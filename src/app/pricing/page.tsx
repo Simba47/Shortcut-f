@@ -126,6 +126,7 @@ export default function PricingPage() {
             {mine.subscription.status !== 'cancelled' && (
               <button onClick={cancel} className="underline" style={{ color: 'rgba(255,255,255,0.7)' }}>Cancel subscription</button>
             )}
+            {' '}<a href="/billing" className="underline" style={{ color: 'rgba(255,255,255,0.7)' }}>Payments &amp; invoices</a>
           </p>
         )}
 

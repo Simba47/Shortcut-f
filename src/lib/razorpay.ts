@@ -39,15 +39,24 @@ export function verifyWebhookSignature(rawBody: string, signature: string | null
 }
 
 type SubEntity = { id?: string; status?: string; current_end?: number | null; notes?: Record<string, unknown> | unknown[] }
+/** A payment that went through, as the invoice needs it */
+export interface PaidPayment { id: string; amountPaise: number; paidAt: Date }
+type PaymentEntity = { id?: string; amount?: number; status?: string; created_at?: number }
 export type SubscriptionChange =
-  | { kind: 'active'; subscriptionId: string; userId: string; plan: PaidPlanKey; expiresAt: Date | null }
+  | { kind: 'active'; subscriptionId: string; userId: string; plan: PaidPlanKey; expiresAt: Date | null; payment?: PaidPayment }
   | { kind: 'ended'; subscriptionId: string; userId: string | null; plan: string | null; expiresAt: Date | null }
 
 /**
  * What a webhook event means for a subscription: paid and running, or over. Anything else (a
  * payment event, an unknown plan name, a body that is not what we expect) changes nothing.
  */
-export function subscriptionChange(event: { event?: string; payload?: { subscription?: { entity?: SubEntity } } } | null): SubscriptionChange | null {
+/** The payment in an event, when it was taken ('captured' or 'authorized') */
+export function paidPayment(p: PaymentEntity | undefined | null): PaidPayment | undefined {
+  if (!p?.id || typeof p.amount !== 'number' || !(p.status === 'captured' || p.status === 'authorized')) return undefined
+  return { id: p.id, amountPaise: p.amount, paidAt: new Date((p.created_at ?? Math.floor(Date.now() / 1000)) * 1000) }
+}
+
+export function subscriptionChange(event: { event?: string; payload?: { subscription?: { entity?: SubEntity }; payment?: { entity?: PaymentEntity } } } | null): SubscriptionChange | null {
   const name = event?.event
   const sub = event?.payload?.subscription?.entity
   if (!name || !sub?.id) return null
@@ -57,7 +66,8 @@ export function subscriptionChange(event: { event?: string; payload?: { subscrip
   const expiresAt = typeof sub.current_end === 'number' ? new Date(sub.current_end * 1000) : null
   if (name === 'subscription.activated' || name === 'subscription.charged') {
     if (!userId || !plan || !(PAID_PLAN_KEYS as readonly string[]).includes(plan)) return null
-    return { kind: 'active', subscriptionId: sub.id, userId, plan: plan as PaidPlanKey, expiresAt }
+    const payment = paidPayment(event?.payload?.payment?.entity)
+    return { kind: 'active', subscriptionId: sub.id, userId, plan: plan as PaidPlanKey, expiresAt, ...(payment ? { payment } : {}) }
   }
   if (['subscription.cancelled', 'subscription.completed', 'subscription.expired', 'subscription.halted'].includes(name)) {
     return { kind: 'ended', subscriptionId: sub.id, userId, plan, expiresAt }
@@ -97,3 +107,6 @@ export const cancelRazorpaySubscription = (subscriptionId: string, atCycleEnd: b
 
 export const fetchRazorpaySubscription = (subscriptionId: string) =>
   call<{ id: string; status: string; current_end?: number | null; notes?: Record<string, unknown> }>('GET', `/subscriptions/${subscriptionId}`)
+
+export const fetchRazorpayPayment = (paymentId: string) =>
+  call<PaymentEntity & { currency?: string }>('GET', `/payments/${paymentId}`)

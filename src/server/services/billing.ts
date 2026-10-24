@@ -1,4 +1,6 @@
 import sql from '@/lib/db'
+import { ensureBillingSchema } from '@/server/services/billingSchema'
+import { recordPayment, recordCheckoutPayment } from '@/server/services/invoices'
 import { PLANS } from '@/lib/plans'
 import {
   PAID_PLAN_KEYS, type PaidPlanKey, type SubscriptionChange,
@@ -7,26 +9,6 @@ import {
 
 /** A renewal's webhook can arrive a little after the paid month ends: access is not cut in that gap */
 const GRACE_MS = 2 * 24 * 3600 * 1000
-
-let ready: Promise<void> | null = null
-/** The billing tables, made once per process (the same way the worker adds its own columns) */
-export function ensureBillingSchema(): Promise<void> {
-  ready ??= (async () => {
-    await sql`ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS razorpay_subscription_id TEXT`
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_razorpay_sub_uq ON subscriptions (razorpay_subscription_id) WHERE razorpay_subscription_id IS NOT NULL`
-    await sql`
-      CREATE TABLE IF NOT EXISTS billing_plans (
-        plan TEXT NOT NULL, amount_paise INTEGER NOT NULL, razorpay_plan_id TEXT NOT NULL,
-        PRIMARY KEY (plan, amount_paise)
-      )`
-    // One row per webhook event handled: a delivery Razorpay repeats is recognised and skipped
-    await sql`
-      CREATE TABLE IF NOT EXISTS billing_events (
-        id TEXT PRIMARY KEY, type TEXT NOT NULL, received_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )`
-  })().catch(e => { ready = null; throw e })
-  return ready
-}
 
 function paidPlan(plan: unknown): PaidPlanKey {
   if (!(PAID_PLAN_KEYS as readonly string[]).includes(plan as string)) {
@@ -78,6 +60,9 @@ export async function activate(c: Extract<SubscriptionChange, { kind: 'active' }
     others = rows.map(r => r.razorpay_subscription_id)
     return true
   })
+  // The payment and its invoice, on every delivery: it is recorded once whatever the number of tries,
+  // and a failure here answers an error so Razorpay sends the event again
+  if (c.payment) await recordPayment(c.userId, c.subscriptionId, c.plan, c.payment)
   // A change of plan: the old subscription stops billing now (best effort; it is already replaced here)
   for (const id of others) {
     await cancelRazorpaySubscription(id, false).catch(e => console.error(`[billing] could not stop replaced subscription ${id}:`, e instanceof Error ? e.message : e))
@@ -138,7 +123,7 @@ export async function subscriptionSummary(userId: string) {
 }
 
 /** After the browser's payment: Razorpay's own record of the subscription, to confirm it is ours and when it renews */
-export async function activateAfterCheckout(userId: string, subscriptionId: string) {
+export async function activateAfterCheckout(userId: string, subscriptionId: string, paymentId: string) {
   await ensureBillingSchema()
   const [own] = await sql<{ plan: string }[]>`SELECT plan FROM subscriptions WHERE razorpay_subscription_id = ${subscriptionId} AND user_id = ${userId}`
   if (!own) throw Object.assign(new Error('Unknown subscription'), { status: 404, expose: true })
@@ -148,5 +133,7 @@ export async function activateAfterCheckout(userId: string, subscriptionId: stri
     kind: 'active', subscriptionId, userId, plan,
     expiresAt: typeof remote.current_end === 'number' ? new Date(remote.current_end * 1000) : null,
   })
+  // The invoice for this payment (the webhook brings the same payment later: it is recorded once)
+  await recordCheckoutPayment(userId, subscriptionId, plan, paymentId).catch(e => console.error('[billing] could not record the checkout payment:', e instanceof Error ? e.message : e))
   return { plan, planName: PLANS[plan].name }
 }

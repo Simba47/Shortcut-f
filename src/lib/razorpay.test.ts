@@ -38,6 +38,21 @@ test('a charge turns the plan on until the end of the paid period', () => {
   assert.deepEqual(c, { kind: 'active', subscriptionId: 'sub_1', userId: 'u1', plan: 'creator', expiresAt: new Date(1790000000 * 1000) })
 })
 
+test('a charge carries the payment: id, amount in paise, when it was paid', () => {
+  const c = subscriptionChange(ev('subscription.charged',
+    { id: 'sub_1', status: 'active', current_end: 1790000000, notes: { user_id: 'u1', plan: 'creator' } },
+    { id: 'pay_9', amount: 99900, currency: 'INR', status: 'captured', created_at: 1787500000 }))
+  assert.deepEqual(c && 'payment' in c ? c.payment : null, { id: 'pay_9', amountPaise: 99900, paidAt: new Date(1787500000 * 1000) })
+})
+
+test('a payment that did not go through is not recorded', () => {
+  const c = subscriptionChange(ev('subscription.charged',
+    { id: 'sub_1', current_end: 1790000000, notes: { user_id: 'u1', plan: 'creator' } },
+    { id: 'pay_9', amount: 99900, status: 'failed', created_at: 1787500000 }))
+  assert.equal(c?.kind, 'active')
+  assert.equal(c && 'payment' in c, false)
+})
+
 test('activation works the same as a charge', () => {
   const c = subscriptionChange(ev('subscription.activated', { id: 'sub_1', status: 'active', current_end: 1790000000, notes: { user_id: 'u1', plan: 'starter' } }))
   assert.equal(c?.kind, 'active')

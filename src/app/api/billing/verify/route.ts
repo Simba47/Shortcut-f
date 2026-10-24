@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   )
   if (!ok) return NextResponse.json({ error: 'The payment could not be verified.' }, { status: 400 })
   try {
-    return NextResponse.json({ success: true, ...(await activateAfterCheckout(user.id, String(b.razorpay_subscription_id))) })
+    return NextResponse.json({ success: true, ...(await activateAfterCheckout(user.id, String(b.razorpay_subscription_id), String(b.razorpay_payment_id))) })
   } catch (err) {
     return apiError(err)
   }
