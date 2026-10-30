@@ -2,8 +2,9 @@ import sql from '@/lib/db'
 import { ensureBillingSchema } from '@/server/services/billingSchema'
 import { recordPayment, recordCheckoutPayment } from '@/server/services/invoices'
 import { PLANS } from '@/lib/plans'
+import { grantPlanCredits } from '@/server/services/credits'
 import {
-  PAID_PLAN_KEYS, type PaidPlanKey, type SubscriptionChange,
+  PAID_PLAN_KEYS, type PaidPlanKey, type SubscriptionChange, razorpayMode,
   createRazorpayPlan, createRazorpaySubscription, cancelRazorpaySubscription, fetchRazorpaySubscription, rupeesToPaise,
 } from '@/lib/razorpay'
 
@@ -17,14 +18,20 @@ function paidPlan(plan: unknown): PaidPlanKey {
   return plan as PaidPlanKey
 }
 
-/** Razorpay's plan for one of ours at today's price: made on first use, then reused */
+/**
+ * Razorpay's plan for one of ours at today's price: made on first use, then reused for the same keys.
+ * With dummy keys (the fake Razorpay forgets everything on a restart) nothing is cached.
+ */
 async function razorpayPlanId(plan: PaidPlanKey): Promise<string> {
   const amount = rupeesToPaise(PLANS[plan].price)
-  const [have] = await sql<{ razorpay_plan_id: string }[]>`SELECT razorpay_plan_id FROM billing_plans WHERE plan = ${plan} AND amount_paise = ${amount}`
+  const make = () => createRazorpayPlan(`Shortcut ${PLANS[plan].name}`, amount)
+  if (razorpayMode() === 'mock') return (await make()).id
+  const keyId = process.env.RAZORPAY_KEY_ID ?? ''
+  const [have] = await sql<{ razorpay_plan_id: string }[]>`SELECT razorpay_plan_id FROM billing_plans WHERE plan = ${plan} AND amount_paise = ${amount} AND key_id = ${keyId}`
   if (have) return have.razorpay_plan_id
-  const made = await createRazorpayPlan(`Shortcut ${PLANS[plan].name}`, amount)
-  await sql`INSERT INTO billing_plans (plan, amount_paise, razorpay_plan_id) VALUES (${plan}, ${amount}, ${made.id}) ON CONFLICT DO NOTHING`
-  const [row] = await sql<{ razorpay_plan_id: string }[]>`SELECT razorpay_plan_id FROM billing_plans WHERE plan = ${plan} AND amount_paise = ${amount}`
+  const made = await make()
+  await sql`INSERT INTO billing_plans (plan, amount_paise, razorpay_plan_id, key_id) VALUES (${plan}, ${amount}, ${made.id}, ${keyId}) ON CONFLICT DO NOTHING`
+  const [row] = await sql<{ razorpay_plan_id: string }[]>`SELECT razorpay_plan_id FROM billing_plans WHERE plan = ${plan} AND amount_paise = ${amount} AND key_id = ${keyId}`
   return row.razorpay_plan_id
 }
 
@@ -39,7 +46,7 @@ export async function startSubscription(userId: string, planKey: unknown) {
 }
 
 /** Turns a plan on (after a payment or an activation/charge event), and ends the user's other subscriptions */
-export async function activate(c: Extract<SubscriptionChange, { kind: 'active' }>, eventId?: { id: string; type: string }): Promise<boolean> {
+export async function activate(c: Extract<SubscriptionChange, { kind: 'active' }>, eventId?: { id: string; type: string }, paymentId?: string): Promise<boolean> {
   await ensureBillingSchema()
   const expiresAt = c.expiresAt ?? new Date(Date.now() + 31 * 24 * 3600 * 1000)
   let others: string[] = []
@@ -60,6 +67,13 @@ export async function activate(c: Extract<SubscriptionChange, { kind: 'active' }
     others = rows.map(r => r.razorpay_subscription_id)
     return true
   })
+  // The month's credits, once per payment (a repeat of the same payment changes nothing). Only for a
+  // subscription this user really started: the notes in an event are not trusted on their own.
+  const creditRef = c.payment?.id ?? paymentId
+  if (creditRef) {
+    const [mine] = await sql<{ id: string }[]>`SELECT id FROM subscriptions WHERE razorpay_subscription_id = ${c.subscriptionId} AND user_id = ${c.userId}`
+    if (mine) await grantPlanCredits(c.userId, c.plan, `${c.subscriptionId}:${creditRef}`, expiresAt)
+  }
   // The payment and its invoice, on every delivery: it is recorded once whatever the number of tries,
   // and a failure here answers an error so Razorpay sends the event again
   if (c.payment) await recordPayment(c.userId, c.subscriptionId, c.plan, c.payment)
@@ -132,7 +146,7 @@ export async function activateAfterCheckout(userId: string, subscriptionId: stri
   await activate({
     kind: 'active', subscriptionId, userId, plan,
     expiresAt: typeof remote.current_end === 'number' ? new Date(remote.current_end * 1000) : null,
-  })
+  }, undefined, paymentId)
   // The invoice for this payment (the webhook brings the same payment later: it is recorded once)
   await recordCheckoutPayment(userId, subscriptionId, plan, paymentId).catch(e => console.error('[billing] could not record the checkout payment:', e instanceof Error ? e.message : e))
   return { plan, planName: PLANS[plan].name }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/server/auth'
 import sql from '@/lib/db'
 import { PLANS, type PlanKey } from '@/lib/plans'
-import { razorpayConfigured, PAID_PLAN_KEYS } from '@/lib/razorpay'
+import { razorpayConfigured, checkoutScriptUrl, PAID_PLAN_KEYS } from '@/lib/razorpay'
 import { startSubscription } from '@/server/services/billing'
 import { apiError } from '@/lib/api-error'
 
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const sub = await startSubscription(user.id, plan)
-    return NextResponse.json({ ...sub, keyId: process.env.RAZORPAY_KEY_ID, email: user.email })
+    return NextResponse.json({ ...sub, keyId: process.env.RAZORPAY_KEY_ID, email: user.email, checkoutScript: checkoutScriptUrl() })
   } catch (err) {
     return apiError(err)
   }

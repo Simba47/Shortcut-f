@@ -1,5 +1,6 @@
 import sql from '@/lib/db'
 import { PLANS } from '@/lib/plans'
+import { TOPUP_PACKS } from '@/lib/credits'
 import { COMPANY } from '@/lib/company'
 import { type PaidPayment, fetchRazorpayPayment, paidPayment } from '@/lib/razorpay'
 import { splitTax, fiscalYear, formatInvoiceNo, normalizeGstin, GST_STATES, stateName } from '@/lib/invoice'
@@ -112,6 +113,12 @@ export async function recordCheckoutPayment(userId: string, subscriptionId: stri
   if (paid) await recordPayment(userId, subscriptionId, plan, paid)
 }
 
+/** "topup:medium" is stored as the plan of a credit top-up's payment; shown as "150 credits top-up" */
+function topupLabel(plan: string): string | null {
+  const pack = plan.startsWith('topup:') ? TOPUP_PACKS.find(p => p.key === plan.slice(6)) : null
+  return pack ? `${pack.credits} credits top-up` : null
+}
+
 export interface InvoiceRow {
   id: string; invoiceNo: string | null; plan: string; planName: string; amountPaise: number; paidAt: Date
   gstRate: number; taxablePaise: number; cgstPaise: number; sgstPaise: number; igstPaise: number
@@ -124,7 +131,7 @@ type DbRow = {
   customer: Customer; seller: SellerSnapshot; razorpay_payment_id: string
 }
 const toInvoice = (r: DbRow): InvoiceRow => ({
-  id: r.id, invoiceNo: r.invoice_no, plan: r.plan, planName: PLANS[r.plan as keyof typeof PLANS]?.name ?? r.plan,
+  id: r.id, invoiceNo: r.invoice_no, plan: r.plan, planName: PLANS[r.plan as keyof typeof PLANS]?.name ?? topupLabel(r.plan) ?? r.plan,
   amountPaise: r.amount_paise, paidAt: r.paid_at, gstRate: Number(r.gst_rate), taxablePaise: r.taxable_paise,
   cgstPaise: r.cgst_paise, sgstPaise: r.sgst_paise, igstPaise: r.igst_paise, placeOfSupply: r.place_of_supply,
   customer: r.customer, seller: r.seller, razorpayPaymentId: r.razorpay_payment_id,

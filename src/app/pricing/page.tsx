@@ -17,11 +17,11 @@ declare global {
   interface Window { Razorpay: new (o: Record<string, unknown>) => { open: () => void; on: (e: string, cb: (r: never) => void) => void } }
 }
 
-function loadCheckoutScript(): Promise<void> {
+function loadCheckoutScript(src: string): Promise<void> {
   if (typeof window !== 'undefined' && window.Razorpay) return Promise.resolve()
   return new Promise((resolve, reject) => {
     const el = document.createElement('script')
-    el.src = 'https://checkout.razorpay.com/v1/checkout.js'
+    el.src = src
     el.onload = () => resolve()
     el.onerror = () => reject(new Error('The payment window could not load. Check your connection and try again.'))
     document.body.appendChild(el)
@@ -34,7 +34,7 @@ export default function PricingPage() {
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const [mine, setMine] = useState<{ plan: string; testMode: boolean; subscription: { status: string; expiresAt: string | null } | null } | null>(null)
+  const [mine, setMine] = useState<{ plan: string; testMode: boolean; paymentsMode?: 'off' | 'mock' | 'test' | 'live'; subscription: { status: string; expiresAt: string | null } | null } | null>(null)
   useEffect(() => {
     if (!session) return
     fetch('/api/billing/plan').then(r => r.ok ? r.json() : null).then(d => d && setMine(d)).catch(() => {})
@@ -63,8 +63,8 @@ export default function PricingPage() {
   }
 
   /** Razorpay's payment window; after paying, the server checks the signature and turns the plan on */
-  async function openCheckout(d: { subscriptionId: string; keyId: string; planName: string; email?: string }) {
-    await loadCheckoutScript()
+  async function openCheckout(d: { subscriptionId: string; keyId: string; planName: string; email?: string; checkoutScript?: string }) {
+    await loadCheckoutScript(d.checkoutScript ?? 'https://checkout.razorpay.com/v1/checkout.js')
     await new Promise<void>((resolve, reject) => {
       const rz = new window.Razorpay({
         key: d.keyId,
@@ -87,6 +87,43 @@ export default function PricingPage() {
       rz.on('payment.failed', (f: { error?: { description?: string } }) => reject(new Error(f.error?.description ?? 'The payment failed. Please try again.')))
       rz.open()
     })
+  }
+
+  const [topupBusy, setTopupBusy] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  /** Buying a credit pack: an order, Razorpay's payment window, then the server checks it and adds the credits */
+  async function handleTopup(packKey: string) {
+    if (!session) { router.push('/login'); return }
+    setTopupBusy(packKey); setError(null); setNotice(null)
+    try {
+      const res = await fetch('/api/billing/topup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pack: packKey }) })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error ?? 'Failed')
+      await loadCheckoutScript(d.checkoutScript ?? 'https://checkout.razorpay.com/v1/checkout.js')
+      await new Promise<void>((resolve, reject) => {
+        const rz = new window.Razorpay({
+          key: d.keyId, order_id: d.orderId, amount: d.amountPaise, currency: 'INR',
+          name: 'Shortcut', description: `${d.packName}, one time`,
+          prefill: d.email ? { email: d.email } : undefined, theme: { color: '#c8ff00' },
+          handler: async (r: { razorpay_payment_id: string; razorpay_order_id: string; razorpay_signature: string }) => {
+            try {
+              const v = await fetch('/api/billing/topup/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(r) })
+              const out = await v.json()
+              if (!v.ok) throw new Error(out.error ?? 'The payment could not be verified. If money was taken, the credits will show shortly.')
+              setNotice(`${out.credits} credits added. You now have ${out.balance}.`)
+              resolve()
+            } catch (e) { reject(e) }
+          },
+          modal: { ondismiss: () => resolve() },
+        })
+        rz.on('payment.failed', (f: { error?: { description?: string } }) => reject(new Error(f.error?.description ?? 'The payment failed. Please try again.')))
+        rz.open()
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong')
+    } finally {
+      setTopupBusy(null)
+    }
   }
 
   async function cancel() {
@@ -133,6 +170,20 @@ export default function PricingPage() {
             )}
             {' '}<a href="/billing" className="underline" style={{ color: 'rgba(255,255,255,0.7)' }}>Payments &amp; invoices</a>
           </p>
+        )}
+
+        {mine?.paymentsMode === 'mock' && (
+          <div className="mx-auto max-w-md mb-6 rounded-xl px-4 py-2.5 text-center text-xs" style={{ background: 'rgba(51,149,255,0.08)', border: '1px solid rgba(51,149,255,0.25)', color: '#6cb3ff' }}>
+            Dummy payments: this runs with dummy Razorpay keys. Nothing is charged. Put real keys in the settings to take real payments.
+          </div>
+        )}
+        {mine?.paymentsMode === 'test' && (
+          <div className="mx-auto max-w-md mb-6 rounded-xl px-4 py-2.5 text-center text-xs" style={{ background: 'rgba(51,149,255,0.08)', border: '1px solid rgba(51,149,255,0.25)', color: '#6cb3ff' }}>
+            Razorpay test mode: use Razorpay&apos;s test cards. Nothing real is charged.
+          </div>
+        )}
+        {notice && (
+          <p className="text-center text-sm mb-6" style={{ color: '#c8ff00' }}>{notice}</p>
         )}
 
         {error && (
@@ -247,7 +298,7 @@ export default function PricingPage() {
 
         <section className="mt-14">
           <h2 className="text-xl font-bold text-white text-center mb-1">Need more credits?</h2>
-          <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>Top-up packs for paid plans. Top-up credits last 12 months. A bigger plan costs less per credit.</p>
+          <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>Top-up packs for paid plans, paid once. Top-up credits last 12 months. A bigger plan costs less per credit.</p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {TOPUP_PACKS.map(pack => (
               <div key={pack.key} className="rounded-2xl p-4 text-center" style={{ background: '#161616', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -255,7 +306,17 @@ export default function PricingPage() {
                 <div className="text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>credits</div>
                 <div className="text-lg font-semibold text-white mt-2">₹{pack.price}</div>
                 <div className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>₹{(pack.price / pack.credits).toFixed(2)} a credit</div>
-                <div className="mt-3 py-2 rounded-xl text-xs font-semibold" style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.35)' }}>Coming soon</div>
+                {mine && mine.plan !== 'free' ? (
+                  <button onClick={() => handleTopup(pack.key)} disabled={!!topupBusy}
+                    className="w-full mt-3 py-2 rounded-xl text-xs font-semibold transition-opacity"
+                    style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', opacity: topupBusy && topupBusy !== pack.key ? 0.4 : 1, cursor: topupBusy ? 'wait' : 'pointer' }}>
+                    {topupBusy === pack.key ? 'Opening…' : `Buy — ₹${pack.price}`}
+                  </button>
+                ) : (
+                  <div className="mt-3 py-2 rounded-xl text-xs font-semibold" style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.35)' }}>
+                    {session ? 'Choose a paid plan first' : 'Sign in to buy'}
+                  </div>
+                )}
               </div>
             ))}
           </div>

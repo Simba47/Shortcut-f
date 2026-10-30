@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyWebhookSignature, subscriptionChange } from '@/lib/razorpay'
+import { verifyWebhookSignature, subscriptionChange, topupChange } from '@/lib/razorpay'
+import { applyTopup } from '@/server/services/topup'
 import { activate, endSubscription } from '@/server/services/billing'
 
 export const runtime = 'nodejs'
@@ -17,6 +18,15 @@ export async function POST(req: NextRequest) {
   }
   let event: { event?: string }
   try { event = JSON.parse(raw) } catch { return NextResponse.json({ error: 'Bad body' }, { status: 400 }) }
+  // A credit pack paid in full (order.paid): credits once per payment, however often it is delivered
+  const top = topupChange(event)
+  if (top) {
+    try { return NextResponse.json({ ok: true, ...(await applyTopup(top)) }) }
+    catch (err) {
+      console.error('[billing] top-up webhook failed:', err instanceof Error ? err.message : err)
+      return NextResponse.json({ error: 'Try again' }, { status: 500 })
+    }
+  }
   const change = subscriptionChange(event)
   if (!change) return NextResponse.json({ ok: true, ignored: true })
   const eventId = req.headers.get('x-razorpay-event-id')

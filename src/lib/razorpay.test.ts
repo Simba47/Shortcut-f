@@ -1,7 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
-import { verifyPaymentSignature, verifyWebhookSignature, rupeesToPaise, subscriptionChange } from './razorpay.ts'
+import {
+  verifyPaymentSignature, verifyWebhookSignature, rupeesToPaise, subscriptionChange,
+  razorpayMode, razorpayApiBase, checkoutScriptUrl, verifyOrderSignature, topupChange,
+} from './razorpay.ts'
 
 const hmac = (secret: string, text: string) => createHmac('sha256', secret).update(text).digest('hex')
 
@@ -80,4 +83,60 @@ test('other events and malformed bodies change nothing', () => {
   assert.equal(subscriptionChange({ event: 'subscription.charged' } as never), null)
   assert.equal(subscriptionChange(null as never), null)
   assert.equal(subscriptionChange(ev('subscription.charged', { id: 'sub_1', current_end: 1790000000, notes: {} })), null)
+})
+
+const DUMMY = { RAZORPAY_KEY_ID: 'rzp_test_dummykey000001', RAZORPAY_KEY_SECRET: 'dummysecret' }
+
+test('mode: off without keys; test or live by the key; mock only with RAZORPAY_MOCK=1, a test key and not in production', () => {
+  assert.equal(razorpayMode({}), 'off')
+  assert.equal(razorpayMode({ ...DUMMY }), 'test')
+  assert.equal(razorpayMode({ RAZORPAY_KEY_ID: 'rzp_live_abc', RAZORPAY_KEY_SECRET: 's' }), 'live')
+  assert.equal(razorpayMode({ ...DUMMY, RAZORPAY_MOCK: '1' }), 'mock')
+  // a live key is never mocked, and production never mocks
+  assert.equal(razorpayMode({ RAZORPAY_KEY_ID: 'rzp_live_abc', RAZORPAY_KEY_SECRET: 's', RAZORPAY_MOCK: '1' }), 'live')
+  assert.equal(razorpayMode({ ...DUMMY, RAZORPAY_MOCK: '1', NODE_ENV: 'production' }), 'test')
+})
+
+test('the API address is Razorpay, or our own fake one in mock mode', () => {
+  assert.equal(razorpayApiBase({ ...DUMMY }), 'https://api.razorpay.com/v1')
+  assert.equal(razorpayApiBase({ ...DUMMY, RAZORPAY_MOCK: '1', APP_URL: 'http://localhost:3100/' }), 'http://localhost:3100/api/dev/razorpay/v1')
+  assert.equal(razorpayApiBase({ ...DUMMY, RAZORPAY_MOCK: '1' }), 'http://localhost:3000/api/dev/razorpay/v1')
+})
+
+test('the checkout window script is Razorpay\'s, or our own fake one in mock mode', () => {
+  assert.equal(checkoutScriptUrl({ ...DUMMY }), 'https://checkout.razorpay.com/v1/checkout.js')
+  assert.equal(checkoutScriptUrl({ ...DUMMY, RAZORPAY_MOCK: '1' }), '/dev/razorpay-checkout.js')
+})
+
+test('an order payment is genuine only with the signature of order_id|payment_id', () => {
+  const sig = hmac('sec', 'order_1|pay_1')
+  assert.equal(verifyOrderSignature({ orderId: 'order_1', paymentId: 'pay_1', signature: sig }, 'sec'), true)
+  assert.equal(verifyOrderSignature({ orderId: 'order_2', paymentId: 'pay_1', signature: sig }, 'sec'), false)
+  assert.equal(verifyOrderSignature({ orderId: 'order_1', paymentId: 'pay_1', signature: sig }, 'other'), false)
+  assert.equal(verifyOrderSignature({ orderId: 'order_1', paymentId: 'pay_1', signature: '' }, 'sec'), false)
+})
+
+const orderPaid = (over: Record<string, unknown> = {}, amount = 49900) => ({
+  event: 'order.paid',
+  payload: {
+    order: { entity: { id: 'order_1', amount_paid: amount, notes: { kind: 'topup', user_id: 'u1', pack: 'medium', credits: '999999', ...over } } },
+    payment: { entity: { id: 'pay_1', amount, status: 'captured', created_at: 1_700_000_000 } },
+  },
+})
+
+test('a paid top-up order becomes credits by its pack, never by the credits in the notes', () => {
+  const c = topupChange(orderPaid())
+  assert.ok(c)
+  assert.equal(c.userId, 'u1'); assert.equal(c.pack, 'medium'); assert.equal(c.orderId, 'order_1')
+  assert.equal(c.credits, 150)
+  assert.equal(c.payment.id, 'pay_1'); assert.equal(c.payment.amountPaise, 49900)
+})
+
+test('a top-up event that is not for a known pack, not paid in full, or not a top-up changes nothing', () => {
+  assert.equal(topupChange(orderPaid({ pack: 'huge' })), null)
+  assert.equal(topupChange(orderPaid({}, 100)), null)
+  assert.equal(topupChange(orderPaid({ kind: 'plan' })), null)
+  assert.equal(topupChange(orderPaid({ user_id: '' })), null)
+  assert.equal(topupChange({ event: 'payment.captured', payload: {} }), null)
+  assert.equal(topupChange(null), null)
 })

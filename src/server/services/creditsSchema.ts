@@ -50,6 +50,19 @@ export function ensureCreditsSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`
     await sql`CREATE INDEX IF NOT EXISTS credit_ledger_user_idx ON credit_ledger (user_id, id DESC)`
+    // Top-up orders we made at Razorpay: a payment is credited only for an order that is ours, for this user and pack
+    await sql`
+      CREATE TABLE IF NOT EXISTS topup_orders (
+        order_id TEXT PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        pack TEXT NOT NULL,
+        credits INTEGER NOT NULL,
+        amount_paise INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created', 'paid')),
+        payment_id TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        paid_at TIMESTAMPTZ
+      )`
   })().catch(e => { ready = null; throw e })
   return ready
 }

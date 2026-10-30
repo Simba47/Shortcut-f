@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireUser } from '@/server/auth'
 import { getUserPlan, getUserPlanConfig } from '@/server/services/quota'
 import sql from '@/lib/db'
-import { razorpayConfigured } from '@/lib/razorpay'
+import { razorpayConfigured, razorpayMode } from '@/lib/razorpay'
 import { subscriptionSummary } from '@/server/services/billing'
 
 export const runtime = 'nodejs'
@@ -40,6 +40,8 @@ export async function GET() {
     // Paying: a Razorpay subscription (state, and when it renews or ends); testMode = no keys, plans switch on without payment
     subscription: subscription && { status: subscription.status, expiresAt: subscription.expiresAt },
     paymentsEnabled: razorpayConfigured(),
+    // off | mock (dummy keys, nothing is charged) | test (Razorpay test mode) | live
+    paymentsMode: razorpayMode(),
     testMode: !razorpayConfigured() && process.env.ALLOW_TEST_SUBSCRIBE === '1',
     autoCaption: plan.autoCaption,
     watermark: plan.watermark,

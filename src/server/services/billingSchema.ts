@@ -11,6 +11,11 @@ export function ensureBillingSchema(): Promise<void> {
         plan TEXT NOT NULL, amount_paise INTEGER NOT NULL, razorpay_plan_id TEXT NOT NULL,
         PRIMARY KEY (plan, amount_paise)
       )`
+    // A Razorpay plan exists only under the keys that made it (test and live keys are different accounts),
+    // so the cache is kept per key: swapping keys makes new plans instead of reusing ones that are not there
+    await sql`ALTER TABLE billing_plans ADD COLUMN IF NOT EXISTS key_id TEXT NOT NULL DEFAULT ''`
+    await sql`ALTER TABLE billing_plans DROP CONSTRAINT IF EXISTS billing_plans_pkey`
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS billing_plans_uq ON billing_plans (plan, amount_paise, key_id)`
     // One row per webhook event handled: a delivery Razorpay repeats is recognised and skipped
     await sql`
       CREATE TABLE IF NOT EXISTS billing_events (
