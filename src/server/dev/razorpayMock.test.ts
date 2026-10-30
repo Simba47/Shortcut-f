@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { verifyPaymentSignature, verifyOrderSignature, verifyWebhookSignature, subscriptionChange, topupChange } from '@/lib/razorpay'
-import { mockApi, mockPay, mockRenew, mockHalt, resetMock, type Delivery } from './razorpayMock'
+import { mockApi, mockPay, mockRenew, mockHalt, mockInfo, resetMock, type Delivery } from './razorpayMock'
 
 const KEY = 'rzp_test_dummykey000001', SECRET = 'dummysecret', HOOK = 'dummywebhooksecret'
 process.env.RAZORPAY_KEY_ID = KEY
@@ -94,4 +94,23 @@ test('unknown ids and paths answer 404, like Razorpay', async () => {
   assert.equal((await mockApi('GET', '/subscriptions/sub_nope', undefined, auth)).status, 404)
   assert.equal((await mockApi('GET', '/orders/order_nope', undefined, auth)).status, 404)
   assert.equal((await mockApi('GET', '/nothing', undefined, auth)).status, 404)
+})
+
+test('the payment window can ask what it is charging for, before the customer pays', async () => {
+  const sub = await subscribe()
+  assert.deepEqual(mockInfo({ subscriptionId: sub.id }), { ok: true, amount: 99900, currency: 'INR', kind: 'subscription' })
+  const order = await mockApi('POST', '/orders', { amount: 19900, currency: 'INR', receipt: 'r', notes: {} }, auth)
+  assert.deepEqual(mockInfo({ orderId: order.body.id }), { ok: true, amount: 19900, currency: 'INR', kind: 'order' })
+  assert.equal(mockInfo({ orderId: 'order_nope' }).ok, false)
+})
+
+test('the payment method used is recorded on the payment, as Razorpay does', async () => {
+  const sub = await subscribe()
+  const r = await mockPay({ subscriptionId: sub.id, outcome: 'success', method: 'upi' }, send)
+  assert.ok(r.ok)
+  const pay = await mockApi('GET', `/payments/${r.razorpay_payment_id}`, undefined, auth)
+  assert.equal(pay.body.method, 'upi')
+  const other = await mockPay({ subscriptionId: sub.id, outcome: 'success', method: 'weird' }, send)
+  assert.ok(other.ok)
+  assert.equal((await mockApi('GET', `/payments/${other.razorpay_payment_id}`, undefined, auth)).body.method, 'card')
 })

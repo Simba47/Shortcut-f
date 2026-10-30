@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { razorpayMode } from '@/lib/razorpay'
-import { mockPay, sendWebhook, type Delivery } from '@/server/dev/razorpayMock'
+import { mockInfo, mockPay, sendWebhook, type Delivery } from '@/server/dev/razorpayMock'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+/** What the fake payment window is about to charge (amount), so it can show the price */
+export async function GET(req: NextRequest) {
+  if (razorpayMode() !== 'mock') return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  const q = req.nextUrl.searchParams
+  return NextResponse.json(mockInfo({ subscriptionId: q.get('subscription_id') ?? undefined, orderId: q.get('order_id') ?? undefined }))
+}
 
 /**
  * The fake payment window reports "paid" (or "failed"). The browser's answer comes back at once;
@@ -15,7 +22,7 @@ export async function POST(req: NextRequest) {
   const b = await req.json().catch(() => ({}))
   const later: Delivery[] = []
   const result = await mockPay(
-    { subscriptionId: b.subscription_id, orderId: b.order_id, outcome: b.outcome === 'fail' ? 'fail' : 'success' },
+    { subscriptionId: b.subscription_id, orderId: b.order_id, outcome: b.outcome === 'fail' ? 'fail' : 'success', method: b.method },
     async d => { later.push(d) },
   )
   setTimeout(() => { for (const d of later) sendWebhook(d).catch(e => console.error('[razorpay mock] webhook not delivered:', e)) }, 700)

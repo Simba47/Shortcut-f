@@ -12,7 +12,9 @@ export type Sender = (d: Delivery) => Promise<void>
 
 type Sub = { id: string; plan_id: string; status: 'created' | 'active' | 'cancelled' | 'halted'; current_end: number | null; notes: Record<string, unknown>; total_count: number }
 type Order = { id: string; amount: number; amount_paid: number; currency: string; receipt: string; notes: Record<string, unknown>; status: 'created' | 'paid' }
-type Pay = { id: string; amount: number; status: 'captured'; created_at: number; currency: string; order_id?: string; subscription_id?: string }
+type Method = 'card' | 'upi' | 'netbanking' | 'wallet'
+const METHODS: Method[] = ['card', 'upi', 'netbanking', 'wallet']
+type Pay = { id: string; amount: number; status: 'captured'; created_at: number; currency: string; method: Method; order_id?: string; subscription_id?: string }
 interface Store { plans: Map<string, { id: string; amount: number }>; subs: Map<string, Sub>; orders: Map<string, Order>; payments: Map<string, Pay> }
 
 const g = globalThis as { __rzpMock?: Store }
@@ -101,7 +103,7 @@ const subEntity = (sub: Sub) => ({ entity: { id: sub.id, status: sub.status, cur
 const payEntity = (p: Pay) => ({ entity: { id: p.id, amount: p.amount, status: p.status, created_at: p.created_at } })
 
 function newPayment(amount: number, extra: Partial<Pay>): Pay {
-  const p: Pay = { id: id('pay'), amount, status: 'captured', created_at: now(), currency: 'INR', ...extra }
+  const p: Pay = { id: id('pay'), amount, status: 'captured', created_at: now(), currency: 'INR', method: 'card', ...extra }
   store().payments.set(p.id, p)
   return p
 }
@@ -114,13 +116,14 @@ export type PayResult =
  * The customer pays in the fake checkout window. Success: a payment is captured, the answer carries
  * the signature the browser would get, and Razorpay's events are sent to our webhook. Fail: nothing changes.
  */
-export async function mockPay(a: { subscriptionId?: string; orderId?: string; outcome: 'success' | 'fail' }, send: Sender = sendWebhook): Promise<PayResult> {
+export async function mockPay(a: { subscriptionId?: string; orderId?: string; outcome: 'success' | 'fail'; method?: string }, send: Sender = sendWebhook): Promise<PayResult> {
   const s = store()
+  const method = METHODS.find(m => m === a.method) ?? 'card'
   if (a.outcome === 'fail') return { ok: false, error: 'The payment failed (dummy payment, nothing was charged).' }
   if (a.subscriptionId) {
     const sub = s.subs.get(a.subscriptionId)
     if (!sub) return { ok: false, error: 'Unknown subscription' }
-    const pay = newPayment(s.plans.get(sub.plan_id)!.amount, { subscription_id: sub.id })
+    const pay = newPayment(s.plans.get(sub.plan_id)!.amount, { subscription_id: sub.id, method })
     sub.status = 'active'
     sub.current_end = now() + 30 * DAY
     await emit(send, 'subscription.activated', { subscription: subEntity(sub), payment: payEntity(pay) })
@@ -131,7 +134,7 @@ export async function mockPay(a: { subscriptionId?: string; orderId?: string; ou
     const order = s.orders.get(a.orderId)
     if (!order) return { ok: false, error: 'Unknown order' }
     if (order.status === 'paid') return { ok: false, error: 'This order is already paid' }
-    const pay = newPayment(order.amount, { order_id: order.id })
+    const pay = newPayment(order.amount, { order_id: order.id, method })
     order.status = 'paid'
     order.amount_paid = order.amount
     await emit(send, 'payment.captured', { payment: payEntity(pay) })
@@ -139,6 +142,15 @@ export async function mockPay(a: { subscriptionId?: string; orderId?: string; ou
     return { ok: true, razorpay_payment_id: pay.id, razorpay_order_id: order.id, razorpay_signature: hmac(keySecret(), `${order.id}|${pay.id}`) }
   }
   return { ok: false, error: 'Nothing to pay' }
+}
+
+/** What the payment window shows before the customer pays: how much, and whether it is a plan or a one-time order */
+export function mockInfo(a: { subscriptionId?: string; orderId?: string }): { ok: true; amount: number; currency: string; kind: 'subscription' | 'order' } | { ok: false } {
+  const s = store()
+  const sub = a.subscriptionId ? s.subs.get(a.subscriptionId) : undefined
+  if (sub) return { ok: true, amount: s.plans.get(sub.plan_id)!.amount, currency: 'INR', kind: 'subscription' }
+  const order = a.orderId ? s.orders.get(a.orderId) : undefined
+  return order ? { ok: true, amount: order.amount, currency: order.currency, kind: 'order' } : { ok: false }
 }
 
 /** A monthly renewal: another charge, and a later end date */

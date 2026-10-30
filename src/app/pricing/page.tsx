@@ -254,19 +254,27 @@ export default function PricingPage() {
                 </ul>
 
                 {isPaid ? (
-                  <button
-                    onClick={() => handleSubscribe(key)}
-                    disabled={!!loading || mine?.plan === key}
-                    className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity"
-                    style={{
-                      background: isPopular ? '#c8ff00' : 'rgba(255,255,255,0.1)',
-                      color: isPopular ? '#000' : '#fff',
-                      opacity: loading && !busy ? 0.4 : 1,
-                      cursor: loading ? 'wait' : 'pointer',
-                    }}
-                  >
-                    {busy ? 'Opening payment…' : mine?.plan === key ? `Your plan — ₹${plan.price}/mo` : `Subscribe — ₹${plan.price}/mo`}
-                  </button>
+                  mine?.plan === key ? (
+                    // The plan they are on: a status, not a button (it must not look like something to press)
+                    <div aria-current="true" className="w-full py-2.5 rounded-xl text-sm font-semibold text-center cursor-default select-none"
+                      style={{ background: 'transparent', color: '#c8ff00', border: '1.5px solid rgba(200,255,0,0.55)' }}>
+                      ✓ Your plan — ₹{plan.price}/mo
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleSubscribe(key)}
+                      disabled={!!loading}
+                      className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity"
+                      style={{
+                        background: isPopular ? '#c8ff00' : 'rgba(255,255,255,0.1)',
+                        color: isPopular ? '#000' : '#fff',
+                        opacity: loading && !busy ? 0.4 : 1,
+                        cursor: loading ? 'wait' : 'pointer',
+                      }}
+                    >
+                      {busy ? 'Opening payment…' : `Subscribe — ₹${plan.price}/mo`}
+                    </button>
+                  )
                 ) : (
                   <div className="w-full py-2.5 rounded-xl text-sm font-semibold text-center" style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.06)' }}>
                     Default plan
