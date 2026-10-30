@@ -1,9 +1,11 @@
 import sql from '@/lib/db'
+import { effectivePlan } from '@/server/services/billing'
 import { PLANS, type PlanKey } from '@/lib/plans'
 
 export async function getUserPlan(userId: string): Promise<PlanKey> {
   const [row] = await sql<{ plan: string }[]>`SELECT plan FROM users WHERE id = ${userId}`
-  const plan = row?.plan ?? 'free'
+  // A paid plan counts only while its subscription is paid up (billing.ts)
+  const plan = await effectivePlan(userId, row?.plan ?? 'free')
   return (plan in PLANS ? plan : 'free') as PlanKey
 }
 
