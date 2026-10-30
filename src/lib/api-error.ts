@@ -19,7 +19,7 @@ function isConnectionError(err: unknown): boolean {
  * details) — unless the error was made to be read (`expose: true`, e.g. "Brand kits are being set up").
  */
 export function apiError(err: unknown) {
-  const e = err as { message?: string; status?: number; expose?: boolean }
+  const e = err as { message?: string; status?: number; expose?: boolean; needed?: number; balance?: number }
   const offline = isConnectionError(err)
   const status = offline ? 503 : (e.status ?? 500)
   // The client only gets a generic message, so the real cause has to reach the server log
@@ -30,5 +30,7 @@ export function apiError(err: unknown) {
     : status < 500 || (e.expose && e.message)
       ? (e.message ?? 'Something went wrong')
       : 'Something went wrong. Please try again.'
-  return NextResponse.json({ error: message }, { status, ...(offline ? { headers: { 'Retry-After': '2' } } : {}) })
+  // Out of credits: the page shows what the action needs and what is left, with Top up and Upgrade
+  const credits = status === 402 && typeof e.needed === 'number' ? { code: 'insufficient_credits', needed: e.needed, balance: e.balance ?? 0 } : {}
+  return NextResponse.json({ error: message, ...credits }, { status, ...(offline ? { headers: { 'Retry-After': '2' } } : {}) })
 }

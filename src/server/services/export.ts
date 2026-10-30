@@ -1,11 +1,13 @@
 import sql from '@/lib/db'
 import type { RenderQuality } from '@chai-cut/shared'
+import { creditsMode, exportCredits } from '@/lib/credits'
+import { charge, linkJob, release, type Hold } from './credits'
 
 // retranscribe: regenerate this clip's captions first (Gemini), then render —
 // the worker queues the render once the new transcript is saved.
 export async function queueRender(userId: string, clipId: string, quality: RenderQuality = '1080p', retranscribe = false, removeFillers?: boolean) {
   const [row] = await sql`
-    SELECT c.id, c.status, v.storage_path, v.user_id
+    SELECT c.id, c.status, c.start_ms, c.end_ms, v.storage_path, v.user_id
     FROM clips c JOIN videos v ON v.id = c.video_id
     WHERE c.id = ${clipId}
   `
@@ -14,6 +16,25 @@ export async function queueRender(userId: string, clipId: string, quality: Rende
   if (row.status === 'rendering') throw Object.assign(new Error('Already rendering'), { status: 409 })
   if (!row.storage_path) throw Object.assign(new Error('Video not ready (no storage path)'), { status: 400 })
 
+  // Credits: 2 for a clip up to 3 minutes, 3 up to 5 minutes, none longer (checked only when credits
+  // are on, so the site behaves as before until then). Taken before anything changes, given back if
+  // the export cannot be queued.
+  let hold: Hold | null = null
+  if (creditsMode() !== 'off') {
+    hold = await charge(userId, { amount: exportCredits(row.end_ms - row.start_ms), refType: 'render', refId: clipId })
+  }
+  try {
+    return await startRender(userId, clipId, row.storage_path as string, quality, retranscribe, removeFillers, hold)
+  } catch (err) {
+    if (hold) await release(hold.id).catch(e => console.error('[credits] could not give the credits back:', e))
+    throw err
+  }
+}
+
+async function startRender(
+  userId: string, clipId: string, storagePath: string, quality: RenderQuality,
+  retranscribe: boolean, removeFillers: boolean | undefined, hold: Hold | null,
+) {
   // The clip's brand kit changed since it went on (a new logo, other colours): the clip follows it
   // first, so a clip exported without being opened is on-brand (brandApply.ts; never fails the export)
   const { catchUpClip } = await import('./brandApply')
@@ -30,12 +51,14 @@ export async function queueRender(userId: string, clipId: string, quality: Rende
   const plan = await getUserPlanConfig(userId)
   // user_id: the worker's fair limits (exports one person runs at once); priority: the top plan's
   // exports go to the front of the line
-  const payload = { clip_id: clipId, video_storage_path: row.storage_path, quality, watermark: plan.watermark, user_id: userId,
+  const payload = { clip_id: clipId, video_storage_path: storagePath, quality, watermark: plan.watermark, user_id: userId,
     ...(plan.priorityExports ? { priority: true } : {}) }
   if (retranscribe && plan.autoCaption) {
     try {
       const { queueRetranscribe } = await import('./transcribe')
-      await queueRetranscribe(userId, clipId, 'unknown', payload)  // 'unknown' → reuse the video's language
+      const captionJob = await queueRetranscribe(userId, clipId, 'unknown', payload)  // 'unknown' → reuse the video's language
+      // The render is queued later by the worker, so until then the export's credits follow the captions job
+      if (hold && captionJob) await linkJob(hold.id, captionJob)
       return { job_id: null, retranscribing: true }
     } catch (err) {
       await sql`UPDATE clips SET status = 'draft' WHERE id = ${clipId}`
@@ -49,6 +72,7 @@ export async function queueRender(userId: string, clipId: string, quality: Rende
     await sql`UPDATE clips SET status = 'draft' WHERE id = ${clipId}`
     throw Object.assign(new Error('Failed to queue render job'), { status: 500 })
   }
+  if (hold) await linkJob(hold.id, job.id)
   // Not awaited: the log never slows the export down
   import('./suggestionEvents').then(m => m.logClipEvents(userId, [clipId], 'exported')).catch(() => {})
   return { job_id: job.id }

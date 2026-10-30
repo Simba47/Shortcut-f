@@ -8,6 +8,8 @@ import { useFrameAt } from '@/modules/clips/thumbs'
 import { ScrubPlayer } from '@/components/clips/ScrubPlayer'
 import { useLocalVideo } from '@/modules/clips/localVideo'
 import { usePolling } from '@/lib/usePolling'
+import { useCredits } from '@/lib/useCredits'
+import { readingCredits } from '@/lib/credits'
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -539,8 +541,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // that reading as the clip board opens; how far it is shows on the AI card, and a Best moments or
   // Ask AI asked for before it's done runs by itself once it is. Manual edit never reads the whole
   // video: each clip's captions are made in the editor, for that clip alone.
-  type Reading = { status: 'none' | 'running' | 'ready' | 'failed'; progress: number | null; error: string | null; stopped?: boolean }
+  type Reading = { status: 'none' | 'running' | 'ready' | 'failed'; progress: number | null; error: string | null; stopped?: boolean; needsCredits?: boolean }
   const [reading, setReading] = useState<Reading | null>(null)
+  // Credits (null when they are off): the reading costs 1 per video minute, so the unlock button says so
+  const { credits, refresh: refreshCredits } = useCredits()
+  const readingCost = readingCredits(video.duration_ms)
   /** What was asked for while the video was being read (runs when it's done), and its name */
   const afterReading = useRef<(() => void) | null>(null)
   const [waitingFor, setWaitingFor] = useState<string | null>(null)
@@ -549,8 +554,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     try {
       const res = await fetch(readingUrl, start ? { method: 'POST' } : undefined)
       if (res.ok) setReading(await res.json())
+      // Not enough credits to read the video: say so (with a way to get more), not "failed"
+      else if (res.status === 402) {
+        const d = await res.json().catch(() => ({}))
+        setReading({ status: 'failed', progress: null, error: d.error ?? 'Not enough credits to read this video.', needsCredits: true })
+      }
+      if (start) refreshCredits()
     } catch { /* checked again on the next round */ }
-  }, [readingUrl])
+  }, [readingUrl, refreshCredits])
   // (asked once per visit: the server also keeps it to one reading if two asks meet)
   const readingAsked = useRef(false)
   useEffect(() => {
@@ -1562,6 +1573,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           ) : reading.status === 'failed' ? (
             <div className="flex flex-col gap-2">
               <span className="text-xs" style={{ color: '#f87171' }}>{reading.error ?? 'Getting the transcript failed.'}</span>
+              {reading.needsCredits && (
+                <a href="/pricing" className="mmc-go h-10 rounded-xl text-[13px] font-semibold flex items-center justify-center">Get credits</a>
+              )}
               <button type="button" onClick={() => checkReading(true)} className="mmc-go h-10 rounded-xl text-[13px] font-semibold">Try again</button>
             </div>
           ) : (
@@ -1577,8 +1591,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 017.5-2" />
                 </svg>
-                Unlock edit tools
+                Unlock edit tools{credits ? ` · ${readingCost} credit${readingCost === 1 ? '' : 's'}` : ''}
               </button>
+              {credits && <p className="text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>You have {credits.balance} credits. Reading is charged once per video.</p>}
             </div>
           )}
         </div>

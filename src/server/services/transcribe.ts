@@ -1,4 +1,6 @@
 import sql from '@/lib/db'
+import { readingCredits, captionCredits } from '@/lib/credits'
+import { charge, linkJob } from './credits'
 
 // renderAfter: when set, the worker queues this render job once transcription finishes
 export async function queueRetranscribe(userId: string, clipId: string, languageCode: string, renderAfter?: { clip_id: string; video_storage_path: string; quality: string; watermark: boolean; user_id?: string; priority?: boolean }) {
@@ -34,7 +36,14 @@ export async function queueRetranscribe(userId: string, clipId: string, language
     user_id: userId,
     ...(renderAfter ? { render_after: renderAfter } : {}),
   }
-  const [job] = await sql`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${sql.json(payload)}, 'queued') RETURNING id`
+  // Captions for this clip alone: 1 credit per clip minute. The hold and the job are made together,
+  // so a clip that cannot be paid for queues nothing.
+  const job = await sql.begin(async tx => {
+    const hold = await charge(userId, { amount: captionCredits(row.end_ms - row.start_ms), refType: 'caption', refId: clipId }, tx)
+    const [made] = await tx`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${tx.json(payload)}, 'queued') RETURNING id`
+    if (hold && made) await linkJob(hold.id, made.id, tx)
+    return made
+  })
   return job?.id as string | undefined
 }
 
@@ -47,7 +56,7 @@ export async function queueRetranscribe(userId: string, clipId: string, language
  * the parts it had read, so only the rest is sent).
  */
 export async function ensureVideoTranscript(videoId: string): Promise<'ready' | 'running'> {
-  const [video] = await sql`SELECT storage_path, duration_ms FROM videos WHERE id = ${videoId}`
+  const [video] = await sql`SELECT storage_path, duration_ms, user_id FROM videos WHERE id = ${videoId}`
   if (await hasWholeTranscript(videoId, video?.duration_ms ?? null)) return 'ready'
   const [last] = await sql`
     SELECT id, status, error, payload->>'reported' AS reported FROM jobs
@@ -73,7 +82,12 @@ export async function ensureVideoTranscript(videoId: string): Promise<'ready' | 
       const [busy] = await tx`
         SELECT 1 FROM jobs WHERE type = 'transcribe' AND payload->>'video_id' = ${videoId}
           AND payload->>'transcribe_full' = 'true' AND status IN ('queued', 'processing') LIMIT 1`
-      if (!busy) await tx`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${tx.json(payload)}, 'queued')`
+      if (busy) return
+      // The whole video is read once: 1 credit per video minute, charged here, in the same
+      // transaction as the job, so a user who cannot pay queues nothing (402)
+      const hold = await charge(video.user_id, { amount: readingCredits(video.duration_ms), refType: 'transcribe', refId: videoId }, tx)
+      const [made] = await tx`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${tx.json(payload)}, 'queued') RETURNING id`
+      if (hold && made) await linkJob(hold.id, made.id, tx)
     })
   }
   return 'running'
@@ -148,7 +162,11 @@ export async function startVideoTranscript(userId: string, videoId: string): Pro
     SELECT id FROM jobs WHERE type = 'transcribe' AND payload->>'video_id' = ${videoId} AND payload->>'transcribe_full' = 'true'
       AND status = 'failed' AND NOT (payload ? 'reported') ORDER BY created_at DESC LIMIT 1`
   if (last) await sql`UPDATE jobs SET payload = payload || '{"reported": true}'::jsonb WHERE id = ${last.id}`
-  await ensureVideoTranscript(videoId).catch(() => { /* its reason is in the state below */ })
+  await ensureVideoTranscript(videoId).catch(e => {
+    // Not enough credits is the user's to act on (top up or upgrade): it is not a reading that failed
+    if (e?.status === 402) throw e
+    /* any other reason is in the state below */
+  })
   return videoTranscriptState(userId, videoId)
 }
 

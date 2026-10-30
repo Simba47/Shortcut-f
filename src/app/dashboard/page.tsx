@@ -5,6 +5,8 @@ import './dashboard.css'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { usePolling } from '@/lib/usePolling'
+import { useCredits, type CreditsInfo } from '@/lib/useCredits'
+import { readingCredits, EXPORT_CREDITS, LONG_EXPORT_CREDITS } from '@/lib/credits'
 import type { Video } from '@chai-cut/shared'
 import { ACCEPTED_VIDEO_EXTENSIONS } from '@chai-cut/shared'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -76,6 +78,8 @@ export default function DashboardPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   // "Upload video" asks where the video comes from: this device, or a Drive link
   const [chooserOpen, setChooserOpen] = useState(false)
+  // Credits (null while loading, and when credits are off: no prices are shown then)
+  const { credits, refresh: refreshCredits } = useCredits()
 
   async function fetchVideos() {
     const res = await fetch('/api/videos')
@@ -213,6 +217,13 @@ export default function DashboardPage() {
               <span className="dash-usage-label"><strong>{planInfo.usage.videos}</strong> / {planInfo.maxVideos} videos</span>
               <div className="dash-usage-bar"><div style={{ width: `${usagePct}%` }} /></div>
             </div>
+          )}
+          {credits && (
+            <a href="/pricing" className={`dash-credits${credits.balance <= 5 ? ' is-low' : ''}`}
+              title={credits.nextExpiry ? `${credits.nextExpiry.amount} credits expire ${new Date(credits.nextExpiry.at).toLocaleDateString()}` : 'Credits pay for AI reading, captions and exports'}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v10M9.5 9.5h4a1.8 1.8 0 010 3.6h-3a1.8 1.8 0 000 3.6h4.2" /></svg>
+              <span><strong>{credits.balance}</strong> credits</span>
+            </a>
           )}
           {planInfo?.plan === 'free' && (
             <a href="/pricing" className="dash-btn-fill fill-btn fill-btn-sm"><FillButtonContent>Upgrade</FillButtonContent></a>
@@ -400,7 +411,7 @@ export default function DashboardPage() {
       )}
 
       {choosing && (
-        <EditModeDialog title={choosing.title} videoUrl={choosing.videoUrl} durationMs={choosing.durationMs} onClose={() => setChoosing(null)}
+        <EditModeDialog videoId={choosing.id} title={choosing.title} videoUrl={choosing.videoUrl} durationMs={choosing.durationMs} credits={credits} onClose={() => { setChoosing(null); refreshCredits() }}
           onPick={mode => router.push(`/videos/${choosing.id}?start=${mode}`)} />
       )}
 
@@ -897,10 +908,13 @@ function DeleteDialog({ items, onClose, onDeleted }: {
  * best moments light up one after another; Manual's has a stretch held between two handles with
  * the playhead running through it. Esc, the ✕ or a click outside closes it (the video stays).
  */
-function EditModeDialog({ title, videoUrl, durationMs, onClose, onPick }: {
+function EditModeDialog({ videoId, title, videoUrl, durationMs, credits, onClose, onPick }: {
+  videoId: string
   title: string
   videoUrl?: string | null
   durationMs?: number | null
+  /** The balance, when credits are on: the cards then say what each way costs */
+  credits: CreditsInfo | null
   onClose: () => void
   onPick: (mode: 'ai' | 'manual') => void
 }) {
@@ -911,7 +925,25 @@ function EditModeDialog({ title, videoUrl, durationMs, onClose, onPick }: {
     window.addEventListener('keydown', esc)
     return () => window.removeEventListener('keydown', esc)
   }, [onClose, picked])
-  const pick = (mode: 'ai' | 'manual') => { if (picked) return; setPicked(mode); onPick(mode) }
+  // AI edit reads the whole video once: 1 credit per started minute. Short of that, the card leads to credits instead.
+  // A video that is being read, or already read, is paid for: AI edit costs nothing more, and
+  // the card must not ask for the credits again. (Until the video's state is known, no price is shown as short.)
+  const [reading, setReading] = useState<'unknown' | 'paid' | 'unpaid'>('unknown')
+  useEffect(() => {
+    let live = true
+    fetch(`/api/videos/${videoId}/transcript`, { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (live) setReading(d && (d.status === 'running' || d.status === 'ready') ? 'paid' : 'unpaid') })
+      .catch(() => { if (live) setReading('unpaid') })
+    return () => { live = false }
+  }, [videoId])
+  const aiCost = readingCredits(durationMs)
+  const aiShort = !!credits && reading === 'unpaid' && credits.balance < aiCost
+  const pick = (mode: 'ai' | 'manual') => {
+    if (picked) return
+    if (mode === 'ai' && aiShort) { window.location.assign('/pricing'); return }
+    setPicked(mode); onPick(mode)
+  }
   const options = [
     {
       mode: 'ai' as const, name: 'AI edit', tag: 'Recommended', cta: 'Start with AI',
@@ -985,16 +1017,32 @@ function EditModeDialog({ title, videoUrl, durationMs, onClose, onPick }: {
                     </span>
                   ))}
                 </span>
+                {credits && (o.mode === 'ai' ? (
+                  <span className={`emd-cost${aiShort ? ' is-short' : ''}`}>
+                    {reading === 'paid'
+                      ? <>This video is <b>already read</b>. AI edit, Best moments, Ask AI and Make my clips cost nothing more.</>
+                      : aiShort
+                      ? <>Needs <b>{aiCost} credits</b> to read this video. You have {credits.balance}.</>
+                      : <>Uses <b>{aiCost} credit{aiCost === 1 ? '' : 's'}</b> to read this video, once. Best moments, Ask AI and Make my clips are then free.</>}
+                  </span>
+                ) : (
+                  <span className="emd-cost">
+                    Cutting and editing are free. Captions: <b>1 credit</b> per clip minute. Each export: <b>{EXPORT_CREDITS} credits</b> ({LONG_EXPORT_CREDITS} over 3 min).
+                  </span>
+                ))}
               </span>
               <span className="emd-cta">
-                {picked === o.mode ? <><span className="dash-spinner" />Opening…</> : <>{o.cta}
+                {picked === o.mode ? <><span className="dash-spinner" />Opening…</> : <>{o.mode === 'ai' && aiShort ? 'Get credits' : o.cta}
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></>}
               </span>
             </button>
           ))}
         </div>
 
-        <p className="emd-foot">Not sure? Either way opens the clip board, where both are there, so you can switch any time.</p>
+        <p className="emd-foot">
+          {credits && <><b>{credits.balance} credits</b> left. </>}
+          Not sure? Either way opens the clip board, where both are there, so you can switch any time{credits ? ' (switching to AI later reads the video then)' : ''}.
+        </p>
       </div>
     </div>
   )

@@ -4,9 +4,14 @@ import { useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { PLANS } from '@/lib/plans'
+import { FREE_SIGNUP_CREDITS, TOPUP_PACKS, EXPORT_CREDITS, LONG_EXPORT_CREDITS } from '@/lib/credits'
 import { BrandLogo } from '@/components/ui/brand-logo'
 
 const PLAN_ORDER = ['free', 'starter', 'creator', 'agency'] as const
+
+// An hour of video with 8 clips costs 76 credits (60 to read it + 8 exports of 2): the plan's credits in that unit
+const CREDITS_PER_HOUR_WITH_CLIPS = 60 + 8 * EXPORT_CREDITS
+const hoursOfVideo = (credits: number) => Math.round((credits / CREDITS_PER_HOUR_WITH_CLIPS) * 10) / 10
 
 export default function PricingPage() {
   const { data: session } = useSession()
@@ -52,7 +57,7 @@ export default function PricingPage() {
       <main className="max-w-5xl mx-auto px-6 pt-14 pb-20">
         <h1 className="text-3xl font-bold text-white text-center mb-2">Simple, transparent pricing</h1>
         <p className="text-center mb-3" style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.9rem' }}>
-          All plans include unlimited exports · Cancel anytime
+          Credits pay for AI reading, captions and exports. The editor is always free · Cancel anytime
         </p>
 
         <div className="mx-auto max-w-sm mb-10 rounded-xl px-4 py-2.5 text-center text-xs" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#f59e0b' }}>
@@ -96,6 +101,18 @@ export default function PricingPage() {
                   )}
                 </div>
 
+                {/* What the plan gives, in credits: the number people compare first */}
+                <div className="mb-5 rounded-xl px-3 py-2.5" style={{ background: 'rgba(200,255,0,0.08)', border: '1px solid rgba(200,255,0,0.22)' }}>
+                  <div className="text-base font-bold" style={{ color: '#c8ff00' }}>
+                    {isPaid ? `${plan.monthlyCredits} credits` : `${FREE_SIGNUP_CREDITS} credits`}
+                    <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.5)' }}>{isPaid ? ' every month' : ' to start, once'}</span>
+                  </div>
+                  <div className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                    About {hoursOfVideo(isPaid ? plan.monthlyCredits : FREE_SIGNUP_CREDITS)} hours of video with 8 clips each
+                    {isPaid ? ' · unused credits roll over one month' : ''}
+                  </div>
+                </div>
+
                 <ul className="flex-1 space-y-2.5 mb-6">
                   {([
                     [`${plan.maxVideos} video${plan.maxVideos === 1 ? '' : 's'}`, true],
@@ -137,6 +154,41 @@ export default function PricingPage() {
             )
           })}
         </div>
+
+        <section className="mt-14">
+          <h2 className="text-xl font-bold text-white text-center mb-1">What a credit buys</h2>
+          <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>You see the price before every step. Nothing is charged by surprise, and a job that fails gives its credits back.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              ['AI edit', '1 credit per minute of video', 'Reads the whole video once. Best moments, Ask AI and Make my clips are then free.'],
+              ['Manual edit', '1 credit per clip minute', 'For the captions of a clip you cut yourself. Cutting and editing are free.'],
+              ['Export', `${EXPORT_CREDITS} credits (${LONG_EXPORT_CREDITS} for 3 to 5 min)`, 'Per clip, in 1080p. Clips can be up to 5 minutes.'],
+              ['Free to use', '0 credits', 'The editor, captions styling, text, music, stock B-roll, brand kits and grouping.'],
+            ].map(([name, price, note]) => (
+              <div key={name} className="rounded-2xl p-4" style={{ background: '#161616', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div className="text-sm font-semibold text-white">{name}</div>
+                <div className="text-sm font-bold mt-1" style={{ color: '#c8ff00' }}>{price}</div>
+                <p className="text-xs mt-1.5" style={{ color: 'rgba(255,255,255,0.45)' }}>{note}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className="text-xl font-bold text-white text-center mb-1">Need more credits?</h2>
+          <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>Top-up packs for paid plans. Top-up credits last 12 months. A bigger plan costs less per credit.</p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {TOPUP_PACKS.map(pack => (
+              <div key={pack.key} className="rounded-2xl p-4 text-center" style={{ background: '#161616', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div className="text-2xl font-bold text-white">{pack.credits}</div>
+                <div className="text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>credits</div>
+                <div className="text-lg font-semibold text-white mt-2">₹{pack.price}</div>
+                <div className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>₹{(pack.price / pack.credits).toFixed(2)} a credit</div>
+                <div className="mt-3 py-2 rounded-xl text-xs font-semibold" style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.35)' }}>Coming soon</div>
+              </div>
+            ))}
+          </div>
+        </section>
       </main>
     </div>
   )
