@@ -35,7 +35,12 @@ export interface AskOptions {
   thinkingBudget?: number
   /** Default 120 s */
   timeoutMs?: number
+  /** Told what the answer used (tokens), to record what each call cost (never stops the answer) */
+  onUsage?: (u: GeminiUsage) => void
 }
+
+/** Tokens one answer used: thinking is billed as output, so it is counted there */
+export interface GeminiUsage { model: string; inputTokens: number; outputTokens: number }
 
 export const GEMINI_MODEL = 'gemini-2.5-flash'
 
@@ -114,7 +119,14 @@ export async function askGemini(input: string | GeminiPart[], opts: AskOptions =
       continue
     }
     if (res.ok) {
-      const data = await res.json() as { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[] }
+      const data = await res.json() as {
+        candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[]
+        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
+      }
+      if (opts.onUsage) {
+        const u = data.usageMetadata ?? {}
+        try { opts.onUsage({ model, inputTokens: u.promptTokenCount ?? 0, outputTokens: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0) }) } catch { /* recording never fails the answer */ }
+      }
       return (data.candidates?.[0]?.content?.parts ?? []).filter(p => !p.thought).map(p => p.text ?? '').join('')
     }
     const text = await res.text()

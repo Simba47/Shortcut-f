@@ -683,8 +683,6 @@ export async function regenerateClipText(userId: string, clipId: string) {
   `
   if (!clip) throw Object.assign(new Error('Clip not found'), { status: 404 })
   if (clip.user_id !== userId) throw Object.assign(new Error('Forbidden'), { status: 403 })
-  const { aiProvider, askGemini } = await import('@/lib/gemini')
-  if (!aiProvider()) throw Object.assign(new Error('AI text is not configured'), { status: 500 })
 
   const [transcript] = await sql`SELECT id FROM transcripts WHERE video_id = ${clip.video_id} ORDER BY created_at DESC LIMIT 1`
   const words = transcript
@@ -695,6 +693,16 @@ export async function regenerateClipText(userId: string, clipId: string) {
     : []
   if (!words.length) throw Object.assign(new Error('This clip has no captions yet, so there is nothing to write from'), { status: 400 })
 
+  // A rewrite counts against the month's allowance, then costs credits (services/aiUsage.ts):
+  // checked before any AI call, and given back if the AI does not answer
+  const { beginAiAction, recordAiUsage } = await import('./aiUsage')
+  const action = await beginAiAction(userId, 'rewrite', clip.video_id)
+  const { aiProvider, askGemini } = await import('@/lib/gemini')
+  if (!aiProvider()) { await action.fail(); throw Object.assign(new Error('AI text is not configured'), { status: 500 }) }
+  const onUsage = (u: { model: string; inputTokens: number; outputTokens: number }) => {
+    recordAiUsage({ userId, videoId: clip.video_id, purpose: 'rewrite', ...u }).catch(e => console.warn('[ai-usage] not recorded:', e instanceof Error ? e.message : e))
+  }
+
   const { generateClipText } = await import('@/lib/clipText')
   // The brand's words (brand kit Phase 5): names spelled its way, its tone, words it hides, its
   // hashtags and closing line — rules on the one call made anyway, nothing more paid for
@@ -703,8 +711,10 @@ export async function regenerateClipText(userId: string, clipId: string) {
   const brandWords = await brandWordsFor(userId, clipId)
   let text
   try {
-    text = brandClipText(await generateClipText(brandCaptionWords(words, brandWords), clip.video_title ?? null, prompt => askGemini(prompt), 'roman', brandVoice(brandWords)), brandWords)
+    text = brandClipText(await generateClipText(brandCaptionWords(words, brandWords), clip.video_title ?? null, prompt => askGemini(prompt, { onUsage }), 'roman', brandVoice(brandWords)), brandWords)
+    await action.done()
   } catch (e) {
+    await action.fail()
     console.error('[ai-text] Gemini error:', e)
     throw Object.assign(new Error('AI could not write the text right now. Try again in a moment.'), { status: 502 })
   }

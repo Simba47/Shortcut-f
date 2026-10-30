@@ -15,7 +15,7 @@ function inTx<T>(db: Db, fn: (tx: postgres.TransactionSql) => Promise<T>): Promi
 }
 
 export interface Hold { id: string; amount: number }
-export interface ReserveArgs { amount: number; refType: 'transcribe' | 'caption' | 'render'; refId?: string; jobId?: string | null }
+export interface ReserveArgs { amount: number; refType: 'transcribe' | 'caption' | 'render' | 'search' | 'ask_ai' | 'rewrite'; refId?: string; jobId?: string | null }
 
 type GrantRow = { id: string; remaining: number; expires_at: Date | null; kind: GrantKind; created_at: Date }
 const toSpendable = (r: GrantRow): SpendableGrant => ({ id: r.id, remaining: r.remaining, expiresAt: r.expires_at, kind: r.kind, createdAt: r.created_at })
