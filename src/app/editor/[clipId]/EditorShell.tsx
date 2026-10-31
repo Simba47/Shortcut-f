@@ -82,6 +82,7 @@ import { frameSlotSize } from '@/modules/editor/frames'
 import { getBoxPositionAtLerp, type BoxPosition } from '@/lib/interpolation'
 import { SubjectsPanel, type SubjectItem, type AnglesView } from '@/components/editor/SubjectsPanel'
 import { angleRows, angleAt, type Angle, type AngleRow } from '@/modules/editor/angles'
+import { briefView, withWide, WIDEN_MIN_MS } from '@/modules/editor/briefWiden'
 import { decideFormat, decideVertical, AUTO_FORMAT, keepsAll, viewsOverlap } from '@/modules/editor/autoFormat'
 import type { SegmentLocal, CropBoxLocal, FrameLayout, FrameLane, FrameItem, TransitionType } from '@chai-cut/shared'
 import { SPEED_MIN, SPEED_MAX } from '@chai-cut/shared'
@@ -2324,14 +2325,16 @@ export function EditorShell({
       }
       return seen > 0 && several * 2 >= seen
     }
-    for (const seg of segs.filter(x => !isShot(x, mainVideoId) && x.end_ms - x.start_ms > 250).sort((a, b) => a.start_ms - b.start_ms)) {
-      if (seg.locked || seg.layout === 'horizontal' || inGroup(seg)) continue
-      const frame = isFrameLayout(seg.layout)
-      const mainSlots = frame ? frameOf(seg).main_slots ?? [0] : null
-      // The views that show the main video (in a frame: its main slots, not one shown whole)
-      const views = [...seg.crop_boxes].sort((a, b) => a.slot_index - b.slot_index).filter(b => !b.image_path
+    /** The views of a section that show the main video (in a frame: its main slots, not one shown whole) */
+    const mainViews = (seg: SegmentLocal) => {
+      const mainSlots = isFrameLayout(seg.layout) ? frameOf(seg).main_slots ?? [0] : null
+      return [...seg.crop_boxes].sort((a, b) => a.slot_index - b.slot_index).filter(b => !b.image_path
         && !(b.source_video_id && b.source_video_id !== mainVideoId)
         && (!mainSlots || (mainSlots.includes(b.slot_index) && frameSlotSize(seg.layout as FrameLayout, true, b.slot_index, seg.frame) !== null)))
+    }
+    for (const seg of segs.filter(x => !isShot(x, mainVideoId) && x.end_ms - x.start_ms > 250).sort((a, b) => a.start_ms - b.start_ms)) {
+      if (seg.locked || seg.layout === 'horizontal' || inGroup(seg)) continue
+      const views = mainViews(seg)
       // Two or more views: each follows the person inside it, nobody in two (viewPeople)
       const who = views.length > 1 ? viewPeople(seg, views, tracked, kfs, cuts) : null
       // Views side by side that don't overlap where they start (a Split or Trio Auto format laid, say)
@@ -2380,6 +2383,30 @@ export function EditorShell({
           .map(k => ({ id: crypto.randomUUID(), box_id: box.id, t_ms: k.t_ms, x: k.x, y: k.y, w: k.w, h: k.h }))
         framed++
       })
+    }
+    // Someone on screen briefly (~0.5 s: the scan's close looks, Angle.brief): the section keeps its
+    // format, the view nearest them takes them in for that moment and cuts back (user, 2026-11-01;
+    // modules/editor/briefWiden.ts — the same as Make my clips)
+    const briefs = anglesData?.status === 'done' ? anglesData.angles.flatMap(g => g.brief ?? []) : []
+    for (const b of briefs) {
+      const from = Math.round(trim.toTimeline(b.from)), to = Math.round(trim.toTimeline(b.to))
+      const seg = segs.find(x => !isShot(x, mainVideoId) && !x.locked && x.layout !== 'horizontal' && x.layout !== 'frame_blur_fill'
+        && x.start_ms < to && x.end_ms > from)
+      if (!seg) continue
+      const a = Math.max(seg.start_ms, from), z = Math.min(seg.end_ms, to)
+      if (z - a < WIDEN_MIN_MS) continue
+      const views = mainViews(seg)
+      if (!views.length) continue
+      const kfsOf = (box: CropBoxLocal) => next[box.id] ?? kfs[box.id] ?? box.keyframes ?? []
+      const at = views.map(box => getBoxPositionAtLerp(a, kfsOf(box)))
+      // (the people each view shows then: the tracked faces at that moment)
+      const faces = tracked.flatMap(p => { const f = subjectBoxAt(p.path, trim.toSource(a), cuts); return f ? [f] : [] })
+      const pick = briefView(at, () => faces, b)
+      if (!pick) continue
+      const box = views[pick.i], list = kfsOf(box)
+      next[box.id] = withWide(list, pick.view, a, z, seg.start_ms, seg.end_ms, t => getBoxPositionAtLerp(t, list),
+        (t, r) => ({ id: crypto.randomUUID(), box_id: box.id, t_ms: t, x: r.x, y: r.y, w: r.w, h: r.h }))
+      framed++
     }
     if (!framed) {
       setSubjectNotice(held.length ? `${groupNote}Undo takes it back.` : 'They aren’t seen in the parts of the clip that can be framed on them.')
