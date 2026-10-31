@@ -5,9 +5,11 @@ import type { StockResult } from './BrollPanel'
 
 // ── Media ▸ Memes ─────────────────────────────────────────────────────────────
 // Meme GIFs, still memes and clips — Indian ones too (Brahmanandam, Vadivelu, Hera Pheri…), which
-// the stock libraries don't carry. One search asks every library that has that kind (user,
-// 2026-10-30: try KLIPY, GIPHY and Imgflip side by side to see which gives the best results):
-//   GIFs: KLIPY, GIPHY · Memes (stills): KLIPY, Imgflip templates · Clips: KLIPY
+// the stock libraries don't carry. One search, every kind at once (user, 2026-10-31: no GIFs ·
+// Memes · Clips switch, one section of the three), from every library (user, 2026-10-30: KLIPY,
+// GIPHY and Imgflip side by side to see which gives the best results):
+//   KLIPY: GIFs, memes and clips, interleaved, each tile marked GIF / Meme / Clip
+//   GIPHY: GIFs · Imgflip: meme templates (shown only when it finds some)
 // Each library's results are a section of their own, under its name, and each tile says where it
 // is from: KLIPY's and GIPHY's terms forbid mixing their items with another library's in one grid.
 // A GIF or clip goes in as B-roll (its mp4), a still like a photo; either is saved to the user's
@@ -21,9 +23,13 @@ import type { StockResult } from './BrollPanel'
 
 type Kind = 'gifs' | 'memes' | 'clips'
 type Source = 'klipy' | 'giphy' | 'imgflip'
-const KINDS: [Kind, string][] = [['gifs', 'GIFs'], ['memes', 'Memes'], ['clips', 'Clips']]
-const SOURCES: Record<Kind, Source[]> = { gifs: ['klipy', 'giphy'], memes: ['klipy', 'imgflip'], clips: ['klipy'] }
+const KINDS: Kind[] = ['gifs', 'memes', 'clips']
+/** A tile's kind badge */
+const KIND_NAMES: Record<Kind, string> = { gifs: 'GIF', memes: 'Meme', clips: 'Clip' }
+const SOURCES: Source[] = ['klipy', 'giphy', 'imgflip']
 const SOURCE_NAMES: Record<Source, string> = { klipy: 'KLIPY', giphy: 'GIPHY', imgflip: 'Imgflip' }
+/** What each library has, under its name */
+const SOURCE_HAS: Record<Source, string> = { klipy: 'GIFs, memes and clips', giphy: 'GIFs', imgflip: 'Meme templates' }
 const KLIPY_API = 'https://api.klipy.com/api/v1'
 const KLIPY_KIND: Record<Kind, string> = { gifs: 'gifs', memes: 'static-memes', clips: 'clips' }
 /** Searched on opening, before anything is typed (KLIPY's own trending is mostly American) */
@@ -32,6 +38,7 @@ const OPENING_WORDS = 'telugu'
 interface MemeItem {
   ref: string          // what our server saves it as: "klipy:gif:<slug>", "giphy:gif:<id>", "imgflip:<id>"…
   source: Source
+  kind: Kind
   title: string
   thumb: string        // small, moving for GIFs and clips
   url: string          // what is added: the mp4 (GIFs, clips) or the picture (stills)
@@ -56,14 +63,14 @@ function fromKlipy(kind: Kind, r: KlipyRaw): MemeItem | null {
     const url = typeof r.file.mp4 === 'string' ? r.file.mp4 : null
     const thumb = typeof r.file.webp === 'string' ? r.file.webp : typeof r.file.gif === 'string' ? r.file.gif : null
     if (!url || !thumb) return null
-    return { ref: `klipy:clip:${r.slug}`, source: 'klipy', slug: r.slug, title: r.title ?? 'Clip', thumb, url, video: true, width: r.file_meta?.mp4?.width ?? 854, height: r.file_meta?.mp4?.height ?? 480 }
+    return { ref: `klipy:clip:${r.slug}`, source: 'klipy', kind, slug: r.slug, title: r.title ?? 'Clip', thumb, url, video: true, width: r.file_meta?.mp4?.width ?? 854, height: r.file_meta?.mp4?.height ?? 480 }
   }
   const small = size('sm') ?? size('md')
   const big = kind === 'gifs' ? size('hd')?.mp4 ?? size('md')?.mp4 : size('hd')?.png ?? size('md')?.png ?? size('hd')?.webp
   const thumb = small?.webp?.url ?? small?.gif?.url ?? small?.png?.url
   if (!big?.url || !thumb) return null
   return {
-    ref: `klipy:${kind === 'gifs' ? 'gif' : 'meme'}:${r.slug}`, source: 'klipy', slug: r.slug, title: r.title ?? (kind === 'gifs' ? 'GIF' : 'Meme'),
+    ref: `klipy:${kind === 'gifs' ? 'gif' : 'meme'}:${r.slug}`, source: 'klipy', kind, slug: r.slug, title: r.title ?? (kind === 'gifs' ? 'GIF' : 'Meme'),
     thumb, url: big.url, video: kind === 'gifs', width: big.width ?? 0, height: big.height ?? 0,
   }
 }
@@ -75,7 +82,7 @@ function fromGiphy(r: GiphyRaw): MemeItem | null {
   const small = r.images?.fixed_width_small ?? r.images?.fixed_width
   const thumb = small?.webp ?? small?.url
   if (!r.id || !big?.mp4 || !thumb) return null
-  return { ref: `giphy:gif:${r.id}`, source: 'giphy', title: r.title?.trim() || 'GIF', thumb, url: big.mp4, video: true, width: Number(big.width) || 0, height: Number(big.height) || 0 }
+  return { ref: `giphy:gif:${r.id}`, source: 'giphy', kind: 'gifs', title: r.title?.trim() || 'GIF', thumb, url: big.mp4, video: true, width: Number(big.width) || 0, height: Number(big.height) || 0 }
 }
 
 /** A video's length in seconds, read in the browser (the libraries give none for GIFs) */
@@ -101,14 +108,13 @@ export function MemesPanel({ currentTimeMs, onAddVideo, onAddPhoto }: {
   /** A still, saved to the user's photos: put in at the playhead */
   onAddPhoto: (photo: { storage_path: string; preview_url: string }) => void
 }) {
-  const [kind, setKind] = useState<Kind>('gifs')
   const [query, setQuery] = useState('')
   const [sections, setSections] = useState<Section[]>([])
   const [error, setError] = useState<string | null>(null)
   const [picked, setPicked] = useState<MemeItem | null>(null)
   const [adding, setAdding] = useState(false)
   const keys = useRef<Promise<Keys> | null>(null)
-  /** What the results shown are for: `<kind>|<words>` ('' words = the ones shown on opening) */
+  /** The words the results shown are for ('' = the ones shown on opening) */
   const asked = useRef('')
 
   const getKeys = () => (keys.current ??= fetch('/api/memes').then(r => r.ok ? r.json() : null).then(k => k ?? { klipy: null, giphy: null, customer_id: null }).catch(() => {
@@ -116,15 +122,25 @@ export function MemesPanel({ currentTimeMs, onAddVideo, onAddPhoto }: {
     return { klipy: null, giphy: null, customer_id: null }
   }))
 
+  /** One KLIPY kind's results, in KLIPY's order (throws a message) */
+  async function fetchKlipy(key: Keys, k: Kind, words: string): Promise<MemeItem[]> {
+    const params = new URLSearchParams({ q: words, per_page: '30', page: '1', locale: 'in', content_filter: 'medium', customer_id: key.customer_id ?? '' })
+    const res = await fetch(`${KLIPY_API}/${key.klipy}/${KLIPY_KIND[k]}/search?${params}`)
+    if (res.status === 429) throw new Error('KLIPY’s search limit is used up for now.')
+    const data = await res.json().catch(() => null) as { result?: boolean; data?: { data?: KlipyRaw[] } } | null
+    if (!res.ok || !data?.result) throw new Error('KLIPY isn’t answering right now.')
+    return (data.data?.data ?? []).flatMap(r => fromKlipy(k, r) ?? [])
+  }
+
   /** One library's results (throws a message to show in its section) */
-  async function fetchFrom(source: Source, k: Kind, term: string): Promise<{ items: MemeItem[]; note?: string }> {
+  async function fetchFrom(source: Source, term: string): Promise<{ items: MemeItem[]; note?: string }> {
     const words = term || OPENING_WORDS
     if (source === 'imgflip') {
       const res = await fetch(`/api/memes/imgflip?q=${encodeURIComponent(term)}`)
       const data = await res.json().catch(() => null) as { items?: { id: string; name: string; url: string; width: number; height: number }[]; premium?: boolean; error?: string } | null
       if (!res.ok || !data) throw new Error(data?.error ?? 'Imgflip isn’t answering right now.')
       return {
-        items: (data.items ?? []).map(m => ({ ref: `imgflip:${m.id}`, source: 'imgflip', title: m.name, thumb: m.url, url: m.url, video: false, width: m.width, height: m.height })),
+        items: (data.items ?? []).map(m => ({ ref: `imgflip:${m.id}`, source: 'imgflip', kind: 'memes', title: m.name, thumb: m.url, url: m.url, video: false, width: m.width, height: m.height })),
         note: data.premium ? undefined : term ? 'Free plan: only its top 100 templates are searched, by name' : 'Its top 100 templates (the free plan can’t search all of Imgflip)',
       }
     }
@@ -139,24 +155,26 @@ export function MemesPanel({ currentTimeMs, onAddVideo, onAddPhoto }: {
       return { items: (data.data ?? []).flatMap(r => fromGiphy(r) ?? []) }
     }
     if (!key.klipy) throw new Error('Not set up yet.')
-    const params = new URLSearchParams({ q: words, per_page: '30', page: '1', locale: 'in', content_filter: 'medium', customer_id: key.customer_id ?? '' })
-    const res = await fetch(`${KLIPY_API}/${key.klipy}/${KLIPY_KIND[k]}/search?${params}`)
-    if (res.status === 429) throw new Error('KLIPY’s search limit is used up for now.')
-    const data = await res.json().catch(() => null) as { result?: boolean; data?: { data?: KlipyRaw[] } } | null
-    if (!res.ok || !data?.result) throw new Error('KLIPY isn’t answering right now.')
-    return { items: (data.data?.data ?? []).flatMap(r => fromKlipy(k, r) ?? []) }
+    // GIFs, memes and clips side by side; a kind that fails leaves the others (and is named)
+    const got = await Promise.allSettled(KINDS.map(k => fetchKlipy(key, k, words)))
+    const lists = got.map(g => (g.status === 'fulfilled' ? g.value : []))
+    const failed = KINDS.filter((_, i) => got[i].status === 'rejected')
+    if (failed.length === KINDS.length) throw (got[0] as PromiseRejectedResult).reason
+    // interleaved — a GIF, a meme, a clip, … — each kind still in KLIPY's own order
+    const items: MemeItem[] = []
+    for (let i = 0; i < Math.max(...lists.map(l => l.length)); i++) for (const l of lists) if (l[i]) items.push(l[i])
+    return { items, note: failed.length ? `Its ${failed.map(k => KIND_NAMES[k].toLowerCase() + 's').join(' and ')} didn’t load this time` : undefined }
   }
 
-  function search(q: string, k: Kind = kind) {
+  function search(q: string) {
     const term = q.trim()
-    const ask = `${k}|${term}`
-    asked.current = ask
+    asked.current = term
     setError(null); setPicked(null)
-    const list = SOURCES[k]
-    setSections(list.map(source => ({ source, items: null })))
+    setSections(SOURCES.map(source => ({ source, items: null })))
     // each library fills its own section as soon as it answers
-    for (const source of list) {
-      fetchFrom(source, k, term).then(
+    for (const source of SOURCES) {
+      const ask = term
+      fetchFrom(source, term).then(
         r => { if (asked.current === ask) setSections(s => s.map(x => x.source === source ? { source, items: r.items, note: r.note } : x)) },
         e => { if (asked.current === ask) setSections(s => s.map(x => x.source === source ? { source, items: [], error: e instanceof Error ? e.message : 'Search failed' } : x)) },
       )
@@ -190,9 +208,9 @@ export function MemesPanel({ currentTimeMs, onAddVideo, onAddPhoto }: {
       if (picked.source === 'klipy' && picked.slug) {
         const key = await getKeys()
         if (key.klipy) {
-          fetch(`${KLIPY_API}/${key.klipy}/${KLIPY_KIND[kind]}/share/${encodeURIComponent(picked.slug)}`, {
+          fetch(`${KLIPY_API}/${key.klipy}/${KLIPY_KIND[picked.kind]}/share/${encodeURIComponent(picked.slug)}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ customer_id: key.customer_id, q: asked.current.slice(asked.current.indexOf('|') + 1) || OPENING_WORDS }),
+            body: JSON.stringify({ customer_id: key.customer_id, q: asked.current || OPENING_WORDS }),
           }).catch(() => {})
         }
       }
@@ -204,23 +222,13 @@ export function MemesPanel({ currentTimeMs, onAddVideo, onAddPhoto }: {
     }
   }
 
-  const words = asked.current.slice(asked.current.indexOf('|') + 1)
+  const words = asked.current
   const searching = sections.some(s => s.items === null)
+  // (Imgflip's section only when it found something: its free plan matches few words)
+  const shown = sections.filter(s => !(s.source === 'imgflip' && s.items && !s.error && s.items.length === 0))
 
   return (
     <div className="flex-1 flex flex-col gap-3 p-4 min-h-0">
-      {/* GIFs · Memes · Clips: switching searches the same words there */}
-      <div role="radiogroup" aria-label="Kind of meme" className="grid grid-cols-3 gap-0.5 p-0.5 rounded-lg" style={{ background: muted(0.06) }}>
-        {KINDS.map(([id, label]) => (
-          <button key={id} type="button" role="radio" aria-checked={kind === id}
-            onClick={() => { if (kind === id) return; setKind(id); search(query, id) }}
-            className="h-7 rounded-md text-[11.5px] font-semibold transition-colors"
-            style={kind === id ? { background: muted(0.16), color: 'var(--ed-text)' } : { color: muted(0.6) }}>
-            {label}
-          </button>
-        ))}
-      </div>
-
       <form onSubmit={e => { e.preventDefault(); if (query.trim()) search(query) }} className="flex gap-1.5">
         {/* "Search KLIPY": KLIPY's terms ask for these words in the box */}
         <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search KLIPY"
@@ -237,12 +245,12 @@ export function MemesPanel({ currentTimeMs, onAddVideo, onAddPhoto }: {
 
       {/* One section per library, in its own order (down to the panel's bottom, like B-roll) */}
       <div className="flex-1 min-h-[240px] flex flex-col gap-4 overflow-y-auto -mr-2 pr-2">
-        {sections.map(sec => (
+        {shown.map(sec => (
           <section key={sec.source} aria-label={SOURCE_NAMES[sec.source]} className="flex flex-col gap-1.5">
             <div className="flex items-baseline gap-2">
               <h3 className="text-[11.5px] font-bold" style={{ color: 'var(--ed-text)' }}>{SOURCE_NAMES[sec.source]}</h3>
               <span className="text-[10.5px] tabular-nums" style={{ color: muted(0.45) }}>
-                {sec.items === null ? 'searching…' : sec.error ? '' : `${sec.items.length} result${sec.items.length === 1 ? '' : 's'}`}
+                {SOURCE_HAS[sec.source]} · {sec.items === null ? 'searching…' : sec.error ? '' : `${sec.items.length} result${sec.items.length === 1 ? '' : 's'}`}
               </span>
               {sec.source === 'giphy' && <span className="ml-auto text-[10px]" style={{ color: muted(0.45) }}>Powered by GIPHY</span>}
             </div>
@@ -260,13 +268,18 @@ export function MemesPanel({ currentTimeMs, onAddVideo, onAddPhoto }: {
               <div className="grid grid-cols-2 auto-rows-max gap-1.5">
                 {sec.items.map(r => (
                   <button key={r.ref} type="button" onClick={() => setPicked(p => (p?.ref === r.ref ? null : r))}
-                    title={`${r.title} · ${SOURCE_NAMES[r.source]} · click to pick it`} aria-pressed={picked?.ref === r.ref}
+                    title={`${r.title} · ${KIND_NAMES[r.kind]} · ${SOURCE_NAMES[r.source]} · click to pick it`} aria-pressed={picked?.ref === r.ref}
                     className="relative rounded-md overflow-hidden bg-black" style={{ aspectRatio: '4 / 3', outline: picked?.ref === r.ref ? '2px solid #c8ff00' : 'none', outlineOffset: -2 }}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={r.thumb} alt={r.title} loading="lazy" className="w-full h-full object-cover" />
                     {/* which library it is from (user, 2026-10-30: to compare them) */}
                     <span className="absolute left-1 top-1 px-1 rounded text-[9px] font-semibold text-white" style={{ background: 'rgba(0,0,0,0.6)' }}>
                       {SOURCE_NAMES[r.source]}
+                    </span>
+                    {/* what it is: one section holds all three kinds (a clip has sound; a meme is a still) */}
+                    <span className="absolute right-1 top-1 px-1 rounded text-[9px] font-bold" data-kind={r.kind}
+                      style={{ background: r.kind === 'clips' ? '#c8ff00' : r.kind === 'memes' ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.6)', color: r.kind === 'gifs' ? '#fff' : '#000' }}>
+                      {KIND_NAMES[r.kind]}
                     </span>
                   </button>
                 ))}
