@@ -7,6 +7,7 @@ import { useCaptionStore } from '@/modules/captions/store'
 import type { PlayedPart } from '@/modules/captions/parts'
 import { useRef, useEffect, useCallback, useState, useMemo, useId, createContext, useContext } from 'react'
 import { emojiFamily, captionEmojiFamily } from '@/modules/editor/emojiFont'
+import { LAYOUT_COLORS } from './SegmentTimeline'
 import type { RefObject } from 'react'
 import type { FrameLayout, SegmentLocal, Overlay, TextOverlay as TextOverlayType, CaptionStyle, TranscriptWord, FrameItem, FrameLane, CornerStyle } from '@chai-cut/shared'
 import { BG_PAD, shownText, textCss, textReplayElapsed, withAlpha, wrapTextLines, TEXT_LINE_EM, MIN_TEXT_W, MIN_TEXT_H } from '@/modules/editor/textStyle'
@@ -26,6 +27,10 @@ import { VIDEO_FONTS } from '@/lib/shared/videoFonts'
 import { ensureBrandFont } from './brandFonts'
 
 const BOX_COLORS = ['#22c55e', '#3b82f6', '#f59e0b']
+/** The layout's name on its frames' tag (user, 2026-10-31: the corners in the layout's colour, as on the timeline, so it's plain which format it is) */
+const LAYOUT_NAMES: Partial<Record<string, string>> = {
+  vertical: 'Vertical', split: 'Split', trio: 'Trio', horizontal: 'Horizontal', spotlight: 'Spotlight', centered: 'Centered',
+}
 // What each slot becomes in the 9:16 output, top to bottom
 const SLOT_LABELS: Record<string, string[]> = {
   vertical: ['9:16'], split: ['Top', 'Bottom'], trio: ['Top', 'Middle', 'Bottom'], horizontal: ['Full frame'],
@@ -195,8 +200,9 @@ export function VideoPreview({
                   key={box.id}
                   pos={pos}
                   aspect={aspect}
-                  color={BOX_COLORS[slotIdx % BOX_COLORS.length]}
+                  color={LAYOUT_COLORS[layout] ?? BOX_COLORS[slotIdx % BOX_COLORS.length]}
                   isActive={box.id === activeBoxId || boxes.length === 1}
+                  kind={frame ? 'Frame' : LAYOUT_NAMES[layout]}
                   label={label}
                   onSelect={() => onSelectBox(activeSegment.id, box.id)}
                   onChange={newPos => onBoxChange(box.id, newPos)}
@@ -3509,6 +3515,8 @@ interface DraggableBoxProps {
   aspect: number | null
   color: string
   isActive: boolean
+  /** The layout's name (Vertical, Split, …), first on the tag in the layout's colour */
+  kind?: string
   label: string
   onSelect: () => void
   onChange: (newPos: BoxPosition) => void
@@ -3516,8 +3524,38 @@ interface DraggableBoxProps {
 
 const MIN_BOX = 0.05
 
-function DraggableBox({ pos, aspect, color, isActive, label, onSelect, onChange }: DraggableBoxProps) {
+/**
+ * A corner of the crop frame as a camera's focus bracket (user, 2026-10-31: "the frame is highlighting more
+ * and looks ordinary — make it easier and creative"): an L in the box's colour inside a bigger, easy-to-grab spot
+ */
+function bracketStyle(dir: string, color: string): React.CSSProperties {
+  const n = dir.includes('n'), w = dir.includes('w')
+  // (user, 2026-10-31) the frame itself soft white, the corners in the layout's colour with its glow — the
+  // timeline's colour for that layout, so which format it is reads at a glance
+  const line = `3px solid ${color}`
+  return {
+    position: 'absolute', width: 14, height: 14, pointerEvents: 'none',
+    [n ? 'top' : 'bottom']: 4, [w ? 'left' : 'right']: 4,
+    [n ? 'borderTop' : 'borderBottom']: line,
+    [w ? 'borderLeft' : 'borderRight']: line,
+    [`border${n ? 'Top' : 'Bottom'}${w ? 'Left' : 'Right'}Radius`]: 7,
+    filter: `drop-shadow(0 0 6px ${color}aa) drop-shadow(0 1px 2px rgba(0,0,0,0.45))`,
+  }
+}
+
+/** The frame's tags (what it becomes, its zoom): small dark glass pills */
+const GLASS_TAG: React.CSSProperties = {
+  position: 'absolute', top: 8, display: 'flex', alignItems: 'center', gap: 5,
+  fontSize: 10.5, fontWeight: 650, letterSpacing: '0.02em', color: '#fff', lineHeight: 1.3,
+  padding: '3px 8px', borderRadius: 999, pointerEvents: 'none',
+  background: 'rgba(10, 10, 12, 0.55)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+  boxShadow: 'inset 0 0 0 1px rgba(255, 255, 255, 0.14), 0 4px 12px -4px rgba(0, 0, 0, 0.6)',
+}
+
+function DraggableBox({ pos, aspect, color, isActive, kind, label, onSelect, onChange }: DraggableBoxProps) {
   const ref = useRef<HTMLDivElement>(null)
+  // Moving or resizing: the thirds guides show, to place the face
+  const [busy, setBusy] = useState(false)
 
   function cRect() {
     const r = ref.current?.parentElement?.getBoundingClientRect()
@@ -3529,6 +3567,7 @@ function DraggableBox({ pos, aspect, color, isActive, label, onSelect, onChange 
     e.stopPropagation()
     e.preventDefault()
     onSelect()
+    setBusy(true)
     const sx = e.clientX, sy = e.clientY, start = { ...pos }
     function move(ev: MouseEvent) {
       const { w, h } = cRect()
@@ -3538,7 +3577,7 @@ function DraggableBox({ pos, aspect, color, isActive, label, onSelect, onChange 
         y: Math.max(0, Math.min(1 - start.h, start.y + (ev.clientY - sy) / h)),
       })
     }
-    function up() { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
+    function up() { setBusy(false); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
@@ -3547,6 +3586,7 @@ function DraggableBox({ pos, aspect, color, isActive, label, onSelect, onChange 
     e.stopPropagation()
     e.preventDefault()
     onSelect()
+    setBusy(true)
     const sx = e.clientX, sy = e.clientY, start = { ...pos }
     const re = start.x + start.w, be = start.y + start.h
     function move(ev: MouseEvent) {
@@ -3570,7 +3610,7 @@ function DraggableBox({ pos, aspect, color, isActive, label, onSelect, onChange 
       if (dir.includes('n')) { const ny = Math.max(0, Math.min(be - MIN_BOX, y + dy)); bh = be - ny; y = ny }
       onChange({ x, y, w: bw, h: bh })
     }
-    function up() { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
+    function up() { setBusy(false); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
@@ -3585,42 +3625,64 @@ function DraggableBox({ pos, aspect, color, isActive, label, onSelect, onChange 
         position: 'absolute',
         left: `${pos.x * 100}%`, top: `${pos.y * 100}%`,
         width: `${pos.w * 100}%`, height: `${pos.h * 100}%`,
-        border: `2px solid ${color}`,
-        background: isActive ? `${color}10` : 'transparent',
+        // A fine see-through edge with a dark hairline round it: clear on bright and dark video alike
+        border: `1px solid rgba(255, 255, 255, ${isActive ? 0.42 : 0.24})`,
+        boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.28), 0 12px 40px -14px rgba(0, 0, 0, 0.7)',
+        borderRadius: 4, background: 'transparent',
         boxSizing: 'border-box', cursor: 'move', pointerEvents: 'auto', userSelect: 'none',
         zIndex: isActive ? 2 : 1,
       }}
       onMouseDown={startDrag}
       onClick={e => { e.stopPropagation(); onSelect() }}
     >
+      {/* Thirds guides while moving or resizing (where to put the eyes) */}
+      {busy && (
+        <div aria-hidden="true" style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none',
+          backgroundImage: 'linear-gradient(90deg, transparent calc(33.333% - 0.5px), rgba(255,255,255,0.35) calc(33.333% - 0.5px), rgba(255,255,255,0.35) calc(33.333% + 0.5px), transparent calc(33.333% + 0.5px), transparent calc(66.666% - 0.5px), rgba(255,255,255,0.35) calc(66.666% - 0.5px), rgba(255,255,255,0.35) calc(66.666% + 0.5px), transparent calc(66.666% + 0.5px)),'
+            + ' linear-gradient(180deg, transparent calc(33.333% - 0.5px), rgba(255,255,255,0.35) calc(33.333% - 0.5px), rgba(255,255,255,0.35) calc(33.333% + 0.5px), transparent calc(33.333% + 0.5px), transparent calc(66.666% - 0.5px), rgba(255,255,255,0.35) calc(66.666% - 0.5px), rgba(255,255,255,0.35) calc(66.666% + 0.5px), transparent calc(66.666% + 0.5px))',
+        }} />
+      )}
+
       {/* Slot label — what this box becomes in the output */}
-      <div style={{
-        position: 'absolute', top: 6, left: 6,
-        fontSize: 10, fontWeight: 700, color: '#fff', lineHeight: 1.4,
-        background: color, padding: '1px 7px', borderRadius: 4, pointerEvents: 'none',
-        textShadow: '0 1px 2px rgba(0,0,0,0.4)',
-      }}>{label}</div>
+      <div style={{ ...GLASS_TAG, left: 8 }}>
+        <span style={{ width: 6, height: 6, borderRadius: 999, background: color, boxShadow: `0 0 6px ${color}` }} />
+        {/* (lightened: a dark blue name didn't read on the dark glass) */}
+        {kind && <span style={{ color: `color-mix(in srgb, ${color} 60%, white)` }}>{kind}</span>}
+        {kind && <span style={{ opacity: 0.4 }}>·</span>}
+        {label}
+      </div>
 
       {/* Zoom badge — how far this crop is punched in (only when it is: "1.0x" read like a speed) */}
       {Math.round(10 / Math.max(0.1, pos.h)) / 10 > 1 && (
-        <div style={{
-          position: 'absolute', top: 6, right: 6,
-          fontSize: 10, fontWeight: 700, color: '#fff', lineHeight: 1.4,
-          background: 'rgba(0,0,0,0.65)', padding: '1px 7px', borderRadius: 4, pointerEvents: 'none',
-        }}>
+        <div style={{ ...GLASS_TAG, right: 8 }}>
           Zoom {(Math.round(10 / Math.max(0.1, pos.h)) / 10).toFixed(1)}×
         </div>
       )}
 
-      {handles.map(({ cursor, pos: hPos, dir }) => (
+      {/* Corners: focus brackets in a 26 px spot to grab; edges (free boxes only): a small bar */}
+      {handles.map(({ cursor, pos: hPos, dir }) => dir.length === 2 ? (
         <div
           key={dir}
           data-handle="1"
           style={{
-            position: 'absolute', width: 12, height: 12,
-            background: '#fff', border: `2px solid ${color}`,
-            borderRadius: 3, cursor, pointerEvents: 'auto', boxSizing: 'border-box',
+            position: 'absolute', width: 26, height: 26, cursor, pointerEvents: 'auto',
+            [dir.includes('n') ? 'top' : 'bottom']: -6, [dir.includes('w') ? 'left' : 'right']: -6,
+          }}
+          onMouseDown={e => startResize(e, dir)}
+        >
+          <span style={bracketStyle(dir, color)} />
+        </div>
+      ) : (
+        <div
+          key={dir}
+          data-handle="1"
+          style={{
+            position: 'absolute', width: dir === 'n' || dir === 's' ? 18 : 4, height: dir === 'n' || dir === 's' ? 4 : 18,
+            background: color, borderRadius: 999, cursor, pointerEvents: 'auto',
+            boxShadow: `0 0 6px ${color}aa, 0 1px 3px rgba(0,0,0,0.5)`,
             ...hPos,
+            ...(dir === 'n' ? { top: -2.5 } : dir === 's' ? { bottom: -2.5 } : dir === 'e' ? { right: -2.5 } : { left: -2.5 }),
           }}
           onMouseDown={e => startResize(e, dir)}
         />

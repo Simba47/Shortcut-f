@@ -7,7 +7,7 @@ import { motion } from 'framer-motion'
 /**
  * Dark / light switch for the dashboard, the clip board and the editor (only those: every other
  * page stays dark). A sculpted pill track, a round thumb that springs across with a small burst of
- * light, sun on the left and moon on the right.
+ * light, sun on the left and moon on the right — in the app's own neutral glass and palette colour.
  *
  * The choice is kept in this browser (localStorage `shortcut-theme`) and shown as
  * `<html data-theme="light">`, which the pages' light styles key on (globals.css). The root layout
@@ -75,57 +75,51 @@ export default function CinematicThemeSwitcher({ className = '' }: { className?:
       role="switch" aria-checked={isDark} aria-label={`Switch to ${isDark ? 'light' : 'dark'} mode`} title={isDark ? 'Light mode' : 'Dark mode'}
       whileTap={{ scale: 0.96 }}
       className={`relative shrink-0 flex h-[34px] w-[64px] items-center rounded-full p-[3px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c8ff00]/60 ${className}`}
+      // (user, 2026-10-31: the navy and yellow looked odd next to every other button) the app's own look: a
+      // neutral glass track with a fine edge, a white-glass thumb as on the Off / Reels / Shorts switch, the
+      // icon of the theme on in the palette colour and the other one plain grey
       style={{
-        background: isDark
-          ? 'radial-gradient(ellipse at top left, #1e293b 0%, #0f172a 40%, #020617 100%)'
-          : 'radial-gradient(ellipse at top left, #ffffff 0%, #f1f5f9 40%, #cbd5e1 100%)',
+        background: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(10, 10, 12, 0.06)',
         boxShadow: isDark
-          ? 'inset 3px 3px 7px rgba(0,0,0,0.9), inset -3px -3px 7px rgba(71,85,105,0.35), inset 0 1px 2px rgba(0,0,0,1), 0 1px 1px rgba(255,255,255,0.05), 0 4px 10px rgba(0,0,0,0.4)'
-          : 'inset 3px 3px 7px rgba(148,163,184,0.5), inset -3px -3px 7px rgba(255,255,255,1), inset 0 1px 2px rgba(148,163,184,0.4), 0 1px 2px rgba(255,255,255,1), 0 4px 10px rgba(0,0,0,0.08)',
-        border: isDark ? '1px solid rgba(51,65,85,0.6)' : '1px solid rgba(203,213,225,0.7)',
+          ? 'inset 0 1px 3px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 255, 255, 0.04)'
+          : 'inset 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 0 rgba(255, 255, 255, 0.8)',
+        border: isDark ? '1px solid rgba(255, 255, 255, 0.12)' : '1px solid rgba(10, 10, 12, 0.12)',
         transition: 'background 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease',
       }}>
-      {/* glossy light over the track */}
-      <span aria-hidden="true" className="absolute inset-0 rounded-full pointer-events-none" style={{
-        background: isDark
-          ? 'linear-gradient(to bottom, rgba(71,85,105,0.2) 0%, transparent 35%, transparent 70%, rgba(0,0,0,0.3) 100%)'
-          : 'linear-gradient(to bottom, rgba(255,255,255,0.7) 0%, transparent 35%, transparent 70%, rgba(148,163,184,0.15) 100%)',
-        mixBlendMode: 'overlay',
-      }} />
       {/* the sun and the moon in the track */}
       <span aria-hidden="true" className="absolute inset-0 flex items-center justify-between px-[9px]">
-        <Sun size={13} className={isDark ? 'text-yellow-100/70' : 'text-amber-600'} />
-        <Moon size={13} className={isDark ? 'text-yellow-100/70' : 'text-slate-500'} />
+        <Sun size={13} style={{ color: isDark ? 'rgba(255, 255, 255, 0.4)' : 'rgba(10, 10, 12, 0.4)' }} />
+        <Moon size={13} style={{ color: isDark ? 'rgba(255, 255, 255, 0.4)' : 'rgba(10, 10, 12, 0.4)' }} />
       </span>
       {/* the thumb: springs across, a little past and back */}
       <motion.span aria-hidden="true"
         className="relative z-10 flex h-[26px] w-[26px] items-center justify-center rounded-full overflow-hidden"
         style={{
           background: isDark
-            ? 'linear-gradient(145deg, #64748b 0%, #475569 50%, #334155 100%)'
-            : 'linear-gradient(145deg, #ffffff 0%, #fefefe 50%, #f8fafc 100%)',
+            ? 'linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.1))'
+            : 'linear-gradient(180deg, #ffffff, #f4f4f5)',
           boxShadow: isDark
-            ? 'inset 1px 1px 2px rgba(100,116,139,0.4), inset -1px -1px 2px rgba(0,0,0,0.8), 0 4px 12px rgba(0,0,0,0.6), 0 2px 4px rgba(0,0,0,0.4)'
-            : 'inset 1px 1px 2px rgba(203,213,225,0.3), inset -1px -1px 2px rgba(255,255,255,1), 0 4px 12px rgba(0,0,0,0.16), 0 2px 4px rgba(0,0,0,0.08)',
-          border: isDark ? '1px solid rgba(148,163,184,0.3)' : '1px solid rgba(255,255,255,0.9)',
+            ? 'inset 0 0 0 1px rgba(255, 255, 255, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 12px -2px rgba(0, 0, 0, 0.8)'
+            : 'inset 0 0 0 1px rgba(10, 10, 12, 0.08), 0 2px 8px -2px rgba(0, 0, 0, 0.25)',
+          backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
         }}
         initial={false}
         animate={{ x: isDark ? 30 : 0 }}
         transition={{ type: 'spring', stiffness: 300, damping: 20 }}>
-        <span className="absolute inset-0 rounded-full pointer-events-none" style={{ background: 'linear-gradient(to bottom, rgba(255,255,255,0.4) 0%, transparent 40%, rgba(0,0,0,0.1) 100%)', mixBlendMode: 'overlay' }} />
         {particles.map(p => (
           <motion.span key={p.id} className="absolute rounded-full pointer-events-none" style={{
             width: 8, height: 8,
+            // (the burst in the palette colour)
             background: isDark
-              ? 'radial-gradient(circle, rgba(147,197,253,0.5) 0%, rgba(147,197,253,0) 70%)'
-              : 'radial-gradient(circle, rgba(251,191,36,0.7) 0%, rgba(251,191,36,0) 70%)',
+              ? 'radial-gradient(circle, rgba(200,255,0,0.45) 0%, rgba(200,255,0,0) 70%)'
+              : 'radial-gradient(circle, rgba(120,160,0,0.45) 0%, rgba(120,160,0,0) 70%)',
           }}
             initial={{ scale: 0, opacity: 0 }}
             animate={{ scale: isDark ? 5 : 6, opacity: [0, 1, 0] }}
             transition={{ duration: isDark ? 0.5 : p.duration, delay: p.delay, ease: 'easeOut' }} />
         ))}
         <span className="relative z-10">
-          {isDark ? <Moon size={13} className="text-yellow-200" /> : <Sun size={13} className="text-amber-500" />}
+          {isDark ? <Moon size={13} style={{ color: '#c8ff00' }} /> : <Sun size={13} style={{ color: '#4a6100' }} />}
         </span>
       </motion.span>
     </motion.button>

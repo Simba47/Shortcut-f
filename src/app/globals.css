@@ -3688,35 +3688,19 @@ html .editor-theme .ed-body .ed-rail > div { overflow-y: auto !important; justif
 html .editor-theme .ed-body .ed-rail > div > .ed-tool { margin-block: auto; }
 html .editor-theme .ed-body .ed-rail > button { display: flex !important; }
 
-/* ══ The Preview as a real phone (user, 2026-10-29: "keep a exact mobile layout"): a tall phone body (bezel, side
-   buttons), its screen with a status bar — the time, the camera island, signal · Wi-Fi · battery — the 9:16 video,
-   and the home bar under it. The Off / Reels / Shorts switch black with the picked one on white glass, as the
-   layout switch. Not in full view. Both modes ══ */
-.editor-theme .ed-phone {
-  position: relative; box-sizing: border-box; padding: 10px; border-radius: 44px;
-  background: linear-gradient(150deg, #34343a 0%, #141416 30%, #0b0b0c 60%, #26262b 100%);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), inset 0 0 0 1.5px rgba(255, 255, 255, 0.06), inset 0 0 0 4px #050506,
-    0 36px 70px -28px rgba(0, 0, 0, 0.95), 0 12px 28px -16px rgba(0, 0, 0, 0.75);
+/* ══ The Preview as a clean card (user, 2026-10-31: "remove the mobile completely, keep a normal preview, a little
+   creative" — it was a phone since 2026-10-29): the 9:16 video rounded, on a fine edge that runs lime → clear →
+   soft white, with a soft lime glow under it. Not in full view. Both modes. The Off / Reels / Shorts switch black
+   with the picked one on white glass, as the layout switch ══ */
+.editor-theme .ed-pv-card {
+  position: relative; box-sizing: border-box; padding: 1.5px; border-radius: 18px;
+  /* (user, 2026-10-31: no palette colour behind the preview) a fine neutral edge, a soft dark shadow */
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 45%, rgba(255, 255, 255, 0.16) 100%);
+  box-shadow: 0 22px 50px -24px rgba(0, 0, 0, 0.9);
 }
-.editor-theme .ed-phone::before, .editor-theme .ed-phone::after {
-  content: ''; position: absolute; width: 3px; border-radius: 2px; background: linear-gradient(90deg, #44444a, #1e1e21);
-}
-.editor-theme .ed-phone::before { right: -3px; top: 26%; height: 12%; }
-.editor-theme .ed-phone::after { left: -3px; top: 20%; height: 6%; box-shadow: 0 calc(100% + 14px) 0 #2a2a2f, 0 calc(200% + 22px) 0 #2a2a2f; }
-.editor-theme .ed-phone-screen { position: relative; overflow: hidden; border-radius: 35px; background: #000; isolation: isolate; }
-.editor-theme .ed-phone .relative > :first-child { border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
-.editor-theme .ed-phone-status {
-  position: relative; height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px 0 26px; color: #fff;
-}
-.editor-theme .ed-phone-time { font-size: 12px; font-weight: 650; letter-spacing: .01em; font-variant-numeric: tabular-nums; }
-.editor-theme .ed-phone-island {
-  position: absolute; left: 50%; top: 8px; translate: -50% 0; width: 30%; max-width: 92px; height: 20px; border-radius: 999px; background: #000;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-}
-.editor-theme .ed-phone-island::after { content: ''; position: absolute; right: 8px; top: 50%; translate: 0 -50%; width: 7px; height: 7px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #2b3a55, #0a0d14 70%); }
-.editor-theme .ed-phone-icons { display: flex; align-items: center; gap: 4px; }
-.editor-theme .ed-phone-home { height: 24px; display: grid; place-items: center; }
-.editor-theme .ed-phone-home i { width: 34%; height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.85); }
+.editor-theme .ed-pv-card-in { position: relative; overflow: hidden; border-radius: 16.5px; background: #000; isolation: isolate; }
+.editor-theme .ed-pv-card .relative > :first-child { border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+html[data-theme="light"] .editor-theme .ed-pv-card { background: linear-gradient(150deg, rgba(10, 10, 12, 0.18) 0%, rgba(10, 10, 12, 0.06) 45%, rgba(10, 10, 12, 0.14) 100%); box-shadow: 0 22px 50px -24px rgba(0, 0, 0, 0.45); }
 /* the view switch */
 .editor-theme .ed-pv-views { background: #0a0a0b; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 8px 22px -12px rgba(0, 0, 0, 0.8); }
 .editor-theme .ed-pv-view { color: rgba(255, 255, 255, 0.5); transition: color .2s, background-color .2s, box-shadow .2s; }
@@ -3733,33 +3717,12 @@ html[data-theme="light"] .editor-theme .ed-preview-inner .ed-pv-view[data-on] {
   color: #fff !important; background: linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.1)) !important;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
 }
-/* (user, 2026-10-29: in a small Preview the phone was squeezed) every part of the phone in proportion to its width —
-   the bezel, the corners, the status bar, the island, the icons and the home bar — so it's the same phone at any size */
-.editor-theme .ed-phone { padding: calc(var(--pw) * 0.035); border-radius: calc(var(--pw) * 0.165); }
-.editor-theme .ed-phone::before { right: calc(var(--pw) * -0.012); width: max(2px, calc(var(--pw) * 0.012)); }
-.editor-theme .ed-phone::after { left: calc(var(--pw) * -0.012); width: max(2px, calc(var(--pw) * 0.012)); }
-.editor-theme .ed-phone-screen { container-type: inline-size; border-radius: calc(var(--pw) * 0.135); }
-.editor-theme .ed-phone-status { height: 12cqw; padding: 0 7cqw 0 10cqw; }
-.editor-theme .ed-phone-time { font-size: 5.4cqw; }
-.editor-theme .ed-phone-island { top: 2.6cqw; width: 31cqw; max-width: none; height: 8cqw; }
-.editor-theme .ed-phone-island::after { right: 2.6cqw; width: 2.8cqw; height: 2.8cqw; }
-.editor-theme .ed-phone-icons { gap: 1.4cqw; }
-.editor-theme .ed-phone-icons svg:nth-child(1) { width: 6.4cqw; height: auto; }
-.editor-theme .ed-phone-icons svg:nth-child(2) { width: 5.6cqw; height: auto; }
-.editor-theme .ed-phone-icons svg:nth-child(3) { width: 9.6cqw; height: auto; }
-.editor-theme .ed-phone-home { height: 8cqw; }
-.editor-theme .ed-phone-home i { width: 36%; height: max(3px, 1.5cqw); }
-/* (user, 2026-10-29) the Preview's header one row — close · Off / Reels / Shorts · Export — and the phone gets the
-   room the second row took; narrow, the views show only their icons. The old second-row padding doesn't reach the phone */
+/* (user, 2026-10-29) the Preview's header one row — close · Off / Reels / Shorts · Export — and the preview gets the
+   room the second row took; narrow, the views show only their icons */
 html .editor-theme .ed-preview-inner > div:first-child.ed-pv-head { height: 52px !important; container-type: inline-size; }
 html .editor-theme .ed-preview-inner > div:nth-child(2) { padding-top: 10px !important; }
 @container (max-width: 300px) { .editor-theme .ed-pv-view span { display: none; } }
-/* (user, 2026-10-29: "increase the mobile size") a slimmer bezel and bars, less room round it: the phone grows */
-.editor-theme .ed-phone { padding: calc(var(--pw) * 0.028); }
-.editor-theme .ed-phone-screen { border-radius: calc(var(--pw) * 0.14); }
-.editor-theme .ed-phone-status { height: 10cqw; }
-.editor-theme .ed-phone-island { top: 2cqw; height: 7cqw; }
-.editor-theme .ed-phone-home { height: 6cqw; }
+/* (user, 2026-10-29: "increase the size") less room round the preview: it grows */
 html .editor-theme .ed-preview-inner > div:nth-child(2) { padding-top: 6px !important; }
 
 /* (user, 2026-10-29: "add palet colour by a little") Video / Clip preview: the knob gets a fine lime edge and a faint
@@ -3771,3 +3734,69 @@ html[data-theme="light"] .view-switch-knob { box-shadow: inset 0 0 0 1px rgba(12
 /* (user, 2026-10-29) the picked side's knob black, its lime edge kept */
 html .view-switch-knob { background: linear-gradient(180deg, #161618, #050506) !important; }
 html .view-switch-opt[data-on] { color: #fff !important; }
+
+/* (user, 2026-10-30) Mark as group, just pressed: a soft lime pulse round it and the tick drawn in (SubjectsPanel) */
+.sp-mark { transition: background-color .15s, transform .12s; }
+.sp-mark[data-marked] { animation: sp-mark-pulse .7s ease-out; }
+@keyframes sp-mark-pulse { from { box-shadow: inset 0 0 0 1.5px rgba(200, 255, 0, 0.8), 0 0 0 0 rgba(200, 255, 0, 0.45); } to { box-shadow: inset 0 0 0 1.5px rgba(200, 255, 0, 0.55), 0 0 0 8px rgba(200, 255, 0, 0); } }
+.sp-mark-tick path { stroke-dasharray: 24; stroke-dashoffset: 24; animation: sp-mark-tick .35s .05s ease-out forwards; }
+@keyframes sp-mark-tick { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .sp-mark[data-marked], .sp-mark-tick path { animation: none; stroke-dashoffset: 0; } }
+
+/* ── Instant press feedback (user, 2026-10-31: Subjects' Detect / Stop took seconds to change, so a press looked
+   dead): every press sinks a little at once; a button waiting for the worker's answer breathes. SubjectsPanel `pending` ── */
+.ed-tap { transition: transform .12s ease, opacity .2s ease, background-color .2s ease; }
+.ed-tap:active:not(:disabled) { transform: scale(0.96); }
+.ed-tap[data-pending] { animation: ed-tap-breathe 1.1s ease-in-out infinite; }
+@keyframes ed-tap-breathe { 0%, 100% { filter: none; transform: scale(1); } 50% { filter: brightness(1.12); transform: scale(0.985); } }
+@media (prefers-reduced-motion: reduce) {
+  .ed-tap[data-pending] { animation: none; }
+}
+
+/* ── A running button is its own Stop (user, 2026-10-31: "keep detecting and stop in a single button"): it shows
+   what it does and how far, with a ■ on its right; pointed at, it reads "■ Stop" in red. On a touch screen the ■
+   stays in sight (no pointing), so a tap reads as stop. SubjectsPanel ── */
+.ed-runbtn .ed-run-stop { display: none; }
+@media (hover: hover) {
+  /* (user, 2026-10-31: "the total red button is a little dominating") a calm dark button: a fine white edge (2026-10-31),
+     white "Stop", only the ■ red with a faint glow */
+  .ed-runbtn[data-running]:not(:disabled):hover { background: rgb(var(--ed-fg) / 0.08) !important; color: var(--ed-text) !important; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.32) !important; }
+  .ed-runbtn[data-running]:not(:disabled):hover .ed-run-stop svg { color: #f87171; filter: drop-shadow(0 0 4px rgba(248, 113, 113, 0.6)); }
+  .ed-runbtn[data-running]:not(:disabled):hover > span[aria-hidden="true"] { opacity: 0; }
+  .ed-runbtn[data-running]:not(:disabled):hover .ed-run-label, .ed-runbtn[data-running]:not(:disabled):hover .ed-run-mark { display: none; }
+  .ed-runbtn[data-running]:not(:disabled):hover .ed-run-stop { display: flex; }
+}
+
+/* ── Auto format, calmer (user, 2026-10-31: "decrease the palette colour for this button, design it properly, and
+   an animation when I click"): a dark button lit from inside by the palette colour — a soft lime gradient, a fine
+   lime edge and a faint glow, its text and sparkle lime. Pointed at, the light lifts and the sparkle twinkles.
+   Pressed, it turns into its running self (.ed-autobtn-go) with a pop and a lime ripple from the middle ── */
+.ed-autobtn {
+  position: relative; overflow: hidden; isolation: isolate;
+  background: linear-gradient(135deg, rgba(200, 255, 0, 0.2) 0%, rgba(200, 255, 0, 0.07) 100%);
+  box-shadow: inset 0 0 0 1px rgba(200, 255, 0, 0.5), 0 8px 22px -14px rgba(200, 255, 0, 0.6);
+  transition: transform .12s ease, background .25s ease, box-shadow .25s ease;
+}
+.ed-autobtn:not(:disabled):hover {
+  background: linear-gradient(135deg, rgba(200, 255, 0, 0.28) 0%, rgba(200, 255, 0, 0.1) 100%);
+  box-shadow: inset 0 0 0 1px rgba(200, 255, 0, 0.7), 0 10px 26px -12px rgba(200, 255, 0, 0.7);
+}
+.ed-autobtn-spark { transition: transform .35s cubic-bezier(.34, 1.56, .64, 1); }
+.ed-autobtn:not(:disabled):hover .ed-autobtn-spark { transform: rotate(18deg) scale(1.18); }
+.ed-autobtn-go { animation: ed-auto-pop .42s cubic-bezier(.34, 1.56, .64, 1); }
+.ed-autobtn-go::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 120%; aspect-ratio: 1; border-radius: 50%;
+  translate: -50% -50%; pointer-events: none; z-index: -1;
+  background: radial-gradient(circle, rgba(200, 255, 0, 0.45) 0%, rgba(200, 255, 0, 0.15) 40%, transparent 70%);
+  animation: ed-auto-ripple .7s ease-out forwards;
+}
+@keyframes ed-auto-pop { 0% { transform: scale(.94); } 55% { transform: scale(1.03); } 100% { transform: scale(1); } }
+@keyframes ed-auto-ripple { from { transform: scale(0); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
+html[data-theme="light"] .editor-theme .ed-autobtn {
+  background: linear-gradient(135deg, rgba(160, 205, 0, 0.28) 0%, rgba(160, 205, 0, 0.1) 100%);
+  box-shadow: inset 0 0 0 1px rgba(110, 145, 0, 0.55), 0 8px 22px -14px rgba(110, 145, 0, 0.5);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ed-autobtn-go, .ed-autobtn-go::after { animation: none; }
+  .ed-autobtn:not(:disabled):hover .ed-autobtn-spark { transform: none; }
+}

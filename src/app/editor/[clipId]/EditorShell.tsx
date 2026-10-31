@@ -127,10 +127,14 @@ const PLATFORM_OPTIONS: { id: Platform; label: string; icon: React.ReactNode }[]
   { id: 'instagram', label: 'Reels', icon: <><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4" /><path d="M17.5 6.5h.01" /></> },
   { id: 'youtube', label: 'Shorts', icon: <><rect x="2.5" y="5" width="19" height="14" rx="4" /><path d="M10 9.2v5.6l4.8-2.8z" fill="currentColor" /></> },
 ]
-// Options sidebar width (px)
-const OPTIONS_W = 272
-// The Preview column opens at its smallest (user, 2026-10-28): wider only when its edge is dragged
+// Options sidebar width (px): it opens this wide for every tool and stays so until its edge is dragged
+// (user, 2026-10-31: the Subjects card's size in their screenshot as the default; was 272)
+const OPTIONS_W = 338
+// The Preview column's smallest width; it opens as wide as the 9:16 preview needs to fill its height (user,
+// 2026-10-31: "so much gap above and below, increase the size"), until its edge is dragged
 const PREVIEW_W = 260
+/** The preview card's height in widths: the 9:16 video */
+const PREVIEW_H_PER_W = 16 / 9
 // The editing panel (timeline) opens just as tall as its ruler, the clip's strip and the strip's own
 // rows (user, 2026-10-28: the same on every clip, the video and preview never squeezed): rows of
 // media, text and music scroll inside it. Dragging the line above the play bar makes it taller for
@@ -514,6 +518,10 @@ export function EditorShell({
   // Widths of the two side columns, dragged at their inner edge (this visit only)
   const [optionsW, setOptionsW] = useState(OPTIONS_W)
   const [previewW, setPreviewW] = useState(PREVIEW_W)
+  // The Preview column follows its height (the phone fills it, no gap above or below) until its edge is
+  // dragged; a double-click on the edge goes back to that
+  const [previewFit, setPreviewFit] = useState(true)
+  const previewBodyRef = useRef<HTMLDivElement>(null)
   const [resizing, setResizing] = useState<'options' | 'preview' | 'timeline' | null>(null)
   // The timeline's height, dragged at the line above the play bar (null = its usual size; this visit only)
   const [timelineH, setTimelineH] = useState<number | null>(null)
@@ -551,6 +559,7 @@ export function EditorShell({
     const [lo, hi] = which === 'options' ? OPTIONS_RANGE : PREVIEW_RANGE
     let w = w0
     setResizing(which)
+    if (which === 'preview') setPreviewFit(false)
     const move = (ev: PointerEvent) => {
       // The options column grows to the right, the preview column to the left
       const d = which === 'options' ? ev.clientX - x0 : x0 - ev.clientX
@@ -565,8 +574,27 @@ export function EditorShell({
     window.addEventListener('pointerup', up)
   }
   function resetColumn(which: 'options' | 'preview') {
-    if (which === 'options') setOptionsW(OPTIONS_W); else setPreviewW(PREVIEW_W)
+    if (which === 'options') setOptionsW(OPTIONS_W); else setPreviewFit(true)
   }
+  // Fitted: the column as wide as the 9:16 card is at the full height of the Preview's body (its height
+  // doesn't depend on the column's width, so this settles at once), within PREVIEW_RANGE
+  useEffect(() => {
+    const el = previewBodyRef.current
+    if (!previewFit || !el) return
+    const fit = () => {
+      const cs = getComputedStyle(el)
+      const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
+      const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight)
+      const cardW = (el.clientHeight - padY) / PREVIEW_H_PER_W
+      if (!(cardW > 0)) return
+      const [lo, hi] = PREVIEW_RANGE
+      setPreviewW(Math.round(Math.max(lo, Math.min(hi, cardW + padX))))
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [previewFit])
 
   // First-time tour: opens once the page has settled; the header's "?" replays it
   const [tourOpen, setTourOpen] = useState(false)
@@ -2394,15 +2422,28 @@ export function EditorShell({
   // opening the tool started a scan by itself); a list found before is read when the editor opens.
   type AnglesData = { status: 'none' | 'queued' | 'running' | 'done' | 'failed' | 'unavailable'; progress: number; error: string | null; angles: Angle[]; scan_start_ms: number | null; scan_end_ms: number | null }
   const [anglesData, setAnglesData] = useState<AnglesData | null>(null)
+  // Bumped by Stop: an answer to a request sent before it (a status check, or the scan's start, slow on a
+  // slow database) no longer counts — it put "Detecting…" back after Stop (user, 2026-10-31)
+  const stopGenRef = useRef(0)
+  // The scenes last found: what a stopped scan goes back to (as the server's stop does)
+  const lastDoneAnglesRef = useRef<AnglesData | null>(null)
+  useEffect(() => { if (anglesData?.status === 'done') lastDoneAnglesRef.current = anglesData }, [anglesData])
   const loadAngles = useCallback(async (scan = false) => {
+    const gen = stopGenRef.current
     try {
       const res = await fetch(`${subjectsUrl}/angles`, scan
         ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start_ms: rawClip.start_ms, end_ms: rawClip.end_ms }) }
         : undefined)
       const data = await res.json().catch(() => ({}))
+      if (gen !== stopGenRef.current) {
+        // Stopped meanwhile. A scan that only now got started is stopped again, so it doesn't run on
+        if (scan && res.ok) fetch(`${subjectsUrl}/stop`, { method: 'POST' }).catch(() => {})
+        return
+      }
       if (!res.ok) throw new Error(data.error ?? 'The camera angles could not be listed.')
       setAnglesData(data)
     } catch (e) {
+      if (gen !== stopGenRef.current) return
       setAnglesData({ status: 'failed', progress: 0, error: e instanceof Error ? e.message : 'The camera angles could not be listed.', angles: [], scan_start_ms: null, scan_end_ms: null })
     }
   }, [subjectsUrl, rawClip.start_ms, rawClip.end_ms])
@@ -2731,13 +2772,32 @@ export function EditorShell({
     stopAskedRef.current = true
     autoAfterScanRef.current = false
     setAutoPhase('idle')
-    try {
-      const data = await subjectsCall(`${subjectsUrl}/stop`, { method: 'POST' })
-      takeSubjects(data.subjects)
-      if (data.angles) setAnglesData(data.angles)
-      setSubjectsError(null)
-      setSubjectNotice(`Stopped.${formatsLaidRef.current ? ' The formats already laid stay — Undo takes them back.' : ''}`)
-    } catch (e) { setSubjectsError(e instanceof Error ? e.message : 'Could not stop') }
+    // At once on screen (user, 2026-10-31: Stop waited on a slow server and the scan carried on showing):
+    // the scan goes back to the scenes found before it (none: not detected yet), the people being
+    // followed are marked again, and answers to requests sent before now are ignored
+    const gen = ++stopGenRef.current
+    setAnglesData(a => a && (a.status === 'queued' || a.status === 'running')
+      ? (lastDoneAnglesRef.current ?? { status: 'none', progress: 0, error: null, angles: [], scan_start_ms: null, scan_end_ms: null })
+      : a)
+    setSubjects(list => list.map(s => (s.status === 'queued' || s.status === 'running' ? { ...s, status: 'new', progress: 0 } : s)))
+    setSubjectsError(null)
+    // (no "Stopped." line — user, 2026-10-31: the buttons going back say it; only the Undo hint stays, when formats were laid)
+    setSubjectNotice(formatsLaidRef.current ? 'The formats already laid stay — Undo takes them back.' : null)
+    // Then the server, which stops the worker's jobs: tried again while the database is slow (each try up to 20 s)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const ctl = new AbortController()
+      const t = setTimeout(() => ctl.abort(), 20_000)
+      try {
+        const data = await subjectsCall(`${subjectsUrl}/stop`, { method: 'POST', signal: ctl.signal })
+        if (gen === stopGenRef.current) {
+          takeSubjects(data.subjects)
+          if (data.angles) setAnglesData(data.angles)
+        }
+        return
+      } catch (e) {
+        if (attempt === 2) setSubjectsError(`Stop didn’t reach the server (${e instanceof Error && e.name !== 'AbortError' ? e.message : 'the connection is slow'}). Press Stop again.`)
+      } finally { clearTimeout(t) }
+    }
   }
 
   // The frame on screen: its own time in the video (see frameStartAt)
@@ -6077,7 +6137,7 @@ export function EditorShell({
         <div className="flex items-center gap-3 shrink-0">
           {/* The brand kit on this clip, one click away (brand kit Phase 2) */}
           <EditorBrandMenu kits={brand.kits} loading={brand.loading} onKitId={brandOn?.kit_id ?? null}
-            onTurnOn={turnBrandOn} onTurnOff={turnBrandOff} onEdit={() => openSettings('brand')} onUndo={undo} />
+            onTurnOn={turnBrandOn} onTurnOff={turnBrandOff} onEdit={() => { setKitStudio(true); openSettings('brand') }} onUndo={undo} />
           <button type="button" onClick={() => setTourOpen(true)} aria-label="Show the editor tour" title="How the editor works"
             className="w-8 h-8 flex items-center justify-center rounded-full transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
             style={{ color: 'rgb(var(--ed-fg) / 0.7)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }}>
@@ -6110,6 +6170,8 @@ export function EditorShell({
         {/* Tool rail: always there, down the left (open or closed, the options panel sits beside it) */}
         <ToolRail tool={tool} open={optionsOpen}
           onPick={id => {
+            // (Brand kit pressed again while open: its workshop closes too, back to what was open before it)
+            if (id === 'brand' && tool === 'brand') { closeKitStudio(); return }
             if (id === tool && optionsOpen) { toggleOptions(false); return }
             setTool(id); setEditingTranscript(false); toggleOptions(true)
           }} />
@@ -6871,19 +6933,18 @@ export function EditorShell({
           </div>
 
           {/* Preview fills the column: as wide as it can be while the full 9:16 frame fits the height */}
-          <div className="flex-1 min-h-0 px-2 py-1.5 overflow-hidden">
+          <div ref={previewBodyRef} className="flex-1 min-h-0 px-2 py-1.5 overflow-hidden">
             <AmbientGlow videoRef={videoRef} />
             <div ref={fullViewRef} className="ed-pv-box h-full w-full flex justify-center" data-full-view={fullView || undefined}
               style={fullView
                 ? { containerType: 'size', alignItems: 'center', background: '#000', padding: '24px 24px 84px', boxSizing: 'border-box',
                     ...(fullViewFallback ? { position: 'fixed', inset: 0, zIndex: 200, width: '100vw', height: '100vh' } : {}) }
                 : { containerType: 'size', alignItems: 'flex-start' }}>
-            {/* Not in full view: inside a phone — its status bar, the 9:16 video, its home bar (styles: .ed-phone*).
-                Everything on it is in proportion to its width (--pw), as tall as 1.86 widths: it always fits the panel */}
-            <div className={fullView ? undefined : 'ed-phone'}
-              style={fullView ? { width: 'min(100cqw, calc(100cqh * 9 / 16))' } : { ['--pw' as string]: 'min(100cqw, calc(100cqh / 1.86))', width: 'var(--pw)' }}>
-              <div className={fullView ? undefined : 'ed-phone-screen'}>
-              {!fullView && <PhoneStatusBar />}
+            {/* Not in full view: the 9:16 video on a card — rounded, a fine lime-to-white edge and a soft glow
+                under it (user, 2026-10-31: "remove the mobile completely, a normal preview, a little creative";
+                styles: .ed-pv-card). As big as the panel lets the full 9:16 be */}
+            <div className={fullView ? undefined : 'ed-pv-card'} style={{ width: 'min(100cqw, calc(100cqh * 9 / 16))' }}>
+              <div className={fullView ? undefined : 'ed-pv-card-in'}>
               <div className="relative">
               {rendering ? (
                 <div className="flex flex-col items-center justify-center gap-4 rounded-xl" style={{ aspectRatio: '9/16', background: 'var(--ed-app)', border: '1px solid rgb(var(--ed-fg) / 0.08)' }}>
@@ -6957,7 +7018,6 @@ export function EditorShell({
                 </button>
               )}
               </div>
-              {!fullView && <div className="ed-phone-home" aria-hidden="true"><i /></div>}
               </div>
             </div>
             {fullView && (
@@ -7702,21 +7762,6 @@ function msToClock(ms: number) {
 }
 
 /** Timeline zoom as − 1x +: each press one step (1x → 1.25x → 1.5x → 2x → 3x → 4x); click the value for 1x */
-/** A phone's status bar over the Preview (the time, the camera island, signal · Wi-Fi · battery), for the look of a real phone */
-function PhoneStatusBar() {
-  return (
-    <div className="ed-phone-status" aria-hidden="true">
-      <span className="ed-phone-time">9:41</span>
-      <i className="ed-phone-island" />
-      <span className="ed-phone-icons">
-        <svg width="16" height="10" viewBox="0 0 16 10" fill="currentColor"><rect x="0" y="7" width="3" height="3" rx=".7" /><rect x="4.3" y="5" width="3" height="5" rx=".7" /><rect x="8.6" y="2.6" width="3" height="7.4" rx=".7" /><rect x="12.9" y="0" width="3" height="10" rx=".7" /></svg>
-        <svg width="14" height="10" viewBox="0 0 14 10" fill="currentColor"><path d="M7 2.2c2 0 3.8.8 5.1 2l1.1-1.1A8.8 8.8 0 007 .6 8.8 8.8 0 00.8 3.1l1.1 1.1C3.2 3 5 2.2 7 2.2zm0 3.1c1.1 0 2.2.4 3 1.2l1.1-1.1A5.8 5.8 0 007 3.7c-1.6 0-3 .6-4.1 1.7L4 6.5c.8-.8 1.9-1.2 3-1.2zm0 3.1c.4 0 .8.2 1 .5L7 10 6 8.9c.2-.3.6-.5 1-.5z" /></svg>
-        <svg width="24" height="11" viewBox="0 0 24 11" fill="none"><rect x=".5" y=".5" width="20" height="10" rx="3" stroke="currentColor" strokeOpacity=".45" /><rect x="2" y="2" width="15.5" height="7" rx="1.8" fill="currentColor" /><path d="M22 3.8v3.4c.7-.3 1.2-1 1.2-1.7s-.5-1.4-1.2-1.7z" fill="currentColor" fillOpacity=".5" /></svg>
-      </span>
-    </div>
-  )
-}
-
 /** How far the clip has played, as an arc round the play button (globals.css .ed-play-ring: the desktop editor shows it) */
 function PlayRing({ lengthMs }: { lengthMs: number }) {
   const now = useLiveTimeMs()
@@ -7805,9 +7850,10 @@ function AmbientGlow({ videoRef }: { videoRef: React.RefObject<HTMLVideoElement 
   return <canvas ref={ref} width={32} height={18} className="ed-ambient" aria-hidden="true" />
 }
 
-/** The tools down the rail: all but Brand kit — it's in the top bar's Brand menu (its Edit opens it): user, 2026-10-28 */
+/** The tools down the rail — Brand kit back on it, last, under Post (user, 2026-10-31; it was only in the top
+ *  bar's Brand menu from 2026-10-28, which still opens it too) */
 // (Format isn't on the rail: user, 2026-10-29 — sections are picked and changed on the timeline and the video)
-const RAIL_TOOLS = TOOLS.filter(t => t.id !== 'brand' && t.id !== 'format')
+const RAIL_TOOLS = TOOLS.filter(t => t.id !== 'format')
 
 function ToolRail({ tool, open, onPick }: { tool: Tool; open: boolean; onPick: (t: Tool) => void }) {
   const ref = useRef<HTMLDivElement>(null)

@@ -77,9 +77,11 @@ export function EditorBrandMenu({ kits, loading, onKitId, onTurnOn, onTurnOff, o
             {!onKitId && <span aria-hidden="true">✓</span>}
           </button>
           <span className="ebm-line" />
-          {kits.length
-            ? <button type="button" role="menuitem" className="ebm-item" onClick={() => { setOpen(false); onEdit() }}>Edit brand kit…</button>
-            : <a role="menuitem" className="ebm-item" href="/brand" target="_blank" rel="noopener">Make a brand kit ↗</a>}
+          {/* Both open the kit's workshop here in the editor (user, 2026-10-31: "it should not go to another page,
+              it should pop up there itself" — Make a brand kit opened the Brand kits page in a new tab) */}
+          <button type="button" role="menuitem" className="ebm-item" onClick={() => { setOpen(false); onEdit() }}>
+            {kits.length ? 'Edit brand kit…' : 'Make a brand kit…'}
+          </button>
         </div>
       )}
       {added && !open && (

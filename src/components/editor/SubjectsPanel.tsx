@@ -116,6 +116,9 @@ export function SubjectsPanel(p: Props) {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [groupOpen, setGroupOpen] = useState(false)
+  // Mark as group just pressed: it says so for a moment (✓ Marked), so the press is seen
+  const [marked, setMarked] = useState(false)
+  useEffect(() => { if (!marked) return; const id = setTimeout(() => setMarked(false), 1400); return () => clearTimeout(id) }, [marked])
   const busy = p.subjects.some(s => s.status === 'queued' || s.status === 'running')
   /** Marked but not looked for yet (or the last try failed): Follow takes them */
   const waiting = p.subjects.filter(s => s.status === 'new' || s.status === 'failed').length
@@ -138,6 +141,30 @@ export function SubjectsPanel(p: Props) {
   // Detect again is the next thing to do: the clip grew past what was found
   const detectHot = detected && !!p.angles.stale && !working
   const canAct = p.angles.status !== 'loading' && p.angles.status !== 'unavailable'
+  // The press shows at once (user, 2026-10-31: Detect and Stop took 4–7 s to change, so it looked like
+  // nothing happened): the pressed button turns to "Starting…" / "Stopping…" with a running bar until the
+  // worker's answer arrives — the scan or Auto format under way, or everything stopped — at most 30 s
+  const [pending, setPending] = useState<'auto' | 'detect' | 'stop' | null>(null)
+  const [pendingSince, setPendingSince] = useState(0)
+  function press(which: 'auto' | 'detect' | 'stop', run: () => void) {
+    setPending(which); setPendingSince(Date.now()); run()
+  }
+  useEffect(() => {
+    if (pending === 'stop' ? !working : pending === 'detect' ? scanning || p.angles.status === 'failed' : pending === 'auto' && p.autoPhase !== 'idle') setPending(null)
+  }, [pending, working, scanning, p.angles.status, p.autoPhase])
+  useEffect(() => { if (!pending) return; const id = setTimeout(() => setPending(null), 30_000); return () => clearTimeout(id) }, [pending])
+  // (after a few seconds, a line says it's on its way, so a slow answer doesn't look like a dead button)
+  const [slowPress, setSlowPress] = useState(false)
+  useEffect(() => {
+    setSlowPress(false)
+    if (!pending) return
+    const id = setTimeout(() => setSlowPress(true), Math.max(0, pendingSince + 3000 - Date.now()))
+    return () => clearTimeout(id)
+  }, [pending, pendingSince])
+  const spinner = (dark: boolean) => (
+    <span className="w-3.5 h-3.5 shrink-0 rounded-full animate-spin motion-reduce:animate-none" aria-hidden="true"
+      style={dark ? { border: '2px solid rgba(0,0,0,0.25)', borderTopColor: '#000' } : { border: '2px solid rgb(var(--ed-fg) / 0.2)', borderTopColor: 'currentColor' }} />
+  )
   // Following them (user, 2026-10-24: "add a processing bar so we understand it is going on"): how far
   // the ones being followed are, and — while none has started — how long they have waited for the worker
   const following = p.subjects.filter(s => s.status === 'queued' || s.status === 'running')
@@ -184,44 +211,88 @@ export function SubjectsPanel(p: Props) {
           )}
         </div>
 
-        {/* Detect (the scenes and people only) and Auto format (detects if needed, then formats it all),
-            with Stop beside them while either — or the following — runs (user, 2026-10-24) */}
-        {canAct && (
-          <div className="flex items-stretch gap-2">
-            <button type="button" onClick={p.onScanAngles} disabled={working}
-              title={detected ? 'Look for the scenes and people again (someone missed, a scene wrong, or the clip changed). The people you marked stay marked.' : 'Find the scenes, people and groups in this clip. Nothing is formatted.'}
-              className="flex-1 min-w-0 h-11 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold transition-colors hover:bg-[rgb(var(--ed-fg)/0.12)] disabled:cursor-default"
-              style={detectHot
-                ? { background: 'rgba(200,255,0,0.14)', color: 'var(--ed-accent-text)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.55)' }
-                : { background: 'rgb(var(--ed-fg) / 0.07)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)', opacity: working && !scanning ? 0.5 : 1 }}>
-              {scanning
-                ? <span className="w-3.5 h-3.5 shrink-0 rounded-full animate-spin motion-reduce:animate-none" style={{ border: '2px solid rgb(var(--ed-fg) / 0.2)', borderTopColor: 'currentColor' }} aria-hidden="true" />
-                : detected
-                  ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 11-2.64-6.36" /><path d="M21 4v5h-5" /></svg>
-                  : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0113 0" /><circle cx="18" cy="15" r="3" /><path d="M20.2 17.2L22 19" /></svg>}
-              <span className="truncate">{scanning ? 'Detecting…' : detected ? 'Detect again' : 'Detect'}</span>
-            </button>
-            <button type="button" onClick={p.onAutoFormat} disabled={working}
-              title={p.autoMode === 'vertical'
-                ? 'Detects the scenes if needed, then makes every scene Vertical on whoever is talking — the view cuts to each speaker — marks everyone and follows them. Scenes you formatted yourself stay as they are.'
-                : 'Detects the scenes if needed, then gives every scene its format from who is in it and where they sit (Vertical, Split, Trio, or the whole picture — nobody left out), marks everyone and follows them. Scenes you formatted yourself stay as they are.'}
-              className="flex-1 min-w-0 h-11 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold transition-opacity hover:opacity-90 disabled:cursor-default"
-              style={{ background: '#c8ff00', color: '#000', opacity: working && p.autoPhase === 'idle' ? 0.5 : 1 }}>
-              {p.autoPhase !== 'idle'
-                ? <span className="w-3.5 h-3.5 shrink-0 rounded-full animate-spin motion-reduce:animate-none" style={{ border: '2px solid rgba(0,0,0,0.25)', borderTopColor: '#000' }} aria-hidden="true" />
-                : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>}
-              <span className="truncate">{p.autoPhase === 'formatting' ? 'Formatting…' : 'Auto format'}</span>
-            </button>
-            {working && (
-              <button type="button" onClick={p.onStop} aria-label="Stop"
-                title={busy ? 'Stop following (the people stay marked, ready to follow again)' : 'Stop'}
-                className="shrink-0 h-11 px-3 flex items-center justify-center gap-1.5 rounded-xl text-[12.5px] font-bold transition-colors hover:bg-[rgba(239,68,68,0.2)]"
-                style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171', boxShadow: 'inset 0 0 0 1px rgba(239,68,68,0.35)' }}>
-                <svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3" fill="currentColor" /></svg>
-                Stop
-              </button>
-            )}
-          </div>
+        {/* Two buttons, ever (user, 2026-10-31: "do we need two different buttons to show detecting and to stop —
+            keep them in a single button"): Auto format on the left, Detect on the right. The one that runs turns
+            into its own Stop — its progress fills it, a ■ on its right, and pointed at it reads "Stop" in red;
+            the other dims. A following started anywhere else is stopped on Auto format's button */}
+        {canAct && (() => {
+          const detectRuns = scanning || pending === 'detect'
+          const autoRuns = !detectRuns && (p.autoPhase !== 'idle' || pending === 'auto' || busy)
+          const stopping = pending === 'stop'
+          const autoPct = p.autoPhase === 'detecting' ? scanPct : p.autoPhase === 'idle' && busy && started ? followPct : null
+          const autoLabel = p.autoPhase === 'formatting' ? 'Formatting…' : p.autoPhase === 'detecting' ? 'Detecting…' : p.autoPhase === 'idle' && busy ? 'Following…' : 'Auto format…'
+          const stopIcon = <svg width="9" height="9" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4" fill="currentColor" /></svg>
+          /** The inside of a running button: what it does (and how far), or — pointed at — Stop */
+          // `accent`: the loading circle and the % in the palette colour (Detect — user, 2026-10-31)
+          const running = (label: string, pct: number | null, dark: boolean, accent?: string) => stopping
+            ? <>{spinner(dark)}<span className="truncate">Stopping…</span></>
+            : <>
+                <span className="ed-run-label relative flex items-center gap-2 min-w-0">
+                  {accent
+                    ? <span className="w-3.5 h-3.5 shrink-0 rounded-full animate-spin motion-reduce:animate-none" aria-hidden="true" style={{ border: '2px solid rgba(200,255,0,0.22)', borderTopColor: accent }} />
+                    : spinner(dark)}
+                  <span className="truncate">{label}</span>
+                  {pct !== null && <span className="tabular-nums" style={accent ? { color: accent } : { opacity: 0.7 }}>{pct}%</span>}
+                </span>
+                <span className="ed-run-stop relative items-center gap-1.5">{stopIcon}<span>Stop</span></span>
+                <span className="ed-run-mark relative ml-auto shrink-0 w-5 h-5 rounded-md flex items-center justify-center"
+                  style={{ background: dark ? 'rgba(0,0,0,0.14)' : 'rgb(var(--ed-fg) / 0.1)' }}>{stopIcon}</span>
+              </>
+          return (
+            <div className="flex items-stretch gap-2">
+              {autoRuns ? (
+                <button type="button" onClick={() => press('stop', p.onStop)} disabled={stopping} aria-busy="true"
+                  aria-label={`${autoLabel}${autoPct !== null ? ` ${autoPct}%` : ''} — press to stop`}
+                  title={busy && p.autoPhase === 'idle' ? 'Stop following (the people stay marked, ready to follow again)' : 'Stop Auto format (formats already laid stay — Undo takes them back)'}
+                  className="ed-tap ed-runbtn ed-autobtn ed-autobtn-go relative overflow-hidden flex-1 min-w-0 h-11 px-3 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold disabled:cursor-default"
+                  data-running data-tone="lime" style={{ color: 'var(--ed-text)' }}>
+                  {autoPct !== null && <span aria-hidden="true" className="absolute inset-y-0 left-0 transition-[width] duration-500" style={{ width: `${autoPct}%`, background: 'rgba(200,255,0,0.14)' }} />}
+                  {running(autoLabel, autoPct, false, 'var(--ed-accent-text)')}
+                </button>
+              ) : (
+                <button type="button" onClick={() => press('auto', p.onAutoFormat)} disabled={detectRuns || !!pending}
+                  title={p.autoMode === 'vertical'
+                    ? 'Detects the scenes if needed, then makes every scene Vertical on whoever is talking — the view cuts to each speaker — marks everyone and follows them. Scenes you formatted yourself stay as they are.'
+                    : 'Detects the scenes if needed, then gives every scene its format from who is in it and where they sit (Vertical, Split, Trio, or the whole picture — nobody left out), marks everyone and follows them. Scenes you formatted yourself stay as they are.'}
+                  className={`ed-tap flex-1 min-w-0 h-11 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold disabled:cursor-default ${detectRuns ? '' : 'ed-autobtn'}`}
+                  style={detectRuns
+                    ? { background: 'rgb(var(--ed-fg) / 0.06)', color: 'rgb(var(--ed-fg) / 0.4)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.08)' }
+                    : { color: 'var(--ed-accent-text)' }}>
+                  <svg className="ed-autobtn-spark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>
+                  <span className="truncate">Auto format</span>
+                </button>
+              )}
+              {detectRuns ? (
+                <button type="button" onClick={() => press('stop', p.onStop)} disabled={stopping} aria-busy="true"
+                  aria-label={`Detecting ${scanPct}% — press to stop`} title="Stop detecting (the scenes found before stay)"
+                  className="ed-tap ed-runbtn relative overflow-hidden flex-1 min-w-0 h-11 px-3 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold disabled:cursor-default"
+                  data-running data-tone="dark"
+                  // (white text; the palette colour on its border, loading circle and % — user, 2026-10-31)
+                  style={{ background: 'rgb(var(--ed-fg) / 0.07)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.5)' }}>
+                  <span aria-hidden="true" className="absolute inset-y-0 left-0 transition-[width] duration-500" style={{ width: `${scanPct}%`, background: 'rgb(var(--ed-fg) / 0.07)' }} />
+                  {running('Detecting', scanPct, false, 'var(--ed-accent-text)')}
+                </button>
+              ) : (
+                <button type="button" onClick={() => press('detect', p.onScanAngles)} disabled={autoRuns || !!pending}
+                  title={detected ? 'Look for the scenes and people again (someone missed, a scene wrong, or the clip changed). The people you marked stay marked.' : 'Find the scenes, people and groups in this clip. Nothing is formatted.'}
+                  className="ed-tap flex-1 min-w-0 h-11 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold transition-colors hover:bg-[rgb(var(--ed-fg)/0.12)] disabled:cursor-default"
+                  style={detectHot
+                    ? { background: 'rgba(200,255,0,0.14)', color: 'var(--ed-accent-text)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.55)' }
+                    : { background: 'rgb(var(--ed-fg) / 0.07)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)', opacity: autoRuns ? 0.45 : 1 }}>
+                  {detected
+                    ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 11-2.64-6.36" /><path d="M21 4v5h-5" /></svg>
+                    : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0113 0" /><circle cx="18" cy="15" r="3" /><path d="M20.2 17.2L22 19" /></svg>}
+                  <span className="truncate">{detected ? 'Detect again' : 'Detect'}</span>
+                </button>
+              )}
+            </div>
+          )
+        })()}
+        {/* A slow answer: a line saying it's on its way (the buttons themselves show the work) */}
+        {canAct && slowPress && (pending === 'auto' || pending === 'stop') && (
+          <p className="-mt-2 text-[11px]" role="status" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
+            {pending === 'stop' ? 'Stopping… this can take a few seconds.' : 'Starting… the worker is getting it ready, this can take a few seconds.'}
+          </p>
         )}
         {/* How Auto format lays the scenes (user, 2026-10-28): Vertical — the speaker first; Cuts — the Rulebook's formats */}
         {canAct && (
@@ -234,7 +305,9 @@ export function SubjectsPanel(p: Props) {
                     ? 'Every scene Vertical, on whoever is talking: the view cuts to each speaker, at least 2 seconds on each. Listeners can be out of the picture.'
                     : 'Each scene gets its format from who is in it (Vertical, Split, Trio, or the whole picture), with everyone kept in.'}
                   className="h-6 px-2.5 rounded-md text-[11px] font-semibold transition-colors disabled:cursor-default disabled:opacity-60"
-                  style={p.autoMode === m ? { background: '#c8ff00', color: '#000' } : { color: 'rgb(var(--ed-fg) / 0.7)' }}>
+                  // (user, 2026-10-31) the chosen one in a soft touch of the palette colour — a light tint, its text and a
+                  // fine edge — lighter than the solid lime it had before
+                  style={p.autoMode === m ? { background: 'rgba(200,255,0,0.14)', color: 'var(--ed-accent-text)', boxShadow: 'inset 0 0 0 1px rgba(200,255,0,0.45)' } : { color: 'rgb(var(--ed-fg) / 0.6)' }}>
                   {m === 'vertical' ? 'Vertical' : 'Cuts'}
                 </button>
               ))}
@@ -242,9 +315,10 @@ export function SubjectsPanel(p: Props) {
           </div>
         )}
         {p.angles.status === 'done' && p.angles.stale && !working && (
-          <p className="-mt-2 text-[11px]" style={{ color: 'var(--ed-accent-text)' }}>The clip got longer — Detect again to look in the new part too.</p>
+          <p className="-mt-2 text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>The clip got longer — Detect again to look in the new part too.</p>
         )}
-        {scanning && (
+        {/* (shown from the press itself: one loading, not "Starting…" and then "Detecting…" — user, 2026-10-31) */}
+        {(scanning || pending === 'detect') && (
           <div className="flex flex-col gap-3" role="status" aria-label={`Looking for people ${scanPct}%`}>
             <div className="flex items-center gap-2.5">
               <span className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: 'rgb(var(--ed-fg) / 0.08)' }}>
@@ -273,7 +347,7 @@ export function SubjectsPanel(p: Props) {
               </div>
             )}
             {heading(`Scene ${curNo} · ${cur.people === 1 ? '1 person' : `${cur.people} people`}`)}
-            <div className="flex flex-col gap-3 rounded-xl p-3.5"
+            <div className="flex flex-col gap-3.5 rounded-2xl px-4 py-5"
               style={{ background: 'rgb(var(--ed-fg) / 0.035)', boxShadow: cur.set ? 'inset 0 0 0 1.5px rgba(200,255,0,0.45)' : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.07)' }}>
               {cur.people >= 2 ? (
                 // Several people together are one group: one card, one button (the layout and views are the ones on screen)
@@ -282,7 +356,19 @@ export function SubjectsPanel(p: Props) {
                     <div className="flex items-center">
                       {cur.faces.map((f, k) => <FaceDot key={`${curAt}-${k}`} videoUrl={p.videoUrl} at={cur.at} box={f.box} first={k === 0} />)}
                     </div>
-                    <span className="text-[13px] font-semibold text-[var(--ed-text)]">Group of {cur.people}</span>
+                    <span className="text-[14.5px] font-semibold text-[var(--ed-text)]">{cur.people} angles</span>
+                    {/* Mark as group: small, at the card's top right (user, 2026-10-30) */}
+                    {!cur.group && (
+                      <button type="button" onClick={() => { p.onMarkShot(); setMarked(true) }} data-marked={marked || undefined}
+                        title="Set this scene's layout and views first (say Split), then mark it. Every time the clip shows this shot again, it gets the same."
+                        className="sp-mark ml-auto shrink-0 h-8 px-3 flex items-center gap-1.5 rounded-lg text-[12px] font-bold whitespace-nowrap transition-colors hover:bg-[rgb(var(--ed-fg)/0.12)] active:scale-95"
+                        // (neutral either way — user, 2026-10-31: less of the palette colour)
+                        style={{ background: 'rgb(var(--ed-fg) / 0.06)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.12)' }}>
+                        {marked
+                          ? <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="sp-mark-tick"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>Marked</>
+                          : <>{groupIcon(13)}Mark as group</>}
+                      </button>
+                    )}
                   </div>
                   {cur.group ? (
                     <span className="flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: 'var(--ed-accent-text)' }}>
@@ -299,15 +385,6 @@ export function SubjectsPanel(p: Props) {
                           Formatted · {cur.formatted === 'mixed' ? 'by who talks' : LAYOUT_NAMES[cur.formatted] ?? cur.formatted}
                         </span>
                       )}
-                      <button type="button" onClick={p.onMarkShot}
-                        title="Set this scene's layout and views first (say Split), then mark it. Every time the clip shows this shot again, it gets the same."
-                        className="h-9 flex items-center justify-center gap-2 rounded-lg text-[12.5px] font-bold transition-colors hover:bg-[rgba(200,255,0,0.2)]"
-                        style={cur.formatted
-                          ? { background: 'rgb(var(--ed-fg) / 0.06)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.12)' }
-                          : { background: 'rgba(200,255,0,0.12)', color: 'var(--ed-accent-text)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.55)' }}>
-                        {groupIcon(15)}
-                        Mark as group
-                      </button>
                     </>
                   )}
                 </>
@@ -321,13 +398,10 @@ export function SubjectsPanel(p: Props) {
             </div>
           </div>
         )}
-        {/* No scenes listed: mark whoever the view is on */}
-        {!listed && p.angles.status !== 'loading' && p.angles.status !== 'scanning' && (
-          <button type="button" onClick={p.onToggleMarking} aria-pressed={p.marking}
-            className="self-start text-left text-[11.5px] underline underline-offset-2 hover:text-[var(--ed-text)]"
-            style={{ color: p.marking ? 'var(--ed-accent-text)' : muted }}>
-            {p.marking ? 'Click a person on the video… (Esc to stop)' : 'Or mark the person in the 9:16 view'}
-          </button>
+        {/* (the "Or mark the person in the 9:16 view" link is gone — user, 2026-10-31; marking stays on the
+            scene's + tile, and while it's on the line says how to use it) */}
+        {p.marking && (
+          <p className="text-[11.5px]" style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>Click a person on the video… (Esc to stop)</p>
         )}
 
         {p.error && <p role="alert" className="text-xs" style={{ color: '#f87171' }}>{p.error}</p>}
@@ -417,7 +491,7 @@ export function SubjectsPanel(p: Props) {
           </div>
         )}
 
-        {p.notice && <p role="status" className="text-[11.5px]" style={{ color: 'var(--ed-accent-text)' }}>{p.notice}</p>}
+        {p.notice && <p role="status" className="text-[11.5px]" style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>{p.notice}</p>}
       </div>
 
       {/* Follow them: always in reach at the bottom of the panel, once someone is marked */}
@@ -445,10 +519,10 @@ export function SubjectsPanel(p: Props) {
             </span>
           </div>
         )}
-        {!busy && p.retrack && waiting === 0 && <p className="text-[11px]" style={{ color: 'var(--ed-accent-text)' }}>The clip changed since they were followed.</p>}
+        {!busy && p.retrack && waiting === 0 && <p className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>The clip changed since they were followed.</p>}
         <button type="button" onClick={p.onMarkInClip} disabled={!canFollow}
           className="h-10 flex items-center justify-center gap-2 rounded-lg text-[13px] font-bold transition-opacity disabled:opacity-50"
-          style={canFollow ? { background: '#c8ff00', color: '#000' } : { background: 'rgba(200,255,0,0.14)', color: 'var(--ed-accent-text)' }}>
+          style={canFollow ? { background: '#c8ff00', color: '#000' } : { background: 'rgb(var(--ed-fg) / 0.07)', color: 'rgb(var(--ed-fg) / 0.6)' }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
           {waiting > 0 ? `Follow them in the clip (${waiting})` : p.retrack ? 'Follow them again' : 'Follow them in the clip'}
         </button>
@@ -486,7 +560,7 @@ function FaceDot({ videoUrl, at, box: b, first }: { videoUrl: string | null; at:
   const x = Math.max(0, b.x - b.w * 0.25), y = Math.max(0, b.y - b.h * 0.3)
   const url = useFaceAt(videoUrl, at, { x, y, w: Math.min(1 - x, b.w * 1.5), h: Math.min(1 - y, b.h * 1.5) })
   return (
-    <span className="w-11 h-11 rounded-full overflow-hidden shrink-0" aria-hidden="true"
+    <span className="w-10 h-10 rounded-full overflow-hidden shrink-0" aria-hidden="true"
       style={{ marginLeft: first ? 0 : -8, background: 'rgb(var(--ed-fg) / 0.1)', boxShadow: '0 0 0 2px #111112' }}>
       {url
         // eslint-disable-next-line @next/next/no-img-element
