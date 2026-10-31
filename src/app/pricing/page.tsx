@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { PLANS } from '@/lib/plans'
-import { FREE_SIGNUP_CREDITS, TOPUP_PACKS, EXPORT_CREDITS, LONG_EXPORT_CREDITS } from '@/lib/credits'
+import { FREE_SIGNUP_CREDITS, TOPUP_PACKS, EXPORT_CREDITS } from '@/lib/credits'
+import { planFeatureRows, creditUses } from '@/lib/planFeatures'
 import { BrandLogo } from '@/components/ui/brand-logo'
 
 const PLAN_ORDER = ['free', 'starter', 'creator', 'agency'] as const
@@ -236,14 +237,7 @@ export default function PricingPage() {
                 </div>
 
                 <ul className="flex-1 space-y-2.5 mb-6">
-                  {([
-                    [`${plan.maxVideos} video${plan.maxVideos === 1 ? '' : 's'}`, true],
-                    [`Up to ${plan.maxFileSizeGb} GB per video`, true],
-                    [plan.maxClips ? `${plan.maxClips} clips` : 'Unlimited clips', true],
-                    [`${plan.retentionDays} days history`, true],
-                    ['Auto captions', plan.autoCaption],
-                    ['No watermark', !plan.watermark],
-                  ] as [string, boolean][]).map(([label, included]) => (
+                  {planFeatureRows(plan).map(({ label, included }) => (
                     <li key={label} className="flex items-center gap-2 text-sm" style={{ color: included ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.2)' }}>
                       <span style={{ color: included ? '#c8ff00' : 'rgba(255,255,255,0.15)', fontSize: '1rem', lineHeight: '1' }}>
                         {included ? '✓' : '×'}
@@ -284,17 +278,15 @@ export default function PricingPage() {
             )
           })}
         </div>
+        <p className="text-center text-xs mt-5" style={{ color: 'rgba(255,255,255,0.35)' }}>
+          A video gets at most 1 AI clip per minute of its length. Daily and monthly limits reset at midnight, India time.
+        </p>
 
         <section className="mt-14">
           <h2 className="text-xl font-bold text-white text-center mb-1">What a credit buys</h2>
           <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>You see the price before every step. Nothing is charged by surprise, and a job that fails gives its credits back.</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {[
-              ['AI edit', '1 credit per minute of video', 'Reads the whole video once. Best moments, Ask AI and Make my clips are then free.'],
-              ['Manual edit', '1 credit per clip minute', 'For the captions of a clip you cut yourself. Cutting and editing are free.'],
-              ['Export', `${EXPORT_CREDITS} credits (${LONG_EXPORT_CREDITS} for 3 to 5 min)`, 'Per clip, in 1080p. Clips can be up to 5 minutes.'],
-              ['Free to use', '0 credits', 'The editor, captions styling, text, music, stock B-roll, brand kits and grouping.'],
-            ].map(([name, price, note]) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {creditUses().map(({ name, price, note }) => (
               <div key={name} className="rounded-2xl p-4" style={{ background: '#161616', border: '1px solid rgba(255,255,255,0.08)' }}>
                 <div className="text-sm font-semibold text-white">{name}</div>
                 <div className="text-sm font-bold mt-1" style={{ color: '#c8ff00' }}>{price}</div>
