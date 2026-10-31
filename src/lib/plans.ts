@@ -14,9 +14,10 @@ export const PLANS = {
     // Exports go to the front of the worker's line (the top plan's "priority rendering")
     priorityExports: false,
     retentionDays: 30,
-    // AI use (lib/aiLimits.ts): clips per Make my clips run and per day, fresh moment searches per
-    // video, Ask AI searches and hook/title rewrites per month (then credits)
-    ai: { clipsPerRun: 3, clipsPerDay: 3, searchesPerVideo: 1, askAiPerMonth: 10, askAiPerDay: 5, rewritesPerMonth: 20 },
+    // AI use (lib/aiLimits.ts): clips per Make my clips run; AI clips included a month (then credits)
+    // and a daily safety cap; fresh moment searches per video; Ask AI searches and hook/title
+    // rewrites per month (then credits)
+    ai: { clipsPerRun: 3, clipsPerDay: 3, clipsPerMonth: 3, searchesPerVideo: 1, askAiPerMonth: 10, askAiPerDay: 5, rewritesPerMonth: 20 },
   },
   starter: {
     key: 'starter' as const,
@@ -32,7 +33,7 @@ export const PLANS = {
     watermark: false,
     priorityExports: false,
     retentionDays: 30,
-    ai: { clipsPerRun: 10, clipsPerDay: 30, searchesPerVideo: 3, askAiPerMonth: 100, askAiPerDay: 30, rewritesPerMonth: 150 },
+    ai: { clipsPerRun: 10, clipsPerDay: 30, clipsPerMonth: 60, searchesPerVideo: 3, askAiPerMonth: 100, askAiPerDay: 30, rewritesPerMonth: 150 },
   },
   creator: {
     key: 'creator' as const,
@@ -48,7 +49,7 @@ export const PLANS = {
     watermark: false,
     priorityExports: false,
     retentionDays: 45,
-    ai: { clipsPerRun: 15, clipsPerDay: 60, searchesPerVideo: 3, askAiPerMonth: 200, askAiPerDay: 50, rewritesPerMonth: 300 },
+    ai: { clipsPerRun: 15, clipsPerDay: 60, clipsPerMonth: 120, searchesPerVideo: 3, askAiPerMonth: 200, askAiPerDay: 50, rewritesPerMonth: 300 },
   },
   agency: {
     key: 'agency' as const,
@@ -64,7 +65,7 @@ export const PLANS = {
     watermark: false,
     priorityExports: true,
     retentionDays: 60,
-    ai: { clipsPerRun: 20, clipsPerDay: 150, searchesPerVideo: 5, askAiPerMonth: 600, askAiPerDay: 150, rewritesPerMonth: 1000 },
+    ai: { clipsPerRun: 20, clipsPerDay: 150, clipsPerMonth: 300, searchesPerVideo: 5, askAiPerMonth: 600, askAiPerDay: 150, rewritesPerMonth: 1000 },
   },
 } as const
 

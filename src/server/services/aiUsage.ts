@@ -2,7 +2,7 @@ import sql from '@/lib/db'
 import { creditsMode } from '@/lib/credits'
 import {
   aiLimitsFor, videoClipCap, extraSearchCredits, istDayStart, istMonthStart, rewriteCredits,
-  ASK_AI_EXTRA_CREDITS, AI_REQUESTS_PER_MINUTE,
+  ASK_AI_EXTRA_CREDITS, AI_REQUESTS_PER_MINUTE, EXTRA_CLIP_CREDITS,
 } from '@/lib/aiLimits'
 import { charge, release, settle, type Hold } from './credits'
 import { getUserPlan } from './quota'
@@ -110,6 +110,8 @@ export async function recordSearch(userId: string, videoId: string, source: 'mak
 export interface ClipAllowance {
   perRun: number
   clipsPerDay: number; clipsToday: number; dayLeft: number
+  /** AI clips included a month; past them each clip costs credits (EXTRA_CLIP_CREDITS) */
+  clipsPerMonth: number; clipsThisMonth: number; monthLeft: number; extraClipCredits: number
   videoCap: number; videoClips: number; videoLeft: number
   savedLeft: number
   searchesIncluded: number; searchesUsed: number
@@ -133,15 +135,20 @@ export async function clipAllowance(userId: string, videoId: string): Promise<Cl
   const [today] = await sql<{ n: string }[]>`
     SELECT COALESCE(SUM(${runClips}), 0) AS n FROM ai_edit_jobs j JOIN videos v ON v.id = j.video_id
     WHERE v.user_id = ${userId} AND j.created_at >= ${istDayStart()}`
+  const [month] = await sql<{ n: string }[]>`
+    SELECT COALESCE(SUM(${runClips}), 0) AS n FROM ai_edit_jobs j JOIN videos v ON v.id = j.video_id
+    WHERE v.user_id = ${userId} AND j.created_at >= ${istMonthStart()}`
   const [forVideo] = await sql<{ n: string }[]>`SELECT COALESCE(SUM(${runClips}), 0) AS n FROM ai_edit_jobs j WHERE j.video_id = ${videoId}`
   const [searches] = await sql<{ n: number }[]>`
     SELECT count(*)::int AS n FROM moment_searches s LEFT JOIN ai_edit_jobs j ON j.id = s.ai_edit_job_id
     WHERE s.video_id = ${videoId} AND (s.ai_edit_job_id IS NULL OR j.status IS DISTINCT FROM 'failed')`
-  const clipsToday = Number(today.n), videoClips = Number(forVideo.n)
+  const clipsToday = Number(today.n), videoClips = Number(forVideo.n), clipsThisMonth = Number(month.n)
   const videoCap = videoClipCap(video.duration_ms)
   return {
     perRun: limits.clipsPerRun,
     clipsPerDay: limits.clipsPerDay, clipsToday, dayLeft: Math.max(0, limits.clipsPerDay - clipsToday),
+    clipsPerMonth: limits.clipsPerMonth, clipsThisMonth, monthLeft: Math.max(0, limits.clipsPerMonth - clipsThisMonth),
+    extraClipCredits: EXTRA_CLIP_CREDITS,
     videoCap, videoClips, videoLeft: Math.max(0, videoCap - videoClips),
     savedLeft: (await unusedMoments(videoId)).length,
     searchesIncluded: limits.searchesPerVideo, searchesUsed: searches.n,

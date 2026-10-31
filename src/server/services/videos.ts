@@ -2,7 +2,7 @@ import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand } from '@aw
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { aiProvider, askGemini, GEMINI_MODEL, type GeminiUsage } from '@/lib/gemini'
 import { creditsMode } from '@/lib/credits'
-import { clipsAllowed, type LimitedBy } from '@/lib/aiLimits'
+import { clipsAllowed, extraClipCredits, type LimitedBy } from '@/lib/aiLimits'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import sql from '@/lib/db'
 import { findClips, type FoundClip, type Subscores } from './clipFinder'
@@ -225,6 +225,15 @@ function searchCostsError(credits: number) {
   return Object.assign(
     new Error(`Finding new moments for this video costs ${credits} credit${credits === 1 ? '' : 's'}: the included searches for it are used.`),
     { status: 402, expose: true, code: 'search_costs', credits },
+  )
+}
+
+/** A run past the month's included AI clips (and maybe a paid search): the page asks first, then sends pay: true */
+function clipsCostError(credits: number, extra: number, searchCredits: number) {
+  const clips = `${extra} of these clips ${extra === 1 ? 'is' : 'are'} past this month's included AI clips`
+  return Object.assign(
+    new Error(`${clips}${searchCredits ? ', and a new search is needed' : ''}. This run costs ${credits} credit${credits === 1 ? '' : 's'}.`),
+    { status: 402, expose: true, code: 'clips_cost', credits },
   )
 }
 
@@ -521,10 +530,10 @@ export interface MakeClipsOptions extends AutoClipOptions {
 }
 
 /**
- * Make my clips. What is limited is what costs (lib/aiLimits.ts, services/aiUsage.ts): clips made
- * per day and per video, and fresh moment searches per video. "Make more clips" picks from the
- * moments a search already saved — no new search, nothing charged. A run asking for more than is
- * left makes what is left and says why (limited_by).
+ * Make my clips. What is limited is what costs (lib/aiLimits.ts, services/aiUsage.ts): AI clips
+ * a month (past them, credits per clip), a daily safety cap, clips per video, and fresh moment
+ * searches per video. "Make more clips" picks from the moments a search already saved, with no new
+ * search. A run asking for more than is left makes what is left and says why (limited_by).
  */
 export async function createAutoClips(userId: string, videoId: string, clipCount = 5, addBroll = false, options: MakeClipsOptions = {}) {
   const requested = Math.round(Number(clipCount))
@@ -557,7 +566,7 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
   const fromSaved = options.search !== 'new' && allowance.savedLeft > 0
   if (fromSaved && count > allowance.savedLeft) { count = allowance.savedLeft; limitedBy = 'saved' }
   const price = !fromSaved && mode === 'on' ? allowance.nextSearchCredits : 0
-  if (price > 0 && !options.pay) throw searchCostsError(price)
+  const clipCost = mode === 'on' ? extraClipCredits(count, allowance.monthLeft) : { extra: 0, credits: 0 }
 
   const { checkClipQuota, getUserPlanConfig } = await import('./quota')
   await checkClipQuota(userId)
@@ -574,6 +583,9 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
       )
     }
   }
+  // Asked after the plan's own clip limit, so the free plan is told to upgrade, not offered paid clips
+  if (clipCost.credits > 0 && !options.pay) throw clipsCostError(clipCost.credits + price, clipCost.extra, price)
+  if (price > 0 && !options.pay) throw searchCostsError(price)
 
   const [running] = await sql`
     SELECT id FROM ai_edit_jobs WHERE video_id = ${videoId} AND status IN ('queued', 'running') LIMIT 1
@@ -582,7 +594,9 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
 
   const { charge, linkJob, release } = await import('./credits')
   const hold = price > 0 ? await charge(userId, { amount: price, refType: 'search', refId: videoId }) : null
+  let clipHold: Awaited<ReturnType<typeof charge>> | null = null
   try {
+    clipHold = clipCost.credits > 0 ? await charge(userId, { amount: clipCost.credits, refType: 'ai_clips', refId: videoId }) : null
     const [aiJob] = await sql`
       INSERT INTO ai_edit_jobs (video_id, clip_count, status) VALUES (${videoId}, ${count}, 'queued') RETURNING id
     `
@@ -600,10 +614,15 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
     const [job] = await sql`INSERT INTO jobs (type, payload, status) VALUES ('ai_edit', ${sql.json(payload)}, 'queued') RETURNING id`
     // The search's credits follow the job: a run that fails gives them back (credits.sweep)
     if (hold) await linkJob(hold.id, job.id)
+    if (clipHold) await linkJob(clipHold.id, job.id)
     if (!fromSaved) await aiUsage.recordSearch(userId, videoId, 'make_clips', aiJob.id, hold ? price : 0)
-    return { ai_edit_job_id: aiJob.id as string, clip_count: count, limited_by: limitedBy, search: fromSaved ? 'saved' as const : 'new' as const, credits: hold ? price : 0 }
+    return {
+      ai_edit_job_id: aiJob.id as string, clip_count: count, limited_by: limitedBy, search: fromSaved ? 'saved' as const : 'new' as const,
+      credits: (hold ? price : 0) + (clipHold ? clipCost.credits : 0), extra_clips: clipHold ? clipCost.extra : 0,
+    }
   } catch (err) {
     if (hold) await release(hold.id).catch(() => {})
+    if (clipHold) await release(clipHold.id).catch(() => {})
     throw err
   }
 }

@@ -279,7 +279,7 @@ export default function PricingPage() {
           })}
         </div>
         <p className="text-center text-xs mt-5" style={{ color: 'rgba(255,255,255,0.35)' }}>
-          A video gets at most 1 AI clip per minute of its length. Daily and monthly limits reset at midnight, India time.
+          A video gets at most 1 AI clip per minute of its length, and at most {PLANS.starter.ai.clipsPerDay}, {PLANS.creator.ai.clipsPerDay} or {PLANS.agency.ai.clipsPerDay} AI clips are made a day on Starter, Creator or Agency. Monthly limits reset on the 1st, India time.
         </p>
 
         <section className="mt-14">

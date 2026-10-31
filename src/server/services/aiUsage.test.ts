@@ -11,6 +11,17 @@ let ai: typeof import('./aiUsage')
 let credits: typeof import('./credits')
 const users: string[] = []
 
+// "Earlier this month": the first instant of the month (on the 1st that is also today, so a test
+// that needs the month used up but not the day lifts the daily cap with withAskAiDayCap)
+const monthStart = async () => (await import('@/lib/aiLimits')).istMonthStart()
+async function withAskAiDayCap<T>(plan: 'free' | 'starter', n: number, fn: () => Promise<T>): Promise<T> {
+  const { PLANS } = await import('@/lib/plans')
+  const ai = PLANS[plan].ai as { askAiPerDay: number }
+  const was = ai.askAiPerDay
+  ai.askAiPerDay = n
+  try { return await fn() } finally { ai.askAiPerDay = was }
+}
+
 async function setup(plan = 'starter', videoMs = 20 * MIN, grantCredits = 0) {
   const [u] = await sql<{ id: string }[]>`INSERT INTO users (email, plan) VALUES (${`ai-test-${Math.random().toString(36).slice(2)}@example.test`}, ${plan}) RETURNING id`
   users.push(u.id)
@@ -86,12 +97,14 @@ const pick = (a: { searchesUsed: number; searchesIncluded: number; nextSearchCre
 
 test('Ask AI: free within the month\'s allowance, then 1 credit each; refused with 402 when credits run out', opts, async () => {
   const { userId, videoId } = await setup('free', 20 * MIN, 1)   // free plan: 10 a month, 5 a day
-  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${userId}, 'ask_ai', now() - interval '2 days' FROM generate_series(1, 10)`
-  const a1 = await ai.beginAiAction(userId, 'ask_ai', videoId)
-  assert.equal(a1.credits, 1)
-  await a1.done()
-  assert.equal((await credits.balance(userId)).balance, 0)
-  await assert.rejects(ai.beginAiAction(userId, 'ask_ai', videoId), (e: { status?: number }) => e.status === 402)
+  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${userId}, 'ask_ai', ${await monthStart()} FROM generate_series(1, 10)`
+  await withAskAiDayCap('free', 1000, async () => {
+    const a1 = await ai.beginAiAction(userId, 'ask_ai', videoId)
+    assert.equal(a1.credits, 1)
+    await a1.done()
+    assert.equal((await credits.balance(userId)).balance, 0)
+    await assert.rejects(ai.beginAiAction(userId, 'ask_ai', videoId), (e: { status?: number }) => e.status === 402)
+  })
 })
 
 test('Ask AI: the daily cap holds even with credits, and a failed search gives its credit and count back', opts, async () => {
@@ -100,8 +113,8 @@ test('Ask AI: the daily cap holds even with credits, and a failed search gives i
   await assert.rejects(ai.beginAiAction(userId, 'ask_ai', videoId), (e: { status?: number; message?: string }) => e.status === 429 && /today/i.test(e.message ?? ''))
   // a failure: back to where it was
   const { userId: u2, videoId: v2 } = await setup('starter', 20 * MIN, 5)
-  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${u2}, 'ask_ai', now() - interval '3 days' FROM generate_series(1, 100)`
-  const h = await ai.beginAiAction(u2, 'ask_ai', v2)
+  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${u2}, 'ask_ai', ${await monthStart()} FROM generate_series(1, 100)`
+  const h = await withAskAiDayCap('starter', 1000, () => ai.beginAiAction(u2, 'ask_ai', v2))
   assert.equal((await credits.balance(u2)).balance, 4)
   await h.fail()
   assert.equal((await credits.balance(u2)).balance, 5)
@@ -110,7 +123,7 @@ test('Ask AI: the daily cap holds even with credits, and a failed search gives i
 
 test('rewrites: the allowance, then 1 credit for every 5', opts, async () => {
   const { userId } = await setup('free', 20 * MIN, 10)   // free: 20 rewrites a month
-  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${userId}, 'rewrite', now() - interval '1 day' FROM generate_series(1, 20)`
+  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${userId}, 'rewrite', ${await monthStart()} FROM generate_series(1, 20)`
   const charged: number[] = []
   for (let i = 0; i < 6; i++) { const h = await ai.beginAiAction(userId, 'rewrite'); charged.push(h.credits); await h.done() }
   assert.deepEqual(charged, [1, 0, 0, 0, 0, 1])

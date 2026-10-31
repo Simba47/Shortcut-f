@@ -26,6 +26,14 @@ export function extraSearchCredits(durationMs: number | null | undefined): numbe
   return Math.max(1, Math.ceil((durationMs ?? 0) / (10 * MINUTE)))
 }
 
+/** An AI clip past the month's included ones */
+export const EXTRA_CLIP_CREDITS = 1
+/** What a run of `count` clips costs when `monthLeft` included clips are left: those are used first */
+export function extraClipCredits(count: number, monthLeft: number): { extra: number; credits: number } {
+  const extra = Math.max(0, count - Math.max(0, monthLeft))
+  return { extra, credits: extra * EXTRA_CLIP_CREDITS }
+}
+
 /** Ask AI past the month's allowance: 1 credit per search */
 export const ASK_AI_EXTRA_CREDITS = 1
 /** Rewrites past the allowance: 1 credit for every 5 */

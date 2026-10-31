@@ -1,6 +1,6 @@
 import type { Plan } from './plans'
 import { EXPORT_CREDITS, LONG_EXPORT_CREDITS } from './credits'
-import { ASK_AI_EXTRA_CREDITS, REWRITES_PER_CREDIT } from './aiLimits'
+import { ASK_AI_EXTRA_CREDITS, REWRITES_PER_CREDIT, EXTRA_CLIP_CREDITS } from './aiLimits'
 
 // What the pricing page says each plan gives. Every number comes from plans.ts and aiLimits.ts,
 // the same values the server applies, so the page cannot promise more than the plan allows.
@@ -11,12 +11,12 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 export function planFeatureRows(plan: Plan): FeatureRow[] {
   const ai = plan.ai
-  // Free counts every clip it ever makes (videos.ts); paid plans limit AI clips per day only
+  // Free counts every clip it ever makes (videos.ts); paid plans include AI clips a month, then charge credits
   const clips: FeatureRow[] = plan.maxClips
     ? [{ label: `${plan.maxClips} clips in total`, included: true }]
     : [
         { label: 'Unlimited clips you cut yourself', included: true },
-        { label: `Up to ${ai.clipsPerDay} AI clips a day`, included: true },
+        { label: `${ai.clipsPerMonth} AI clips a month, then ${plural(EXTRA_CLIP_CREDITS, 'credit', 'credits')} each`, included: true },
       ]
   return [
     // A total, not per month: deleting a video frees its place (checkVideoQuota)
@@ -39,8 +39,8 @@ export function creditUses(): { name: string; price: string; note: string }[] {
   return [
     { name: 'AI edit', price: '1 credit per minute of video',
       note: 'Reads the whole video once. Finding moments, Make my clips, Ask AI and rewrites are then included up to your plan’s limits.' },
-    { name: 'Past your plan’s AI limits', price: `${ASK_AI_EXTRA_CREDITS} credit per Ask AI search`,
-      note: `A new moment search costs 1 credit per 10 minutes of video, and rewrites 1 credit per ${REWRITES_PER_CREDIT} rewrites. You see the price before you confirm.` },
+    { name: 'Past your plan’s AI limits', price: `${EXTRA_CLIP_CREDITS} credit per AI clip past the month’s`,
+      note: `Ask AI costs ${ASK_AI_EXTRA_CREDITS} credit per Ask AI search, a new moment search 1 credit per 10 minutes of video, and rewrites 1 credit per ${REWRITES_PER_CREDIT} rewrites. You see the price before you confirm.` },
     { name: 'Manual edit', price: '1 credit per clip minute',
       note: 'For the captions of a clip you cut yourself. Cutting and editing are free.' },
     { name: 'Export', price: `${EXPORT_CREDITS} credits (${LONG_EXPORT_CREDITS} for 3 to 5 min)`,

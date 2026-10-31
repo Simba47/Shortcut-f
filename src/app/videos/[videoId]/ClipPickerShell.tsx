@@ -336,7 +336,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // What is left of the AI limits for this video and account (api/videos/[id]/allowance; null when
   // credits are off, and then nothing extra is shown). Reloaded after every run and search.
   type Allowance = {
-    clips: { perRun: number; clipsPerDay: number; clipsToday: number; dayLeft: number; videoCap: number; videoClips: number; videoLeft: number; savedLeft: number; searchesIncluded: number; searchesUsed: number; nextSearchCredits: number }
+    clips: { perRun: number; clipsPerDay: number; clipsToday: number; dayLeft: number; clipsPerMonth: number; clipsThisMonth: number; monthLeft: number; extraClipCredits: number; videoCap: number; videoClips: number; videoLeft: number; savedLeft: number; searchesIncluded: number; searchesUsed: number; nextSearchCredits: number }
     askAi: { usedThisMonth: number; perMonth: number; usedToday: number; perDay: number }
   }
   const [allowance, setAllowance] = useState<Allowance | null>(null)
@@ -721,8 +721,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
 
   /**
    * search 'more' (default): make clips from the moments already found, while any are left (free);
-   * 'new': look for new moments. A new search past the included ones costs credits: the server
-   * answers 402 "search_costs" first, and it goes ahead only after the user agrees (pay).
+   * 'new': look for new moments. A new search past the included ones, or clips past the month's
+   * included AI clips, cost credits: the server answers 402 "search_costs" or "clips_cost" first,
+   * and it goes ahead only after the user agrees (pay).
    */
   async function makeClips(search: 'more' | 'new' = 'more', pay = false) {
     // The number in the box, kept to 1–the plan's clips per run (it may not have settled yet if Enter wasn't pressed)
@@ -743,16 +744,20 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           if (window.confirm(`${d.error} Use ${d.credits} credit${d.credits === 1 ? '' : 's'} to look again?`)) return await makeClips('new', true)
           return
         }
+        if (d.code === 'clips_cost') {
+          if (window.confirm(`${d.error} Go ahead?`)) return await makeClips(search, true)
+          return
+        }
         throw new Error(d.error ?? 'Not enough credits')
       }
       if (!res.ok) throw new Error((await res.json()).error ?? 'Could not start making clips')
-      const d = await res.json() as { clip_count?: number; limited_by?: string | null; search?: string; credits?: number }
+      const d = await res.json() as { clip_count?: number; limited_by?: string | null; search?: string; credits?: number; extra_clips?: number }
       const n = d.clip_count ?? count
       const why = d.limited_by === 'day' ? `that's what is left of today's clips`
         : d.limited_by === 'video' ? 'the most this video can have (1 per minute of it)'
         : d.limited_by === 'run' ? 'the most per run on your plan'
         : d.limited_by === 'saved' ? 'all the saved moments left. Press Find new moments for more' : null
-      setAutoNote([why ? `Making ${n}: ${why}.` : null, d.credits ? `${d.credits} credit${d.credits === 1 ? '' : 's'} used for a new search.` : null].filter(Boolean).join(' ') || null)
+      setAutoNote([why ? `Making ${n}: ${why}.` : null, d.credits ? `${d.credits} credit${d.credits === 1 ? '' : 's'} used${d.extra_clips ? ` for ${d.extra_clips} clip${d.extra_clips === 1 ? '' : 's'} past this month's` : ''}${d.extra_clips && d.search === 'new' && d.credits > d.extra_clips ? ' and' : ''}${d.search === 'new' && d.credits > (d.extra_clips ?? 0) ? ' for a new search' : ''}.` : null].filter(Boolean).join(' ') || null)
       await loadAutoClips()
       loadAllowance()
     } catch (e) {
@@ -1412,7 +1417,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           return (
             <div className="flex flex-col gap-1 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>
               <span>{c.savedLeft > 0 ? `From ${c.savedLeft} saved moment${c.savedLeft === 1 ? '' : 's'} · free` : `Looks for moments · new search ${searchPrice}`}</span>
-              <span>Clips today: {c.clipsToday} of {c.clipsPerDay} · This video: {c.videoClips} of {c.videoCap}</span>
+              <span>AI clips this month: {Math.min(c.clipsThisMonth, c.clipsPerMonth)} of {c.clipsPerMonth}{c.monthLeft === 0 ? ` · more cost ${c.extraClipCredits} credit${c.extraClipCredits === 1 ? '' : 's'} each` : ''}</span>
+              <span>Today: {c.clipsToday} of {c.clipsPerDay} · This video: {c.videoClips} of {c.videoCap}</span>
               {c.savedLeft > 0 && (
                 <button type="button" onClick={() => makeClips('new')} disabled={autoRunning || autoStarting}
                   className="self-start underline disabled:opacity-40" style={{ color: 'rgb(var(--cb-fg) / 0.7)' }}>
