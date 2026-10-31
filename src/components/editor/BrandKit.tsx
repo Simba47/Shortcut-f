@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CaptionStyler, FontPicker, loadVideoFonts, type TextCase } from './CaptionStyler'
 import { PlatformOverlay, PLATFORM_SAFE, type Platform } from './PlatformOverlay'
 import { ensureBrandFont } from './brandFonts'
+import { openBrandKits, BRAND_KITS_CLOSED } from '@/components/brand/brandKitsEvents'
+import { InteractiveHoverButton } from '@/components/ui/interactive-hover-button'
 import { BrandStart, BrandCard, type Found } from '@/components/brand/BrandMaker'
 import { KitWords, WordsPreview } from '@/components/brand/BrandWordsEditor'
 import { inviteLink, ROLE_NAMES, type KitInviteIn, type KitInviteOut, type KitMember, type KitRole, type KitTeam as KitTeamState } from '@/lib/shared/brandTeam'
@@ -128,7 +130,9 @@ export function useBrandKits(): BrandKits {
     }
     document.addEventListener('visibilitychange', again)
     window.addEventListener('focus', again)
-    return () => { document.removeEventListener('visibilitychange', again); window.removeEventListener('focus', again) }
+    // (and when the Brand kits popup closes: the kits changed there)
+    window.addEventListener(BRAND_KITS_CLOSED, again)
+    return () => { document.removeEventListener('visibilitychange', again); window.removeEventListener('focus', again); window.removeEventListener(BRAND_KITS_CLOSED, again) }
   }, [])
 
   const flush = useCallback((id: string, keepalive = false) => {
@@ -285,7 +289,7 @@ function BrandOnSwitch({ kit, onKitId, onTurnOn, onTurnOff, compact = false }: B
   const other = onKitId !== null && !on
   return (
     <label className={`flex items-center gap-3 rounded-xl cursor-pointer select-none ${compact ? 'h-9 px-3' : 'p-3'}`}
-      style={{ background: on ? 'rgba(200,255,0,0.1)' : 'rgb(var(--ed-fg) / 0.05)', boxShadow: `inset 0 0 0 1px ${on ? 'rgba(200,255,0,0.55)' : 'rgb(var(--ed-fg) / 0.12)'}` }}>
+      style={{ background: on ? 'rgba(200,255,0,0.05)' : 'rgb(var(--ed-fg) / 0.05)', boxShadow: `inset 0 0 0 1px ${on ? 'rgba(200,255,0,0.275)' : 'rgb(var(--ed-fg) / 0.12)'}` }}>
       <span className="flex-1 min-w-0 flex flex-col">
         <span className={`${compact ? 'text-xs' : 'text-[13px]'} font-bold text-[var(--ed-text)]`}>{compact ? (on ? 'On this clip' : 'Off on this clip') : on ? 'Brand kit on' : 'Brand kit off'}</span>
         {!compact && (
@@ -352,14 +356,14 @@ export function BrandKitPanel({ brand, onKitId, onTurnOn, onTurnOff, onDelete, p
           return (
             <button key={k.id} type="button" role="option" aria-selected={on} onClick={() => brand.select(k.id)}
               className="flex items-center gap-3 p-2.5 rounded-xl text-left transition-colors"
-              style={{ background: on ? 'rgba(200,255,0,0.08)' : 'rgb(var(--ed-fg) / 0.04)', boxShadow: `inset 0 0 0 1px ${on ? 'rgba(200,255,0,0.55)' : 'rgb(var(--ed-fg) / 0.08)'}` }}>
+              style={{ background: on ? 'rgba(200,255,0,0.04)' : 'rgb(var(--ed-fg) / 0.04)', boxShadow: `inset 0 0 0 1px ${on ? 'rgba(200,255,0,0.275)' : 'rgb(var(--ed-fg) / 0.08)'}` }}>
               <KitBadge kit={k} />
               <span className="flex-1 min-w-0 flex flex-col">
                 <span className="flex items-center gap-1.5 min-w-0">
                   <span className="text-[13px] font-semibold truncate text-[var(--ed-text)]">{k.name}</span>
                   {k.data.is_default && (
                     <span className="shrink-0 px-1.5 py-px rounded text-[9.5px] font-bold uppercase tracking-wide" title="New clips get this kit by themselves"
-                      style={{ background: 'rgba(200,255,0,0.14)', color: 'var(--ed-accent-text)' }}>Default</span>
+                      style={{ background: 'rgba(200,255,0,0.07)', color: 'var(--ed-accent-text)' }}>Default</span>
                   )}
                 </span>
                 <span className="text-[11px] truncate" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
@@ -387,9 +391,8 @@ export function BrandKitPanel({ brand, onKitId, onTurnOn, onTurnOff, onDelete, p
       </button>
       {full && <p className="-mt-2 text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>That&rsquo;s all your plan has room for. <a href="/pricing" className="font-semibold hover:underline" style={{ color: 'var(--ed-accent-text)' }}>Upgrade</a> for more.</p>}
       {/* All of them, outside the editor (a new tab: this clip stays open) */}
-      <a href="/brand" target="_blank" rel="noopener" className="-mt-1 self-center text-[11px] font-semibold hover:underline" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
-        All your brand kits ↗
-      </a>
+      <button type="button" onClick={() => openBrandKits()} className="-mt-1 self-center text-[11px] font-semibold hover:underline" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
+        All your brand kits</button>
       {note && <p role="alert" className="-mt-2 text-[11px]" style={{ color: '#fca5a5' }}>{note}</p>}
 
       {brand.current && (
@@ -763,10 +766,21 @@ const STEPS: Array<{ id: StepId; name: string; short: string; about: string }> =
   { id: 'team', name: 'Team', short: 'Share with your team', about: 'Share this kit with your team, and lock its colours and fonts for them.' },
 ]
 
-export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onClose, closeLabel = 'Back to the video' }: Partial<BrandSwitchProps> & {
+/** The Brand kit's Next / Done: lime, a dark dot that fills it on hover, the label back in lime with an arrow */
+const KIT_NEXT_BTN = 'w-auto h-9 px-5 py-0 rounded-lg border-0 bg-[#c8ff00] text-[#0a0a0a] text-xs font-bold [&_svg]:size-3.5'
+// (the dot waits in the left padding, not over the label: these buttons are wider than the component's own)
+const KIT_NEXT_FILL = 'left-[7px] top-[calc(50%-4px)] bg-[#0a0a0a] group-hover:bg-[#0a0a0a]'
+// (pinned to the left edge: without it the layer started where the label ends, so the label and arrow
+// were pushed right and the arrow cut off — user, 2026-10-31)
+const KIT_NEXT_HOVER_TEXT = 'left-0 text-[#c8ff00]'
+
+export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onClose, closeLabel = 'Back to the video', clipMock = true }: Partial<BrandSwitchProps> & {
   brand: BrandKits; onClose: () => void
   /** What closing it goes back to (the Brands page: "Back to your brands") */
   closeLabel?: string
+  /** The "On your clip" phone mock-up on the right. Off in the editor (user, 2026-10-31: its own preview
+   *  already shows the clip — "why again this card"); kept on the Brands page, which has no preview */
+  clipMock?: boolean
 }) {
   const kit = brand.current
   // What the last way in (a link, a logo, a few words) found: the card offers its colours and styles
@@ -839,9 +853,9 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
               <button key={x.id} type="button" onClick={() => setStep(x.id)} aria-current={on ? 'step' : undefined}
                 className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors hover:bg-[rgb(var(--ed-fg)/0.05)]"
                 // (the step you're on: a lime edge, no lime fill — user, 2026-10-29)
-                style={on ? { background: 'rgb(var(--ed-fg) / 0.05)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.65)' } : undefined}>
+                style={on ? { background: 'rgb(var(--ed-fg) / 0.05)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.325)' } : undefined}>
                 <span className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold tabular-nums"
-                  style={on ? { background: 'rgb(var(--ed-fg) / 0.06)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.75)' } : { background: 'rgb(var(--ed-fg) / 0.08)', color: 'rgb(var(--ed-fg) / 0.7)' }}>{i + 1}</span>
+                  style={on ? { background: 'rgb(var(--ed-fg) / 0.06)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.375)' } : { background: 'rgb(var(--ed-fg) / 0.08)', color: 'rgb(var(--ed-fg) / 0.7)' }}>{i + 1}</span>
                 <span className="flex-1 min-w-0 flex flex-col">
                   <span className="text-[12.5px] font-semibold leading-snug" style={{ color: on ? 'var(--ed-text)' : 'rgb(var(--ed-fg) / 0.8)' }}>{x.name}</span>
                   <span className="text-[10.5px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>{x.short}</span>
@@ -1059,20 +1073,21 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
                   ← {steps[at - 1].name}
                 </button>
               ) : <span />}
+              {/* Next / Done (user, 2026-10-31): on hover the label slides away, a dot grows to fill the button dark,
+                  and the label comes back in lime with an arrow (components/ui/interactive-hover-button) */}
               {at < steps.length - 1 ? (
-                <button type="button" onClick={() => setStep(steps[at + 1].id)} className="h-9 px-4 rounded-lg text-xs font-bold" style={{ background: '#c8ff00', color: '#0a0a0a' }}>
-                  Next: {steps[at + 1].name} →
-                </button>
+                <InteractiveHoverButton type="button" onClick={() => setStep(steps[at + 1].id)} text={`Next: ${steps[at + 1].name}`}
+                  className={KIT_NEXT_BTN} fillClassName={KIT_NEXT_FILL} hoverTextClassName={KIT_NEXT_HOVER_TEXT} />
               ) : (
-                <button type="button" onClick={onClose} className="h-9 px-4 rounded-lg text-xs font-bold" style={{ background: '#c8ff00', color: '#0a0a0a' }}>
-                  Done
-                </button>
+                <InteractiveHoverButton type="button" onClick={onClose} text="Done"
+                  className={KIT_NEXT_BTN} fillClassName={KIT_NEXT_FILL} hoverTextClassName={KIT_NEXT_HOVER_TEXT} />
               )}
             </div>
           </div>
         </div>
 
-        {/* How it looks: always in view, for the step */}
+        {/* How it looks, for the step (the clip's look only where there's no preview of the clip itself) */}
+        {(clipMock || cur.id === 'card' || cur.id === 'words') && (
         <aside aria-label="How it looks" className="shrink-0 w-[244px] p-4 overflow-y-auto flex flex-col items-center gap-2" style={{ borderLeft: '1px solid rgb(var(--ed-fg) / 0.06)' }}>
           {cur.id === 'card' ? (
             <Mock label="Branded card">
@@ -1095,6 +1110,7 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
           )}
           <p className="text-[10.5px] text-center max-w-[200px] mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.4)' }}>Changes save by themselves.</p>
         </aside>
+        )}
       </div>
     </div>
   )
@@ -1241,8 +1257,11 @@ function DefaultSwitch({ kit, compact = false, onChange }: { kit: BrandKit; comp
 export function Switch({ on, label, onChange }: { on: boolean; label: string; onChange: (on: boolean) => void }) {
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={e => { e.preventDefault(); onChange(!on) }}
-      className="relative shrink-0 rounded-full transition-colors" style={{ width: 34, height: 19, background: on ? '#c8ff00' : 'rgb(var(--ed-fg) / 0.18)' }}>
-      <span className="absolute top-[2px] rounded-full transition-[left]" style={{ left: on ? 17 : 2, width: 15, height: 15, background: on ? '#0a0a0a' : '#fff' }} />
+      // (user, 2026-10-31: less of the palette colour, not none) on: a faint lime track with a fine lime edge
+      // and a lime knob, instead of a solid lime track
+      className="relative shrink-0 rounded-full transition-colors"
+      style={{ width: 34, height: 19, background: on ? 'rgba(200,255,0,0.16)' : 'rgb(var(--ed-fg) / 0.18)', boxShadow: on ? 'inset 0 0 0 1px rgba(200,255,0,0.45)' : 'none' }}>
+      <span className="absolute top-[2px] rounded-full transition-[left,background-color]" style={{ left: on ? 17 : 2, width: 15, height: 15, background: on ? 'var(--ed-accent-text)' : '#fff' }} />
     </button>
   )
 }
@@ -1403,7 +1422,7 @@ function CardFields({ value: c, onChange }: { value: BrandCardSettings; onChange
             {CARD_PATTERNS.map(pt => (
               <button key={pt} type="button" role="radio" aria-checked={c.bg.pattern === pt} onClick={() => onChange({ ...c, bg: { ...c.bg, pattern: pt } })}
                 className="h-8 px-3 rounded-lg text-xs font-semibold transition-colors"
-                style={{ color: 'var(--ed-text)', background: c.bg.pattern === pt ? 'rgba(200,255,0,0.12)' : 'rgb(var(--ed-fg) / 0.06)', boxShadow: `inset 0 0 0 1px ${c.bg.pattern === pt ? '#c8ff00' : 'rgb(var(--ed-fg) / 0.1)'}` }}>
+                style={{ color: 'var(--ed-text)', background: c.bg.pattern === pt ? 'rgba(200,255,0,0.06)' : 'rgb(var(--ed-fg) / 0.06)', boxShadow: `inset 0 0 0 1px ${c.bg.pattern === pt ? 'rgba(200,255,0,0.5)' : 'rgb(var(--ed-fg) / 0.1)'}` }}>
                 {PATTERN_NAMES[pt]}
               </button>
             ))}

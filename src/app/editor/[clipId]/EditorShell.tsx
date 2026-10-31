@@ -1,5 +1,6 @@
 'use client'
 
+import { useFrameAt } from '@/modules/clips/thumbs'
 import { InfoTip } from '@/components/ui/info-tip'
 import { musicGainAt, speechRangesInVideo, speechRanges, heardSpeech, type Range as SpeechRange } from '@/modules/editor/musicGain'
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
@@ -128,8 +129,9 @@ const PLATFORM_OPTIONS: { id: Platform; label: string; icon: React.ReactNode }[]
   { id: 'youtube', label: 'Shorts', icon: <><rect x="2.5" y="5" width="19" height="14" rx="4" /><path d="M10 9.2v5.6l4.8-2.8z" fill="currentColor" /></> },
 ]
 // Options sidebar width (px): it opens this wide for every tool and stays so until its edge is dragged
-// (user, 2026-10-31: the Subjects card's size in their screenshot as the default; was 272)
-const OPTIONS_W = 338
+// (user, 2026-10-31: the size in their screenshot as the default — room for a scene's faces and Mark as group
+// on one line; was 272, then 338)
+const OPTIONS_W = 384
 // The Preview column's smallest width; it opens as wide as the 9:16 preview needs to fill its height (user,
 // 2026-10-31: "so much gap above and below, increase the size"), until its edge is dragged
 const PREVIEW_W = 260
@@ -465,6 +467,28 @@ export function EditorShell({
   /** The Free plan's watermark shows on the preview, where the export will put it */
   const showWatermark = useFreeWatermark()
   const [tool, setTool] = useState<Tool>('subjects')
+  // The Transition tiles' two pictures of this clip (a quarter and two thirds in), read in the background soon
+  // after the editor opens — not when the tool opens, which showed blank tiles for a moment (user, 2026-10-31).
+  // (a second and a half in, so the preview's own video loads first; at once if Transitions opens before that)
+  const [trFramesOn, setTrFramesOn] = useState(false)
+  useEffect(() => { const t = setTimeout(() => setTrFramesOn(true), 1500); return () => clearTimeout(t) }, [])
+  const trFrameMs = useMemo<[number, number]>(() => {
+    const len = rawClip.end_ms - rawClip.start_ms
+    return [rawClip.start_ms + Math.round(len * 0.25), rawClip.start_ms + Math.round(len * 0.68)]
+  }, [rawClip.start_ms, rawClip.end_ms])
+  const trFrameA = useFrameAt(trFramesOn || tool === 'transitions' ? videoUrl : null, trFrameMs[0])
+  const trFrameB = useFrameAt(trFramesOn || tool === 'transitions' ? videoUrl : null, trFrameMs[1])
+  /** The picture on the preview right now (the editor's own video, already loaded), for the tiles until theirs are in */
+  const grabPreviewFrame = useCallback(() => {
+    const v = videoRef.current
+    if (!v || !v.videoWidth || v.readyState < 2) return null
+    try {
+      const c = document.createElement('canvas')
+      c.width = 192; c.height = Math.max(1, Math.round((192 * v.videoHeight) / v.videoWidth))
+      c.getContext('2d')?.drawImage(v, 0, 0, c.width, c.height)
+      return c.toDataURL('image/jpeg', 0.7)
+    } catch { return null }
+  }, [videoRef])
   // The editor always opens the same way — a new clip, a refresh, or coming from any board: the
   // tool rail with the options panel closed (a tool opens it), the video, the Preview column on the
   // right at its usual width (Off) and the timeline at its usual height. Sizes dragged while editing
@@ -576,12 +600,16 @@ export function EditorShell({
   function resetColumn(which: 'options' | 'preview') {
     if (which === 'options') setOptionsW(OPTIONS_W); else setPreviewFit(true)
   }
+  // While the Brand kit's workshop is open the preview keeps its size: the workshop tucks the timeline away,
+  // the Preview's body grew taller and the card with it (user, 2026-10-31). Set from studioShown below
+  const previewFrozenRef = useRef(false)
   // Fitted: the column as wide as the 9:16 card is at the full height of the Preview's body (its height
   // doesn't depend on the column's width, so this settles at once), within PREVIEW_RANGE
   useEffect(() => {
     const el = previewBodyRef.current
     if (!previewFit || !el) return
     const fit = () => {
+      if (previewFrozenRef.current) return
       const cs = getComputedStyle(el)
       const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
       const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight)
@@ -812,6 +840,8 @@ export function EditorShell({
   // The kit's workshop open: the timeline tucked away for its room (the ⌃ in the timeline bar brings it
   // back); closed, the timeline as it was (user, 2026-10-28)
   const studioShown = tool === 'brand' && kitStudio
+  // (before the timeline is tucked away below, so the preview doesn't follow that height)
+  useLayoutEffect(() => { previewFrozenRef.current = studioShown }, [studioShown])
   const timelineBeforeStudio = useRef<boolean | null>(null)
   useEffect(() => {
     if (studioShown) {
@@ -6137,7 +6167,7 @@ export function EditorShell({
         <div className="flex items-center gap-3 shrink-0">
           {/* The brand kit on this clip, one click away (brand kit Phase 2) */}
           <EditorBrandMenu kits={brand.kits} loading={brand.loading} onKitId={brandOn?.kit_id ?? null}
-            onTurnOn={turnBrandOn} onTurnOff={turnBrandOff} onEdit={() => { setKitStudio(true); openSettings('brand') }} onUndo={undo} />
+            onTurnOn={turnBrandOn} onTurnOff={turnBrandOff} onEdit={id => { if (id) brand.select(id); setKitStudio(true); openSettings('brand') }} />
           <button type="button" onClick={() => setTourOpen(true)} aria-label="Show the editor tour" title="How the editor works"
             className="w-8 h-8 flex items-center justify-center rounded-full transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
             style={{ color: 'rgb(var(--ed-fg) / 0.7)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }}>
@@ -6738,7 +6768,9 @@ export function EditorShell({
               <TransitionsPanel joins={transitionJoins} transitions={transitions} currentTimeMs={currentTimeMs}
                 canAddHere={canAddTransitionAt(activeSegment, currentTimeMs)} onAddHere={addTransitionHere}
                 onSet={setTransitionAt} onPreview={previewJoin} onSeek={ms => { pause(); seekToMs(ms) }} savedAsDissolve={trAsDissolve}
-                focusJoin={transitionFocus} onShownJoin={setTransitionShown} />
+                focusJoin={transitionFocus} onShownJoin={setTransitionShown}
+                // (the tiles show the transition between two pictures of this clip: a quarter and two thirds in)
+                frameA={trFrameA} frameB={trFrameB} grabFrame={grabPreviewFrame} />
             )}
 
             {tool === 'text' && (
@@ -6779,7 +6811,7 @@ export function EditorShell({
           {/* (not tied to the options sidebar: closing that leaves the workshop open — user, 2026-10-20) */}
           {tool === 'brand' && kitStudio && (
             <div className="absolute inset-0 overflow-hidden" style={{ zIndex: 30, borderRadius: 'inherit', background: 'var(--ed-panel)' }}>
-              <BrandKitStudio brand={brand} onKitId={brandOn?.kit_id ?? null} onTurnOn={turnBrandOn} onTurnOff={turnBrandOff} onClose={closeKitStudio} />
+              <BrandKitStudio brand={brand} onKitId={brandOn?.kit_id ?? null} onTurnOn={turnBrandOn} onTurnOff={turnBrandOff} onClose={closeKitStudio} clipMock={false} />
             </div>
           )}
           {/* Canvas toolbar, centred: the layouts as one sliding switch, then the Motion button.

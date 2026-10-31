@@ -1,5 +1,6 @@
 'use client'
 
+import { openBrandKits, BRAND_KITS_CLOSED } from '@/components/brand/brandKitsEvents'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 /**
@@ -23,6 +24,8 @@ export interface ClipBrands {
   busy: string | null
   note: { text: string; bad: boolean } | null
   applyAll: (kitId: string | null) => Promise<void>
+  /** The kit (or none) on just these clips — the ones ticked with Select */
+  applyTo: (clipIds: string[], kitId: string | null) => Promise<void>
   setClip: (clipId: string, kitId: string | null) => Promise<void>
 }
 
@@ -43,6 +46,13 @@ export function useClipBrands(videoId: string, clipIds: string[]): ClipBrands {
 
   const loadClips = useCallback(() => fetch(`/api/videos/${videoId}/brand`).then(r => json<{ clips: Record<string, string | null> }>(r))
     .then(d => setOf(d.clips ?? {})).catch(() => { /* tags left as they were */ }), [videoId])
+  // (read again when the Brand kits popup closes: a kit made, renamed or recoloured there shows here)
+  const [kitsRead, setKitsRead] = useState(0)
+  useEffect(() => {
+    const again = () => setKitsRead(n => n + 1)
+    window.addEventListener(BRAND_KITS_CLOSED, again)
+    return () => window.removeEventListener(BRAND_KITS_CLOSED, again)
+  }, [])
   useEffect(() => {
     fetch('/api/brand-kits').then(r => json<{ kits: Array<{ id: string; name: string; data: { is_default?: boolean; colors: { main: string; accent: string } } }> }>(r))
       .then(d => {
@@ -50,7 +60,7 @@ export function useClipBrands(videoId: string, clipIds: string[]): ClipBrands {
         setKits(ks)
         setPick(p => (ks.some(k => k.id === p) ? p : (ks.find(k => k.isDefault) ?? ks[0])?.id ?? ''))
       }).catch(() => { /* no kits shown */ })
-  }, [])
+  }, [kitsRead])
   useEffect(() => { loadClips() }, [loadClips, clipsKey])
 
   const kitOf = (clipId: string) => { const id = of[clipId]; return id ? kits.find(k => k.id === id) ?? null : null }
@@ -71,6 +81,26 @@ export function useClipBrands(videoId: string, clipIds: string[]): ClipBrands {
       setNote({ text: e instanceof Error ? e.message : String(e), bad: true })
     } finally { setBusy(null) }
   }
+  /** The kit (or none) on the clips ticked with Select: one by one, as a clip's own tag does it */
+  async function applyTo(clipIds: string[], kitId: string | null) {
+    if (!clipIds.length) return
+    setBusy('all'); setNote(null)
+    let changed = 0, failed = 0
+    for (const id of clipIds) {
+      try {
+        await fetch(`/api/clips/${id}/brand`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kit_id: kitId }) })
+          .then(res => json<{ on: boolean }>(res))
+        changed++
+      } catch { failed++ }
+    }
+    await loadClips()
+    const kit = kits.find(k => k.id === kitId)
+    setNote({
+      bad: failed > 0,
+      text: `${kit ? `${kit.name} is on` : 'Brand taken off'} ${changed} clip${changed === 1 ? '' : 's'}${failed ? ` · ${failed} couldn’t be changed (being exported?)` : ''}`,
+    })
+    setBusy(null)
+  }
   async function setClip(clipId: string, kitId: string | null) {
     setBusy(clipId); setNote(null)
     try {
@@ -81,7 +111,7 @@ export function useClipBrands(videoId: string, clipIds: string[]): ClipBrands {
       setNote({ text: e instanceof Error ? e.message : String(e), bad: true })
     } finally { setBusy(null) }
   }
-  return { kits, kitOf, pick, setPick, branded, busy, note, applyAll, setClip }
+  return { kits, kitOf, pick, setPick, branded, busy, note, applyAll, applyTo, setClip }
 }
 
 /** Two dots in a kit's colours */
@@ -138,7 +168,7 @@ function KitPick({ kits, value, onChange, disabled }: { kits: KitLite[]; value: 
               )}
             </li>
           ))}
-          <li role="presentation" className="cbb-pick-foot"><a href="/brand">Manage brand kits →</a></li>
+          <li role="presentation" className="cbb-pick-foot"><button type="button" onClick={() => { setOpen(false); openBrandKits() }}>Manage brand kits →</button></li>
         </ul>
       )}
     </div>
@@ -146,34 +176,42 @@ function KitPick({ kits, value, onChange, disabled }: { kits: KitLite[]; value: 
 }
 
 /** Above the clips: the kit, "Put on all N clips", how many have one, and "Take off all" */
-export function BrandAllBar({ b, total }: { b: ClipBrands; total: number }) {
+export function BrandAllBar({ b, total, selected = [] }: { b: ClipBrands; total: number; selected?: string[] }) {
   if (!total) return null
   if (!b.kits.length) {
     return (
       <div className="cbb-bar">
         <span className="cbb-label">Brand</span>
         <span className="text-[11px] flex-1 min-w-0" style={{ color: 'rgb(var(--cb-fg) / 0.55)' }}>Put your logo, colours and caption look on every clip.</span>
-        <a href="/brand" className="cbb-btn">Make a brand kit</a>
+        <button type="button" className="cbb-btn" onClick={() => openBrandKits()}>Make a brand kit</button>
       </div>
     )
   }
   const kit = b.kits.find(k => k.id === b.pick) ?? null
   const allOn = !!kit && b.branded === total
+  // Which clips it goes on (user, 2026-10-31: "only which kit and for what videos"): the ones ticked with
+  // Select, else all of them
+  const some = selected.length > 0
+  const brandedPicked = some ? selected.filter(id => !!b.kitOf(id)).length : b.branded
   return (
     <div className="flex flex-col gap-1.5">
       <div className="cbb-bar">
         <span className="cbb-label">Brand</span>
         <KitPick kits={b.kits} value={b.pick} onChange={b.setPick} disabled={!!b.busy} />
-        <button type="button" className="cbb-btn" data-primary disabled={!!b.busy || !kit} onClick={() => b.applyAll(b.pick)}
-          title={allOn ? 'Put it on again: a clip whose kit changed gets the newest version' : `Put ${kit?.name ?? 'this kit'} on all ${total} clips`}>
-          {b.busy === 'all' ? 'Working…' : `Put on all ${total}`}
+        {/* (no Edit here — editing is the top bar's Brand kits; this bar is which kit, on which clips) */}
+        <button type="button" className="cbb-btn" data-primary disabled={!!b.busy || !kit} onClick={() => (some ? b.applyTo(selected, b.pick) : b.applyAll(b.pick))}
+          title={some ? `Put ${kit?.name ?? 'this kit'} on the ${selected.length} clip${selected.length === 1 ? '' : 's'} you ticked`
+            : allOn ? 'Put it on again: a clip whose kit changed gets the newest version' : `Put ${kit?.name ?? 'this kit'} on all ${total} clips`}>
+          {b.busy === 'all' ? 'Working…' : some ? `Put on ${selected.length} selected` : `Put on all ${total}`}
         </button>
       </div>
       <div className="flex items-center gap-2 px-1">
-        <span className="text-[10.5px] tabular-nums" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>{b.branded} of {total} branded</span>
-        {b.branded > 0 && (
-          <button type="button" className="text-[10.5px] font-semibold hover:underline" disabled={!!b.busy} onClick={() => b.applyAll(null)}
-            style={{ color: 'rgb(var(--cb-fg) / 0.55)' }}>Take off all</button>
+        <span className="text-[10.5px] tabular-nums" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>
+          {some ? `${brandedPicked} of ${selected.length} selected branded` : `${b.branded} of ${total} branded`}
+        </span>
+        {brandedPicked > 0 && (
+          <button type="button" className="text-[10.5px] font-semibold hover:underline" disabled={!!b.busy} onClick={() => (some ? b.applyTo(selected, null) : b.applyAll(null))}
+            style={{ color: 'rgb(var(--cb-fg) / 0.55)' }}>{some ? 'Take off selected' : 'Take off all'}</button>
         )}
         {b.note && <span role={b.note.bad ? 'alert' : 'status'} className="text-[10.5px] truncate" style={{ color: b.note.bad ? '#f87171' : '#c8ff00' }}>{b.note.text}</span>}
       </div>

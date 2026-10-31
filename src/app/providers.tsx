@@ -4,6 +4,7 @@ import { SessionProvider, useSession } from 'next-auth/react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useEffect } from 'react'
 import { PUBLIC_PATHS } from '@/lib/publicPaths'
+import { BrandKitDialogHost } from '@/components/brand/BrandKitDialog'
 
 const AUTH_PAGES = ['/login', '/signup', '/verify-otp', '/forgot-password', '/reset-password']
 
@@ -32,6 +33,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <SessionProvider refetchInterval={60}>
       <SessionWatcher />
       {children}
+      {/* Brand kits, as a popup over any page (openBrandKits) */}
+      <BrandKitDialogHost />
     </SessionProvider>
   )
 }

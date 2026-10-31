@@ -1844,14 +1844,12 @@ body {
 .ebm-item[data-on] { color: var(--ed-text); font-weight: 600; }
 .ebm-tag { padding: 1px 5px; border-radius: 4px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ed-accent-text, #c8ff00); background: rgba(200,255,0,0.12); }
 .ebm-line { height: 1px; margin: 4px 2px; background: rgb(var(--ed-fg) / 0.1); }
-.ebm-added { position: absolute; right: 0; top: calc(100% + 6px); z-index: 80; max-width: 320px; display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 12px; border-radius: 10px; font-size: 12px; color: var(--ed-text); background: var(--ed-panel); box-shadow: 0 0 0 1px rgba(200,255,0,0.35), 0 10px 26px rgba(0,0,0,0.4); }
-.ebm-added button { flex-shrink: 0; height: 24px; padding: 0 9px; border-radius: 7px; font-size: 11.5px; font-weight: 700; color: #0a0a0a; background: #c8ff00; }
 @media (max-width: 900px) { .ebm-name { display: none; } .ebm-pill { padding: 0 8px; } }
 /* ── Making a brand in a minute (components/brand/BrandMaker.tsx): the three ways in, then the card ── */
 .bm-ways { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .bm-way { display: flex; flex-direction: column; gap: 3px; padding: 12px; border-radius: 12px; text-align: left; background: rgb(var(--ed-fg) / 0.04); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.1); transition: background .15s, box-shadow .15s; }
 .bm-way:hover { background: rgb(var(--ed-fg) / 0.07); }
-.bm-way[data-on] { background: rgba(200,255,0,0.08); box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.55); }
+.bm-way[data-on] { background: rgba(200,255,0,0.04); box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.275); }
 .bm-way:focus-visible, .bm-chip:focus-visible, .bm-swatch:focus-visible, .bm-offer:focus-visible, .bm-drop:focus-visible { outline: 2px solid rgba(200,255,0,0.7); outline-offset: 2px; }
 .bm-way-name { font-size: 13px; font-weight: 700; color: var(--ed-text); }
 .bm-way-about { font-size: 11px; line-height: 1.35; color: rgb(var(--ed-fg) / 0.5); }
@@ -1865,7 +1863,7 @@ body {
 .bm-drop:hover:not(:disabled) { border-color: rgba(200,255,0,0.6); }
 .bm-chip { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: rgb(var(--ed-fg) / 0.78); background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.1); }
 .bm-chip:hover { color: var(--ed-text); }
-.bm-chip[data-on] { color: var(--ed-text); background: rgba(200,255,0,0.1); box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.55); }
+.bm-chip[data-on] { color: var(--ed-text); background: rgba(200,255,0,0.05); box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.275); }
 .bm-chip-dot { width: 10px; height: 10px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.25); }
 .bm-card { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .bm-found { grid-column: 1 / -1; margin: 0; font-size: 12px; font-weight: 600; color: var(--ed-accent-text, #c8ff00); }
@@ -1879,7 +1877,7 @@ body {
 .bm-quiet:hover { text-decoration: underline; }
 .bm-swatch { display: block; width: 40px; height: 40px; border-radius: 12px; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.2); transition: transform .12s; }
 .bm-swatch:hover { transform: translateY(-1px); }
-.bm-swatch[data-on] { outline: 2px solid #c8ff00; outline-offset: 2px; }
+.bm-swatch[data-on] { outline: 2px solid rgba(200,255,0,0.5); outline-offset: 2px; }
 .bm-swatch-add { display: grid; place-items: center; font-size: 18px; color: rgb(var(--ed-fg) / 0.6); background: transparent; box-shadow: inset 0 0 0 1.5px rgb(var(--ed-fg) / 0.2); }
 .bm-swatch-x { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; font-size: 11px; line-height: 1; color: #fff; background: #111; box-shadow: 0 0 0 1px rgb(var(--ed-fg) / 0.3); opacity: 0; transition: opacity .12s; }
 .group:hover > .bm-swatch-x, .bm-swatch-x:focus-visible { opacity: 1; }
@@ -3372,8 +3370,8 @@ html .editor-theme .ed-body .ed-player .ed-play:focus-visible .ed-play-ring { fi
 .cbb-pick-item[aria-selected="true"] { font-weight: 700; color: var(--cb-text); }
 .cbb-pick-check { flex-shrink: 0; color: var(--cb-text); }
 .cbb-pick-foot { margin-top: 4px; padding: 6px 9px 3px; border-top: 1px solid rgb(var(--cb-fg) / 0.08); }
-.cbb-pick-foot a { font-size: 11.5px; font-weight: 600; color: rgb(var(--cb-fg) / 0.55); text-decoration: none; }
-.cbb-pick-foot a:hover { color: var(--cb-text); }
+.cbb-pick-foot a, .cbb-pick-foot button { font-size: 11.5px; font-weight: 600; color: rgb(var(--cb-fg) / 0.55); text-decoration: none; }
+.cbb-pick-foot a:hover, .cbb-pick-foot button:hover { color: var(--cb-text); }
 @media (prefers-reduced-motion: reduce) { .cbb-pick-list { animation: none; } }
 
 /* ══ Clip board, premium (user, 2026-10-28) — both modes, the look only:
@@ -3653,9 +3651,9 @@ html[data-theme="light"] .tl2-addmenu-ico { background: linear-gradient(180deg, 
 /* ══ Brand maker, quieter (user, 2026-10-29: "decrease the usage of palet colour… use it for borders to highlight,
    no need of whole box in that colour"): the picked way in, the picked style and Make my brand are told by a lime
    edge on the dark surface — no lime fills; buttons stay inside their tiles ══ */
-.bm-way[data-on] { background: rgb(var(--ed-fg) / 0.04); box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.7); }
+.bm-way[data-on] { background: rgb(var(--ed-fg) / 0.04); box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.35); }
 .bm-way[data-on] .bm-way-name { color: var(--ed-text); }
-.bm-chip[data-on] { background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.7); }
+.bm-chip[data-on] { background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.35); }
 .bs-primary.bm-go {
   color: var(--ed-text); background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.75);
   transition: background-color .15s, box-shadow .15s;
@@ -3665,7 +3663,7 @@ html[data-theme="light"] .tl2-addmenu-ico { background: linear-gradient(180deg, 
 .bm-found { color: rgb(var(--ed-fg) / 0.8); }
 .bm-btn { white-space: nowrap; transition: background-color .15s; }
 .bm-btn:hover:not(:disabled) { background: rgb(var(--ed-fg) / 0.13); }
-html[data-theme="light"] .bm-way[data-on], html[data-theme="light"] .bm-chip[data-on] { box-shadow: inset 0 0 0 1.5px #8fc400; }
+html[data-theme="light"] .bm-way[data-on], html[data-theme="light"] .bm-chip[data-on] { box-shadow: inset 0 0 0 1.5px rgba(143, 196, 0, 0.5); }
 html[data-theme="light"] .bs-primary.bm-go { box-shadow: inset 0 0 0 1.5px #8fc400; }
 
 /* ══ The tool rail, using its height (user, 2026-10-29: "we have lot of space"): each tool its icon with its name
@@ -3800,3 +3798,142 @@ html[data-theme="light"] .editor-theme .ed-autobtn {
   .ed-autobtn-go, .ed-autobtn-go::after { animation: none; }
   .ed-autobtn:not(:disabled):hover .ed-autobtn-spark { transform: none; }
 }
+
+/* ── The Brand menu (user, 2026-10-31: "keep it properly, an animation when switching, Edit on the picked kit's
+   row"): it drops in; the kit that's on has a lime bar and tint, its ✓ and Edit pop in; the row just picked
+   pulses its colours; the top pill slides the new kit in. EditorBrandMenu ── */
+.ebm-menu { animation: ebm-in .16s cubic-bezier(.2, .8, .2, 1); transform-origin: top right; gap: 2px; }
+@keyframes ebm-in { from { opacity: 0; transform: translateY(-4px) scale(.97); } }
+.ebm-row { position: relative; display: flex; align-items: center; gap: 4px; border-radius: 8px; transition: background-color .2s ease; }
+.ebm-row[data-on] { background: rgba(200, 255, 0, 0.07); box-shadow: inset 2px 0 0 #c8ff00; }
+.ebm-row[data-on] > .ebm-item:hover { background: transparent; }
+.ebm-row .ebm-item { background: transparent; }
+.ebm-check { color: var(--ed-accent-text); font-weight: 700; animation: ebm-pop .32s cubic-bezier(.34, 1.56, .64, 1); }
+.ebm-row[data-picked] .ebm-dots i { animation: ebm-dot .45s cubic-bezier(.34, 1.56, .64, 1); }
+.ebm-edit {
+  flex-shrink: 0; height: 24px; margin-right: 4px; padding: 0 8px; display: inline-flex; align-items: center; gap: 5px;
+  border-radius: 7px; font-size: 11px; font-weight: 600; color: rgb(var(--ed-fg) / 0.85);
+  background: rgb(var(--ed-fg) / 0.08); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.12);
+  transition: background-color .15s ease, color .15s ease; animation: ebm-pop .32s cubic-bezier(.34, 1.56, .64, 1);
+}
+.ebm-edit:hover { background: rgb(var(--ed-fg) / 0.14); color: var(--ed-text); }
+/* (hidden until the kit's row is pointed at or reached with the keyboard — user, 2026-10-31) */
+.ebm-row .ebm-edit { opacity: 0; transform: translateX(4px); pointer-events: none; animation: none; transition: opacity .15s ease, transform .15s ease, background-color .15s ease, color .15s ease; }
+.ebm-row:hover .ebm-edit, .ebm-row:focus-within .ebm-edit { opacity: 1; transform: none; pointer-events: auto; }
+@media (hover: none) { .ebm-row .ebm-edit { opacity: 1; transform: none; pointer-events: auto; } }
+.ebm-edit:focus-visible { outline: 2px solid rgba(200, 255, 0, 0.7); outline-offset: 2px; }
+.ebm-swap { display: inline-flex; align-items: center; gap: 7px; min-width: 0; animation: ebm-swap .32s cubic-bezier(.2, .8, .2, 1); }
+@keyframes ebm-pop { 0% { opacity: 0; transform: scale(.5); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes ebm-dot { 0%, 100% { transform: scale(1); } 45% { transform: scale(1.35); } }
+@keyframes ebm-swap { from { opacity: 0; transform: translateY(5px); } }
+@media (prefers-reduced-motion: reduce) {
+  .ebm-menu, .ebm-check, .ebm-edit, .ebm-swap, .ebm-row[data-picked] .ebm-dots i { animation: none; }
+}
+
+/* ── Brand kits as a popup (user, 2026-10-31; BrandKitDialog): clearly a window over the page — the page shows
+   around it, dimmed and blurred; a rounded window with a fine edge and a deep shadow, its own title bar
+   (Brand kits · ✕), your kits on the left and the kit's editing panel beside them. It drops in ── */
+.bkd-overlay { position: fixed; inset: 0; z-index: 300; display: flex; align-items: center; justify-content: center;
+  padding: clamp(14px, 4vh, 44px) clamp(14px, 4vw, 64px);
+  background: rgba(0, 0, 0, 0.42); backdrop-filter: blur(10px) saturate(.9); -webkit-backdrop-filter: blur(10px) saturate(.9); animation: bkd-fade .2s ease-out; }
+.bkd-box { position: relative; width: 100%; max-width: 1320px; height: 100%; max-height: 880px; display: flex; flex-direction: column; overflow: hidden;
+  border-radius: 20px; background: var(--ed-panel, #0b0b0c);
+  box-shadow: 0 0 0 1px rgb(var(--ed-fg) / 0.14), 0 1px 0 rgb(var(--ed-fg) / 0.08) inset, 0 40px 100px -24px rgba(0, 0, 0, 0.85), 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+  animation: bkd-in .26s cubic-bezier(.2, .8, .2, 1); }
+/* (a shade lighter than the page in dark mode, so the window sits on top of it, not sunk into it) */
+html:not([data-theme="light"]) .bkd-box { --ed-panel: #121214; }
+.bkd-head { flex-shrink: 0; height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 16px; border-bottom: 1px solid rgb(var(--ed-fg) / 0.08); background: rgb(var(--ed-fg) / 0.025); }
+.bkd-head-ico { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--ed-accent-text); background: rgba(200, 255, 0, 0.08); box-shadow: inset 0 0 0 1px rgba(200, 255, 0, 0.2); }
+.bkd-head-title { margin: 0; font-size: 14px; font-weight: 800; color: var(--ed-text); }
+.bkd-head-sub { font-size: 12px; color: rgb(var(--ed-fg) / 0.45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bkd-body { flex: 1; min-height: 0; display: flex; }
+.bkd-loading { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; font-size: 13px; color: rgb(var(--ed-fg) / 0.6); }
+.bkd-loading .bkd-spin { width: 34px; height: 34px; border-width: 3px; }
+.bkd-side { flex-shrink: 0; width: 248px; padding: 14px 12px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; border-right: 1px solid rgb(var(--ed-fg) / 0.06); }
+.bkd-side-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 4px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: rgb(var(--ed-fg) / 0.45); }
+.bkd-side-head span + span { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.bkd-kits { display: flex; flex-direction: column; gap: 6px; }
+.bkd-kit { border-radius: 12px; background: rgb(var(--ed-fg) / 0.04); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.08); transition: background-color .2s, box-shadow .2s; }
+.bkd-kit[data-on] { background: rgba(200, 255, 0, 0.04); box-shadow: inset 0 0 0 1px rgba(200, 255, 0, 0.3); }
+.bkd-kit-face { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 10px; text-align: left; border-radius: 12px; }
+.bkd-kit-face:hover { background: rgb(var(--ed-fg) / 0.04); }
+.bkd-kit-logo { width: 34px; height: 34px; flex-shrink: 0; display: grid; place-items: center; overflow: hidden; border-radius: 9px; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.12); }
+.bkd-kit-logo img { width: 100%; height: 100%; object-fit: cover; }
+.bkd-kit-logo b { font-size: 14px; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); }
+.bkd-kit-name { font-size: 13px; font-weight: 700; color: var(--ed-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bkd-kit-meta { font-size: 11px; color: rgb(var(--ed-fg) / 0.5); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bkd-dots { display: inline-flex; gap: 2px; flex-shrink: 0; }
+.bkd-dots i { width: 11px; height: 11px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.25); }
+.bkd-kit-foot { display: flex; align-items: center; gap: 8px; padding: 0 10px 8px; font-size: 11px; color: rgb(var(--ed-fg) / 0.7); }
+.bkd-tag { padding: 1px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ed-accent-text); background: rgba(200, 255, 0, 0.07); }
+.bkd-link { font-size: 11px; font-weight: 600; color: rgb(var(--ed-fg) / 0.75); }
+.bkd-link:hover { color: var(--ed-text); text-decoration: underline; }
+.bkd-danger { color: #f87171; }
+.bkd-icon { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; color: rgb(var(--ed-fg) / 0.6); }
+.bkd-icon:hover { color: #f87171; background: rgba(239, 68, 68, 0.1); }
+.bkd-new { height: 36px; border-radius: 10px; font-size: 12.5px; font-weight: 700; color: var(--ed-text); background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.12); transition: background-color .15s; }
+.bkd-new:hover:not(:disabled) { background: rgb(var(--ed-fg) / 0.1); }
+.bkd-new:disabled { opacity: .5; cursor: default; }
+.bkd-btn { height: 30px; padding: 0 12px; border-radius: 8px; font-size: 12px; font-weight: 700; color: #0a0a0a; background: #c8ff00; }
+.bkd-btn-lg { height: 40px; padding: 0 20px; font-size: 13px; }
+.bkd-btn:disabled { opacity: .6; }
+.bkd-note { font-size: 11px; line-height: 1.5; color: rgb(var(--ed-fg) / 0.55); }
+.bkd-note a { color: var(--ed-accent-text); font-weight: 700; }
+.bkd-error { font-size: 11.5px; color: #fca5a5; }
+.bkd-invites { display: flex; flex-direction: column; gap: 6px; }
+.bkd-invite { display: flex; flex-direction: column; gap: 2px; padding: 10px; border-radius: 12px; font-size: 11px; color: rgb(var(--ed-fg) / 0.6); background: rgb(var(--ed-fg) / 0.05); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.1); }
+.bkd-invite strong { font-size: 12.5px; color: var(--ed-text); }
+.bkd-invite[data-linked] { box-shadow: inset 0 0 0 1px rgba(200, 255, 0, 0.35); }
+.bkd-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.bkd-main > * { flex: 1; min-height: 0; }
+.bkd-center { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 24px; font-size: 13px; color: rgb(var(--ed-fg) / 0.6); }
+.bkd-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(200, 255, 0, 0.22); border-top-color: #c8ff00; animation: spin .8s linear infinite; }
+.bkd-close { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; color: rgb(var(--ed-fg) / 0.7); background: rgb(var(--ed-fg) / 0.06); }
+.bkd-close:hover { color: var(--ed-text); background: rgb(var(--ed-fg) / 0.12); }
+@keyframes bkd-fade { from { opacity: 0; } }
+@keyframes bkd-in { from { opacity: 0; transform: translateY(10px) scale(.985); } }
+@media (max-width: 760px) { .bkd-overlay { padding: 8px; } .bkd-box { border-radius: 14px; max-height: none; } .bkd-side { width: 200px; } .bkd-head-sub { display: none; } }
+@media (prefers-reduced-motion: reduce) { .bkd-overlay, .bkd-box { animation: none; } }
+
+/* ── Brand kits in the clip board's top bar (user, 2026-10-31): the dashboard's pill, in the clip board's colours ── */
+.cb-brand-link { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
+  color: var(--cb-text); background: rgb(var(--cb-fg) / 0.06); border: 1px solid rgb(var(--cb-fg) / 0.12); white-space: nowrap; transition: border-color .15s, background-color .15s; }
+.cb-brand-link:hover { background: rgb(var(--cb-fg) / 0.1); border-color: rgb(var(--cb-fg) / 0.22); }
+.cb-brand-link svg { color: #c8ff00; }
+[data-theme="light"] .cb-brand-link svg { color: #5a7a00; }
+@media (max-width: 640px) { .cb-brand-link span { display: none; } .cb-brand-link { padding: 0 10px; } }
+
+/* ── Transition tiles with the clip's own pictures (user, 2026-10-31): shot A and shot B are two frames of the video
+   being edited (TransitionsPanel frames), not grey and white boxes — every tile's loop plays between them. A little
+   taller, so the picture reads. (Fade black / white keep their black or white middle) ── */
+/* (the same height before the pictures are in, so the tiles don't jump when they arrive) */
+.tr-kinds .tr-demo { height: 38px; }
+.tr-kinds[data-frames] .tr-demo .tr-a { background: var(--tr-a) center / cover no-repeat; }
+.tr-kinds[data-frames] .tr-demo .tr-b { background: var(--tr-b) center / cover no-repeat; }
+.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo:is([data-kind="fadeblack"], [data-kind="fadewhite"]) i { opacity: 1; }
+.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo[data-kind="fadeblack"] { background: #000; }
+.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo[data-kind="fadeblack"] .tr-a { -webkit-mask-image: linear-gradient(90deg, #000 20%, transparent 45%); mask-image: linear-gradient(90deg, #000 20%, transparent 45%); }
+.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo[data-kind="fadeblack"] .tr-b { opacity: 1; -webkit-mask-image: linear-gradient(90deg, transparent 55%, #000 80%); mask-image: linear-gradient(90deg, transparent 55%, #000 80%); }
+.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo[data-kind="fadewhite"] { background: #fff; }
+.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo[data-kind="fadewhite"] .tr-a { -webkit-mask-image: linear-gradient(90deg, #000 20%, transparent 45%); mask-image: linear-gradient(90deg, #000 20%, transparent 45%); }
+.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo[data-kind="fadewhite"] .tr-b { opacity: 1; -webkit-mask-image: linear-gradient(90deg, transparent 55%, #000 80%); mask-image: linear-gradient(90deg, transparent 55%, #000 80%); }
+
+/* ── Subjects: "Auto format as Vertical | Cuts" (user, 2026-10-31: "highlight it properly"): two equal options on a
+   dark track, a soft lime pill sliding under the chosen one with a faint glow, its text and icon lime; the other
+   plainly readable. SubjectsPanel .sp-mode ── */
+.sp-mode { position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 10px;
+  background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.1); }
+.sp-mode-pill { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 7px;
+  background: linear-gradient(135deg, rgba(200, 255, 0, 0.22), rgba(200, 255, 0, 0.08));
+  box-shadow: inset 0 0 0 1px rgba(200, 255, 0, 0.5), 0 2px 10px -3px rgba(200, 255, 0, 0.45);
+  transition: transform .28s cubic-bezier(.34, 1.3, .64, 1); }
+.sp-mode[data-mode="cuts"] .sp-mode-pill { transform: translateX(100%); }
+.sp-mode-opt { position: relative; z-index: 1; height: 26px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border-radius: 7px; font-size: 11.5px; font-weight: 600; color: rgb(var(--ed-fg) / 0.65); transition: color .2s ease; }
+.sp-mode-opt:hover:not(:disabled):not([data-on]) { color: var(--ed-text); }
+.sp-mode-opt[data-on] { color: var(--ed-accent-text); font-weight: 700; }
+.sp-mode-opt:focus-visible { outline: 2px solid rgba(200, 255, 0, 0.6); outline-offset: 1px; }
+.sp-mode[data-off] { opacity: .55; }
+.sp-mode-opt:disabled { cursor: default; }
+html[data-theme="light"] .sp-mode-pill { background: linear-gradient(135deg, rgba(150, 200, 0, 0.28), rgba(150, 200, 0, 0.1)); box-shadow: inset 0 0 0 1px rgba(110, 150, 0, 0.55); }
+@media (prefers-reduced-motion: reduce) { .sp-mode-pill { transition: none; } }

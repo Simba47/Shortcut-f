@@ -294,20 +294,22 @@ export function SubjectsPanel(p: Props) {
             {pending === 'stop' ? 'Stopping… this can take a few seconds.' : 'Starting… the worker is getting it ready, this can take a few seconds.'}
           </p>
         )}
-        {/* How Auto format lays the scenes (user, 2026-10-28): Vertical — the speaker first; Cuts — the Rulebook's formats */}
+        {/* How Auto format lays the scenes (user, 2026-10-28): Vertical — the speaker first; Cuts — the Rulebook's formats.
+            (2026-10-31: "highlight it properly") a soft lime pill slides under the one chosen, each with its icon */}
         {canAct && (
-          <div className="-mt-2 flex items-center gap-2">
-            <span className="text-[11px]" style={{ color: muted }}>Auto format as</span>
-            <div role="radiogroup" aria-label="Auto format as" className="flex p-0.5 rounded-lg" style={{ background: 'rgb(var(--ed-fg) / 0.07)' }}>
+          <div className="-mt-2 flex items-center gap-2.5">
+            <span className="text-[11.5px] font-medium whitespace-nowrap" style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>Auto format as</span>
+            <div role="radiogroup" aria-label="Auto format as" className="sp-mode" data-mode={p.autoMode} data-off={working || undefined}>
+              <span className="sp-mode-pill" aria-hidden="true" />
               {(['vertical', 'cuts'] as const).map(m => (
                 <button key={m} type="button" role="radio" aria-checked={p.autoMode === m} disabled={working} onClick={() => p.onAutoMode(m)}
                   title={m === 'vertical'
                     ? 'Every scene Vertical, on whoever is talking: the view cuts to each speaker, at least 2 seconds on each. Listeners can be out of the picture.'
                     : 'Each scene gets its format from who is in it (Vertical, Split, Trio, or the whole picture), with everyone kept in.'}
-                  className="h-6 px-2.5 rounded-md text-[11px] font-semibold transition-colors disabled:cursor-default disabled:opacity-60"
-                  // (user, 2026-10-31) the chosen one in a soft touch of the palette colour — a light tint, its text and a
-                  // fine edge — lighter than the solid lime it had before
-                  style={p.autoMode === m ? { background: 'rgba(200,255,0,0.14)', color: 'var(--ed-accent-text)', boxShadow: 'inset 0 0 0 1px rgba(200,255,0,0.45)' } : { color: 'rgb(var(--ed-fg) / 0.6)' }}>
+                  className="sp-mode-opt" data-on={p.autoMode === m || undefined}>
+                  {m === 'vertical'
+                    ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M11 18.5h2" /></svg>
+                    : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.6" /><circle cx="6" cy="18" r="2.6" /><path d="M8.2 7.6L20 18M8.2 16.4L20 6" /></svg>}
                   {m === 'vertical' ? 'Vertical' : 'Cuts'}
                 </button>
               ))}
@@ -352,11 +354,20 @@ export function SubjectsPanel(p: Props) {
               {cur.people >= 2 ? (
                 // Several people together are one group: one card, one button (the layout and views are the ones on screen)
                 <>
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center">
-                      {cur.faces.map((f, k) => <FaceDot key={`${curAt}-${k}`} videoUrl={p.videoUrl} at={cur.at} box={f.box} first={k === 0} />)}
+                  {/* (user, 2026-10-31) the more faces, the smaller each one (6 at most, then "+N"), the count on one line,
+                      and Mark as group on a line of its own when the card has no room beside them — nothing cut off */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-3">
+                    <div className="flex items-center shrink-0">
+                      {cur.faces.slice(0, MAX_FACE_DOTS).map((f, k) => <FaceDot key={`${curAt}-${k}`} videoUrl={p.videoUrl} at={cur.at} box={f.box} first={k === 0} size={faceDotSize(cur.faces.length)} />)}
+                      {cur.faces.length > MAX_FACE_DOTS && (
+                        <span className="rounded-full shrink-0 flex items-center justify-center text-[10.5px] font-bold tabular-nums"
+                          style={{ width: faceDotSize(cur.faces.length), height: faceDotSize(cur.faces.length), marginLeft: -Math.round(faceDotSize(cur.faces.length) * 0.28),
+                            color: 'var(--ed-text)', background: 'rgb(var(--ed-fg) / 0.12)', boxShadow: '0 0 0 2px #111112' }}>
+                          +{cur.faces.length - MAX_FACE_DOTS}
+                        </span>
+                      )}
                     </div>
-                    <span className="text-[14.5px] font-semibold text-[var(--ed-text)]">{cur.people} angles</span>
+                    <span className="text-[14.5px] font-semibold text-[var(--ed-text)] whitespace-nowrap">{cur.people} angles</span>
                     {/* Mark as group: small, at the card's top right (user, 2026-10-30) */}
                     {!cur.group && (
                       <button type="button" onClick={() => { p.onMarkShot(); setMarked(true) }} data-marked={marked || undefined}
@@ -455,7 +466,7 @@ export function SubjectsPanel(p: Props) {
                   </span>
                   {s.status === 'running' && (
                     <span className="h-0.5 rounded-full overflow-hidden" style={{ background: 'rgb(var(--ed-fg) / 0.08)' }}>
-                      <span className="block h-full rounded-full transition-[width] duration-500" style={{ width: `${Math.max(5, s.progress)}%`, background: s.color }} />
+                      <span className="block h-full rounded-full transition-[width] duration-500" style={{ width: `${Math.max(5, s.progress)}%`, background: 'rgb(var(--ed-fg) / 0.7)' }} />
                     </span>
                   )}
                 </div>
@@ -543,7 +554,7 @@ function SceneThumb({ angle: a, no, current, videoUrl, onOpen }: { angle: AngleI
         // eslint-disable-next-line @next/next/no-img-element
         && <img src={picture} alt="" className="w-full h-full object-cover" />}
       {/* (the ring over the picture) */}
-      <span className="absolute inset-0 rounded-lg pointer-events-none" style={{ boxShadow: current ? 'inset 0 0 0 2px #c8ff00' : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }} />
+      <span className="absolute inset-0 rounded-lg pointer-events-none" style={{ boxShadow: current ? 'inset 0 0 0 2px rgba(200,255,0,0.5)' : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }} />
       <span className="absolute left-1 top-1 min-w-[15px] h-[15px] px-1 rounded text-[9.5px] font-bold leading-[15px] text-center" style={{ background: 'rgba(0,0,0,0.7)', color: '#fff' }}>{no}</span>
       {a.set && (
         <span className="absolute right-1 bottom-1 w-[15px] h-[15px] rounded-full flex items-center justify-center" style={{ background: '#c8ff00' }}>
@@ -555,13 +566,18 @@ function SceneThumb({ angle: a, no, current, videoUrl, onOpen }: { angle: AngleI
 }
 
 /** One face of a group card: a small round picture, overlapping the one before it */
-function FaceDot({ videoUrl, at, box: b, first }: { videoUrl: string | null; at: number; box: AngleItem['faces'][number]['box']; first: boolean }) {
+/** A group's faces: at most this many shown, then "+N" */
+const MAX_FACE_DOTS = 6
+/** A group's face size by how many there are: big for two, smaller step by step, so the card has room */
+function faceDotSize(n: number) { return n <= 2 ? 40 : n === 3 ? 34 : n === 4 ? 30 : n <= 6 ? 26 : 22 }
+
+function FaceDot({ videoUrl, at, box: b, first, size = 40 }: { videoUrl: string | null; at: number; box: AngleItem['faces'][number]['box']; first: boolean; size?: number }) {
   // A little room around the face
   const x = Math.max(0, b.x - b.w * 0.25), y = Math.max(0, b.y - b.h * 0.3)
   const url = useFaceAt(videoUrl, at, { x, y, w: Math.min(1 - x, b.w * 1.5), h: Math.min(1 - y, b.h * 1.5) })
   return (
-    <span className="w-10 h-10 rounded-full overflow-hidden shrink-0" aria-hidden="true"
-      style={{ marginLeft: first ? 0 : -8, background: 'rgb(var(--ed-fg) / 0.1)', boxShadow: '0 0 0 2px #111112' }}>
+    <span className="rounded-full overflow-hidden shrink-0" aria-hidden="true"
+      style={{ width: size, height: size, marginLeft: first ? 0 : -Math.round(size * 0.28), background: 'rgb(var(--ed-fg) / 0.1)', boxShadow: '0 0 0 2px #111112' }}>
       {url
         // eslint-disable-next-line @next/next/no-img-element
         && <img src={url} alt="" className="w-full h-full object-cover" />}
@@ -578,8 +594,9 @@ function AngleFace({ videoUrl, at, face: f, onMark, saving }: { videoUrl: string
   const url = useFaceAt(videoUrl, at, box)
   const picture = (
     <span className="relative w-14 h-14 rounded-full overflow-hidden flex items-center justify-center text-[17px] font-bold"
+      // (marked: a plain soft-white ring, not the person's colour — user, 2026-10-31: "keep the colour simple")
       style={f.subject
-        ? { background: f.subject.color, color: '#111', boxShadow: `0 0 0 2.5px ${f.subject.color}, 0 0 0 5px rgb(var(--ed-fg) / 0.06)` }
+        ? { background: 'rgb(var(--ed-fg) / 0.1)', color: 'var(--ed-text)', boxShadow: '0 0 0 2px rgb(var(--ed-fg) / 0.55), 0 0 0 4.5px rgb(var(--ed-fg) / 0.06)' }
         : { background: 'rgb(var(--ed-fg) / 0.08)', color: muted, boxShadow: '0 0 0 1.5px rgb(var(--ed-fg) / 0.22)' }}>
       {url
         // eslint-disable-next-line @next/next/no-img-element
@@ -594,20 +611,25 @@ function AngleFace({ videoUrl, at, face: f, onMark, saving }: { videoUrl: string
         <span className="relative rounded-full">
           {picture}
           {/* Added by hand, being looked for: a ring turning round them (user, 2026-10-29: + Add showed nothing) */}
-          {f.pending && <span className="absolute -inset-[3px] rounded-full animate-spin motion-reduce:animate-none" style={{ border: '2.5px solid rgba(200,255,0,0.18)', borderTopColor: '#c8ff00' }} />}
+          {f.pending && <span className="absolute -inset-[3px] rounded-full animate-spin motion-reduce:animate-none" style={{ border: '2.5px solid rgb(var(--ed-fg) / 0.14)', borderTopColor: 'rgb(var(--ed-fg) / 0.85)' }} />}
         </span>
-        <span className="max-w-full truncate text-[11px] font-bold" style={{ color: f.subject.color }}>{f.pending ? 'Finding…' : f.subject.label}</span>
+        {/* (the name in white; their colour only as a small dot — it matches their box on the video) */}
+        <span className="max-w-full flex items-center gap-1 text-[11px] font-bold" style={{ color: 'var(--ed-text)' }}>
+          {!f.pending && <i className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: f.subject.color }} aria-hidden="true" />}
+          <span className="truncate">{f.pending ? 'Finding…' : f.subject.label}</span>
+        </span>
       </span>
     )
   }
   return (
     <button type="button" onClick={onMark} disabled={saving} aria-busy={saving} title={saving ? 'Marking…' : 'Mark this person'} className="group/face flex flex-col items-center gap-1.5 w-14">
-      <span className="relative rounded-full transition-shadow group-hover/face:shadow-[0_0_0_3px_rgba(200,255,0,0.6)]">
+      <span className="relative rounded-full transition-shadow group-hover/face:shadow-[0_0_0_3px_rgba(200,255,0,0.3)]">
         {picture}
-        {/* Being saved: a lime ring turning round the face */}
-        {saving && <span className="absolute -inset-[3px] rounded-full animate-spin motion-reduce:animate-none" style={{ border: '2.5px solid rgba(200,255,0,0.18)', borderTopColor: '#c8ff00' }} />}
+        {/* Being saved: a soft white ring turning round the face (not lime — user, 2026-10-31) */}
+        {saving && <span className="absolute -inset-[3px] rounded-full animate-spin motion-reduce:animate-none" style={{ border: '2.5px solid rgb(var(--ed-fg) / 0.14)', borderTopColor: 'rgb(var(--ed-fg) / 0.85)' }} />}
       </span>
-      <span className="text-[11px] font-semibold" style={{ color: 'var(--ed-accent-text)' }}>{saving ? 'Marking…' : 'Mark'}</span>
+      {/* (white, not lime — user, 2026-10-31) */}
+      <span className="text-[11px] font-semibold" style={{ color: 'var(--ed-text)' }}>{saving ? 'Marking…' : 'Mark'}</span>
     </button>
   )
 }
@@ -619,26 +641,34 @@ function AddFace({ marking, onClick }: { marking: boolean; onClick: () => void }
       title={marking ? 'Click the person on the video (Esc to stop)' : 'Someone missing? Click here, then click them on the video'}
       className="group/add flex flex-col items-center gap-1.5 w-14">
       <span className={`w-14 h-14 rounded-full flex items-center justify-center transition-colors ${marking ? 'animate-pulse motion-reduce:animate-none' : ''}`}
-        style={{ border: `1.5px dashed ${marking ? '#c8ff00' : 'rgb(var(--ed-fg) / 0.28)'}`, color: marking ? 'var(--ed-accent-text)' : muted }}>
+        style={{ border: `1.5px dashed ${marking ? 'rgba(200,255,0,0.5)' : 'rgb(var(--ed-fg) / 0.28)'}`, color: marking ? 'var(--ed-text)' : muted }}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
       </span>
-      <span className="text-[11px] font-semibold group-hover/add:text-[var(--ed-text)]" style={{ color: marking ? 'var(--ed-accent-text)' : muted }}>
+      <span className="text-[11px] font-semibold group-hover/add:text-[var(--ed-text)]" style={{ color: marking ? 'var(--ed-text)' : muted }}>
         {marking ? 'Click video' : 'Add'}
       </span>
     </button>
   )
 }
 
-/** The person's face (cut from the video where they were marked) in their colour's ring; their initial until it's ready */
+/**
+ * The person's face (cut from the video where they were marked) in a plain soft-white ring; their initial until
+ * it's ready. Their colour only as a small dot on it (user, 2026-10-31: "keep that colour minimal") — it matches
+ * their box on the video
+ */
 function Avatar({ subject: s, videoUrl }: { subject: SubjectItem; videoUrl: string | null }) {
   const url = useFaceAt(videoUrl, s.face?.ms ?? null, s.face?.box ?? null)
   return (
-    <span className="shrink-0 w-8 h-8 rounded-full overflow-hidden flex items-center justify-center text-[12px] font-bold"
-      style={{ background: s.color, color: '#111', boxShadow: `0 0 0 2px ${s.color}` }}>
-      {url
-        // eslint-disable-next-line @next/next/no-img-element
-        ? <img src={url} alt={s.label} className="w-full h-full object-cover" />
-        : s.label.slice(0, 1).toUpperCase()}
+    <span className="relative shrink-0 w-8 h-8">
+      <span className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center text-[12px] font-bold"
+        style={{ background: 'rgb(var(--ed-fg) / 0.1)', color: 'var(--ed-text)', boxShadow: '0 0 0 1.5px rgb(var(--ed-fg) / 0.45)' }}>
+        {url
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={url} alt={s.label} className="w-full h-full object-cover" />
+          : s.label.slice(0, 1).toUpperCase()}
+      </span>
+      <i className="absolute -right-0.5 -bottom-0.5 w-2.5 h-2.5 rounded-full" aria-hidden="true"
+        style={{ background: s.color, boxShadow: '0 0 0 2px var(--ed-panel, #111)' }} />
     </span>
   )
 }

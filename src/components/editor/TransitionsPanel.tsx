@@ -138,7 +138,7 @@ const SAME_SHOT_TIP = 'Dissolve looks like a plain cut there. Pick Slide, Whip, 
  * With no joins yet the tiles still show: picking one splits the clip at the playhead and puts
  * that transition on the new join (onAddHere).
  */
-export function TransitionsPanel({ joins, transitions, currentTimeMs, canAddHere, onAddHere, onSet, onPreview, onSeek, savedAsDissolve, focusJoin, onShownJoin }: {
+export function TransitionsPanel({ joins, transitions, currentTimeMs, canAddHere, onAddHere, onSet, onPreview, onSeek, savedAsDissolve, focusJoin, onShownJoin, frameA, frameB, grabFrame }: {
   joins: TransitionJoin[]
   transitions: Transition[]
   currentTimeMs: number
@@ -157,7 +157,18 @@ export function TransitionsPanel({ joins, transitions, currentTimeMs, canAddHere
   focusJoin?: { id: string; n: number } | null
   /** The cut the controls are on (its section id; null: none), so the timeline can mark it */
   onShownJoin?: (afterId: string | null) => void
+  /** Two pictures of the clip being edited (read as the editor opens): the tiles play their transition between
+   *  them, not grey boxes (user, 2026-10-31) */
+  frameA?: string | null
+  frameB?: string | null
+  /** The picture on the preview right now, at once: the tiles show it until the two pictures are in, so they
+   *  are never blank boxes (user, 2026-10-31: "a black blank, then the content after some time") */
+  grabFrame?: () => string | null
 }) {
+  const [instant] = useState(() => ((!frameA || !frameB) && grabFrame ? grabFrame() : null))
+  const shotA = frameA ?? instant
+  const shotB = frameB ?? frameA ?? instant
+  const frames = shotA && shotB ? { a: shotA, b: shotB } : null
   // The cut the controls are for (its section id): the one picked, else the one nearest the playhead
   const nearestJoin = () => [...joins].sort((a, b) => Math.abs(a.at - currentTimeMs) - Math.abs(b.at - currentTimeMs))[0]
   const [scope, setScope] = useState<string>(() => (focusJoin && joins.some(j => j.afterId === focusJoin.id) ? focusJoin.id : nearestJoin()?.afterId ?? ''))
@@ -204,7 +215,7 @@ export function TransitionsPanel({ joins, transitions, currentTimeMs, canAddHere
             </p>
           </div>
         </div>
-        <KindTiles picked={null} label="Add a transition at the playhead" disabled={!canAddHere} weak
+        <KindTiles frames={frames} picked={null} label="Add a transition at the playhead" disabled={!canAddHere} weak
           onPick={t => { if (t !== 'cut') onAddHere(t) }} />
         {canAddHere && <span className="tr-hint">This splits one shot in two, framed the same on both sides: {SAME_SHOT_TIP}</span>}
       </div>
@@ -279,7 +290,7 @@ export function TransitionsPanel({ joins, transitions, currentTimeMs, canAddHere
         </div>
       </div>
 
-      <KindTiles picked={picked} label={one ? `Transition at ${fmt(one.at)}` : 'Transition on every cut'} onPick={t => apply(t)}
+      <KindTiles frames={frames} picked={picked} label={one ? `Transition at ${fmt(one.at)}` : 'Transition on every cut'} onPick={t => apply(t)}
         weak={targets.every(j => j.sameShot)} />
       {/* the same transition on every cut: this cut's, with its length */}
       {one && joins.length > 1 && (() => {
@@ -375,7 +386,9 @@ function Flame() {
 }
 
 /** The tiles of every kind; `picked` is lit */
-function KindTiles({ picked, label, disabled, weak, onPick }: {
+function KindTiles({ picked, label, disabled, weak, onPick, frames }: {
+  /** Two pictures of the clip: shot A and shot B in every tile */
+  frames?: { a: string; b: string } | null
   picked: TransitionType | null
   label: string
   disabled?: boolean
@@ -401,7 +414,8 @@ function KindTiles({ picked, label, disabled, weak, onPick }: {
   // (an older kind shows only while it is the one picked, so the clip's own choice stays visible)
   const shown = TRANSITION_KINDS.filter(k => !k.hidden || picked === k.type)
   return (
-    <div className="tr-kinds" role="radiogroup" aria-label={label}>
+    <div className="tr-kinds" role="radiogroup" aria-label={label} data-frames={frames ? '' : undefined}
+      style={frames ? { ['--tr-a' as string]: `url("${frames.a}")`, ['--tr-b' as string]: `url("${frames.b}")` } : undefined}>
       <span className="tr-label">Basic</span>
       <div className="tr-grid">{shown.filter(k => !k.fresh).map(tile)}</div>
       <span className="tr-label tr-label-hot"><Flame />Trending on Reels and Shorts</span>

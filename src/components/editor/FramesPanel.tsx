@@ -94,40 +94,55 @@ function msToLabel(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
-/** Mini diagram of a frame: each area where it sits — slots as tinted tiles (round where they are),
- *  text areas with text lines, the caption strip as a highlighted line, the sound wave as bars */
+/** Mini diagram of a frame: each area where it sits — slots as frosted-glass panes (round where they are; the main
+ *  video the brightest, with a small play mark), text areas with text lines, the caption strip as a fine lime line,
+ *  the sound wave as bars. (user, 2026-10-31: "looks odd, keep them premium" — no blue / green / pink blocks) */
 export function FrameThumb({ layout }: { layout: FrameLayout }) {
-  const tints = ['#60a5fa', '#34d399', '#f472b6', '#fbbf24']
+  // The panes from the main video down: each a little softer, so they read apart without colours
+  const panes = [
+    'linear-gradient(160deg, rgba(255,255,255,0.34), rgba(255,255,255,0.16))',
+    'linear-gradient(160deg, rgba(255,255,255,0.22), rgba(255,255,255,0.09))',
+    'linear-gradient(160deg, rgba(255,255,255,0.15), rgba(255,255,255,0.06))',
+    'linear-gradient(160deg, rgba(255,255,255,0.11), rgba(255,255,255,0.04))',
+  ]
   const base = frameBase(layout)
   return (
-    <div className="relative rounded-md overflow-hidden" style={{
-      width: 40, height: 71, border: '1px solid rgb(var(--ed-fg) / 0.12)',
-      background: base === 'blur' ? 'linear-gradient(160deg, #3b4252, #1f2937)' : base === 'band' ? '#2a2a33' : '#050505',
+    <div className="relative rounded-[7px] overflow-hidden" style={{
+      width: 40, height: 71,
+      background: base === 'blur'
+        ? 'radial-gradient(120% 70% at 50% 35%, #34343c 0%, #1a1a1f 70%)'
+        : base === 'band' ? 'linear-gradient(180deg, #202026, #141418)' : 'linear-gradient(180deg, #121215, #070708)',
+      boxShadow: 'inset 0 0 0 1px rgb(255 255 255 / 0.14), inset 0 1px 0 rgb(255 255 255 / 0.08), 0 6px 14px -8px rgb(0 0 0 / 0.9)',
     }}>
       {frameAreas(layout).map((a, i) => {
         const box: React.CSSProperties = { position: 'absolute', left: `${a.x * 100}%`, top: `${a.y * 100}%`, width: `${a.w * 100}%`, height: `${a.h * 100}%` }
         if (a.kind === 'band') return (
           <div key={i} className="flex flex-col items-center justify-center gap-[2px]"
             style={{ ...box, background: a.bg && a.bg !== 'none' ? a.bg : undefined, borderRadius: a.radius ? 3 : undefined }}>
-            <span className="block rounded-full" style={{ width: '70%', height: 2, background: a.color === '#000000' || a.color === '#111111' ? 'rgb(0 0 0 / 0.6)' : 'rgb(255 255 255 / 0.55)' }} />
-            {a.h > 0.08 && <span className="block rounded-full" style={{ width: '45%', height: 2, background: 'rgb(255 255 255 / 0.35)' }} />}
+            <span className="block rounded-full" style={{ width: '64%', height: 1.5, background: a.color === '#000000' || a.color === '#111111' ? 'rgb(0 0 0 / 0.55)' : 'rgb(255 255 255 / 0.6)' }} />
+            {a.h > 0.08 && <span className="block rounded-full" style={{ width: '40%', height: 1.5, background: 'rgb(255 255 255 / 0.3)' }} />}
           </div>
         )
         if (a.kind === 'caption') return (
           <div key={i} className="flex items-center justify-center" style={box}>
-            <span className="block rounded-full" style={{ width: '60%', height: 3, background: '#facc15' }} />
+            <span className="block rounded-full" style={{ width: '52%', height: 2, background: '#c8ff00', opacity: 0.85, boxShadow: '0 0 4px rgb(200 255 0 / 0.5)' }} />
           </div>
         )
         if (a.kind === 'wave') return (
           <div key={i} className="flex items-center justify-center gap-[1px]" style={box}>
-            {[3, 6, 4, 8, 5, 7, 3, 6].map((h, k) => <span key={k} style={{ width: 1.5, height: h, borderRadius: 1, background: a.color ?? '#c8ff00' }} />)}
+            {[3, 6, 4, 8, 5, 7, 3, 6].map((h, k) => <span key={k} style={{ width: 1.5, height: h, borderRadius: 1, background: 'rgb(255 255 255 / 0.55)' }} />)}
           </div>
         )
         return (
-          <div key={i} style={{
-            ...box, background: `${tints[a.slot % tints.length]}cc`, boxShadow: 'inset 0 0 0 1px #050505',
+          <div key={i} className="flex items-center justify-center" style={{
+            ...box, background: panes[a.slot % panes.length],
+            boxShadow: 'inset 0 0 0 1px rgb(255 255 255 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.2)',
             borderRadius: a.radius === 'circle' ? '50%' : a.radius ? 3 : 2,
-          }} />
+          }}>
+            {a.slot === 0 && a.w * a.h > 0.08 && (
+              <svg width="7" height="7" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l5 3-5 3z" fill="rgb(255 255 255 / 0.75)" /></svg>
+            )}
+          </div>
         )
       })}
     </div>

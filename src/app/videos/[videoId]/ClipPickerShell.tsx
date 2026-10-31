@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { AccountMenu } from '@/components/ui/account-menu'
 import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
+import { openBrandKits } from '@/components/brand/brandKitsEvents'
 import { BrandLoader, BrandLoaderScreen } from '@/components/ui/brand-loader'
 import { ClipPlayer } from '@/components/clips/ClipPlayer'
 import type { ClipPreviewData } from '@/server/services/clipPreview'
@@ -1628,6 +1629,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         {/* Where am I: Shortcut | Dashboard › Clip board */}
         <Breadcrumbs shine items={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Clip board' }]} />
         <div className="flex-1" />
+        {/* The account's brand kits, in the popup (as on the dashboard — user, 2026-10-31) */}
+        <button type="button" onClick={() => openBrandKits()} className="cb-brand-link" title="Your logo, colours and caption look — on every clip">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2" /><circle cx="17.5" cy="10.5" r="2" /><circle cx="8.5" cy="7.5" r="2" /><circle cx="6.5" cy="12.5" r="2" /><path d="M12 22a10 10 0 110-20 9 9 0 019 9c0 3-2 4-4 4h-2a2 2 0 00-1 3.7A2 2 0 0112 22z" /></svg>
+          <span>Brand kits</span>
+        </button>
         <ThemeSwitch />
         <AccountMenu />
       </nav>
@@ -1719,7 +1725,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             </div>
           )}
           {/* (brand kit Phase 2) a kit on every clip at once */}
-          {!selecting && <div className="px-4 pb-3 shrink-0"><BrandAllBar b={brands} total={boardClips.length} /></div>}
+          {/* (shown while selecting too: the kit then goes on the ticked clips only) */}
+          <div className="px-4 pb-3 shrink-0"><BrandAllBar b={brands} total={boardClips.length} selected={selecting ? [...selected] : []} /></div>
           {clipError && (
             <div role="alert" className="mx-4 mb-2 px-3 py-2 rounded-lg flex items-center justify-between gap-2" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)' }}>
               <span className="text-xs" style={{ color: '#f87171' }}>{clipError}</span>
