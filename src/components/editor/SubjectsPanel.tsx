@@ -83,7 +83,8 @@ interface Props {
   marking: boolean
   onToggleMarking: () => void
   /** Mark the shot on screen, with its format and views, as a group subject */
-  onMarkShot: () => void
+  /** Mark the scene as a group: resolves true once it's saved */
+  onMarkShot: () => Promise<boolean> | void
   /** Everyone and every group is marked: look for them through the whole clip, then lay it out */
   onMarkInClip: () => void
   /** The ones followed need following again (the clip changed since): Follow them again does it */
@@ -118,6 +119,17 @@ export function SubjectsPanel(p: Props) {
   const [groupOpen, setGroupOpen] = useState(false)
   // Mark as group just pressed: it says so for a moment (✓ Marked), so the press is seen
   const [marked, setMarked] = useState(false)
+  // Mark as group being saved: the button shows a small spinner and "Marking…" until the server answers
+  // (user, 2026-10-31: it showed nothing while it worked), then ✓ — only when it worked
+  const [groupBusy, setGroupBusy] = useState(false)
+  async function markGroup() {
+    if (groupBusy) return
+    setGroupBusy(true)
+    let ok = false
+    try { ok = (await p.onMarkShot()) !== false } finally { setGroupBusy(false) }
+    if (ok) setMarked(true)
+  }
+  const groupSpinner = <span className="w-3 h-3 shrink-0 rounded-full animate-spin motion-reduce:animate-none" aria-hidden="true" style={{ border: '2px solid rgb(var(--ed-fg) / 0.18)', borderTopColor: 'rgb(var(--ed-fg) / 0.85)' }} />
   useEffect(() => { if (!marked) return; const id = setTimeout(() => setMarked(false), 1400); return () => clearTimeout(id) }, [marked])
   const busy = p.subjects.some(s => s.status === 'queued' || s.status === 'running')
   /** Marked but not looked for yet (or the last try failed): Follow takes them */
@@ -132,7 +144,9 @@ export function SubjectsPanel(p: Props) {
   const cur = atPlayhead && atPlayhead.people > 0 ? atPlayhead : (withPeople.find(a => !a.set) ?? withPeople[0])
   const curAt = cur ? p.angles.items.indexOf(cur) : -1
   const curNo = cur ? withPeople.indexOf(cur) + 1 : 0
-  const scanPct = Math.max(5, p.angles.progress)
+  // (a scan just asked for starts from the beginning: the last scan's 100% stayed up until the server answered —
+  // user, 2026-10-31)
+  const scanPct = p.angles.status === 'scanning' ? Math.max(5, p.angles.progress) : 5
   const canFollow = !busy && (waiting > 0 || p.retrack)
   const scanning = p.angles.status === 'scanning'
   const detected = p.angles.status === 'done'
@@ -288,6 +302,18 @@ export function SubjectsPanel(p: Props) {
             </div>
           )
         })()}
+        {/* While one runs: what it's doing, and that a click on it stops it (no Stop swapped in on hover —
+            user, 2026-10-31) */}
+        {canAct && !pending && (scanning || p.autoPhase !== 'idle' || busy) && (
+          <p className="-mt-2 flex items-center gap-1.5 text-[11px]" role="status" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
+            <svg width="8" height="8" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4" fill="currentColor" /></svg>
+            {scanning
+              ? 'Finding the scenes and people in this clip · click Detecting to stop'
+              : p.autoPhase === 'formatting' ? 'Laying out each scene · click the button to stop'
+              : p.autoPhase === 'detecting' ? 'Finding the scenes first, then formatting · click the button to stop'
+              : 'Following the people through the clip · click the button to stop'}
+          </p>
+        )}
         {/* A slow answer: a line saying it's on its way (the buttons themselves show the work) */}
         {canAct && slowPress && (pending === 'auto' || pending === 'stop') && (
           <p className="-mt-2 text-[11px]" role="status" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
@@ -350,7 +376,7 @@ export function SubjectsPanel(p: Props) {
             )}
             {heading(`Scene ${curNo} · ${cur.people === 1 ? '1 person' : `${cur.people} people`}`)}
             <div className="flex flex-col gap-3.5 rounded-2xl px-4 py-5"
-              style={{ background: 'rgb(var(--ed-fg) / 0.035)', boxShadow: cur.set ? 'inset 0 0 0 1.5px rgba(200,255,0,0.45)' : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.07)' }}>
+              style={{ background: 'rgb(var(--ed-fg) / 0.035)', boxShadow: cur.set ? 'inset 0 0 0 1.5px rgb(var(--ed-fg) / 0.2)' : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.07)' }}>
               {cur.people >= 2 ? (
                 // Several people together are one group: one card, one button (the layout and views are the ones on screen)
                 <>
@@ -370,29 +396,31 @@ export function SubjectsPanel(p: Props) {
                     <span className="text-[14.5px] font-semibold text-[var(--ed-text)] whitespace-nowrap">{cur.people} angles</span>
                     {/* Mark as group: small, at the card's top right (user, 2026-10-30) */}
                     {!cur.group && (
-                      <button type="button" onClick={() => { p.onMarkShot(); setMarked(true) }} data-marked={marked || undefined}
+                      <button type="button" onClick={markGroup} disabled={groupBusy} aria-busy={groupBusy || undefined} data-marked={marked || undefined}
                         title="Set this scene's layout and views first (say Split), then mark it. Every time the clip shows this shot again, it gets the same."
                         className="sp-mark ml-auto shrink-0 h-8 px-3 flex items-center gap-1.5 rounded-lg text-[12px] font-bold whitespace-nowrap transition-colors hover:bg-[rgb(var(--ed-fg)/0.12)] active:scale-95"
                         // (neutral either way — user, 2026-10-31: less of the palette colour)
                         style={{ background: 'rgb(var(--ed-fg) / 0.06)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.12)' }}>
-                        {marked
+                        {groupBusy
+                          ? <>{groupSpinner}Marking…</>
+                          : marked
                           ? <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="sp-mark-tick"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>Marked</>
                           : <>{groupIcon(13)}Mark as group</>}
                       </button>
                     )}
                   </div>
                   {cur.group ? (
-                    <span className="flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: 'var(--ed-accent-text)' }}>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+                    <span className="flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: 'var(--ed-text)' }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ed-accent-text)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
                       {cur.group.label} · {LAYOUT_NAMES[cur.group.layout] ?? cur.group.layout}
                     </span>
                   ) : (
                     <>
                       {/* Formatted (Auto format, place by place: the speaker can change which view is whose) */}
                       {cur.formatted && (
-                        <span className="flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: 'var(--ed-accent-text)' }}
+                        <span className="flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: 'var(--ed-text)' }}
                           title={cur.formatted === 'mixed' ? 'Each time this shot comes back it has its own format — who talks decides who is where' : undefined}>
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ed-accent-text)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
                           Formatted · {cur.formatted === 'mixed' ? 'by who talks' : LAYOUT_NAMES[cur.formatted] ?? cur.formatted}
                         </span>
                       )}
@@ -490,12 +518,12 @@ export function SubjectsPanel(p: Props) {
             </button>
             {groupOpen && (
               <div className="px-3 pb-3">
-                <button type="button" onClick={p.onMarkShot}
+                <button type="button" onClick={markGroup} disabled={groupBusy} aria-busy={groupBusy || undefined}
                   title="Set the format and place the views first (say Split), then mark it. Every time the clip shows this shot again, it gets the same."
                   className="w-full h-9 flex items-center justify-center gap-2 rounded-lg text-[12.5px] font-semibold transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
                   style={{ background: 'rgb(var(--ed-fg) / 0.06)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)' }}>
-                  {groupIcon(15)}
-                  Mark this shot as a group
+                  {groupBusy ? groupSpinner : groupIcon(15)}
+                  {groupBusy ? 'Marking…' : 'Mark this shot as a group'}
                 </button>
               </div>
             )}
@@ -532,8 +560,9 @@ export function SubjectsPanel(p: Props) {
         )}
         {!busy && p.retrack && waiting === 0 && <p className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>The clip changed since they were followed.</p>}
         <button type="button" onClick={p.onMarkInClip} disabled={!canFollow}
-          className="h-10 flex items-center justify-center gap-2 rounded-lg text-[13px] font-bold transition-opacity disabled:opacity-50"
-          style={canFollow ? { background: '#c8ff00', color: '#000' } : { background: 'rgb(var(--ed-fg) / 0.07)', color: 'rgb(var(--ed-fg) / 0.6)' }}>
+          // (user, 2026-10-31: less of the palette colour) the calm lime of Auto format, not a solid lime bar
+          className={`h-10 flex items-center justify-center gap-2 rounded-lg text-[13px] font-bold transition-opacity disabled:opacity-50 ${canFollow ? 'ed-autobtn' : ''}`}
+          style={canFollow ? { color: 'var(--ed-accent-text)' } : { background: 'rgb(var(--ed-fg) / 0.07)', color: 'rgb(var(--ed-fg) / 0.6)' }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
           {waiting > 0 ? `Follow them in the clip (${waiting})` : p.retrack ? 'Follow them again' : 'Follow them in the clip'}
         </button>
@@ -557,8 +586,8 @@ function SceneThumb({ angle: a, no, current, videoUrl, onOpen }: { angle: AngleI
       <span className="absolute inset-0 rounded-lg pointer-events-none" style={{ boxShadow: current ? 'inset 0 0 0 2px rgba(200,255,0,0.5)' : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }} />
       <span className="absolute left-1 top-1 min-w-[15px] h-[15px] px-1 rounded text-[9.5px] font-bold leading-[15px] text-center" style={{ background: 'rgba(0,0,0,0.7)', color: '#fff' }}>{no}</span>
       {a.set && (
-        <span className="absolute right-1 bottom-1 w-[15px] h-[15px] rounded-full flex items-center justify-center" style={{ background: '#c8ff00' }}>
-          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+        <span className="absolute right-1 bottom-1 w-[15px] h-[15px] rounded-full flex items-center justify-center" style={{ background: 'rgba(10,10,12,0.8)', boxShadow: 'inset 0 0 0 1px rgb(255 255 255 / 0.35)' }}>
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
         </span>
       )}
     </button>

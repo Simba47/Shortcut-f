@@ -2199,15 +2199,16 @@ export function EditorShell({
    */
   // A press while the last one is still being saved is ignored: it would make a second group (and a second "Group 2")
   const markingShotRef = useRef(false)
-  async function markShot() {
-    if (markingShotRef.current) return
+  /** Mark the scene as a group; true once it's saved (the button shows Marking… until then) */
+  async function markShot(): Promise<boolean> {
+    if (markingShotRef.current) return false
     setSubjectNotice(null)
     setMarking(false)
     const seg = activeSegment
-    if (!seg) { setSubjectsError('Pick a format here first (Vertical, Split, Trio…) and place its views, then mark the shot.'); return }
-    if (isFrameLayout(seg.layout)) { setSubjectsError('A frame can’t be a group’s format yet — use Vertical, Split, Trio or another format.'); return }
+    if (!seg) { setSubjectsError('Pick a format here first (Vertical, Split, Trio…) and place its views, then mark the shot.'); return false }
+    if (isFrameLayout(seg.layout)) { setSubjectsError('A frame can’t be a group’s format yet — use Vertical, Split, Trio or another format.'); return false }
     if (seg.crop_boxes.some(b => b.image_path || (b.source_video_id && b.source_video_id !== mainVideoId))) {
-      setSubjectsError('Every view has to show this clip’s video to mark the shot.'); return
+      setSubjectsError('Every view has to show this clip’s video to mark the shot.'); return false
     }
     pause()
     const t = Math.round(liveTime.get())
@@ -2223,7 +2224,8 @@ export function EditorShell({
       })
       setSubjects(list => [...list, { ...subject, seen: null, stale: false }])
       setSubjectsError(null)
-    } catch (e) { setSubjectsError(e instanceof Error ? e.message : 'Could not mark the shot') }
+      return true
+    } catch (e) { setSubjectsError(e instanceof Error ? e.message : 'Could not mark the shot'); return false }
     finally { markingShotRef.current = false }
   }
   /**

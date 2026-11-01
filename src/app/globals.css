@@ -2175,10 +2175,20 @@ body {
   position: absolute; top: 0; bottom: 0; width: 8px; z-index: 30; cursor: col-resize; touch-action: none;
 }
 .ed-col-handle::after {
-  content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%);
-  background: #c8ff00; opacity: 0; transition: opacity .15s;
+  /* (user, 2026-10-31: half the lime, a proper line) a fine line that fades out at its ends… */
+  content: ''; position: absolute; top: 10px; bottom: 10px; left: 50%; width: 2px; transform: translateX(-50%); border-radius: 2px;
+  background: linear-gradient(180deg, transparent, rgba(200, 255, 0, 0.5) 12%, rgba(200, 255, 0, 0.5) 88%, transparent);
+  opacity: 0; transition: opacity .15s;
 }
-.ed-col-handle:hover::after, .ed-col-handle[data-on]::after { opacity: 1; }
+.ed-col-handle::before {
+  /* …and a small grip in its middle, so it reads as something to drag */
+  content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 30px; transform: translate(-50%, -50%); border-radius: 4px; z-index: 1;
+  background: rgb(var(--ed-fg) / 0.85); box-shadow: 0 0 0 2px rgb(0 0 0 / 0.45), 0 2px 8px rgb(0 0 0 / 0.5);
+  opacity: 0; transition: opacity .15s, height .15s;
+}
+.ed-col-handle:hover::after, .ed-col-handle[data-on]::after, .ed-col-handle:hover::before, .ed-col-handle[data-on]::before { opacity: 1; }
+.ed-col-handle[data-on]::after { background: linear-gradient(180deg, transparent, rgba(200, 255, 0, 0.7) 12%, rgba(200, 255, 0, 0.7) 88%, transparent); }
+.ed-col-handle[data-on]::before { height: 40px; }
 /* While dragging: the width follows the pointer straight away (no easing) */
 .ed-options[data-resizing], .ed-preview-col[data-resizing] { transition: none; }
 .ed-options[data-resizing] *, .ed-preview-col[data-resizing] * { user-select: none; }
@@ -2204,10 +2214,19 @@ body {
 /* ── The line above the play bar: drag to share the height between the video and the timeline ── */
 .ed-row-handle { position: absolute; left: 0; right: 0; top: -5px; height: 10px; cursor: row-resize; touch-action: none; }
 .ed-row-handle::after {
-  content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 2px; transform: translateY(-50%);
-  background: #c8ff00; opacity: 0; transition: opacity .15s;
+  /* (as the column edges: half the lime, fading at its ends, a grip in the middle) */
+  content: ''; position: absolute; left: 10px; right: 10px; top: 50%; height: 2px; transform: translateY(-50%); border-radius: 2px;
+  background: linear-gradient(90deg, transparent, rgba(200, 255, 0, 0.5) 8%, rgba(200, 255, 0, 0.5) 92%, transparent);
+  opacity: 0; transition: opacity .15s;
 }
-.ed-row-handle:hover::after, .ed-row-handle[data-on]::after { opacity: 1; }
+.ed-row-handle::before {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 30px; height: 4px; transform: translate(-50%, -50%); border-radius: 4px; z-index: 1;
+  background: rgb(var(--ed-fg) / 0.85); box-shadow: 0 0 0 2px rgb(0 0 0 / 0.45), 0 2px 8px rgb(0 0 0 / 0.5);
+  opacity: 0; transition: opacity .15s, width .15s;
+}
+.ed-row-handle:hover::after, .ed-row-handle[data-on]::after, .ed-row-handle:hover::before, .ed-row-handle[data-on]::before { opacity: 1; }
+.ed-row-handle[data-on]::after { background: linear-gradient(90deg, transparent, rgba(200, 255, 0, 0.7) 8%, rgba(200, 255, 0, 0.7) 92%, transparent); }
+.ed-row-handle[data-on]::before { width: 40px; }
 
 
 /* ── Lock / view / sound beside each timeline lane (SegmentTimeline laneCtl) ── */
@@ -2833,7 +2852,8 @@ html:not([data-theme="light"]) .editor-theme [data-layout-panel="Editing panel"]
 [data-theme="light"] .editor-theme .ed-preview-inner > :is(div:nth-child(2), .flex-1) { box-shadow: inset 1px 0 0 var(--ed-hair); }
 [data-theme="light"] .editor-theme .ed-top > .ed-preview-rail { border-left: 1px solid var(--ed-hair) !important; background: transparent !important; border-radius: 0 14px 0 0; }
 [data-theme="light"] .editor-theme .ed-body .ed-row-wrap { transform: none !important; }
-[data-theme="light"] .editor-theme .ed-row-handle::after { background: var(--ed-lime-mark); }
+[data-theme="light"] .editor-theme .ed-row-handle::after { background: linear-gradient(90deg, transparent, rgba(110, 150, 0, 0.5) 8%, rgba(110, 150, 0, 0.5) 92%, transparent); }
+[data-theme="light"] .editor-theme .ed-col-handle::after { background: linear-gradient(180deg, transparent, rgba(110, 150, 0, 0.5) 12%, rgba(110, 150, 0, 0.5) 88%, transparent); }
 
 /* ── Top bar: the page's grey too (user, 2026-10-28: "the background the same, not black"), a hairline under it ── */
 [data-theme="light"] .editor-theme > .app-nav {
@@ -3752,18 +3772,12 @@ html .view-switch-opt[data-on] { color: #fff !important; }
 }
 
 /* ── A running button is its own Stop (user, 2026-10-31: "keep detecting and stop in a single button"): it shows
-   what it does and how far, with a ■ on its right; pointed at, it reads "■ Stop" in red. On a touch screen the ■
-   stays in sight (no pointing), so a tap reads as stop. SubjectsPanel ── */
+   what it does and how far, with a ■ on its right, and a click on it stops it (a line under the buttons says so).
+   SubjectsPanel ── */
 .ed-runbtn .ed-run-stop { display: none; }
-@media (hover: hover) {
-  /* (user, 2026-10-31: "the total red button is a little dominating") a calm dark button: a fine white edge (2026-10-31),
-     white "Stop", only the ■ red with a faint glow */
-  .ed-runbtn[data-running]:not(:disabled):hover { background: rgb(var(--ed-fg) / 0.08) !important; color: var(--ed-text) !important; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.32) !important; }
-  .ed-runbtn[data-running]:not(:disabled):hover .ed-run-stop svg { color: #f87171; filter: drop-shadow(0 0 4px rgba(248, 113, 113, 0.6)); }
-  .ed-runbtn[data-running]:not(:disabled):hover > span[aria-hidden="true"] { opacity: 0; }
-  .ed-runbtn[data-running]:not(:disabled):hover .ed-run-label, .ed-runbtn[data-running]:not(:disabled):hover .ed-run-mark { display: none; }
-  .ed-runbtn[data-running]:not(:disabled):hover .ed-run-stop { display: flex; }
-}
+/* (user, 2026-10-31: no Stop swapped in on hover — the button keeps showing its work and its ■, a click stops it;
+   pointed at, it only brightens a little) */
+.ed-runbtn[data-running]:not(:disabled):hover { filter: brightness(1.08); }
 
 /* ── Auto format, calmer (user, 2026-10-31: "decrease the palette colour for this button, design it properly, and
    an animation when I click"): a dark button lit from inside by the palette colour — a soft lime gradient, a fine
