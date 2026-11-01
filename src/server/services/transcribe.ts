@@ -123,6 +123,16 @@ export interface VideoTranscriptState {
   stopped?: boolean
   /** While running: its place in line when it is waiting its turn (1 = next), else null (placeInLine) */
   place?: number | null
+  /** While running, what the worker is doing (its job's read_step): getting the sound, reading its
+   *  parts, saving the transcript — null from a worker that doesn't say */
+  step?: 'audio' | 'reading' | 'saving' | null
+  /** While reading: the parts read and all of them (the video is read in parts) */
+  done?: number | null
+  total?: number | null
+  /** Waiting to start (queued), what for: 'copy' — this video's editing copy is being made in the
+   *  long-job slot; 'queue' — other videos' readings are ahead (place); 'server' — the server is busy
+   *  with other work or picking it up */
+  waitingOn?: 'copy' | 'queue' | 'server' | null
 }
 
 /** What Stop writes on the reading's job (the worker's READING_STOPPED: it stops when it sees it) */
@@ -177,13 +187,24 @@ export async function placeInLine(jobId: string): Promise<number | null> {
 export async function videoTranscriptState(userId: string, videoId: string): Promise<VideoTranscriptState> {
   const video = await ownVideo(userId, videoId)
   if (await hasWholeTranscript(videoId, video.duration_ms)) return { status: 'ready', progress: 100, error: null }
-  const [last] = await sql<{ id: string; status: string; error: string | null; read_pct: string | null }[]>`
-    SELECT id, status, error, payload->>'read_pct' AS read_pct FROM jobs
+  const [last] = await sql<{ id: string; status: string; error: string | null; read_pct: string | null; read_step: string | null; read_done: string | null; read_total: string | null }[]>`
+    SELECT id, status, error, payload->>'read_pct' AS read_pct, payload->>'read_step' AS read_step,
+      payload->>'read_done' AS read_done, payload->>'read_total' AS read_total FROM jobs
     WHERE type = 'transcribe' AND payload->>'video_id' = ${videoId} AND payload->>'transcribe_full' = 'true'
     ORDER BY created_at DESC LIMIT 1`
-  if (last?.status === 'queued') return { status: 'running', progress: 0, error: null, place: await placeInLine(last.id) }
+  if (last?.status === 'queued') {
+    const place = await placeInLine(last.id)
+    const [copy] = await sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM jobs WHERE type = 'proxy' AND status = 'processing' AND payload->>'video_id' = ${videoId}`
+    const waitingOn = copy?.n ? 'copy' : place && place > 1 ? 'queue' : 'server'
+    return { status: 'running', progress: 0, error: null, place, waitingOn }
+  }
   if (last?.status === 'processing') {
-    return { status: 'running', progress: last.read_pct === null ? null : Math.min(99, Number(last.read_pct)), error: null, place: await placeInLine(last.id) }
+    const step = last.read_step === 'audio' || last.read_step === 'reading' || last.read_step === 'saving' ? last.read_step : null
+    return {
+      status: 'running', progress: last.read_pct === null ? null : Math.min(99, Number(last.read_pct)), error: null, place: await placeInLine(last.id),
+      step, done: last.read_done === null ? null : Number(last.read_done), total: last.read_total === null ? null : Number(last.read_total),
+    }
   }
   if (last?.status === 'failed' && last.error === READING_STOPPED) {
     return { status: 'none', progress: last.read_pct === null ? null : Math.min(99, Number(last.read_pct)), error: null, stopped: true }

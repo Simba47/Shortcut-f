@@ -1124,8 +1124,45 @@ body {
 .tr-tile[data-weak]:not([data-on]) .tr-demo { opacity: .45; }
 .tr-tile[data-weak]:not([data-on]) .tr-name { color: rgb(var(--ed-fg) / 0.38); }
 .tr-tile:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 1px; }
-.tr-tile:disabled { opacity: .4; cursor: not-allowed; transform: none; }
-.tr-tile:disabled:hover { background: rgb(var(--ed-fg) / 0.03); }
+.tr-tile:is(:disabled, [aria-disabled="true"]) { opacity: .4; cursor: not-allowed; transform: none; }
+.tr-tile:is(:disabled, [aria-disabled="true"]):hover { background: rgb(var(--ed-fg) / 0.03); }
+/* The preview screen on top of the tiles (TransitionsPanel KindTiles): the clip's two shots playing the
+   transition pointed at (or picked) in a loop, bigger than a tile; its name in a corner chip.
+   (It is a .tr-tile with data-on so the tiles' loops play in it; it looks like a screen, not a tile.) */
+/* (a little smaller than the panel's width, centred — user, 2026-11-01) */
+.tr-tile.tr-stage { width: 82%; align-self: center; position: relative; padding: 0; gap: 0; cursor: default; background: #000; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.1); border-radius: 12px; overflow: hidden; }
+.tr-tile.tr-stage:hover { background: #000; }
+.tr-tile.tr-stage:active { transform: none; }
+
+.tr-stage-name {
+  position: absolute; left: 8px; bottom: 8px; padding: 3px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; color: #f4f4f5; background: rgba(0,0,0,0.6); backdrop-filter: blur(6px);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
+}
+/* "won't show here" (TransitionsPanel UnseenPopup): a popup over the top of the Transitions panel, its
+   width, not a card in the list — the anchor sticks to the panel's top while it scrolls and takes no room */
+.tr-pop-anchor { position: sticky; top: 6px; z-index: 30; height: 0; margin-bottom: -14px; }
+.tr-pop {
+  /* (a little smaller — user, 2026-11-01: it looked very big) */
+  display: grid; grid-template-columns: auto 1fr; gap: 5px 7px; align-items: start;
+  padding: 7px 8px 8px 10px; border-radius: 10px;
+  background: var(--ed-popover, #1a1a1c); color: var(--ed-text, #f4f4f5);
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.45), 0 14px 32px -10px rgba(0,0,0,0.75);
+  font-size: 11px; line-height: 1.35;
+  animation: tr-pop-in .26s cubic-bezier(.2,.9,.3,1.2);
+}
+.tr-pop > svg { margin-top: 1px; }
+.tr-pop-text { min-width: 0; }
+.tr-pop-actions { grid-column: 2; display: flex; gap: 5px; }
+.tr-pop button {
+  height: 22px; padding: 0 10px; border: 0; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 11px; font-weight: 700; color: var(--ed-text, #f4f4f5); background: rgb(var(--ed-fg) / 0.1);
+  transition: background .15s;
+}
+.tr-pop button:hover { background: rgb(var(--ed-fg) / 0.18); }
+@keyframes tr-pop-in { from { opacity: 0; translate: 0 -8px; } }
+@media (prefers-reduced-motion: reduce) { .tr-pop { animation: none; } }
+.tr-stage-note { margin: -4px 0 0; font-size: 11px; line-height: 1.45; color: rgb(var(--ed-fg) / 0.55); }
 /* no joins yet: a line on what picking does, above the tiles */
 .tr-start {
   display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 14px;
@@ -1138,7 +1175,19 @@ body {
 .tr-name { font-size: 10.5px; line-height: 1.2; white-space: nowrap; font-weight: 500; text-align: center; color: rgb(var(--ed-fg) / 0.6); }
 .tr-name .tr-flame { display: inline-block; vertical-align: -1px; margin-right: 3px; color: #c8ff00; }
 .tr-tile[data-on] .tr-name { color: var(--ed-text); font-weight: 600; }
-.tr-range { width: 100%; accent-color: #c8ff00; }
+/* The Length slider: a thin track, lime only as thin as a line up to the knob (user, 2026-11-01: less lime) */
+.tr-range { -webkit-appearance: none; appearance: none; width: 100%; height: 16px; background: transparent; cursor: pointer;
+  --pct: calc((var(--v) - var(--min)) / (var(--max) - var(--min)) * 100%); }
+.tr-range::-webkit-slider-runnable-track { height: 3px; border-radius: 999px;
+  background: linear-gradient(90deg, rgba(200,255,0,0.75) var(--pct), rgb(var(--ed-fg) / 0.14) var(--pct)); }
+.tr-range::-moz-range-track { height: 3px; border-radius: 999px; background: rgb(var(--ed-fg) / 0.14); }
+.tr-range::-moz-range-progress { height: 3px; border-radius: 999px; background: rgba(200,255,0,0.75); }
+.tr-range::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4.5px; border-radius: 50%;
+  background: #f4f4f5; box-shadow: 0 0 0 2px rgba(200,255,0,0.55), 0 1px 4px rgba(0,0,0,0.5); }
+.tr-range::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%;
+  background: #f4f4f5; box-shadow: 0 0 0 2px rgba(200,255,0,0.55), 0 1px 4px rgba(0,0,0,0.5); }
+.tr-range:focus-visible { outline: none; }
+.tr-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(200,255,0,0.8); }
 .tr-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 22px; text-align: center; }
 .tr-empty-icon { width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center; color: rgb(var(--ed-fg) / 0.6); background: rgb(var(--ed-fg) / 0.06); }
 .tr-empty-title { font-size: 13px; font-weight: 700; color: var(--ed-text); }
@@ -3917,20 +3966,15 @@ html:not([data-theme="light"]) .bkd-box { --ed-panel: #121214; }
 [data-theme="light"] .cb-brand-link svg { color: #5a7a00; }
 @media (max-width: 640px) { .cb-brand-link span { display: none; } .cb-brand-link { padding: 0 10px; } }
 
-/* ── Transition tiles with the clip's own pictures (user, 2026-10-31): shot A and shot B are two frames of the video
-   being edited (TransitionsPanel frames), not grey and white boxes — every tile's loop plays between them. A little
-   taller, so the picture reads. (Fade black / white keep their black or white middle) ── */
-/* (the same height before the pictures are in, so the tiles don't jump when they arrive) */
-.tr-kinds .tr-demo { height: 38px; }
-.tr-kinds[data-frames] .tr-demo .tr-a { background: var(--tr-a) center / cover no-repeat; }
-.tr-kinds[data-frames] .tr-demo .tr-b { background: var(--tr-b) center / cover no-repeat; }
-.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo:is([data-kind="fadeblack"], [data-kind="fadewhite"]) i { opacity: 1; }
-.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo[data-kind="fadeblack"] { background: #000; }
-.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo[data-kind="fadeblack"] .tr-a { -webkit-mask-image: linear-gradient(90deg, #000 20%, transparent 45%); mask-image: linear-gradient(90deg, #000 20%, transparent 45%); }
-.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo[data-kind="fadeblack"] .tr-b { opacity: 1; -webkit-mask-image: linear-gradient(90deg, transparent 55%, #000 80%); mask-image: linear-gradient(90deg, transparent 55%, #000 80%); }
-.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo[data-kind="fadewhite"] { background: #fff; }
-.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo[data-kind="fadewhite"] .tr-a { -webkit-mask-image: linear-gradient(90deg, #000 20%, transparent 45%); mask-image: linear-gradient(90deg, #000 20%, transparent 45%); }
-.tr-kinds[data-frames] .tr-tile:not([data-on]):not(:hover) .tr-demo[data-kind="fadewhite"] .tr-b { opacity: 1; -webkit-mask-image: linear-gradient(90deg, transparent 55%, #000 80%); mask-image: linear-gradient(90deg, transparent 55%, #000 80%); }
+/* ── The clip's own pictures (TransitionsPanel frames) play only in the preview screen on top (user,
+   2026-11-01): shot A and shot B, two frames of the video being edited. The tiles below are the plain
+   dark and light boxes again, at their own height (user, 2026-10-31 had put the pictures in every tile) ── */
+.tr-kinds .tr-stage .tr-demo { height: auto; aspect-ratio: 16 / 9; max-height: 190px; width: 100%; border-radius: 12px; }
+.tr-kinds[data-frames] .tr-stage .tr-demo .tr-a { background: var(--tr-a) center / cover no-repeat; }
+.tr-kinds[data-frames] .tr-stage .tr-demo .tr-b { background: var(--tr-b) center / cover no-repeat; }
+/* (the screen's pictures drawn sharp at every moment of the loop: no layer kept at a small size from a
+   scaled-down step, and the browser's best scaling) */
+.tr-kinds .tr-stage .tr-demo i { will-change: auto; image-rendering: auto; backface-visibility: hidden; }
 
 /* ── Subjects: "Auto format as Vertical | Cuts" (user, 2026-10-31: "highlight it properly"): two equal options on a
    dark track, a soft lime pill sliding under the chosen one with a faint glow, its text and icon lime; the other

@@ -321,25 +321,29 @@ export function SubjectsPanel(p: Props) {
           </p>
         )}
         {/* How Auto format lays the scenes (user, 2026-10-28): Vertical — the speaker first; Cuts — the Rulebook's formats.
-            (2026-10-31: "highlight it properly") a soft lime pill slides under the one chosen, each with its icon */}
+            (2026-10-31: "highlight it properly") a soft lime pill slides under the one chosen, each with its icon.
+            (2026-11-01: a new user couldn't tell what "Vertical / Cuts" meant) each option says what it does —
+            Follow the speaker / Show everyone — and a line under it says what the chosen one will do */}
         {canAct && (
-          <div className="-mt-2 flex items-center gap-2.5">
-            <span className="text-[11.5px] font-medium whitespace-nowrap" style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>Auto format as</span>
-            <div role="radiogroup" aria-label="Auto format as" className="sp-mode" data-mode={p.autoMode} data-off={working || undefined}>
+          <div className="-mt-2 flex flex-col gap-1.5">
+            <span className="text-[11.5px] font-medium" style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>How Auto format frames each scene</span>
+            <div role="radiogroup" aria-label="How Auto format frames each scene" className="sp-mode" data-mode={p.autoMode} data-off={working || undefined}>
               <span className="sp-mode-pill" aria-hidden="true" />
               {(['vertical', 'cuts'] as const).map(m => (
                 <button key={m} type="button" role="radio" aria-checked={p.autoMode === m} disabled={working} onClick={() => p.onAutoMode(m)}
-                  title={m === 'vertical'
-                    ? 'Every scene Vertical, on whoever is talking: the view cuts to each speaker, at least 2 seconds on each. Listeners can be out of the picture.'
-                    : 'Each scene gets its format from who is in it (Vertical, Split, Trio, or the whole picture), with everyone kept in.'}
                   className="sp-mode-opt" data-on={p.autoMode === m || undefined}>
                   {m === 'vertical'
                     ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M11 18.5h2" /></svg>
-                    : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.6" /><circle cx="6" cy="18" r="2.6" /><path d="M8.2 7.6L20 18M8.2 16.4L20 6" /></svg>}
-                  {m === 'vertical' ? 'Vertical' : 'Cuts'}
+                    : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M7 12h10" /></svg>}
+                  {m === 'vertical' ? 'Follow the speaker' : 'Show everyone'}
                 </button>
               ))}
             </div>
+            <p className="text-[11px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
+              {p.autoMode === 'vertical'
+                ? 'One person fills the screen, and it switches to whoever is talking.'
+                : 'Each scene gets Vertical, Split or Trio, so everyone in it stays in view.'}
+            </p>
           </div>
         )}
         {p.angles.status === 'done' && p.angles.stale && !working && (
