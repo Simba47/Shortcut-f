@@ -526,8 +526,9 @@ function FrameTextBox({ row, item, selected, editing, onSelect, onChange, onDele
     drag(e, dx => onChange({ size: Math.max(24, Math.min(200, Math.round(size0 + dx * 270))) }))
   }
 
+  // (a frame text's handles in white, like the text box's — user, 2026-11-01; its frame line stays the accent)
   const handle = (extra: React.CSSProperties): React.CSSProperties => ({
-    position: 'absolute', background: accent, border: '2px solid #111', borderRadius: 4, pointerEvents: 'auto', ...extra,
+    position: 'absolute', background: '#ffffff', border: '2px solid #111', borderRadius: 4, pointerEvents: 'auto', ...extra,
   })
   const tools = selected && !editing
 
@@ -544,10 +545,11 @@ function FrameTextBox({ row, item, selected, editing, onSelect, onChange, onDele
         transform: item.rotation ? `rotate(${item.rotation}deg)` : undefined,
         cursor: editing ? 'text' : 'move', userSelect: 'none', touchAction: 'none',
         // (an outline, not a border: the box's inside stays exactly the width the text wraps in)
-        outline: `1.5px solid ${selected || editing ? accent : 'transparent'}`,
+        // (all white when picked, no lime — user, 2026-11-01: the line, its glow and the tint inside)
+        outline: `1.5px solid ${selected || editing ? '#ffffff' : 'transparent'}`,
         borderRadius: 3,
-        background: editing ? 'rgba(0,0,0,0.25)' : selected ? 'rgba(200,255,0,0.12)' : 'transparent',
-        boxShadow: selected ? `0 0 0 2.5px ${accent}44` : 'none',
+        background: editing ? 'rgba(0,0,0,0.25)' : selected ? 'rgba(255,255,255,0.08)' : 'transparent',
+        boxShadow: selected ? '0 0 0 2.5px rgba(255,255,255,0.22)' : 'none',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
       {editing ? (
@@ -584,7 +586,7 @@ function FrameTextBox({ row, item, selected, editing, onSelect, onChange, onDele
           aria-label={`Text box height (${side} side)`}
           style={handle({ left: '50%', [side]: -5, transform: 'translateX(-50%)', width: 22, height: 8, cursor: 'ns-resize' })} />
       ))}
-      {tools && <RotateHandle boxRef={ref} size={18} rotation={item.rotation ?? 0} onRotate={deg => onChange({ rotation: deg })} />}
+      {tools && <RotateHandle boxRef={ref} size={18} color="#ffffff" rotation={item.rotation ?? 0} onRotate={deg => onChange({ rotation: deg })} />}
       {tools && onDelete && (
         <button type="button" aria-label="Delete the text" title="Delete the text"
           onMouseDown={e => { e.stopPropagation(); onDelete() }}
@@ -600,7 +602,7 @@ function FrameTextBox({ row, item, selected, editing, onSelect, onChange, onDele
         <div onMouseDown={startSize} title="Drag to make the text bigger or smaller"
           style={{
             position: 'absolute', bottom: -6, right: -6, width: 14, height: 14, borderRadius: 3,
-            background: accent, border: '2px solid #111', cursor: 'nwse-resize', pointerEvents: 'auto',
+            background: '#ffffff', border: '2px solid #111', cursor: 'nwse-resize', pointerEvents: 'auto',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
           <svg width="6" height="6" viewBox="0 0 8 8" fill="none">
@@ -2933,8 +2935,10 @@ function MovableAreaBox({ seg, onChange }: { seg: SegmentLocal; onChange: (box: 
 /** Degrees in -180..180 */
 const normAngle = (d: number) => ((((d + 180) % 360) + 360) % 360) - 180
 
-function RotateHandle({ boxRef, rotation, onRotate, size = 20 }: {
+function RotateHandle({ boxRef, rotation, onRotate, size = 20, color = '#c8ff00' }: {
   boxRef: React.RefObject<HTMLDivElement | null>; rotation: number; onRotate: (deg: number) => void; size?: number
+  /** Its fill (the text box's is white) */
+  color?: string
 }) {
   const [turning, setTurning] = useState<number | null>(null)
   function start(e: React.MouseEvent) {
@@ -2962,7 +2966,7 @@ function RotateHandle({ boxRef, rotation, onRotate, size = 20 }: {
       title="Drag to rotate (Shift: 15° steps) · double-click to straighten" aria-label="Rotate"
       style={{
         position: 'absolute', top: -size / 2, left: -size / 2, width: size, height: size, borderRadius: '50%',
-        background: '#c8ff00', border: '2px solid #111', cursor: 'grab', pointerEvents: 'auto', boxSizing: 'border-box',
+        background: color, border: '2px solid #111', cursor: 'grab', pointerEvents: 'auto', boxSizing: 'border-box',
         display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2,
       }}>
       <svg width={size * 0.5} height={size * 0.5} viewBox="0 0 24 24" fill="none" stroke="#111" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -3399,9 +3403,10 @@ function TextOverlayBox({ overlay, isActive, onChange, onSelect, onDelete, editi
   const x = overlay.x ?? 0.5
   const y = overlay.y ?? 0.4
   const accent = '#c8ff00'
+  // (the text box's handles in white, not lime — user, 2026-11-01; its frame line stays the accent)
   const fontSize = `${(overlay.size ?? 72) / 10.8}cqw`
   const handle = (extra: React.CSSProperties): React.CSSProperties => ({
-    position: 'absolute', background: accent, border: '2px solid #111', borderRadius: 4, pointerEvents: 'auto', ...extra,
+    position: 'absolute', background: '#ffffff', border: '2px solid #111', borderRadius: 4, pointerEvents: 'auto', ...extra,
   })
 
   return (
@@ -3418,12 +3423,13 @@ function TextOverlayBox({ overlay, isActive, onChange, onSelect, onDelete, editi
         transform: [centred ? 'translateX(-50%)' : '', overlay.rotation ? `rotate(${overlay.rotation}deg)` : ''].join(' ').trim() || undefined,
         cursor: editing ? 'text' : 'move',
         userSelect: 'none',
-        border: `1.5px solid ${isActive || editing ? accent : 'transparent'}`,
+        // (all white when picked, no lime — user, 2026-11-01: the line, its glow and the tint inside)
+        border: `1.5px solid ${isActive || editing ? '#ffffff' : 'transparent'}`,
         borderRadius: 3,
         padding: 0,
-        background: editing ? 'rgba(0,0,0,0.25)' : isActive ? 'rgba(200,255,0,0.12)' : 'transparent',
+        background: editing ? 'rgba(0,0,0,0.25)' : isActive ? 'rgba(255,255,255,0.08)' : 'transparent',
         backdropFilter: 'none',
-        boxShadow: isActive ? `0 0 0 1px ${accent}44` : 'none',
+        boxShadow: isActive ? '0 0 0 1px rgba(255,255,255,0.22)' : 'none',
         // A box with a width set shows that width (the text wraps inside it)
         ...(overlay.w && !centred ? { width: `${overlay.w * 100}%` } : { maxWidth: '90%' }),
         // A box with a height set: at least that tall, the text in its middle
@@ -3470,7 +3476,7 @@ function TextOverlayBox({ overlay, isActive, onChange, onSelect, onDelete, editi
           style={handle({ left: '50%', [side]: -5, transform: 'translateX(-50%)', width: 22, height: 8, cursor: 'ns-resize' })} />
       ))}
       {isActive && !editing && !centred && (
-        <RotateHandle boxRef={ref} size={18} rotation={overlay.rotation ?? 0} onRotate={deg => onChange({ rotation: deg })} />
+        <RotateHandle boxRef={ref} size={18} color="#ffffff" rotation={overlay.rotation ?? 0} onRotate={deg => onChange({ rotation: deg })} />
       )}
       {isActive && !editing && (
         <button
@@ -3493,7 +3499,7 @@ function TextOverlayBox({ overlay, isActive, onChange, onSelect, onDelete, editi
           style={{
             position: 'absolute', bottom: -6, right: -6,
             width: 14, height: 14, borderRadius: 3,
-            background: accent, border: '2px solid #111',
+            background: '#ffffff', border: '2px solid #111',
             cursor: 'nwse-resize', pointerEvents: 'auto',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}

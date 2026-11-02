@@ -558,11 +558,13 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // Ask AI asked for before it's done runs by itself once it is. Manual edit never reads the whole
   // video: each clip's captions are made in the editor, for that clip alone.
   // place: waiting its turn (many readings at once), its place in line (1 = next)
-  type Reading = { status: 'none' | 'running' | 'ready' | 'failed'; progress: number | null; error: string | null; stopped?: boolean; place?: number | null }
+  // step / done / total: what the worker is doing and the parts read of all (ReadingProgress)
+  type Reading = { status: 'none' | 'running' | 'ready' | 'failed'; progress: number | null; error: string | null; stopped?: boolean; place?: number | null; step?: 'audio' | 'reading' | 'saving' | null; done?: number | null; total?: number | null; waitingOn?: 'copy' | 'queue' | 'server' | null }
   const [reading, setReading] = useState<Reading | null>(null)
   /** What was asked for while the video was being read (runs when it's done), and its name */
   const afterReading = useRef<(() => void) | null>(null)
-  const [waitingFor, setWaitingFor] = useState<string | null>(null)
+  // (the one line under the lock says what is being done; what waits for it runs by itself)
+  const [, setWaitingFor] = useState<string | null>(null)
   const readingUrl = `/api/videos/${video.id}/transcript`
   const checkReading = useCallback(async (start = false) => {
     try {
@@ -578,6 +580,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     checkReading(startWith === 'ai')
   }, [isReady]) // eslint-disable-line react-hooks/exhaustive-deps
   usePolling(() => checkReading(), reading?.status === 'running')
+  /** About how long reading the whole video takes: measured on QA (2026-10-17), 8–17 s a minute of video */
+  const readTotalMs = 30_000 + READ_MS_PER_MIN * Math.max(1, (video.duration_ms ?? 60_000) / 60_000)
   useEffect(() => {
     if (reading?.status !== 'ready') return
     const run = afterReading.current
@@ -1171,17 +1175,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             style={{ background: 'rgba(200,255,0,0.06)', boxShadow: 'inset 0 0 0 1px rgba(200,255,0,0.18)' }}>
             {reading.status === 'running' ? (
               <>
-                <span className="flex items-center gap-2 text-xs font-semibold text-white">
-                  <Spinner /> Reading your video for AI{reading.place ? ` · waiting its turn, ${inLineText(reading.place)}` : reading.progress ? ` · ${reading.progress}%` : '…'}
-                </span>
-                {reading.progress !== null && (
-                  <span className="h-1 rounded-full overflow-hidden" style={{ background: 'rgb(var(--cb-fg) / 0.1)' }} aria-hidden="true">
-                    <span className="block h-full rounded-full transition-[width] duration-700" style={{ width: `${Math.max(3, reading.progress)}%`, background: ACCENT }} />
-                  </span>
-                )}
-                <span className="text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.55)' }}>
-                  {waitingFor ? `${waitingFor} runs by itself when it's done. ` : ''}Best moments, Ask AI and Make my clips need all its words. You can make clips by hand meanwhile.
-                </span>
+                <ReadingProgress reading={reading} expectMs={readTotalMs} small />
               </>
             ) : (
               <span className="flex items-center justify-between gap-2">
@@ -1545,9 +1539,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // Once read, the video stays unlocked. A Make my clips run already going keeps its card (it reads
   // the video itself). Manual clips never wait for any of this: each clip's captions are its own.
   const aiLocked = isReady && reading?.status !== 'ready' && !autoRunning && !autoAsking
-  /** About how long reading the whole video takes: measured on QA (2026-10-17), 8–17 s a minute of video */
-  const readTotalMs = 30_000 + READ_MS_PER_MIN * Math.max(1, (video.duration_ms ?? 60_000) / 60_000)
-  const readLeftMs = reading?.status === 'running' && reading.progress ? readTotalMs * (1 - reading.progress / 100) : readTotalMs
   const aiToolsLocked = (
     <div className={`relative ${wide ? 'flex flex-col gap-3' : 'md:col-span-2 h-full'}`} data-start-target="ai">
       {/* The tools themselves, greyed and out of reach until the transcript is in */}
@@ -1571,26 +1562,19 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               <span className="text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>Make my clips · Best moments · Ask AI</span>
             </span>
           </div>
-          {!reading ? (
+          {/* AI edit picked: the one line and percentage show from the first moment (checking the
+              video) through the reading — the same bar all the way (user, 2026-11-01) */}
+          {!reading && startWith !== 'ai' ? (
             <p className="flex items-center gap-2 text-xs" style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}><Spinner /> Checking your video…</p>
-          ) : reading.status === 'running' ? (
+          ) : !reading || reading.status === 'running' ? (
             <div className="flex flex-col gap-2">
-              <span className="flex items-center gap-2 text-[12.5px] font-semibold text-white">
-                <Spinner /> Getting the transcript{reading.place ? ` · waiting its turn, ${inLineText(reading.place)}` : reading.progress ? ` · ${reading.progress}%` : '…'}
-              </span>
-              <span className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgb(var(--cb-fg) / 0.1)' }} aria-hidden="true">
-                <span className="block h-full rounded-full transition-[width] duration-700" style={{ width: `${Math.max(3, reading.progress ?? 3)}%`, background: ACCENT }} />
-              </span>
-              <span className="text-[11.5px] leading-relaxed" style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}>
-                {waitingFor ? `${waitingFor} runs by itself when it's done. ` : ''}{minutesLeft(readLeftMs)} — the tools unlock by themselves.
-                You can keep making clips by hand, or leave this page: it carries on.
-              </span>
-              <button type="button" onClick={stopReading} disabled={stopping}
+              <ReadingProgress reading={reading} expectMs={readTotalMs} />
+              {reading && <button type="button" onClick={stopReading} disabled={stopping}
                 className="self-start h-8 px-3 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 transition-colors hover:bg-[rgba(239,68,68,0.18)] disabled:opacity-50"
                 style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', boxShadow: 'inset 0 0 0 1px rgba(239,68,68,0.3)' }}>
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
                 {stopping ? 'Stopping…' : 'Stop'}
-              </button>
+              </button>}
             </div>
           ) : reading.status === 'failed' ? (
             <div className="flex flex-col gap-2">
@@ -2039,6 +2023,97 @@ function CancelButton({ onClick, title }: { onClick: () => void; title: string }
   )
 }
 
+/**
+ * Getting a video ready for the AI tools, from the moment AI edit is picked to the tools unlocking,
+ * in the clip board's lock box (user, 2026-11-01: one line saying exactly what is being done, and a
+ * percentage that moves steadily — it had sat at 0 % and then jumped 1 % → 50 %; not on the loading
+ * page). Each step has its share of the bar:
+ *   the upload being taken in (the video not ready yet)  0 – 6 %
+ *   checking the video                                    6 – 9 %
+ *   waiting its turn (other videos ahead)                 9 – 14 %
+ *   getting the audio                                    14 – 24 %
+ *   turning speech into text, part by part               24 – 92 %
+ *   saving the transcript                                92 – 99 %, then 100 %
+ * Inside a step the bar moves on by itself toward the step's end at the pace that step is expected
+ * to take (a part: the video's expected reading time over its parts), easing off so it never gets
+ * there before the worker says so, and it never goes back. A worker that doesn't name its steps (an
+ * older one) still moves smoothly over the whole reading time.
+ */
+type ReadingNow = { status?: string; progress: number | null; place?: number | null; step?: 'audio' | 'reading' | 'saving' | null; done?: number | null; total?: number | null; waitingOn?: 'copy' | 'queue' | 'server' | null }
+type PrepStage = { key: string; text: string; pct: number; next: number; tau: number }
+function prepStage(videoReady: boolean, r: ReadingNow | null, expectMs: number): PrepStage {
+  const readMs = Math.max(20_000, expectMs - 30_000)
+  if (!videoReady) return { key: 'upload', text: 'Taking in your upload', pct: 0, next: 6, tau: 12_000 }
+  if (!r) return { key: 'check', text: 'Checking your video', pct: 6, next: 9, tau: 6_000 }
+  if (r.status === 'ready') return { key: 'done', text: 'Done — your AI tools are ready', pct: 100, next: 100, tau: 1 }
+  // Queued, not started yet: what it's waiting for, plainly (user, 2026-11-01: "next in line" said nothing)
+  if (r.place) {
+    const ahead = r.place - 1
+    const text = r.waitingOn === 'copy' ? 'Waiting for your video’s editing copy to finish first'
+      : r.waitingOn === 'queue' && ahead > 0 ? `In the queue · ${ahead} ${ahead === 1 ? 'video' : 'videos'} ahead of yours`
+      : r.waitingOn === 'server' ? 'Waiting for the server to start it'
+      : `Waiting to start · ${inLineText(r.place)}`
+    return { key: `wait-${r.waitingOn ?? ''}-${r.place}`, text, pct: 9, next: 14, tau: 25_000 }
+  }
+  if (r.step === 'audio') return { key: 'audio', text: 'Getting the audio from your video', pct: 14, next: 24, tau: 15_000 }
+  if (r.step === 'saving') return { key: 'save', text: 'Saving the transcript', pct: 92, next: 99, tau: 8_000 }
+  if (r.step === 'reading' && r.total) {
+    const done = Math.min(r.done ?? 0, r.total)
+    const at = (n: number) => 24 + (68 * n) / r.total!
+    return done >= r.total
+      ? { key: 'save', text: 'Saving the transcript', pct: 92, next: 99, tau: 8_000 }
+      : { key: `read-${done}`, text: `Turning speech into text · ${done} of ${r.total} parts done`, pct: at(done), next: at(done + 1), tau: readMs / r.total }
+  }
+  // (an older worker: only how far, once a part is read — or nothing yet)
+  if (r.progress) {
+    const at = 24 + 0.68 * Math.min(100, r.progress)
+    return { key: `read%${r.progress}`, text: 'Turning speech into text', pct: at, next: 92, tau: readMs * (1 - r.progress / 100) }
+  }
+  return { key: 'start', text: 'Getting the audio and turning speech into text', pct: 14, next: 92, tau: readMs }
+}
+/**
+ * The bar's place on screen: the stage's start, moved on with time toward its end (never there), and
+ * never back. A step done sooner than expected doesn't make it jump: it climbs there quickly (up to
+ * CATCH_UP % a tick) — the same at 100 %.
+ */
+const CATCH_UP = 2
+function usePrepPct(stage: PrepStage): number {
+  const [shown, setShown] = useState(stage.pct)
+  const live = useRef({ stage, key: stage.key, at: Date.now(), from: stage.pct, shown: stage.pct })
+  useEffect(() => {
+    const l = live.current
+    l.stage = stage
+    // (a new stage starts from where the bar is, if that's already past the stage's own start)
+    if (l.key !== stage.key) { l.key = stage.key; l.at = Date.now(); l.from = Math.max(stage.pct, Math.min(l.shown, stage.next)) }
+  })
+  useEffect(() => {
+    const t = setInterval(() => {
+      const l = live.current, st = l.stage
+      const target = st.pct >= 100 ? 100 : l.from + Math.max(0, st.next - l.from) * 0.92 * (1 - Math.exp(-(Date.now() - l.at) / Math.max(1, st.tau)))
+      const next = Math.max(l.shown, Math.min(target, l.shown + CATCH_UP))
+      if (next !== l.shown) { l.shown = next; setShown(next) }
+    }, 200)
+    return () => clearInterval(t)
+  }, [])
+  return shown
+}
+function ReadingProgress({ reading, expectMs, small = false }: { reading: ReadingNow | null; expectMs: number; small?: boolean }) {
+  const stage = prepStage(true, reading, expectMs)
+  const shown = usePrepPct(stage)
+  return (
+    <div className="flex flex-col gap-2">
+      <span className={`flex items-center gap-2 font-semibold text-white ${small ? 'text-xs' : 'text-[12.5px]'}`}>
+        <Spinner />
+        <span className="min-w-0 flex-1 truncate">{stage.text}…</span>
+        <span className="shrink-0 tabular-nums" style={{ color: ACCENT }}>{Math.floor(shown)}%</span>
+      </span>
+      <span className={`${small ? 'h-1' : 'h-1.5'} rounded-full overflow-hidden`} style={{ background: 'rgb(var(--cb-fg) / 0.1)' }}
+        role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.floor(shown)} aria-label={stage.text}>
+        <span className="block h-full rounded-full transition-[width] duration-500 ease-linear" style={{ width: `${Math.max(2, shown)}%`, background: ACCENT }} />
+      </span>
+    </div>
+  )
+}
 function Spinner() {
   return <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
 }
@@ -2239,11 +2314,6 @@ const READ_MS_PER_MIN = 15_000
 /** "about 9 min" (a minute or more), "under a minute" */
 function aboutMinutes(ms: number) {
   return ms < 60_000 ? 'under a minute' : `about ${Math.round(ms / 60_000)} min`
-}
-/** "About 4 min left", "Under a minute left" */
-function minutesLeft(ms: number) {
-  const t = aboutMinutes(ms)
-  return `${t[0].toUpperCase()}${t.slice(1)} left`
 }
 
 function aboutLabel(ms: number) {

@@ -46,21 +46,15 @@
   overflow: hidden;
   display: flex; flex-direction: column;
   padding: clamp(20px, 3.6cqh, 40px) clamp(24px, 3.6cqi, 48px);
-  color: var(--auth-ink);
+  color: #f4f4f5;
+  /* The same lime, less of it (user, 2026-11-01, option A): full lime in the top corner behind the
+     logo, fading into the dark card by the middle — the words sit on the dark part, in white; lime
+     stays in the ticks and the clip */
   background:
-    radial-gradient(ellipse 80% 55% at 85% 105%, rgba(255,255,255,0.38), transparent 70%),
-    radial-gradient(ellipse 60% 45% at 0% 0%, rgba(255,255,255,0.22), transparent 70%),
-    linear-gradient(140deg, var(--auth-lime) 0%, var(--auth-lime-deep) 100%);
+    radial-gradient(ellipse 115% 70% at 0% 0%, var(--auth-lime) 0%, #B4E600 24%, rgba(154,204,0,0.5) 48%, rgba(20,20,20,0) 80%),
+    #121213;
 }
-/* a faint grid, like a timeline's ruler, fading out towards the bottom */
-.auth-brand::before {
-  content: ''; position: absolute; inset: 0; pointer-events: none;
-  background-image:
-    linear-gradient(rgba(10,10,10,0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(10,10,10,0.06) 1px, transparent 1px);
-  background-size: 44px 44px;
-  mask-image: linear-gradient(180deg, #000 0%, transparent 75%);
-}
+/* (no grid lines over the lime — user, 2026-11-01) */
 .auth-home { position: relative; z-index: 1; align-self: flex-start; text-decoration: none; color: inherit; }
 .auth-home .brand-word { color: var(--auth-ink); }
 /* The words and the clip side by side in the middle (never on top of each other); the clip goes
@@ -75,15 +69,15 @@
   /* (the second line is the longest: ~12 font sizes wide — so the size follows the room the words have) */
   font-size: clamp(22px, min(4.6cqh, 8cqi), 54px); font-weight: 900; letter-spacing: -0.035em; line-height: 1.02;
 }
-.auth-pitch p { margin: clamp(10px, 1.8cqh, 16px) 0 0; font-size: clamp(14px, 1.9cqh, 16px); line-height: 1.5; color: rgba(10,10,10,0.72); }
+.auth-pitch p { margin: clamp(10px, 1.8cqh, 16px) 0 0; font-size: clamp(14px, 1.9cqh, 16px); line-height: 1.5; color: rgba(244,244,245,0.7); }
 .auth-pitch ul { list-style: none; margin: clamp(16px, 3cqh, 28px) 0 0; padding: 0; display: grid; gap: clamp(8px, 1.4cqh, 12px); }
 .auth-pitch li { display: flex; align-items: center; gap: 10px; font-size: clamp(13px, 1.8cqh, 15px); font-weight: 700; }
 .auth-pitch li span {
   flex-shrink: 0; width: 22px; height: 22px; display: grid; place-items: center;
-  border-radius: 999px; background: var(--auth-ink); color: var(--auth-lime);
+  border-radius: 999px; background: var(--auth-lime); color: var(--auth-ink);
 }
 .auth-pitch li svg { width: 13px; height: 13px; stroke-width: 3; }
-.auth-fine { position: relative; z-index: 1; margin: 0; font-size: 12.5px; font-weight: 700; color: rgba(10,10,10,0.6); }
+.auth-fine { position: relative; z-index: 1; margin: 0; font-size: 12.5px; font-weight: 700; color: rgba(244,244,245,0.55); }
 
 /* A vertical clip, tilted beside the words (decoration): a head and shoulders, a caption, its progress */
 .auth-reel {
@@ -96,7 +90,7 @@
   height: clamp(170px, 28cqh, 250px); aspect-ratio: 9 / 16;
   border-radius: 22px; border: 3px solid var(--auth-ink);
   background: linear-gradient(180deg, #2a2a2e 0%, #121214 100%);
-  box-shadow: 0 30px 60px -20px rgba(10,10,10,0.55);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.12), 0 30px 60px -20px rgba(0,0,0,0.75);
 }
 .auth-reel-head {
   position: absolute; left: 50%; top: 24%; translate: -50% 0;
@@ -119,7 +113,7 @@
 .auth-reel-tag {
   position: absolute; left: -18px; top: 16%;
   padding: 5px 10px; border-radius: 999px;
-  background: var(--auth-ink); color: var(--auth-lime);
+  background: var(--auth-ink); color: var(--auth-lime); box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
   font-size: 11px; font-weight: 800; letter-spacing: .02em; white-space: nowrap;
   rotate: -5deg;
 }
@@ -325,7 +319,10 @@
   .auth-root { display: block; height: auto; min-height: 100svh; overflow: visible; padding: 12px; }
   .auth-card { display: block; width: 100%; height: auto; border-radius: 22px; container-type: normal; }
   .auth-brand { padding: 20px 20px 22px; }
-  .auth-brand::before { mask-image: linear-gradient(180deg, #000 0%, transparent 100%); }
+  /* (a short header: the lime stays round the logo, the white words below it on the dark) */
+  .auth-brand {
+    background: radial-gradient(ellipse 70% 95% at 0% 0%, var(--auth-lime) 0%, #B4E600 22%, rgba(154,204,0,0.5) 42%, rgba(20,20,20,0) 72%), #121213;
+  }
   .auth-stage { margin: 18px 0 0; }
   .auth-pitch { max-width: none; }
   .auth-pitch h2 { font-size: 26px; }

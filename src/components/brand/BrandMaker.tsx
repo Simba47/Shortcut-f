@@ -313,7 +313,7 @@ export function BrandCard({ kit, brand, now, set, found, readOnly = false }: Kit
         <div className="flex items-center gap-3 flex-wrap">
           <span className="bm-sample" style={{ fontFamily: d.title.font ?? 'sans-serif', color: d.title.color }}>Aa {kit.name || 'Your title'}</span>
           <div className="flex-1 min-w-[180px]">
-            <FontPicker value={d.title.font} onChange={font => set({ ...now(), title: { ...now().title, font: font === 'sans-serif' ? null : font } })} />
+            <FontPicker stayOpen value={d.title.font} onChange={font => set({ ...now(), title: { ...now().title, font: font === 'sans-serif' ? null : font } })} />
           </div>
         </div>
       </div>

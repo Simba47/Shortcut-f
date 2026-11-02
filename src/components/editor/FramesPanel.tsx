@@ -3,7 +3,7 @@
 import { InfoTip } from '@/components/ui/info-tip'
 import { useEffect, useState } from 'react'
 import type { SegmentLocal, FrameLayout, FrameItem, FrameSettings, SlotMotion, CornerStyle, BrollPick } from '@chai-cut/shared'
-import { FRAME_TEMPLATES, FRAME_LAYOUTS, isFrameLayout, frameLanes, frameOf, cornerGeometry, CORNER_MAX, mainSlotSound, frameAreas, frameBase, isTextLane } from '@/modules/editor/frames'
+import { FRAME_TEMPLATES, FRAME_LAYOUTS, isFrameLayout, frameLanes, frameOf, cornerGeometry, CORNER_MAX, mainSlotSound, frameAreas, frameBase, isTextLane, startLayout } from '@/modules/editor/frames'
 import { frameItemColor, FRAME_ITEM_COLORS } from './SegmentTimeline'
 import { ItemTimeRange } from './ItemTimeRange'
 import { FrameBackgroundFields } from './FrameBackgroundFields'
@@ -114,7 +114,7 @@ export function FrameThumb({ layout }: { layout: FrameLayout }) {
         : base === 'band' ? 'linear-gradient(180deg, #202026, #141418)' : 'linear-gradient(180deg, #121215, #070708)',
       boxShadow: 'inset 0 0 0 1px rgb(255 255 255 / 0.14), inset 0 1px 0 rgb(255 255 255 / 0.08), 0 6px 14px -8px rgb(0 0 0 / 0.9)',
     }}>
-      {frameAreas(layout).map((a, i) => {
+      {frameAreas(layout, true, startLayout(layout)).map((a, i) => {
         const box: React.CSSProperties = { position: 'absolute', left: `${a.x * 100}%`, top: `${a.y * 100}%`, width: `${a.w * 100}%`, height: `${a.h * 100}%` }
         if (a.kind === 'band') return (
           <div key={i} className="flex flex-col items-center justify-center gap-[2px]"

@@ -90,8 +90,9 @@ export function TransitionGlyph({ type, size = 12 }: { type: string; size?: numb
   return <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">{shape}</svg>
 }
 
-/** How long a new transition lasts, and the range it can be set to (ms) */
-export const TRANSITION_DEFAULT_MS = 500
+/** How long a new transition lasts (user, 2026-11-01: 0.75 s, was 0.5 s), and the range it can be set to (ms).
+ *  Transitions already on a clip keep the length they were saved with */
+export const TRANSITION_DEFAULT_MS = 750
 const MIN_MS = 200, MAX_MS = 1500
 /** The slider moves in these steps (ms) */
 const STEP_MS = 50
@@ -200,22 +201,9 @@ export function TransitionsPanel({ joins, transitions, currentTimeMs, canAddHere
   if (joins.length === 0) {
     return (
       <div className="flex flex-col gap-3 px-4 pb-5 pt-1">
-        <div className="tr-start">
-          <span className="tr-empty-icon" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2.5" y="5" width="8" height="14" rx="2" /><rect x="13.5" y="5" width="8" height="14" rx="2" /><path d="M10.5 12h3" />
-            </svg>
-          </span>
-          <div className="min-w-0">
-            <p className="tr-empty-title">Add a transition</p>
-            <p className="tr-empty-text">
-              {canAddHere
-                ? <>Pick one: the clip is cut at the playhead (<b className="tabular-nums">{fmt(currentTimeMs)}</b>) and it plays there.</>
-                : <>Move the playhead to where one shot should give way to the next, then pick one.</>}
-            </p>
-          </div>
-        </div>
+        {/* (no text card — user, 2026-11-01: the preview screen on top shows what each one does) */}
         <KindTiles frames={frames} picked={null} label="Add a transition at the playhead" disabled={!canAddHere} weak
+          note={canAddHere ? null : 'Move the playhead to where one shot should change to the next, then pick one.'}
           onPick={t => { if (t !== 'cut') onAddHere(t) }} />
         {canAddHere && <span className="tr-hint">This splits one shot in two, framed the same on both sides: {SAME_SHOT_TIP}</span>}
       </div>
@@ -275,6 +263,17 @@ export function TransitionsPanel({ joins, transitions, currentTimeMs, canAddHere
 
   return (
     <div className="flex flex-col gap-3.5 px-4 pb-5 pt-1">
+      {/* A kind that won't show picked on a same-shot cut: a popup over the top of this panel says so and
+          offers one that does in a tap — for 3 s (user, 2026-11-01: at the bottom of the panel it was only
+          seen by scrolling; not a card; inside the Transitions box, not over the page) */}
+      {unseen.length > 0 && (
+        <UnseenPopup
+          showKey={unseen.map(j => `${j.afterId}:${typeOf(j)}`).join(',')}
+          text={one
+            ? `${nameOf(typeOf(one))} won’t show here: both sides of this cut are the same shot, so it looks like a plain cut.`
+            : `${[...new Set(unseen.map(j => nameOf(typeOf(j))))].join(' / ')} won’t show at ${unseen.map(j => fmt(j.at)).join(', ')}: the same shot is on both sides.`}
+          onZoom={() => swap(unseen, 'zoomin')} onWhip={() => swap(unseen, 'smoothleft')} />
+      )}
       {/* Apply to: all cuts, or one */}
       <div className="flex flex-col gap-1.5">
         <span className="tr-label">{joins.length > 1 ? 'Cut' : 'The cut'}</span>
@@ -290,45 +289,9 @@ export function TransitionsPanel({ joins, transitions, currentTimeMs, canAddHere
         </div>
       </div>
 
+      {/* (Length sits right under the preview screen — user, 2026-11-01) */}
       <KindTiles frames={frames} picked={picked} label={one ? `Transition at ${fmt(one.at)}` : 'Transition on every cut'} onPick={t => apply(t)}
-        weak={targets.every(j => j.sameShot)} />
-      {/* the same transition on every cut: this cut's, with its length */}
-      {one && joins.length > 1 && (() => {
-        const t = typeOf(one), len = lenOf(one)
-        const same = joins.every(j => typeOf(j) === t && (t === 'cut' || lenOf(j) === len))
-        return (
-          <button type="button" className="tr-all" disabled={same}
-            title={same ? `Every cut already has ${nameOf(t)}` : `Give all ${joins.length} cuts ${nameOf(t)}${t !== 'cut' ? ` (${secs(len)})` : ''}`}
-            onClick={() => { for (const j of joins) onSet(j.afterId, t, len) }}>
-            {same ? `All ${joins.length} cuts have ${nameOf(t)}` : `Apply ${nameOf(t)} to all ${joins.length} cuts`}
-          </button>
-        )
-      })()}
-      {unseen.length > 0 ? (
-        // A kind that won't show picked on a same-shot cut: say so, and offer one that does in a tap
-        <div className="tr-hint flex flex-col gap-2" data-tone="warn" role="alert">
-          <span>
-            {one
-              ? <>{nameOf(typeOf(one))} won&apos;t show here: both sides of this cut are the same shot, framed the same, so it looks like a plain cut.</>
-              : <>At {unseen.map(j => fmt(j.at)).join(', ')}, {[...new Set(unseen.map(j => nameOf(typeOf(j))))].join(' / ')} won&apos;t show: both sides are the same shot, framed the same, so it looks like a plain cut.</>}
-          </span>
-          <span className="flex gap-2">
-            <button type="button" className="tr-play flex-1 justify-center" onClick={() => swap(unseen, 'zoomin')}>Use Zoom</button>
-            <button type="button" className="tr-play flex-1 justify-center" onClick={() => swap(unseen, 'smoothleft')}>Use Whip</button>
-          </span>
-        </div>
-      ) : targets.some(j => j.sameShot && typeOf(j) === 'cut') && (
-        <span className="tr-hint">
-          {targets.every(j => j.sameShot) ? 'Both sides of this cut are the same shot, framed the same: ' : 'Some cuts have the same shot on both sides, framed the same: '}{SAME_SHOT_TIP}
-        </span>
-      )}
-      {savedAsDissolve && (
-        <span className="tr-hint" data-tone="warn">
-          The new transitions aren&apos;t switched on yet, so this one was saved as Dissolve for now. Pick it again once they&apos;re switched on.
-        </span>
-      )}
-
-      {anyOn && (one && one.room < TRANSITION_MIN_SHOWN_MS ? (
+        weak={targets.every(j => j.sameShot)} belowStage={anyOn && (one && one.room < TRANSITION_MIN_SHOWN_MS ? (
         <span className="tr-hint" data-tone="warn">
           The {sideName(one)} this cut is only {secs(Math.max(0, Math.round(one.room)))} long: too short for a transition, so it plays as a plain cut. Make that part longer to see it.
         </span>
@@ -344,7 +307,8 @@ export function TransitionsPanel({ joins, transitions, currentTimeMs, canAddHere
               onChange={e => {
                 const len = Number(e.target.value)
                 for (const j of targets) if (typeOf(j) !== 'cut') onSet(j.afterId, typeOf(j), len)
-              }} className="tr-range" />
+              }} className="tr-range"
+              style={{ ['--v' as string]: Math.max(sliderMin, Math.min(ms, sliderMax)), ['--min' as string]: sliderMin, ['--max' as string]: sliderMax }} />
           )}
           {mixedLen && (
             <span className="tr-hint">The cuts have different lengths: moving the slider gives them all the same one.</span>
@@ -358,7 +322,30 @@ export function TransitionsPanel({ joins, transitions, currentTimeMs, canAddHere
             </span>
           )}
         </div>
-      ))}
+      ))} />
+      {/* the same transition on every cut: this cut's, with its length */}
+      {one && joins.length > 1 && (() => {
+        const t = typeOf(one), len = lenOf(one)
+        const same = joins.every(j => typeOf(j) === t && (t === 'cut' || lenOf(j) === len))
+        return (
+          <button type="button" className="tr-all" disabled={same}
+            title={same ? `Every cut already has ${nameOf(t)}` : `Give all ${joins.length} cuts ${nameOf(t)}${t !== 'cut' ? ` (${secs(len)})` : ''}`}
+            onClick={() => { for (const j of joins) onSet(j.afterId, t, len) }}>
+            {same ? `All ${joins.length} cuts have ${nameOf(t)}` : `Apply ${nameOf(t)} to all ${joins.length} cuts`}
+          </button>
+        )
+      })()}
+      {unseen.length === 0 && targets.some(j => j.sameShot && typeOf(j) === 'cut') && (
+        <span className="tr-hint">
+          {targets.every(j => j.sameShot) ? 'Both sides of this cut are the same shot, framed the same: ' : 'Some cuts have the same shot on both sides, framed the same: '}{SAME_SHOT_TIP}
+        </span>
+      )}
+      {savedAsDissolve && (
+        <span className="tr-hint" data-tone="warn">
+          The new transitions aren&apos;t switched on yet, so this one was saved as Dissolve for now. Pick it again once they&apos;re switched on.
+        </span>
+      )}
+
 
       <div className="flex items-center gap-2">
         <button type="button" className="tr-play flex-1 justify-center" onClick={() => onPreview(preview.at, playedOf(preview))}
@@ -385,10 +372,46 @@ function Flame() {
   )
 }
 
+/**
+ * The "won't show here" popup: at the top of the screen for 3 seconds each time it is needed anew
+ * (`showKey`: the cuts and kinds it is about), with Use Zoom / Use Whip; pointing at it holds it there.
+ * Styles: .tr-pop in globals.css: it floats over the top of the Transitions panel, its width, and stays
+ * there while the panel scrolls (user, 2026-11-01: inside the box, not over the page).
+ */
+function UnseenPopup({ showKey, text, onZoom, onWhip }: { showKey: string; text: string; onZoom: () => void; onWhip: () => void }) {
+  const [open, setOpen] = useState(true)
+  const [held, setHeld] = useState(false)
+  useEffect(() => { setOpen(true) }, [showKey])
+  useEffect(() => {
+    if (!open || held) return
+    const t = setTimeout(() => setOpen(false), 3000)
+    return () => clearTimeout(t)
+  }, [open, held, showKey])
+  if (!open) return null
+  return (
+    <div className="tr-pop-anchor">
+    <div className="tr-pop" role="alert" onPointerEnter={() => setHeld(true)} onPointerLeave={() => setHeld(false)}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#facc15" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" />
+      </svg>
+      <span className="tr-pop-text">{text}</span>
+      <span className="tr-pop-actions">
+        <button type="button" onClick={() => { onZoom(); setOpen(false) }}>Use Zoom</button>
+        <button type="button" onClick={() => { onWhip(); setOpen(false) }}>Use Whip</button>
+      </span>
+    </div>
+    </div>
+  )
+}
+
 /** The tiles of every kind; `picked` is lit */
-function KindTiles({ picked, label, disabled, weak, onPick, frames }: {
+function KindTiles({ picked, label, disabled, weak, onPick, frames, note, belowStage }: {
   /** Two pictures of the clip: shot A and shot B in every tile */
   frames?: { a: string; b: string } | null
+  /** A line under the preview (why the tiles can't be picked yet) */
+  note?: string | null
+  /** Under the preview screen, before the tiles (the Length slider) */
+  belowStage?: React.ReactNode
   picked: TransitionType | null
   label: string
   disabled?: boolean
@@ -396,13 +419,22 @@ function KindTiles({ picked, label, disabled, weak, onPick, frames }: {
   weak?: boolean
   onPick: (type: TransitionType) => void
 }) {
+  // The preview screen on top (user, 2026-11-01: "a small preview screen so the user knows how that
+  // transition works"): it plays the one pointed at, else the one picked, else Dissolve — with the
+  // clip's own two shots, the same loop the tiles play, only bigger
+  const [hovered, setHovered] = useState<TransitionType | null>(null)
+  const shownKind: TransitionType = hovered ?? picked ?? 'fade'
+  // (not the disabled attribute: a disabled button gets no pointer events, and pointing at a tile
+  // must still preview it before the playhead is on a cut)
   const tile = (k: (typeof TRANSITION_KINDS)[number]) => (
-    <button key={k.type} type="button" role="radio" aria-checked={picked === k.type} disabled={disabled}
+    <button key={k.type} type="button" role="radio" aria-checked={picked === k.type} aria-disabled={disabled || undefined}
       // (drag it onto a cut on the timeline: that cut gets it)
       draggable={!disabled} onDragStart={e => { e.dataTransfer.setData(TRANSITION_DRAG_TYPE, k.type); e.dataTransfer.effectAllowed = 'copy' }}
       className="tr-tile" data-on={picked === k.type || undefined} data-weak={(weak && NEEDS_CHANGE.includes(k.type)) || undefined}
       title={weak && NEEDS_CHANGE.includes(k.type) ? `${k.name} barely shows between two parts of the same shot` : undefined}
-      onClick={() => onPick(k.type)}>
+      onPointerEnter={() => setHovered(k.type)} onPointerLeave={() => setHovered(h => (h === k.type ? null : h))}
+      onFocus={() => setHovered(k.type)} onBlur={() => setHovered(h => (h === k.type ? null : h))}
+      onClick={() => { if (!disabled) onPick(k.type) }}>
       {/* the picture plays the transition; nothing laid over it */}
       <span className="tr-demo" data-kind={k.type} aria-hidden="true">
         <i className="tr-a" /><i className="tr-b" /><i className="tr-fx" />
@@ -416,6 +448,15 @@ function KindTiles({ picked, label, disabled, weak, onPick, frames }: {
   return (
     <div className="tr-kinds" role="radiogroup" aria-label={label} data-frames={frames ? '' : undefined}
       style={frames ? { ['--tr-a' as string]: `url("${frames.a}")`, ['--tr-b' as string]: `url("${frames.b}")` } : undefined}>
+      {/* the preview screen: the same loop as the tiles (its .tr-tile[data-on] plays it), bigger */}
+      <div className="tr-tile tr-stage" data-on="" aria-live="polite">
+        <span key={shownKind} className="tr-demo" data-kind={shownKind} aria-hidden="true">
+          <i className="tr-a" /><i className="tr-b" /><i className="tr-fx" />
+        </span>
+        <span className="tr-stage-name">{nameOf(shownKind)}</span>
+      </div>
+      {note && <p className="tr-stage-note">{note}</p>}
+      {belowStage}
       <span className="tr-label">Basic</span>
       <div className="tr-grid">{shown.filter(k => !k.fresh).map(tile)}</div>
       <span className="tr-label tr-label-hot"><Flame />Trending on Reels and Shorts</span>

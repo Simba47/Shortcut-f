@@ -115,7 +115,8 @@ export function FrameTextPanel({ segment, currentTimeMs, selectedId, onSelect, o
                           <span className="text-[11px] tabular-nums" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>{t.size}px</span>
                         </div>
                         <input type="range" min={32} max={120} step={2} value={t.size} aria-label="Text size"
-                          onChange={e => onUpdate(it.id, { size: Number(e.target.value) })} style={{ accentColor: ACCENT }} />
+                          // (white, not lime — user, 2026-11-01; the editor's text colour, so dark on the light theme)
+                          onChange={e => onUpdate(it.id, { size: Number(e.target.value) })} style={{ accentColor: 'var(--ed-text)' }} />
                       </div>
                     </>
                   )

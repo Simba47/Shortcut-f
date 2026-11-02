@@ -13,7 +13,7 @@ const cache = new Map<string, string>()
 const waiters = new Map<string, Array<(url: string | null) => void>>()
 /** A face to cut out: its box (fractions of the frame); the picture is a square around it, `px` wide */
 type FaceCrop = { x: number; y: number; w: number; h: number; px: number }
-type Job = { key: string; atSec: number; face?: FaceCrop; tries?: number }
+type Job = { key: string; atSec: number; face?: FaceCrop; tries?: number; width?: number }
 
 /** The frame now on screen is drawn (a paused video's new frame after a seek), or a short wait where that can't be told */
 function framePresented(video: HTMLVideoElement): Promise<void> {
@@ -85,6 +85,9 @@ async function run(src: string) {
         else settle(job.key, null)
         continue
       }
+      // A big picture (the Transitions preview screen): one more frame's wait, so what is drawn is the
+      // fully decoded picture at the moment, never a half-ready one (user, 2026-11-01: a shot looked blurred)
+      if (job.width) await framePresented(video)
       let url: string | null = null
       try {
         if (ctx && video.videoWidth && job.face) {
@@ -97,12 +100,15 @@ async function run(src: string) {
           ctx.drawImage(video, sx, sy, side, side, 0, 0, f.px, f.px)
           url = canvas.toDataURL('image/jpeg', 0.85)
         } else if (ctx && video.videoWidth) {
-          // Cover the 16:9 thumbnail, like object-fit: cover
-          canvas.width = W; canvas.height = H
-          const s = Math.max(W / video.videoWidth, H / video.videoHeight)
+          // Cover the 16:9 thumbnail, like object-fit: cover (a wider one asked for, e.g. the Transitions
+          // preview screen: sharper, never more than the video's own size)
+          const w = job.width ? Math.min(job.width, video.videoWidth) : W, h = Math.round((w * H) / W)
+          canvas.width = w; canvas.height = h
+          const s = Math.max(w / video.videoWidth, h / video.videoHeight)
           const dw = video.videoWidth * s, dh = video.videoHeight * s
-          ctx.drawImage(video, (W - dw) / 2, (H - dh) / 2, dw, dh)
-          url = canvas.toDataURL('image/jpeg', 0.7)
+          ctx.imageSmoothingQuality = 'high'
+          ctx.drawImage(video, (w - dw) / 2, (h - dh) / 2, dw, dh)
+          url = canvas.toDataURL('image/jpeg', job.width ? 0.9 : 0.7)
         }
       } catch { url = null }   // a source without CORS can't be read: no thumbnail
       settle(job.key, url)
@@ -112,8 +118,8 @@ async function run(src: string) {
   }
 }
 
-function request(src: string, ms: number, face?: FaceCrop): Promise<string | null> {
-  const key = face ? `${keyOf(src, ms)}@${[face.x, face.y, face.w, face.h].map(v => v.toFixed(3)).join(',')}` : keyOf(src, ms)
+function request(src: string, ms: number, face?: FaceCrop, width?: number): Promise<string | null> {
+  const key = face ? `${keyOf(src, ms)}@${[face.x, face.y, face.w, face.h].map(v => v.toFixed(3)).join(',')}` : width ? `${keyOf(src, ms)}@w${width}` : keyOf(src, ms)
   if (cache.has(key)) return Promise.resolve(cache.get(key)!)
   return new Promise(resolve => {
     const list = waiters.get(key)
@@ -134,23 +140,25 @@ function request(src: string, ms: number, face?: FaceCrop): Promise<string | nul
       q = { video, jobs: [], busy: false }
       queues.set(src, q)
     }
-    q.jobs.push({ key, atSec: ms / 1000, face })
+    q.jobs.push({ key, atSec: ms / 1000, face, width })
     void run(src)
   })
 }
 
-/** A thumbnail of `src` at `ms` (a little into the moment, so it isn't a cut's first frame); null until ready */
-export function useFrameAt(src: string | null | undefined, ms: number): string | null {
+/** A thumbnail of `src` at `ms` (a little into the moment, so it isn't a cut's first frame); null until ready.
+ *  `width`: a bigger picture than a thumbnail (px, 16:9) */
+export function useFrameAt(src: string | null | undefined, ms: number, width?: number): string | null {
   const at = ms + 600
-  const [url, setUrl] = useState<string | null>(() => (src ? cache.get(keyOf(src, at)) ?? null : null))
+  const k = (s: string) => (width ? `${keyOf(s, at)}@w${width}` : keyOf(s, at))
+  const [url, setUrl] = useState<string | null>(() => (src ? cache.get(k(src)) ?? null : null))
   useEffect(() => {
     if (!src) return
     let alive = true
-    const hit = cache.get(keyOf(src, at))
+    const hit = cache.get(k(src))
     if (hit) { setUrl(hit); return }
-    request(src, at).then(u => { if (alive) setUrl(u) })
+    request(src, at, undefined, width).then(u => { if (alive) setUrl(u) })
     return () => { alive = false }
-  }, [src, at])
+  }, [src, at, width]) // eslint-disable-line react-hooks/exhaustive-deps
   return url
 }
 
