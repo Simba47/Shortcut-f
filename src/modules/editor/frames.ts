@@ -77,6 +77,9 @@ export interface FrameTemplate {
   corners?: number
   /** What each slot's "+" offers (default: derived from the template) */
   offers?: { video: boolean; photo: boolean; text?: boolean }[]
+  /** A stacked template's rows top to bottom when a new frame of it starts (template row numbers;
+   *  frame.row_order) — the rows can still be swapped after, as on any stacked frame */
+  startOrder?: number[]
 }
 
 export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
@@ -86,9 +89,13 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
     defaults: ['video'],
   },
   frame_video_photo: {
-    name: 'Video + Photo', description: 'One video and one photo with a letterbox in the middle.',
-    rows: [{ kind: 'slot', slot: 0, h: 0.42 }, { kind: 'band', h: 0.16 }, { kind: 'slot', slot: 1, h: 0.42 }],
+    // In the gallery as Pic + Text + Video (user, 2026-11-01): a picture on top, text in the middle,
+    // the video below — the rows start in that order (startOrder) and can be swapped anywhere after.
+    // (Was "Video + Photo", the video on top: clips that have it keep their own order, export the same)
+    name: 'Pic + Text + Video', description: 'A picture, a line of text and the video, stacked — move them into any order.',
+    rows: [{ kind: 'slot', slot: 0, h: 0.42, label: 'Video' }, { kind: 'band', h: 0.16, label: 'Text' }, { kind: 'slot', slot: 1, h: 0.42, label: 'Pic' }],
     defaults: ['video', 'photo'],
+    startOrder: [2, 1, 0],
   },
   frame_dual: {
     name: 'Dual Video', description: 'Two videos in one frame.',
@@ -293,9 +300,14 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
  * kit's colour, title and @handle (EditorShell fillBrandCard).
  */
 export const FRAME_LAYOUTS: FrameLayout[] = [
-  'frame_single', 'frame_title_caption', 'frame_blur_fill', 'frame_dual', 'frame_screenshot', 'frame_triple',
+  'frame_single', 'frame_title_caption', 'frame_blur_fill', 'frame_dual', 'frame_screenshot', 'frame_video_photo', 'frame_triple',
   'frame_trio_main', 'frame_side_by_side', 'frame_screen_face', 'frame_brand_card',
 ]
+/** How a new frame of this template is laid out (its starting row order), for the gallery's picture */
+export const startLayout = (layout: FrameLayout): RowLayout => {
+  const order = FRAME_TEMPLATES[layout].startOrder
+  return order ? { row_order: order } : undefined
+}
 
 export function isFrameLayout(layout: LayoutType | string | null | undefined): layout is FrameLayout {
   return !!layout && layout in FRAME_TEMPLATES
@@ -687,6 +699,8 @@ export function defaultFrame(layout: FrameLayout, prev?: FrameSettings | null): 
     band: { ...prevBand, ...(tpl.bandBg && prevBand.bg.toLowerCase() === DEFAULT_BAND.bg ? { bg: tpl.bandBg } : {}) },
     main_slots: main,
     main_under: under,
+    // (a template's own starting order: Pic + Text + Video, the picture on top)
+    ...(tpl.startOrder ? { row_order: tpl.startOrder } : {}),
     main_volume: prev?.main_volume ?? 1,
     main_muted: prev?.main_muted ?? false,
     // The main video keeps the corners picked for each slot; a slot without its own starts as the

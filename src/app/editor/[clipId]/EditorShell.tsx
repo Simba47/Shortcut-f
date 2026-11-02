@@ -3,7 +3,7 @@
 import { useFrameAt } from '@/modules/clips/thumbs'
 import { InfoTip } from '@/components/ui/info-tip'
 import { musicGainAt, speechRangesInVideo, speechRanges, heardSpeech, type Range as SpeechRange } from '@/modules/editor/musicGain'
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react'
 import type { Clip, Segment, CropBox, BoxKeyframe, CaptionStyle, TextOverlay, AudioTrack, Transition, TranscriptWord, LayoutType, Overlay } from '@chai-cut/shared'
 import { VideoPreview, OutputCanvas, buildCaptionChunks, captionWordsPerLine, captionDefaultY } from '@/components/editor/VideoPreview'
 import { withoutRanges } from '@/lib/cuts'
@@ -82,6 +82,7 @@ import { frameSlotSize } from '@/modules/editor/frames'
 import { getBoxPositionAtLerp, type BoxPosition } from '@/lib/interpolation'
 import { SubjectsPanel, type SubjectItem, type AnglesView } from '@/components/editor/SubjectsPanel'
 import { angleRows, angleAt, type Angle, type AngleRow } from '@/modules/editor/angles'
+import { briefView, withWide, WIDEN_MIN_MS } from '@/modules/editor/briefWiden'
 import { decideFormat, decideVertical, AUTO_FORMAT, keepsAll, viewsOverlap } from '@/modules/editor/autoFormat'
 import type { SegmentLocal, CropBoxLocal, FrameLayout, FrameLane, FrameItem, TransitionType } from '@chai-cut/shared'
 import { SPEED_MIN, SPEED_MAX } from '@chai-cut/shared'
@@ -132,6 +133,13 @@ const PLATFORM_OPTIONS: { id: Platform; label: string; icon: React.ReactNode }[]
 // (user, 2026-10-31: the size in their screenshot as the default — room for a scene's faces and Mark as group
 // on one line; was 272, then 338)
 const OPTIONS_W = 384
+// The Transitions tool opens narrower (user, 2026-11-01: the size in their screenshot, ~320 px — the
+// preview screen and three tiles a row fit), and keeps its own width: dragged while on Transitions, it
+// comes back that wide next time this visit; the other tools keep theirs
+const TRANSITIONS_W = 320
+/** The Transitions preview screen's two pictures: this wide (px), or the video's own width if less */
+const TR_FRAME_W = 1024
+const toolDefaultW = (t: string) => (t === 'transitions' ? TRANSITIONS_W : OPTIONS_W)
 // The Preview column's smallest width; it opens as wide as the 9:16 preview needs to fill its height (user,
 // 2026-10-31: "so much gap above and below, increase the size"), until its edge is dragged
 const PREVIEW_W = 260
@@ -476,17 +484,21 @@ export function EditorShell({
     const len = rawClip.end_ms - rawClip.start_ms
     return [rawClip.start_ms + Math.round(len * 0.25), rawClip.start_ms + Math.round(len * 0.68)]
   }, [rawClip.start_ms, rawClip.end_ms])
-  const trFrameA = useFrameAt(trFramesOn || tool === 'transitions' ? videoUrl : null, trFrameMs[0])
-  const trFrameB = useFrameAt(trFramesOn || tool === 'transitions' ? videoUrl : null, trFrameMs[1])
+  // Sharp for the Transitions preview screen, both shots, for any video (user, 2026-11-01: it looked
+  // blurred): TR_FRAME_W wide — twice the screen's width, for sharp screens — or the video's own width
+  // if that's less; never a 192 px thumbnail
+  const trFrameA = useFrameAt(trFramesOn || tool === 'transitions' ? videoUrl : null, trFrameMs[0], TR_FRAME_W)
+  const trFrameB = useFrameAt(trFramesOn || tool === 'transitions' ? videoUrl : null, trFrameMs[1], TR_FRAME_W)
   /** The picture on the preview right now (the editor's own video, already loaded), for the tiles until theirs are in */
   const grabPreviewFrame = useCallback(() => {
     const v = videoRef.current
     if (!v || !v.videoWidth || v.readyState < 2) return null
     try {
       const c = document.createElement('canvas')
-      c.width = 192; c.height = Math.max(1, Math.round((192 * v.videoHeight) / v.videoWidth))
+      const w = Math.min(TR_FRAME_W, v.videoWidth)
+      c.width = w; c.height = Math.max(1, Math.round((w * v.videoHeight) / v.videoWidth))
       c.getContext('2d')?.drawImage(v, 0, 0, c.width, c.height)
-      return c.toDataURL('image/jpeg', 0.7)
+      return c.toDataURL('image/jpeg', 0.9)
     } catch { return null }
   }, [videoRef])
   // The editor always opens the same way — a new clip, a refresh, or coming from any board: the
@@ -598,8 +610,18 @@ export function EditorShell({
     window.addEventListener('pointerup', up)
   }
   function resetColumn(which: 'options' | 'preview') {
-    if (which === 'options') setOptionsW(OPTIONS_W); else setPreviewFit(true)
+    if (which === 'options') setOptionsW(toolDefaultW(tool)); else setPreviewFit(true)
   }
+  // Each kind of tool keeps its own width this visit: Transitions one, the rest another (TRANSITIONS_W)
+  const toolWidths = useRef<Record<string, number>>({})
+  const widthOwner = useRef<string>(tool === 'transitions' ? 'transitions' : 'other')
+  useEffect(() => {
+    const next = tool === 'transitions' ? 'transitions' : 'other'
+    if (next === widthOwner.current) return
+    toolWidths.current[widthOwner.current] = optionsW
+    widthOwner.current = next
+    setOptionsW(toolWidths.current[next] ?? toolDefaultW(tool))
+  }, [tool]) // eslint-disable-line react-hooks/exhaustive-deps
   // While the Brand kit's workshop is open the preview keeps its size: the workshop tucks the timeline away,
   // the Preview's body grew taller and the card with it (user, 2026-10-31). Set from studioShown below
   const previewFrozenRef = useRef(false)
@@ -1716,8 +1738,65 @@ export function EditorShell({
     }
     return done
   }
+  /**
+   * A format picked on the switch (top of the preview). While playing the editor's time stands where
+   * playing started (modules/player/store.ts), so a pick then went to that place, not where the playhead
+   * is (user, 2026-11-01): playing stops first and the pick is made on the next redraw, from there.
+   */
+  const [queuedFormat, setQueuedFormat] = useState<LayoutType | null>(null)
+  function pickFormat(id: LayoutType) {
+    if (usePlayerStore.getState().playing) { pause(); setQueuedFormat(id); return }
+    setFormatPlay(p => ({ id, n: (p?.n ?? 0) + 1 }))
+    if (tool === 'subjects' && pickForScene(id)) return
+    // A part picked on the timeline, the playhead in it or on its edge: that whole part gets the format
+    // (user, 2026-11-01: a short part picked, the playhead resting on its last moment — the line into the
+    // next part — and Vertical went to the next part, or seemed to do nothing)
+    const t = liveTime.get()
+    const picked = pickedSegId ? sections.find(x => x.id === pickedSegId) : undefined
+    if (picked && !isGapPart(picked, mainVideoId) && t >= picked.start_ms - LAYOUT_SNAP_MS && t <= picked.end_ms + LAYOUT_SNAP_MS) {
+      formatWholePart(picked, id, t)
+      return
+    }
+    handleLayoutChange(id, 'fromPlayhead')
+  }
+  /** `seg` all of it in `layout` (joined to a neighbour in the same one); the playhead is put inside it, so
+   *  the switch, the preview and the outline all show it (on its edge they read the part beside it) */
+  function formatWholePart(seg: SegmentLocal, layout: LayoutType, t: number) {
+    if (sectionBlocked(seg.id)) return
+    let keep = seg.id
+    // (a frame already is Vertical as a format: picking Vertical keeps the frame)
+    if (seg.layout !== layout && formatLayoutOf(seg.layout) !== layout) {
+      pause()
+      skipCanvasTransitionRef.current = true
+      setActiveBoxId(null)
+      applyLayout(seg.id, layout, getVideoAR(), neighbourFraming(layout, seg.start_ms, seg.end_ms, seg.id))
+      keep = joinSameLayoutNeighbours(seg.id, transitionAfter())
+    }
+    const now = useEditorStore.getState().segments.find(x => x.id === keep)
+    if (!now) return
+    setPickedSegIdState(now.id)
+    // (a little inside the edge: a jump onto the line itself can land a hair before it, in the part before)
+    const edge = Math.min(80, (now.end_ms - now.start_ms) / 3)
+    if (t < now.start_ms + 1 || t > now.end_ms - edge) seekToMs(Math.min(Math.max(t, now.start_ms + edge), now.end_ms - edge))
+  }
+  useEffect(() => {
+    if (!queuedFormat || playing) return
+    setQueuedFormat(null)
+    pickFormat(queuedFormat)
+  }, [queuedFormat, playing]) // eslint-disable-line react-hooks/exhaustive-deps
+  /** The format at clip time `t` (the switch follows the live playhead while playing) */
+  const formatAt = (t: number): LayoutType | null => {
+    const s = partAt(sections, t)
+    return s && !isGapPart(s, mainVideoId) ? formatLayoutOf(s.layout) : null
+  }
   // (read live: a split just before, in the same action, moves the transition at a part's end)
   const transitionAfter = () => new Set(useMediaStore.getState().transitions.map(tr => tr.after_segment_id))
+  /** The playhead onto the start of a part (a cut): a little past the line, so it's read as in that part —
+   *  a jump onto the line itself can land a hair before it, and the switch showed the part before */
+  function seekOnto(ms: number) {
+    const part = useEditorStore.getState().segments.filter(x => !isShot(x, mainVideoId)).find(x => x.start_ms <= ms + 1 && x.end_ms > ms + 1)
+    seekToMs(part ? ms + Math.min(80, (part.end_ms - ms) / 3) : ms)
+  }
   function handleLayoutChange(layout: LayoutType, mode: 'section' | 'fromPlayhead' = 'section') {
     let t = currentTimeMs
     const ar = getVideoAR()
@@ -1739,7 +1818,7 @@ export function EditorShell({
           skipCanvasTransitionRef.current = true
           setActiveBoxId(null)
           formatSpans([[cut, end]], layout, neighbourFraming(layout, cut, end))
-          if (t < cut) seekToMs(cut)
+          if (t < cut) seekOnto(cut)
           return
         }
       }
@@ -1752,7 +1831,7 @@ export function EditorShell({
       skipCanvasTransitionRef.current = true
       const id = addFormat(start, currentGap.end_ms, layout, ar, neighbourFraming(layout, start, currentGap.end_ms))
       joinSameLayoutNeighbours(id, transitionAfter())
-      if (mode !== 'section' && start !== t) seekToMs(start)
+      if (mode !== 'section' && start !== t) seekOnto(start)
       return
     }
     const seg = activeSegment
@@ -1777,9 +1856,12 @@ export function EditorShell({
       // Playhead is on the line into what follows: change the next format if it touches this one
       const next = [...sections].sort((a, b) => a.start_ms - b.start_ms).find(s => s.start_ms >= seg.end_ms - 1)
       if (next && next.start_ms - seg.end_ms < LAYOUT_SNAP_MS) {
-        if (next.layout !== layout && formatLayoutOf(next.layout) !== layout && !sectionBlocked(next.id)) {
+        // (it already has that format: the playhead steps into it, so the switch and the preview show
+        // it — user, 2026-11-01: on the line before a Trio, Trio clicked did nothing it could see)
+        if (next.layout === layout || formatLayoutOf(next.layout) === layout) seekToMs(next.start_ms + Math.min(80, (next.end_ms - next.start_ms) / 3))
+        else if (!sectionBlocked(next.id)) {
           applyLayout(next.id, layout, ar, neighbourFraming(layout, next.start_ms, next.end_ms, next.id))
-          seekToMs(joinSameLayoutNeighbours(next.id, transitionAfter()) === next.id ? next.start_ms : seg.end_ms)
+          seekOnto(joinSameLayoutNeighbours(next.id, transitionAfter()) === next.id ? next.start_ms : seg.end_ms)
         }
         return
       }
@@ -1789,7 +1871,7 @@ export function EditorShell({
       if (gapEnd - seg.end_ms >= 300) {
         const id = addFormat(seg.end_ms, gapEnd, layout, ar, neighbourFraming(layout, seg.end_ms, gapEnd))
         joinSameLayoutNeighbours(id, transitionAfter())
-        seekToMs(seg.end_ms)
+        seekOnto(seg.end_ms)
       }
       return
     }
@@ -2199,15 +2281,16 @@ export function EditorShell({
    */
   // A press while the last one is still being saved is ignored: it would make a second group (and a second "Group 2")
   const markingShotRef = useRef(false)
-  async function markShot() {
-    if (markingShotRef.current) return
+  /** Mark the scene as a group; true once it's saved (the button shows Marking… until then) */
+  async function markShot(): Promise<boolean> {
+    if (markingShotRef.current) return false
     setSubjectNotice(null)
     setMarking(false)
     const seg = activeSegment
-    if (!seg) { setSubjectsError('Pick a format here first (Vertical, Split, Trio…) and place its views, then mark the shot.'); return }
-    if (isFrameLayout(seg.layout)) { setSubjectsError('A frame can’t be a group’s format yet — use Vertical, Split, Trio or another format.'); return }
+    if (!seg) { setSubjectsError('Pick a format here first (Vertical, Split, Trio…) and place its views, then mark the shot.'); return false }
+    if (isFrameLayout(seg.layout)) { setSubjectsError('A frame can’t be a group’s format yet — use Vertical, Split, Trio or another format.'); return false }
     if (seg.crop_boxes.some(b => b.image_path || (b.source_video_id && b.source_video_id !== mainVideoId))) {
-      setSubjectsError('Every view has to show this clip’s video to mark the shot.'); return
+      setSubjectsError('Every view has to show this clip’s video to mark the shot.'); return false
     }
     pause()
     const t = Math.round(liveTime.get())
@@ -2223,7 +2306,8 @@ export function EditorShell({
       })
       setSubjects(list => [...list, { ...subject, seen: null, stale: false }])
       setSubjectsError(null)
-    } catch (e) { setSubjectsError(e instanceof Error ? e.message : 'Could not mark the shot') }
+      return true
+    } catch (e) { setSubjectsError(e instanceof Error ? e.message : 'Could not mark the shot'); return false }
     finally { markingShotRef.current = false }
   }
   /**
@@ -2324,14 +2408,16 @@ export function EditorShell({
       }
       return seen > 0 && several * 2 >= seen
     }
-    for (const seg of segs.filter(x => !isShot(x, mainVideoId) && x.end_ms - x.start_ms > 250).sort((a, b) => a.start_ms - b.start_ms)) {
-      if (seg.locked || seg.layout === 'horizontal' || inGroup(seg)) continue
-      const frame = isFrameLayout(seg.layout)
-      const mainSlots = frame ? frameOf(seg).main_slots ?? [0] : null
-      // The views that show the main video (in a frame: its main slots, not one shown whole)
-      const views = [...seg.crop_boxes].sort((a, b) => a.slot_index - b.slot_index).filter(b => !b.image_path
+    /** The views of a section that show the main video (in a frame: its main slots, not one shown whole) */
+    const mainViews = (seg: SegmentLocal) => {
+      const mainSlots = isFrameLayout(seg.layout) ? frameOf(seg).main_slots ?? [0] : null
+      return [...seg.crop_boxes].sort((a, b) => a.slot_index - b.slot_index).filter(b => !b.image_path
         && !(b.source_video_id && b.source_video_id !== mainVideoId)
         && (!mainSlots || (mainSlots.includes(b.slot_index) && frameSlotSize(seg.layout as FrameLayout, true, b.slot_index, seg.frame) !== null)))
+    }
+    for (const seg of segs.filter(x => !isShot(x, mainVideoId) && x.end_ms - x.start_ms > 250).sort((a, b) => a.start_ms - b.start_ms)) {
+      if (seg.locked || seg.layout === 'horizontal' || inGroup(seg)) continue
+      const views = mainViews(seg)
       // Two or more views: each follows the person inside it, nobody in two (viewPeople)
       const who = views.length > 1 ? viewPeople(seg, views, tracked, kfs, cuts) : null
       // Views side by side that don't overlap where they start (a Split or Trio Auto format laid, say)
@@ -2380,6 +2466,30 @@ export function EditorShell({
           .map(k => ({ id: crypto.randomUUID(), box_id: box.id, t_ms: k.t_ms, x: k.x, y: k.y, w: k.w, h: k.h }))
         framed++
       })
+    }
+    // Someone on screen briefly (~0.5 s: the scan's close looks, Angle.brief): the section keeps its
+    // format, the view nearest them takes them in for that moment and cuts back (user, 2026-11-01;
+    // modules/editor/briefWiden.ts — the same as Make my clips)
+    const briefs = anglesData?.status === 'done' ? anglesData.angles.flatMap(g => g.brief ?? []) : []
+    for (const b of briefs) {
+      const from = Math.round(trim.toTimeline(b.from)), to = Math.round(trim.toTimeline(b.to))
+      const seg = segs.find(x => !isShot(x, mainVideoId) && !x.locked && x.layout !== 'horizontal' && x.layout !== 'frame_blur_fill'
+        && x.start_ms < to && x.end_ms > from)
+      if (!seg) continue
+      const a = Math.max(seg.start_ms, from), z = Math.min(seg.end_ms, to)
+      if (z - a < WIDEN_MIN_MS) continue
+      const views = mainViews(seg)
+      if (!views.length) continue
+      const kfsOf = (box: CropBoxLocal) => next[box.id] ?? kfs[box.id] ?? box.keyframes ?? []
+      const at = views.map(box => getBoxPositionAtLerp(a, kfsOf(box)))
+      // (the people each view shows then: the tracked faces at that moment)
+      const faces = tracked.flatMap(p => { const f = subjectBoxAt(p.path, trim.toSource(a), cuts); return f ? [f] : [] })
+      const pick = briefView(at, () => faces, b)
+      if (!pick) continue
+      const box = views[pick.i], list = kfsOf(box)
+      next[box.id] = withWide(list, pick.view, a, z, seg.start_ms, seg.end_ms, t => getBoxPositionAtLerp(t, list),
+        (t, r) => ({ id: crypto.randomUUID(), box_id: box.id, t_ms: t, x: r.x, y: r.y, w: r.w, h: r.h }))
+      framed++
     }
     if (!framed) {
       setSubjectNotice(held.length ? `${groupNote}Undo takes it back.` : 'They aren’t seen in the parts of the clip that can be framed on them.')
@@ -5644,6 +5754,40 @@ export function EditorShell({
     if (tool !== 'format' || !pickedSegId) return
     sectionListRef.current?.querySelector(`[data-section-id="${pickedSegId}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [tool, pickedSegId])
+  // The picked part follows the playhead (user, 2026-11-01: a part picked, then played through the cuts,
+  // stayed outlined while the video played the next ones). While a part of the main video is picked and
+  // the playhead leaves it — playing, a step or skip, a jump — the part under the playhead is the picked
+  // one instead: the outline, its Delete / Split and its card. Not while a press is held (a drag or
+  // trim moving the playhead: checked once on release); a video on a row, several picked at once, the
+  // empty space a deleted part left, or nothing picked: left as they are. Read live (the editor's own
+  // time stands still while playing — modules/player/store.ts), so it changes only at a cut.
+  const pickPressRef = useRef(false)
+  const followPickRef = useRef(() => {})
+  followPickRef.current = () => {
+    if (!pickedSegId || groupPick.length) return
+    const cur = sections.find(x => x.id === pickedSegId)
+    if (!cur) return
+    if (pickPressRef.current && !usePlayerStore.getState().playing) return
+    const t = liveTime.get()
+    if (t >= cur.start_ms && t < cur.end_ms) return
+    const here = partAt(sections, t)
+    if (!here || here.id === cur.id || isGapPart(here, mainVideoId)) return
+    setPickedSegIdState(here.id)
+  }
+  useEffect(() => {
+    const down = () => { pickPressRef.current = true }
+    const up = () => { pickPressRef.current = false; followPickRef.current() }
+    window.addEventListener('pointerdown', down, true)
+    window.addEventListener('pointerup', up, true)
+    window.addEventListener('pointercancel', up, true)
+    const off = liveTime.subscribe(() => followPickRef.current())
+    return () => {
+      off()
+      window.removeEventListener('pointerdown', down, true)
+      window.removeEventListener('pointerup', up, true)
+      window.removeEventListener('pointercancel', up, true)
+    }
+  }, [])
 
   // ── Caption styles line by line (as in CapCut): the Captions row shows each caption line as a
   //    block; the lines selected there take the style picked in the Captions panel, nothing
@@ -6821,8 +6965,8 @@ export function EditorShell({
             {!inGap && <>
             <FormatSwitcher
               activeId={activeSegment ? formatLayoutOf(activeSegment.layout) : null}
-              play={formatPlay}
-              onPick={id => { setFormatPlay(p => ({ id, n: (p?.n ?? 0) + 1 })); if (tool === 'subjects' && pickForScene(id)) return; handleLayoutChange(id, 'fromPlayhead') }}
+              play={formatPlay} liveActive={formatAt}
+              onPick={pickFormat}
             />
             </>}
 
@@ -7611,16 +7755,24 @@ function SkipFiveIcon({ dir }: { dir: 'back' | 'forward' }) {
 }
 
 /** Tiny 9:16 frame showing how a format divides the reel */
+/** A subscription to nothing (the format switch while not playing) */
+const noSubscribe = () => () => {}
 /**
  * Layout switch for the section under the playhead: the four formats in one track, a knob sliding to the
  * picked one (measured from the options, so it fits any label length or language); each shows its phone
  * icon and name. Styles: .ed-fmt* in globals.css.
  */
-function FormatSwitcher({ activeId, play, onPick }: {
+function FormatSwitcher({ activeId: pausedId, liveActive, play, onPick }: {
   activeId: LayoutType | null
+  /** The format at a clip time: while playing the editor's time stands still (store.ts), so the switch reads the live playhead */
+  liveActive: (t: number) => LayoutType | null
   play: { id: LayoutType; n: number } | null
   onPick: (id: LayoutType) => void
 }) {
+  const playing = usePlayerStore(st => st.playing)
+  // (redraws only when the format under the playhead changes, not every frame)
+  const liveId = useSyncExternalStore(playing ? liveTime.subscribe : noSubscribe, () => (playing ? liveActive(liveTime.get()) : null), () => null)
+  const activeId = playing ? liveId : pausedId
   const btns = useRef(new Map<LayoutType, HTMLButtonElement>())
   const [knob, setKnob] = useState<{ left: number; width: number } | null>(null)
   useLayoutEffect(() => {

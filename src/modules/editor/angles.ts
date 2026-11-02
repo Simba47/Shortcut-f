@@ -1,4 +1,5 @@
 import { subjectBoxAt, type SubjectPoint } from './subjects'
+import type { Brief } from './briefWiden'
 
 // ── Camera angles (SubjectsPanel) ─────────────────────────────────────────────
 // The worker lists the clip's camera angles (a shot, and everywhere it comes back — server
@@ -20,6 +21,8 @@ export interface Angle {
   spans: Array<[number, number]>
   /** Who talks in each of `spans`: talk[i][k] is how long faces[k] talks in spans[i] (ms); none without a transcript */
   talk?: number[][]
+  /** Someone on screen briefly (~0.5 s, the scan's close looks): Follow widens the view to take them in (briefWiden.ts) */
+  brief?: Brief[]
 }
 
 /** What a row needs to know of a marked subject */

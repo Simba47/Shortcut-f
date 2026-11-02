@@ -5,18 +5,32 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 // Uploads a video straight from the browser to R2 as a multipart upload: the file goes up in
 // 16 MB parts, PARALLEL_PARTS at once (one at a time left most of the connection idle — each part
 // also waited for its own signature from our server first; the parts' links are now asked for in
-// batches). A failed part is retried on its own (three tries, with backoff), the upload waits
-// while the browser is offline, and "Retry" after a failure continues with the parts R2 doesn't
-// have yet instead of starting again. Our server only signs each request (/api/ingest/sign),
+// batches). A failed part is retried on its own, the upload waits while the browser is offline,
+// and "Retry" after a failure continues with the parts R2 doesn't have yet instead of starting again.
+// A dropped connection (user, 2026-11-01: Wi-Fi off and on again took very long to carry on): the
+// parts on their way hung on the dead connection until the browser gave up on them, minutes later.
+// Now going offline drops them at once, a part that has sent nothing for STALL_MS is dropped and
+// sent again, and back online the upload carries on straight away (a drop isn't counted as one of
+// a part's tries; the card says it's waiting for the connection meanwhile). Our server only signs each request (/api/ingest/sign),
 // which is where the plan's size and video-count limits are checked. The state carries the
 // measured speed and time left (uploadPace), and each upload logs how fast it went.
 
-const PART_SIZE = 16 * 1024 * 1024
+/** (8 MB: a part cut off by a dropped connection is sent again from its start — less to send again) */
+const PART_SIZE = 8 * 1024 * 1024
 /** Parts going up at once (browsers open about 6 connections to one host) */
 const PARALLEL_PARTS = 6
 /** Part links signed per request to our server */
 const SIGN_BATCH = 24
+/** Tries for a part the server refused (an expired link…); a dropped connection while online counts
+ *  against NET_TRIES instead, and none while offline (it waits) */
 const PART_TRIES = 3
+const NET_TRIES = 12
+/** A part that has sent nothing for this long is on a dead connection: dropped and sent again */
+const STALL_MS = 12_000
+/** After its last byte, how long a part may wait for R2's answer before it is sent again */
+const ANSWER_MS = 45_000
+/** A request to our server (signing) that hasn't answered in this long is asked again */
+const SIGN_TIMEOUT_MS = 20_000
 /** Progress reaches the page at most this often (each part reports many times a second: redrawing the page for each was wasted work) */
 const REPORT_MS = 250
 /** The speed shown is over the last this long (steady, but still follows a change in the connection) */
@@ -43,9 +57,11 @@ export interface UploadState {
   /** Measured upload speed (bytes a second) and the time left at it; null until measured */
   bytesPerSec: number | null
   secondsLeft: number | null
+  /** The connection is gone: it carries on by itself once it's back */
+  offline: boolean
 }
 
-const IDLE: UploadState = { phase: 'idle', fileName: '', progress: 0, error: null, canRetry: false, loaded: 0, total: 0, bytesPerSec: null, secondsLeft: null }
+const IDLE: UploadState = { phase: 'idle', fileName: '', progress: 0, error: null, canRetry: false, loaded: 0, total: 0, bytesPerSec: null, secondsLeft: null, offline: false }
 
 /** "924 MB", "1.4 GB" */
 export function formatBytes(n: number) {
@@ -77,6 +93,20 @@ async function readDurationMs(file: File): Promise<number | undefined> {
 
 /** A refusal from our server (plan limit, file type…): shown as it is, and `final` ones can't be retried */
 const userError = (message: string, final: boolean) => Object.assign(new Error(message), { userFacing: true, final })
+/** Aborts when any of `signals` does, or after `ms` (AbortSignal.any / .timeout are missing from older
+ *  Safari: done by hand there) */
+function limitSignal(ms: number, signals: AbortSignal[]): AbortSignal {
+  const c = new AbortController()
+  const t = setTimeout(() => c.abort(new DOMException('Timed out', 'TimeoutError')), ms)
+  for (const sg of signals) {
+    if (sg.aborted) { c.abort(sg.reason); break }
+    sg.addEventListener('abort', () => c.abort(sg.reason), { once: true })
+  }
+  c.signal.addEventListener('abort', () => clearTimeout(t), { once: true })
+  return c.signal
+}
+/** A dropped or dead connection (not a refusal): sent again once the connection is back */
+const netError = (message: string) => Object.assign(new Error(message), { network: true })
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 /** Resolves once the browser is online (at once when it is) */
 function online(): Promise<void> {
@@ -111,16 +141,28 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
 
   async function sign(body: Record<string, unknown>) {
     const f = fileRef.current
-    const res = await fetch('/api/ingest/sign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, file: f ? { name: f.name, size: f.size, type: f.type } : undefined, ...(asset ? { asset: true } : {}) }),
-      signal: abortRef.current?.signal,
-    })
+    // (a request on a connection that died never answers: asked again after SIGN_TIMEOUT_MS)
+    let res: Response
+    try {
+      res = await fetch('/api/ingest/sign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, file: f ? { name: f.name, size: f.size, type: f.type } : undefined, ...(asset ? { asset: true } : {}) }),
+        signal: timed(SIGN_TIMEOUT_MS),
+      })
+    } catch (e) {
+      if (abortRef.current?.signal.aborted) throw e
+      throw netError('Network error')
+    }
     const data = await res.json().catch(() => ({}))
     // 4xx = we refused it (plan limit, file type…): show why, and don't offer Retry
     if (!res.ok) throw userError(data.error ?? 'Upload failed', res.status < 500)
     return data
+  }
+
+  /** Cancel's signal, and a time limit (a request on a dead connection never answers) */
+  function timed(ms: number): AbortSignal {
+    return limitSignal(ms, abortRef.current ? [abortRef.current.signal] : [])
   }
 
   function stopAll() {
@@ -142,28 +184,37 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
   /** Start the multipart upload in R2: its key (from our server) and upload id (from R2) */
   async function create(file: File): Promise<Multipart> {
     const s = await sign({ method: 'POST', key: '' }) as { url: string; key: string; headers?: Record<string, string> }
-    const res = await fetch(s.url, { method: 'POST', headers: s.headers, signal: abortRef.current?.signal })
+    const res = await fetch(s.url, { method: 'POST', headers: s.headers, signal: timed(30_000) }).catch(e => { throw abortRef.current?.signal.aborted ? e : netError('Network error') })
     if (!res.ok) throw new Error(`Could not start the upload (${res.status})`)
     const uploadId = (await res.text()).match(/<UploadId>([^<]+)<\/UploadId>/)?.[1]
     if (!uploadId) throw new Error('Could not start the upload')
     return { key: s.key, uploadId, etags: Array(Math.max(1, Math.ceil(file.size / PART_SIZE))).fill(null) }
   }
 
-  /** One part up (XHR: its progress counts as it goes). Resolves with its ETag. */
+  /** Parts on their way that were dropped for the connection (offline, stalled), not by Cancel */
+  const dropped = useRef(new WeakSet<XMLHttpRequest>())
+  /** One part up (XHR: its progress counts as it goes). Resolves with its ETag. A part that stops
+   *  moving (a dead connection) is dropped after STALL_MS — ANSWER_MS once all of it is sent */
   function putPart(url: string, blob: Blob, onBytes: (n: number) => void): Promise<string> {
     return new Promise((resolve, reject) => {
       const x = new XMLHttpRequest()
       xhrs.current.add(x)
+      let last = Date.now()
+      let allSent = false
+      const watch = setInterval(() => {
+        if (Date.now() - last > (allSent ? ANSWER_MS : STALL_MS)) { dropped.current.add(x); x.abort() }
+      }, 2000)
+      const end = () => { clearInterval(watch); xhrs.current.delete(x) }
       x.open('PUT', url)
-      x.upload.onprogress = e => onBytes(e.loaded)
+      x.upload.onprogress = e => { last = Date.now(); allSent = e.loaded >= blob.size; onBytes(e.loaded) }
       x.onload = () => {
-        xhrs.current.delete(x)
+        end()
         const etag = x.getResponseHeader('ETag')
         if (x.status >= 200 && x.status < 300 && etag) resolve(etag)
         else reject(new Error(`Part failed (${x.status})`))
       }
-      x.onerror = () => { xhrs.current.delete(x); reject(new Error('Network error')) }
-      x.onabort = () => { xhrs.current.delete(x); reject(Object.assign(new Error('Aborted'), { aborted: true })) }
+      x.onerror = () => { end(); reject(netError('Network error')) }
+      x.onabort = () => { end(); reject(dropped.current.has(x) ? netError('Connection dropped') : Object.assign(new Error('Aborted'), { aborted: true })) }
       x.send(blob)
     })
   }
@@ -209,6 +260,19 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
       } : s))
     }
     report(true)
+    // Offline: the parts on their way are dropped at once (they'd hang on the dead connection), the
+    // card says it's waiting; back online, the workers carry on at once (each waits in online())
+    const goneOffline = () => {
+      for (const x of xhrs.current) { dropped.current.add(x); x.abort() }
+      setState(s => (s.phase === 'uploading' ? { ...s, offline: true, bytesPerSec: null, secondsLeft: null } : s))
+    }
+    const backOnline = () => {
+      // (the speed is measured again from here)
+      samples.length = 0; shownLeft = null
+      setState(s => (s.phase === 'uploading' ? { ...s, offline: false } : s))
+    }
+    window.addEventListener('offline', goneOffline)
+    window.addEventListener('online', backOnline)
     const todo = mp.etags.map((e, i) => (e ? -1 : i)).filter(i => i >= 0)
     const urls = new Map<number, string>()
     /** Links for the next parts, signed in batches ahead of need */
@@ -230,7 +294,8 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
       while (next < todo.length) {
         const i = todo[next++]
         const blob = file.slice(i * PART_SIZE, Math.min(file.size, (i + 1) * PART_SIZE))
-        for (let attempt = 1; ; attempt++) {
+        let refused = 0, drops = 0
+        for (;;) {
           await online()
           try {
             const etag = await putPart(await urlFor(i), blob, b => { sent[i] = b; report() })
@@ -239,11 +304,20 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
             report(true)
             break
           } catch (e) {
-            const info = e as { aborted?: boolean; userFacing?: boolean }
-            if (info.aborted || info.userFacing || abortRef.current?.signal.aborted || attempt >= PART_TRIES) throw e
+            const info = e as { aborted?: boolean; userFacing?: boolean; network?: boolean }
+            if (info.aborted || info.userFacing || abortRef.current?.signal.aborted) throw e
             sent[i] = 0
+            report(true)
             urls.delete(i)   // (a link that failed may have run out: a fresh one)
-            await sleep(1000 * 2 ** (attempt - 1))
+            if (info.network) {
+              // Offline: no try used up — it waits for the connection (online()), then goes again at once
+              if (typeof navigator !== 'undefined' && !navigator.onLine) continue
+              if (++drops >= NET_TRIES) throw e
+              await sleep(Math.min(8000, 500 * 2 ** (drops - 1)))
+            } else {
+              if (++refused >= PART_TRIES) throw e
+              await sleep(1000 * 2 ** (refused - 1))
+            }
           }
         }
       }
@@ -252,6 +326,8 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
       await Promise.all(Array.from({ length: Math.min(PARALLEL_PARTS, todo.length) }, worker))
     } finally {
       if (pending) clearTimeout(pending)
+      window.removeEventListener('offline', goneOffline)
+      window.removeEventListener('online', backOnline)
     }
     // How it went, for checking the connection (the browser's console)
     const secs = (performance.now() - began) / 1000
@@ -263,7 +339,7 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
   async function complete(mp: Multipart) {
     const s = await sign({ method: 'POST', key: mp.key, uploadId: mp.uploadId }) as { url: string }
     const body = `<CompleteMultipartUpload>${mp.etags.map((e, i) => `<Part><PartNumber>${i + 1}</PartNumber><ETag>${e}</ETag></Part>`).join('')}</CompleteMultipartUpload>`
-    const res = await fetch(s.url, { method: 'POST', headers: { 'Content-Type': 'application/xml' }, body, signal: abortRef.current?.signal })
+    const res = await fetch(s.url, { method: 'POST', headers: { 'Content-Type': 'application/xml' }, body, signal: timed(60_000) }).catch(e => { throw abortRef.current?.signal.aborted ? e : netError('Network error') })
     const text = await res.text()
     if (!res.ok || /<Error>/.test(text)) throw new Error('Could not finish the upload')
   }
@@ -281,7 +357,7 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
     return data.video_id as string
   }
 
-  async function run() {
+  async function run(resumes = 0) {
     const file = fileRef.current
     if (!file) return
     abortRef.current = new AbortController()
@@ -304,11 +380,21 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
     } catch (e) {
       if (fileRef.current !== file) return   // cancelled, or another upload started
       stopAll()
-      const info = e as { userFacing?: boolean; final?: boolean }
+      const info = e as { userFacing?: boolean; final?: boolean; network?: boolean }
+      // The connection dropped at the start or the end (or a part ran out of tries on it): once it's
+      // back, it carries on by itself from where it got to — a few times before asking for Retry
+      if (info.network && resumes < 3) {
+        setState(s => (s.phase === 'uploading' ? { ...s, offline: typeof navigator !== 'undefined' && !navigator.onLine } : s))
+        await online()
+        await sleep(1500)
+        if (fileRef.current !== file) return
+        setState(s => (s.phase === 'uploading' ? { ...s, offline: false } : s))
+        return run(resumes + 1)
+      }
       const message = e instanceof Error && info.userFacing
         ? e.message
         : 'The upload was interrupted. Check your connection and press Retry — it continues where it stopped.'
-      setState(s => ({ ...s, phase: 'failed', error: message, canRetry: !info.final }))
+      setState(s => ({ ...s, phase: 'failed', error: message, canRetry: !info.final, offline: false }))
     }
   }
 
@@ -325,7 +411,7 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
   const retry = useCallback(() => {
     if (!fileRef.current) return
     // (the speed is measured again from here)
-    setState(s => ({ ...s, phase: 'uploading', error: null, canRetry: false, bytesPerSec: null, secondsLeft: null }))
+    setState(s => ({ ...s, phase: 'uploading', error: null, canRetry: false, bytesPerSec: null, secondsLeft: null, offline: false }))
     run()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

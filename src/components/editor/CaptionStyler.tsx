@@ -31,9 +31,12 @@ export function loadVideoFonts() {
 interface FontPickerProps {
   value: string | null
   onChange: (family: string) => void
+  /** The list stays open after a font is picked, so fonts can be tried one after another; a click
+   *  outside it (or Escape) closes it (user, 2026-11-01: the Brand kit's title font closed on each pick) */
+  stayOpen?: boolean
 }
 
-export function FontPicker({ value, onChange }: FontPickerProps) {
+export function FontPicker({ value, onChange, stayOpen = false }: FontPickerProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   // A brand kit's own fonts first (components/editor/brandFonts.ts)
@@ -52,8 +55,11 @@ export function FontPicker({ value, onChange }: FontPickerProps) {
     function handler(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
+    // (Escape closes it too)
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('keydown', onKey) }
   }, [open])
 
   return (
@@ -102,7 +108,7 @@ export function FontPicker({ value, onChange }: FontPickerProps) {
                 <button
                   key={f.family}
                   data-brand-font={i < brandFonts.length || undefined}
-                  onClick={() => { onChange(f.family); setOpen(false) }}
+                  onClick={() => { onChange(f.family); if (!stayOpen) setOpen(false) }}
                   className="w-full text-left px-4 py-2.5"
                   style={{
                     fontFamily: f.family,

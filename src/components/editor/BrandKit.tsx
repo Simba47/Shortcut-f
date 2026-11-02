@@ -960,7 +960,7 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
                   <p className="text-[11px] -mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
                     For text on the clip, frame titles and the Branded card: new text starts in it.
                   </p>
-                  <FontPicker value={d.title.font} onChange={font => set({ ...now(), title: { ...now().title, font: font === 'sans-serif' ? null : font } })} />
+                  <FontPicker stayOpen value={d.title.font} onChange={font => set({ ...now(), title: { ...now().title, font: font === 'sans-serif' ? null : font } })} />
                   <ColorRow label="Colour" value={d.title.color} onChange={color => set({ ...now(), title: { ...now().title, color } })} />
                   <RangeRow label="Size" min={24} max={160} step={2} value={d.title.size} text={`${d.title.size}`}
                     onChange={size => set({ ...now(), title: { ...now().title, size } })} />
@@ -1471,7 +1471,7 @@ function TextStyleEditor({ kind, d, value, onChange }: { kind: 'subtitle' | 'cta
         <span className="cap-label">Same font as the title</span>
         <Switch on={value.font === null} label="Same font as the title" onChange={on => onChange({ ...value, font: on ? null : d.title.font ?? 'Inter' })} />
       </label>
-      {value.font !== null && <FontPicker value={value.font} onChange={font => onChange({ ...value, font: font === 'sans-serif' ? 'Inter' : font })} />}
+      {value.font !== null && <FontPicker stayOpen value={value.font} onChange={font => onChange({ ...value, font: font === 'sans-serif' ? 'Inter' : font })} />}
       <ColorRow label="Colour" value={value.color} onChange={color => onChange({ ...value, color })} />
       <RangeRow label="Size" min={20} max={120} step={2} value={value.size} text={`${value.size}`} onChange={size => onChange({ ...value, size })} />
       <label className="cap-row cursor-pointer select-none">
