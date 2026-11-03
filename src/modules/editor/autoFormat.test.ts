@@ -299,7 +299,7 @@ test('holdAtLeast: a short stretch is kept when nobody else is in the picture th
 
 // ── People added by hand (+ Add) join their scene (angles.ts angleRows; the user, 2026-10-29: a listener
 // sitting still was read as a picture, and adding him changed nothing — the scene stayed "1 person") ──
-import { angleRows, type Angle, type AngleSubject } from './angles'
+import { angleRows, placePeople, type Angle, type AngleSubject } from './angles'
 
 const same2 = (t: number) => t
 // Scene 3 of the user's clip: the scan found only C (right); the man on the left (L) sat still beside him
@@ -331,4 +331,31 @@ test('+ Add: someone followed but not in this scene, or on a face the scan found
   const [b] = angleRows([scene3], [{ ...markL, mark_x: 0.77, status: 'done', path: onC } as AngleSubject], [], same2, 210000)
   assert.equal(b.people, 1)
   assert.equal(b.faces.length, 1)
+})
+
+// ── Each place's own people (the scan's `present`, 2026-11-03: a missed cut put a judges' panel into a man's
+// stage shot, and every place showing only him got a Split for six) ──
+test('Auto format decides each place on the people seen there: the man alone is Vertical, with the panel a Split', () => {
+  const stage: Angle = {
+    people: 5, at: 1000, spans: [[0, 2200], [6700, 17200]],
+    faces: [{ x: 0.18, y: 0.3, w: 0.035, h: 0.06 }, { x: 0.37, y: 0.3, w: 0.035, h: 0.06 }, { x: 0.475, y: 0.25, w: 0.05, h: 0.09 }, { x: 0.59, y: 0.3, w: 0.035, h: 0.06 }, { x: 0.75, y: 0.3, w: 0.035, h: 0.06 }],
+    talk: [[0, 0, 900, 0, 0], [0, 0, 5000, 300, 0]],
+    present: [[2], [0, 1, 2, 3, 4]],
+  }
+  const [row] = angleRows([stage], [], [], same2, 20000)
+  const [alone, all] = row.places.map(pl => placePeople(row, pl))
+  assert.equal(alone.boxes.length, 1)
+  assert.deepEqual(alone.talk, [900])
+  assert.equal(decideFormat(alone.boxes, alone.talk, AR)!.layout, 'vertical')
+  assert.equal(all.boxes.length, 5)
+  assert.notEqual(decideFormat(all.boxes, all.talk, AR)!.layout, 'vertical')
+})
+
+test('placePeople: without the scan saying, everyone; a person added by hand counts in every place; a mark still being found doesn\'t', () => {
+  const [plain] = angleRows([scene3], [], [], same2, 210000)
+  assert.equal(placePeople(plain, plain.places[0]).boxes.length, 1)
+  const [withF] = angleRows([scene3], [{ ...markL, status: 'done', path: pathL } as AngleSubject], [], same2, 210000)
+  assert.equal(placePeople(withF, withF.places[0]).boxes.length, 2)
+  const [waiting] = angleRows([scene3], [{ ...markL, status: 'new', path: null } as AngleSubject], [], same2, 210000)
+  assert.equal(placePeople(waiting, waiting.places[0]).boxes.length, 1)
 })
