@@ -81,7 +81,7 @@ import { buildKeyframes } from '@/modules/editor/views'
 import { frameSlotSize } from '@/modules/editor/frames'
 import { getBoxPositionAtLerp, type BoxPosition } from '@/lib/interpolation'
 import { SubjectsPanel, type SubjectItem, type AnglesView } from '@/components/editor/SubjectsPanel'
-import { angleRows, angleAt, type Angle, type AngleRow } from '@/modules/editor/angles'
+import { angleRows, angleAt, placePeople, type Angle, type AngleRow } from '@/modules/editor/angles'
 import { briefView, withWide, WIDEN_MIN_MS } from '@/modules/editor/briefWiden'
 import { decideFormat, decideVertical, AUTO_FORMAT, keepsAll, viewsOverlap } from '@/modules/editor/autoFormat'
 import type { SegmentLocal, CropBoxLocal, FrameLayout, FrameLane, FrameItem, TransitionType } from '@chai-cut/shared'
@@ -2715,10 +2715,11 @@ export function EditorShell({
       // Each place of each scene on its own (who talks differs between them: modules/editor/autoFormat.ts),
       // all decided first, then laid at once (one undo step)
       const decided = rows.filter(r => !r.group || rebuilt.has(r)).flatMap(row => row.places.filter(pl => rebuilt.has(row) || !byHand(pl.shown)).flatMap(pl => {
-        // (people marked by hand and found count too; marks not found yet don't: where they are isn't known)
-        const faces = row.faces.filter(f => !f.pending).map(f => f.box)
-        const plan = mode === 'vertical' ? decideVertical(faces, pl.talk, ar) : decideFormat(faces, pl.talk, ar)
-        return plan ? [{ row, shown: pl.shown, plan }] : []
+        // (the people seen in this place — a scene's places can show fewer of them; people marked by hand and
+        // found count too; marks not found yet don't: angles.ts placePeople)
+        const { boxes: faces, talk } = placePeople(row, pl)
+        const plan = mode === 'vertical' ? decideVertical(faces, talk, ar) : decideFormat(faces, talk, ar)
+        return plan ? [{ row, shown: pl.shown, plan, faces }] : []
       })).sort((p, q) => p.shown[0] - q.shown[0])
       // A very short place (under SHORT_PLACE) takes the format of the place right before it, so fast
       // cutting doesn't flicker (the Rulebook, section 6) — only when that format holds everyone in this
@@ -2726,7 +2727,7 @@ export function EditorShell({
       const plans = decided.map((x, i) => {
         const before = i > 0 ? decided[i - 1] : null
         const short = x.shown[1] - x.shown[0] < AUTO_FORMAT.SHORT_PLACE * 1000
-        const fits = before && keepsAll(before.plan.layout, before.plan.framing, x.row.faces.filter(f => !f.pending).map(f => f.box))
+        const fits = before && keepsAll(before.plan.layout, before.plan.framing, x.faces)
         return mode === 'cuts' && short && before && fits && Math.abs(before.shown[1] - x.shown[0]) <= 150 ? { ...x, plan: before.plan } : x
       })
       // A scene of two or more that gets the same format and views in every place (who talks changes

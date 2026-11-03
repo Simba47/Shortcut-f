@@ -21,6 +21,11 @@ export interface Angle {
   spans: Array<[number, number]>
   /** Who talks in each of `spans`: talk[i][k] is how long faces[k] talks in spans[i] (ms); none without a transcript */
   talk?: number[][]
+  /**
+   * Who is in each of `spans` (indexes into `faces`), when not everyone is in every one (the scan, 2026-11-03:
+   * a place showing only one man was formatted for the scene's six); none: everyone, everywhere
+   */
+  present?: number[][]
   /** Someone on screen briefly (~0.5 s, the scan's close looks): Follow widens the view to take them in (briefWiden.ts) */
   brief?: Brief[]
 }
@@ -47,7 +52,7 @@ export interface AngleRow {
   /** Where the clip shows it now: [start, end] ms of the timeline (removed parts left out) */
   shown: Array<[number, number]>
   /** The same stretches, each with who talks there (ms per face, as `faces`; null: not known) — Auto format decides each on its own */
-  places: Array<{ shown: [number, number]; talk: number[] | null }>
+  places: Array<{ shown: [number, number]; talk: number[] | null; present: number[] | null }>
   totalMs: number
   /** The group marked on this angle */
   group: { label: string; layout: string; color: string } | null
@@ -97,7 +102,7 @@ export function angleRows(
   }
   return angles.flatMap((a): AngleRow[] => {
     const places = a.spans
-      .map(([s, e], i) => ({ shown: [Math.max(0, Math.round(toTimeline(s))), Math.min(lengthMs, Math.round(toTimeline(e)))] as [number, number], talk: a.talk?.[i] ?? null }))
+      .map(([s, e], i) => ({ shown: [Math.max(0, Math.round(toTimeline(s))), Math.min(lengthMs, Math.round(toTimeline(e)))] as [number, number], talk: a.talk?.[i] ?? null, present: a.present?.[i] ?? null }))
       .filter(({ shown: [s, e] }) => e - s >= MIN_SHOWN_MS)
     const shown = places.map(p => p.shown)
     if (!shown.length) return []
@@ -182,6 +187,19 @@ function seenInAngle(path: readonly SubjectPoint[], a: Angle, cuts: readonly num
     if (box) return box
   }
   return null
+}
+
+/**
+ * The people in one of a row's places — Auto format decides each place on them: the scan's faces seen
+ * there (all, when the scan doesn't say), and the people added by hand and found; marks still being
+ * found are left out (where they are isn't known). With how long each talks there
+ */
+export function placePeople(row: AngleRow, place: AngleRow['places'][number]): { boxes: AngleRow['faces'][number]['box'][]; talk: number[] | null } {
+  const keep = row.faces.map((f, k) => !f.pending && (!!f.added || !place.present || place.present.includes(k)))
+  return {
+    boxes: row.faces.filter((_, k) => keep[k]).map(f => f.box),
+    talk: place.talk ? row.faces.flatMap((f, k) => (keep[k] ? [f.added ? 0 : place.talk![k] ?? 0] : [])) : null,
+  }
 }
 
 /** The row showing at `t` (timeline ms), or null */
