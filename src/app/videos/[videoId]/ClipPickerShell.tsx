@@ -20,6 +20,7 @@ import { ClipPlayer } from '@/components/clips/ClipPlayer'
 import type { ClipPreviewData } from '@/server/services/clipPreview'
 import type { SegmentLocal } from '@chai-cut/shared'
 import { defaultCropForSlot, makeBox } from '@/modules/editor/utils'
+import { MODEL_CREDIT } from '@/lib/company'
 
 interface VideoData {
   id: string
@@ -1367,6 +1368,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             </span>
           )} {autoRunning ? 'Making clips…' : `Make ${autoCount} clip${autoCount === 1 ? '' : 's'}`}
         </button>
+        {/* Required by the speech model's licence (lib/company.ts MODEL_CREDIT) */}
+        <p className="text-[10px] text-center" style={{ color: 'rgb(var(--cb-fg) / 0.4)' }}>{MODEL_CREDIT}</p>
       </section>
 
       {/* Ask AI and Best moments share one card: a switch at the top picks which one shows */}
