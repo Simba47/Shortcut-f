@@ -27,7 +27,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      {/* Dark everywhere, except that the dashboard, the clip board and the editor have a dark /
+      {/* Dark everywhere, except that the dashboard, the clip board, AI edits and the editor have a dark /
           light switch (components/ui/cinematic-theme-switcher.tsx). Its choice (`shortcut-theme`) is
           put on those pages before they paint, so a light page never flashes dark. The old
           site-wide switch's `theme` is cleared so nobody stays stuck in light mode. */}
