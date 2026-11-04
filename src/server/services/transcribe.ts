@@ -56,6 +56,9 @@ export async function queueRetranscribe(userId: string, clipId: string, language
 export async function ensureVideoTranscript(videoId: string): Promise<'ready' | 'running'> {
   const [video] = await sql`SELECT storage_path, duration_ms, user_id FROM videos WHERE id = ${videoId}`
   if (await hasWholeTranscript(videoId, video?.duration_ms ?? null)) return 'ready'
+  // The worker's reference transcript is reading it (./referenceTranscript): no Gemini reading is started
+  const { pickingState } = await import('./referenceTranscript')
+  if (await pickingState(videoId) === 'reading') return 'running'
   const [last] = await sql`
     SELECT id, status, error, payload->>'reported' AS reported FROM jobs
     WHERE type = 'transcribe' AND payload->>'video_id' = ${videoId} AND payload->>'transcribe_full' = 'true'
@@ -97,8 +100,8 @@ export async function ensureVideoTranscript(videoId: string): Promise<'ready' | 
 async function hasWholeTranscript(videoId: string, durationMs: number | null): Promise<boolean> {
   // The worker's reference transcript stands in for the whole video's words when it is marked for
   // picking moments (./referenceTranscript): no Gemini reading of the whole video is needed then
-  const { hasPickingTranscript } = await import('./referenceTranscript')
-  if (await hasPickingTranscript(videoId)) return true
+  const { pickingState } = await import('./referenceTranscript')
+  if (await pickingState(videoId) === 'ready') return true
   // (to_jsonb: a database whose worker hasn't added the field yet has no whole_video)
   const [whole] = await sql`
     SELECT 1 FROM transcripts t WHERE t.video_id = ${videoId} AND (to_jsonb(t)->>'whole_video')::boolean LIMIT 1`
@@ -191,6 +194,9 @@ export async function placeInLine(jobId: string): Promise<number | null> {
 export async function videoTranscriptState(userId: string, videoId: string): Promise<VideoTranscriptState> {
   const video = await ownVideo(userId, videoId)
   if (await hasWholeTranscript(videoId, video.duration_ms)) return { status: 'ready', progress: 100, error: null }
+  // Being read by the worker's reference transcript (a few minutes even for a long video): no Gemini reading
+  const { pickingState } = await import('./referenceTranscript')
+  if (await pickingState(videoId) === 'reading') return { status: 'running', progress: null, error: null, step: 'reading' }
   const [last] = await sql<{ id: string; status: string; error: string | null; read_pct: string | null; read_step: string | null; read_done: string | null; read_total: string | null }[]>`
     SELECT id, status, error, payload->>'read_pct' AS read_pct, payload->>'read_step' AS read_step,
       payload->>'read_done' AS read_done, payload->>'read_total' AS read_total FROM jobs

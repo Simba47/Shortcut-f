@@ -9,14 +9,18 @@ import sql from '@/lib/db'
 
 type Word = { word: string; start_ms: number; end_ms: number }
 
-/** Whether the video has a reference transcript to pick moments from (none, or no table yet: false) */
-export async function hasPickingTranscript(videoId: string): Promise<boolean> {
+/**
+ * Where the video's reference transcript stands for picking moments: 'ready' (done), 'reading' (being
+ * made: nothing else needs to read the whole video meanwhile), or null (none, failed, not for picking,
+ * or no table yet), when Gemini reads the whole video as before
+ */
+export async function pickingState(videoId: string): Promise<'ready' | 'reading' | null> {
   try {
-    const [row] = await sql`
-      SELECT 1 FROM reference_transcripts WHERE video_id = ${videoId} AND status = 'done' AND for_picking LIMIT 1`
-    return !!row
+    const [row] = await sql<{ status: string }[]>`
+      SELECT status FROM reference_transcripts WHERE video_id = ${videoId} AND for_picking LIMIT 1`
+    return row?.status === 'done' ? 'ready' : row?.status === 'submitted' ? 'reading' : null
   } catch {
-    return false   // a database the worker hasn't set up for it yet
+    return null   // a database the worker hasn't set up for it yet
   }
 }
 
