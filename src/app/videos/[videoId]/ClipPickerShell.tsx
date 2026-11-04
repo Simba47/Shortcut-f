@@ -9,6 +9,8 @@ import { useFrameAt } from '@/modules/clips/thumbs'
 import { ScrubPlayer } from '@/components/clips/ScrubPlayer'
 import { useLocalVideo } from '@/modules/clips/localVideo'
 import { usePolling } from '@/lib/usePolling'
+import { useCredits } from '@/lib/useCredits'
+import { readingCredits } from '@/lib/credits'
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -350,6 +352,24 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const [autoClips, setAutoClips] = useState<AutoClip[]>([])
   const [autoStarting, setAutoStarting] = useState(false)
   const [autoError, setAutoError] = useState<string | null>(null)
+  // What is left of the AI limits for this video and account (api/videos/[id]/allowance; null when
+  // credits are off, and then nothing extra is shown). Reloaded after every run and search.
+  type Allowance = {
+    clips: { perRun: number; clipsPerDay: number; clipsToday: number; dayLeft: number; clipsPerMonth: number; clipsThisMonth: number; monthLeft: number; extraClipCredits: number; videoCap: number; videoClips: number; videoLeft: number; savedLeft: number; searchesIncluded: number; searchesUsed: number; nextSearchCredits: number }
+    askAi: { usedThisMonth: number; perMonth: number; usedToday: number; perDay: number }
+  }
+  const [allowance, setAllowance] = useState<Allowance | null>(null)
+  /** Why a run makes fewer clips than asked for, or what it used */
+  const [autoNote, setAutoNote] = useState<string | null>(null)
+  const loadAllowance = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/videos/${video.id}/allowance`, { cache: 'no-store' })
+      if (!r.ok) return
+      const d = await r.json()
+      setAllowance(d.mode && d.mode !== 'off' && d.clips ? d as Allowance : null)
+    } catch { /* the next look will do */ }
+  }, [video.id])
+  useEffect(() => { loadAllowance() }, [loadAllowance])
   const [autoStopping, setAutoStopping] = useState(false)
   // The clip list (kept locally so deleted clips disappear at once; a refresh brings the server's copy)
   const [clips, setClips] = useState(savedClips)
@@ -560,8 +580,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // video: each clip's captions are made in the editor, for that clip alone.
   // place: waiting its turn (many readings at once), its place in line (1 = next)
   // step / done / total: what the worker is doing and the parts read of all (ReadingProgress)
-  type Reading = { status: 'none' | 'running' | 'ready' | 'failed'; progress: number | null; error: string | null; stopped?: boolean; place?: number | null; step?: 'audio' | 'reading' | 'saving' | null; done?: number | null; total?: number | null; waitingOn?: 'copy' | 'queue' | 'server' | null; source?: 'reference' }
+  type Reading = { status: 'none' | 'running' | 'ready' | 'failed'; progress: number | null; error: string | null; stopped?: boolean; place?: number | null; step?: 'audio' | 'reading' | 'saving' | null; done?: number | null; total?: number | null; waitingOn?: 'copy' | 'queue' | 'server' | null; source?: 'reference'; needsCredits?: boolean }
   const [reading, setReading] = useState<Reading | null>(null)
+  // Credits (null when they are off): the reading costs 1 per video minute, so the unlock button says so
+  const { credits, refresh: refreshCredits } = useCredits()
+  const readingCost = readingCredits(video.duration_ms)
   /** What was asked for while the video was being read (runs when it's done), and its name */
   const afterReading = useRef<(() => void) | null>(null)
   // (the one line under the lock says what is being done; what waits for it runs by itself)
@@ -571,8 +594,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     try {
       const res = await fetch(readingUrl, start ? { method: 'POST' } : undefined)
       if (res.ok) setReading(await res.json())
+      // Not enough credits to read the video: say so (with a way to get more), not "failed"
+      else if (res.status === 402) {
+        const d = await res.json().catch(() => ({}))
+        setReading({ status: 'failed', progress: null, error: d.error ?? 'Not enough credits to read this video.', needsCredits: true })
+      }
+      if (start) refreshCredits()
     } catch { /* checked again on the next round */ }
-  }, [readingUrl])
+  }, [readingUrl, refreshCredits])
   // (asked once per visit: the server also keeps it to one reading if two asks meet)
   const readingAsked = useRef(false)
   useEffect(() => {
@@ -719,20 +748,47 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const autoDoneCount = autoClips.filter(c => c.status !== 'rendering').length
   useEffect(() => { if (autoDoneCount > 0) router.refresh() }, [autoDoneCount, router])
 
-  async function makeClips() {
-    // The number in the box, kept to 1–10 (it may not have settled yet if Enter wasn't pressed)
-    const count = Math.min(AUTO_MAX, Math.max(1, Number(countText) || autoCount))
+  /**
+   * search 'more' (default): make clips from the moments already found, while any are left (free);
+   * 'new': look for new moments. A new search past the included ones, or clips past the month's
+   * included AI clips, cost credits: the server answers 402 "search_costs" or "clips_cost" first,
+   * and it goes ahead only after the user agrees (pay).
+   */
+  async function makeClips(search: 'more' | 'new' = 'more', pay = false) {
+    // The number in the box, kept to 1–the plan's clips per run (it may not have settled yet if Enter wasn't pressed)
+    const count = Math.min(allowance?.clips.perRun ?? AUTO_MAX, Math.max(1, Number(countText) || autoCount))
     setCount(count)
     setAutoStarting(true)
     setAutoError(null)
+    setAutoNote(null)
     try {
       const res = await fetch(`/api/videos/${video.id}/auto-clips`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clip_count: count, add_broll: autoBroll, ...autoOpts, caption_language: captionLang, title_language: titleLang, brand_kit: brandPick }),
+        body: JSON.stringify({ clip_count: count, add_broll: autoBroll, ...autoOpts, caption_language: captionLang, title_language: titleLang, brand_kit: brandPick, search, pay }),
       })
+      if (res.status === 402) {
+        const d = await res.json().catch(() => ({}))
+        if (d.code === 'search_costs') {
+          if (window.confirm(`${d.error} Use ${d.credits} credit${d.credits === 1 ? '' : 's'} to look again?`)) return await makeClips('new', true)
+          return
+        }
+        if (d.code === 'clips_cost') {
+          if (window.confirm(`${d.error} Go ahead?`)) return await makeClips(search, true)
+          return
+        }
+        throw new Error(d.error ?? 'Not enough credits')
+      }
       if (!res.ok) throw new Error((await res.json()).error ?? 'Could not start making clips')
+      const d = await res.json() as { clip_count?: number; limited_by?: string | null; search?: string; credits?: number; extra_clips?: number }
+      const n = d.clip_count ?? count
+      const why = d.limited_by === 'day' ? `that's what is left of today's clips`
+        : d.limited_by === 'video' ? 'the most this video can have (1 per minute of it)'
+        : d.limited_by === 'run' ? 'the most per run on your plan'
+        : d.limited_by === 'saved' ? 'all the saved moments left. Press Find new moments for more' : null
+      setAutoNote([why ? `Making ${n}: ${why}.` : null, d.credits ? `${d.credits} credit${d.credits === 1 ? '' : 's'} used${d.extra_clips ? ` for ${d.extra_clips} clip${d.extra_clips === 1 ? '' : 's'} past this month's` : ''}${d.extra_clips && d.search === 'new' && d.credits > d.extra_clips ? ' and' : ''}${d.search === 'new' && d.credits > (d.extra_clips ?? 0) ? ' for a new search' : ''}.` : null].filter(Boolean).join(' ') || null)
       await loadAutoClips()
+      loadAllowance()
     } catch (e) {
       setAutoError(e instanceof Error ? e.message : 'Could not start making clips')
     } finally {
@@ -781,7 +837,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const askAbort = useRef<AbortController | null>(null)
   const isAbort = (e: unknown) => e instanceof DOMException && e.name === 'AbortError'
 
-  async function findMoments() {
+  async function findMoments(pay = false) {
     momentsAbort.current?.abort()
     const ctl = new AbortController()
     momentsAbort.current = ctl
@@ -793,12 +849,23 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       // A list to pick from: nothing is saved until "+"; moments already listed are skipped
       const exclude = (suggestions ?? []).map(s => [s.start_ms, s.end_ms])
       const res = await fetch(`/api/videos/${video.id}/best-moments?list=1`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exclude }), signal: ctl.signal,
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exclude, pay }), signal: ctl.signal,
       })
       // The video is still being read: Best moments runs by itself when it's done
       if (res.status === 409) { waitForReading('Best moments', () => findMoments()); return }
+      // Every saved moment is listed and the included searches are used: a new one costs credits, asked first
+      if (res.status === 402) {
+        const d = await res.json().catch(() => ({}))
+        if (d.code === 'search_costs' && window.confirm(`${d.error} Use ${d.credits} credit${d.credits === 1 ? '' : 's'} to look again?`)) {
+          setLoadingSuggestions(false)
+          return await findMoments(true)
+        }
+        if (d.code !== 'search_costs') throw new Error(d.error ?? 'Not enough credits')
+        return
+      }
       if (!res.ok) throw new Error((await res.json()).error ?? 'Could not load suggestions')
       const { moments, limitMessage } = await res.json() as { moments: Suggestion[]; limitMessage: string | null }
+      loadAllowance()
       const batch = Date.now()
       const found = (moments ?? []).map(m => ({ ...m, id: m.clip_id ?? `${batch}-${m.id}` }))
       // Earlier finds stay listed above the new ones
@@ -876,6 +943,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       if (res.status === 409) { waitForReading('Ask AI', () => findByCriteria(q, true)); return }
       if (!res.ok) throw new Error((await res.json()).error ?? 'Could not find clips')
       const { suggestions } = await res.json() as { suggestions?: Suggestion[] }
+      loadAllowance()
       const list = suggestions ?? []
       setAiSuggestions(list)
       setAskFrom(null)
@@ -1299,6 +1367,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         </div>
 
         {autoError && <p className="text-xs" style={{ color: '#f87171' }}>{autoError}</p>}
+        {autoNote && !autoError && <p className="text-xs" style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}>{autoNote}</p>}
         {/* Fewer good moments than clips asked for: nothing is made until the user says yes */}
         {autoAsking && autoJob && (
           <div role="alert" className="flex flex-col gap-2 px-3 py-2.5 rounded-xl" style={{ background: 'rgba(251,191,36,0.07)', border: '1px solid rgba(251,191,36,0.3)' }}>
@@ -1373,6 +1442,25 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             </span>
           )} {autoRunning ? 'Making clips…' : `Make ${autoCount} clip${autoCount === 1 ? '' : 's'}`}
         </button>
+        {/* What the next run uses (credits on): saved moments are free; a new search is counted, then paid */}
+        {allowance && (() => {
+          const c = allowance.clips
+          const searchesLeft = Math.max(0, c.searchesIncluded - c.searchesUsed)
+          const searchPrice = c.nextSearchCredits > 0 ? `${c.nextSearchCredits} credit${c.nextSearchCredits === 1 ? '' : 's'}` : `${searchesLeft} of ${c.searchesIncluded} left`
+          return (
+            <div className="flex flex-col gap-1 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>
+              <span>{c.savedLeft > 0 ? `From ${c.savedLeft} saved moment${c.savedLeft === 1 ? '' : 's'} · free` : `Looks for moments · new search ${searchPrice}`}</span>
+              <span>AI clips this month: {Math.min(c.clipsThisMonth, c.clipsPerMonth)} of {c.clipsPerMonth}{c.monthLeft === 0 ? ` · more cost ${c.extraClipCredits} credit${c.extraClipCredits === 1 ? '' : 's'} each` : ''}</span>
+              <span>Today: {c.clipsToday} of {c.clipsPerDay} · This video: {c.videoClips} of {c.videoCap}</span>
+              {c.savedLeft > 0 && (
+                <button type="button" onClick={() => makeClips('new')} disabled={autoRunning || autoStarting}
+                  className="self-start underline disabled:opacity-40" style={{ color: 'rgb(var(--cb-fg) / 0.7)' }}>
+                  Find new moments · {searchPrice}
+                </button>
+              )}
+            </div>
+          )
+        })()}
         {/* Required by the speech model's licence (lib/company.ts MODEL_CREDIT) */}
         <p className="text-[10px] text-center" style={{ color: 'rgb(var(--cb-fg) / 0.4)' }}>{MODEL_CREDIT}</p>
       </section>
@@ -1456,6 +1544,13 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             </button>
           ))}
         </div>
+        {allowance && (
+          <p className="shrink-0 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
+            {allowance.askAi.usedThisMonth < allowance.askAi.perMonth
+              ? `${allowance.askAi.perMonth - allowance.askAi.usedThisMonth} of ${allowance.askAi.perMonth} searches left this month`
+              : 'Monthly searches used · 1 credit a search'}
+          </p>
+        )}
         {/* Results scroll inside the card, so the card never grows */}
         <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 -mr-2 pr-2">
         {aiError && <p className="text-xs" style={{ color: '#f87171' }}>{aiError}</p>}
@@ -1528,7 +1623,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         ))}
         </div>
         {suggestions && !loadingSuggestions && (
-          <button onClick={findMoments} title="Find more moments (ones already listed or in your clips are skipped)"
+          <button onClick={() => findMoments()} title="Find more moments (ones already listed or in your clips are skipped)"
             className="shrink-0 self-center flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-md transition-colors hover:bg-white/10" style={{ color: ACCENT }}>
             View more suggestions
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
@@ -1587,6 +1682,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           ) : reading.status === 'failed' ? (
             <div className="flex flex-col gap-2">
               <span className="text-xs" style={{ color: '#f87171' }}>{reading.error ?? 'Getting the transcript failed.'}</span>
+              {reading.needsCredits && (
+                <a href="/pricing" className="mmc-go h-10 rounded-xl text-[13px] font-semibold flex items-center justify-center">Get credits</a>
+              )}
               <button type="button" onClick={() => checkReading(true)} className="mmc-go h-10 rounded-xl text-[13px] font-semibold">Try again</button>
             </div>
           ) : (
@@ -1602,8 +1700,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 017.5-2" />
                 </svg>
-                Unlock edit tools
+                Unlock edit tools{credits ? ` · ${readingCost} credit${readingCost === 1 ? '' : 's'}` : ''}
               </button>
+              {credits && <p className="text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>You have {credits.balance} credits. Reading is charged once per video.</p>}
             </div>
           )}
         </div>

@@ -10,6 +10,8 @@
     "type-check": "tsc --noEmit",
     "test:auto-format": "npx tsx --test src/modules/editor/autoFormat.test.ts",
     "test:brand": "npx tsx --test src/lib/brandWords.test.ts src/lib/shared/brandTeam.test.ts src/modules/brand/engine.test.ts src/modules/brand/endCard.test.ts src/modules/brand/bookends.test.ts src/lib/shared/brandStyles.test.ts",
+    "test:credits": "npx tsx --test src/lib/credits.test.ts src/server/services/credits.test.ts src/server/services/creditsHooks.test.ts src/server/services/topup.test.ts src/lib/aiLimits.test.ts src/server/services/aiUsage.test.ts src/server/services/aiLimitsHooks.test.ts src/lib/planFeatures.test.ts",
+    "test:razorpay": "npx tsx --test src/lib/razorpay.test.ts src/lib/invoice.test.ts src/server/dev/razorpayMock.test.ts",
     "test:brand-style": "npx tsx --test src/server/services/brandStyle.test.ts"
   },
   "dependencies": {

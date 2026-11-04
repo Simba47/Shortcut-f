@@ -17,6 +17,22 @@
 .dash-nav-right { display: flex; align-items: center; gap: 14px; }
 
 .dash-usage { display: flex; flex-direction: column; gap: 5px; min-width: 110px; }
+.dash-credits {
+  display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 999px;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-muted);
+  font-size: 12.5px; white-space: nowrap; text-decoration: none; transition: border-color .15s, color .15s;
+}
+.dash-credits svg { color: var(--accent); }
+.dash-credits strong { color: var(--text); font-weight: 700; }
+.dash-credits:hover { border-color: var(--accent); color: var(--text); }
+.dash-credits.is-low { border-color: color-mix(in srgb, var(--warning) 60%, transparent); }
+.dash-credits.is-low svg { color: var(--warning); }
+.emd-cost { display: block; margin-top: 10px; padding: 8px 10px; border-radius: 10px; font-size: 12px; line-height: 1.4; text-align: left;
+  background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--text-muted); }
+.emd-cost b { color: var(--text); font-weight: 700; }
+.emd-cost.is-short { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.emd-cost.is-short b { color: var(--danger); }
+.emd-foot b { color: var(--text); font-weight: 700; }
 .dash-usage-label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 .dash-usage-label strong { color: var(--text); font-weight: 700; }
 .dash-usage-bar { height: 4px; border-radius: 999px; background: var(--border-strong); overflow: hidden; }

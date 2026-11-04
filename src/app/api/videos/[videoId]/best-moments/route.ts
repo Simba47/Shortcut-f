@@ -14,15 +14,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ vid
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { videoId } = await params
   try {
+    const body = await req.json().catch(() => ({}))
+    // fresh: look for new moments instead of showing saved ones; pay: agreed to a search's credits
+    const sopts = { fresh: body?.fresh === true, pay: body?.pay === true }
     if (req.nextUrl.searchParams.get('list') === '1') {
-      const body = await req.json().catch(() => ({}))
       const exclude = Array.isArray(body?.exclude)
         ? (body.exclude as unknown[]).filter((r): r is [number, number] => Array.isArray(r) && r.length === 2 && r.every(n => typeof n === 'number')).slice(0, 200)
         : []
-      const { suggestions } = await getVideoSuggestions(user.id, videoId, exclude)
+      const { suggestions } = await getVideoSuggestions(user.id, videoId, exclude, sopts)
       return NextResponse.json({ moments: suggestions, limitMessage: null })
     }
-    return NextResponse.json(await addBestMoments(user.id, videoId))
+    return NextResponse.json(await addBestMoments(user.id, videoId, sopts))
   } catch (err) {
     return apiError(err)
   }

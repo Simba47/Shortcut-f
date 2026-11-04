@@ -1,6 +1,8 @@
 import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import { aiProvider, askGemini, GEMINI_MODEL } from '@/lib/gemini'
+import { aiProvider, askGemini, GEMINI_MODEL, type GeminiUsage } from '@/lib/gemini'
+import { creditsMode } from '@/lib/credits'
+import { clipsAllowed, extraClipCredits, type LimitedBy } from '@/lib/aiLimits'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import sql from '@/lib/db'
 import { findClips, type FoundClip, type Subscores } from './clipFinder'
@@ -234,7 +236,44 @@ export interface ClipSuggestion {
 }
 type Word = { word: string; start_ms: number; end_ms: number }
 
-export async function getVideoSuggestions(userId: string, videoId: string, extraExclude: Array<[number, number]> = []): Promise<{ suggestions: ClipSuggestion[]; model?: string }> {
+/** Records what each Gemini call cost (services/aiUsage.ts); never slows down or fails the answer */
+function usageOf(userId: string, videoId: string, purpose: string) {
+  return (u: GeminiUsage) => {
+    import('./aiUsage').then(m => m.recordAiUsage({ userId, videoId, purpose, ...u }))
+      .catch(e => console.warn('[ai-usage] not recorded:', e instanceof Error ? e.message : e))
+  }
+}
+
+/** A fresh moment search past the included ones: the page asks first, then sends pay: true */
+function searchCostsError(credits: number) {
+  return Object.assign(
+    new Error(`Finding new moments for this video costs ${credits} credit${credits === 1 ? '' : 's'}: the included searches for it are used.`),
+    { status: 402, expose: true, code: 'search_costs', credits },
+  )
+}
+
+/** A run past the month's included AI clips (and maybe a paid search): the page asks first, then sends pay: true */
+function clipsCostError(credits: number, extra: number, searchCredits: number) {
+  const clips = `${extra} of these clips ${extra === 1 ? 'is' : 'are'} past this month's included AI clips`
+  return Object.assign(
+    new Error(`${clips}${searchCredits ? ', and a new search is needed' : ''}. This run costs ${credits} credit${credits === 1 ? '' : 's'}.`),
+    { status: 402, expose: true, code: 'clips_cost', credits },
+  )
+}
+
+/** How many Best moments are shown at a time */
+const BEST_SHOWN = 8
+/** A fresh search keeps up to this many moments for later ("Make more clips", "View more") */
+const SAVE_UP_TO = 60
+
+export interface SuggestionOptions {
+  /** Look for new moments even when saved ones are left */
+  fresh?: boolean
+  /** The user agreed to pay for a search past the included ones */
+  pay?: boolean
+}
+
+export async function getVideoSuggestions(userId: string, videoId: string, extraExclude: Array<[number, number]> = [], sopts: SuggestionOptions = {}): Promise<{ suggestions: ClipSuggestion[]; model?: string; credits?: number }> {
   const [video] = await sql`
     SELECT id, user_id, duration_ms, status FROM videos WHERE id = ${videoId}
   `
@@ -248,17 +287,39 @@ export async function getVideoSuggestions(userId: string, videoId: string, extra
   const durationMs = video.duration_ms ?? 0
   if (words.length === 0) return { suggestions: makeTimeChunks(durationMs) }
 
+  const model = CLIP_MODEL
+  const aiUsage = await import('./aiUsage')
+  // Moments a search already found and saved: shown again without asking AI (no cost)
+  if (!sopts.fresh) {
+    const saved = await aiUsage.unusedMoments(videoId, extraExclude)
+    if (saved.length) {
+      const suggestions = saved.slice(0, BEST_SHOWN).map((m, i) => toSuggestion(m as FoundClip, `saved-${i}`))
+      logShown(userId, videoId, 'best_moments', model, suggestions)
+      return { suggestions, model }
+    }
+  }
+
+  // A fresh search: counted per video, and past the included ones it costs credits (asked first)
+  const price = creditsMode() === 'on' ? (await aiUsage.clipAllowance(userId, videoId)).nextSearchCredits : 0
+  if (price > 0 && !sopts.pay) throw searchCostsError(price)
+
   // Plain chunks only when no AI can answer
   if (!aiProvider()) return { suggestions: makeWordChunks(words, durationMs) }
 
   // Skip what's already a clip, and moments already listed (so "View more" finds new ones)
   const exclude = [...await clippedRanges(videoId, durationMs), ...extraExclude]
-  const model = CLIP_MODEL
+  const { charge, release, settle } = await import('./credits')
+  const hold = price > 0 ? await charge(userId, { amount: price, refType: 'search', refId: videoId }) : null
   try {
-    const suggestions = await detectBestMoments(words, durationMs, exclude)
+    const found = await detectBestMoments(words, durationMs, exclude, usageOf(userId, videoId, 'best_moments'))
+    await aiUsage.saveMoments(videoId, found)
+    await aiUsage.recordSearch(userId, videoId, 'best_moments', null, hold ? price : 0)
+    if (hold) await settle(hold.id)
+    const suggestions = found.slice(0, BEST_SHOWN).map((c, i) => toSuggestion(c, `ai-${i}`))
     logShown(userId, videoId, 'best_moments', model, suggestions)
-    return { suggestions, model }
+    return { suggestions, model, ...(hold ? { credits: price } : {}) }
   } catch (e) {
+    if (hold) await release(hold.id).catch(() => {})
     console.error(`[suggestions] ${model} error:`, e)
     return { suggestions: makeWordChunks(words, durationMs) }
   }
@@ -275,8 +336,8 @@ export interface AddedMoment extends ClipSuggestion {
  * fallback chunks (no AI, no score) are shown but not saved. On a plan with a clip limit, only
  * as many as there is room for are saved.
  */
-export async function addBestMoments(userId: string, videoId: string): Promise<{ moments: AddedMoment[]; notSaved: number; limitMessage: string | null }> {
-  const { suggestions, model } = await getVideoSuggestions(userId, videoId)
+export async function addBestMoments(userId: string, videoId: string, sopts: SuggestionOptions = {}): Promise<{ moments: AddedMoment[]; notSaved: number; limitMessage: string | null }> {
+  const { suggestions, model } = await getVideoSuggestions(userId, videoId, [], sopts)
   const picks = suggestions.filter(s => typeof s.score === 'number')
   if (!picks.length) {
     return {
@@ -357,11 +418,21 @@ export async function getVideoSuggestionsByCriteria(
     throw Object.assign(new Error('This video has no transcript yet'), { status: 400 })
   }
 
-  if (!aiProvider()) throw Object.assign(new Error('AI clip detection is not configured'), { status: 500 })
+  // Counted against the month's allowance, then 1 credit a search; refused past the daily cap.
+  // Checked before any AI call, and given back if the AI does not answer.
+  const { beginAiAction } = await import('./aiUsage')
+  const action = await beginAiAction(userId, 'ask_ai', videoId)
+  if (!aiProvider()) { await action.fail(); throw Object.assign(new Error('AI clip detection is not configured'), { status: 500 }) }
 
-  const suggestions = await detectClipsByCriteria(words, durationMs, trimmedCriteria)
-  logShown(userId, videoId, 'clip_search', CLIP_MODEL, suggestions)
-  return { suggestions }
+  try {
+    const suggestions = await detectClipsByCriteria(words, durationMs, trimmedCriteria, usageOf(userId, videoId, 'ask_ai'))
+    await action.done()
+    logShown(userId, videoId, 'clip_search', CLIP_MODEL, suggestions)
+    return { suggestions }
+  } catch (e) {
+    await action.fail()
+    throw e
+  }
 }
 
 function toSuggestion(c: FoundClip, id: string): ClipSuggestion {
@@ -386,21 +457,22 @@ async function clippedRanges(videoId: string, durationMs: number): Promise<Array
 }
 
 // Best moments: the whole transcript in ~10-minute windows (see clipFinder.ts)
-async function detectBestMoments(words: Word[], durationMs: number, exclude: Array<[number, number]>): Promise<ClipSuggestion[]> {
-  const ask = (system: string, user: string, o?: { temperature?: number }) => askGemini(user, { model: CLIP_MODEL, system, ...o })
-  const clips = await findClips({
-    words, durationMs, mode: { kind: 'best' }, ask, exclude,
+// Every good moment is kept (up to SAVE_UP_TO, more candidates per window), so later "View more"
+// and "Make more clips" pick from them instead of searching again
+async function detectBestMoments(words: Word[], durationMs: number, exclude: Array<[number, number]>, onUsage?: (u: GeminiUsage) => void): Promise<FoundClip[]> {
+  const ask = (system: string, user: string, o?: { temperature?: number; thinkingBudget?: number }) => askGemini(user, { model: CLIP_MODEL, system, onUsage, ...o })
+  return findClips({
+    words, durationMs, mode: { kind: 'best' }, ask, exclude, limit: SAVE_UP_TO, perWindow: 12, spread: true,
     log: msg => console.error('[suggestions]', msg),
   })
-  return clips.map((c, i) => toSuggestion(c, `ai-${i}`))
 }
 
 // Clip search: Gemini reads the whole transcript in windows and keeps only genuine matches.
 // Clips end on a line the model chose, so the old +5 s end padding is no longer needed.
 async function detectClipsByCriteria(
-  words: Word[], durationMs: number, criteria: string,
+  words: Word[], durationMs: number, criteria: string, onUsage?: (u: GeminiUsage) => void,
 ): Promise<ClipSuggestion[]> {
-  const ask = (system: string, user: string, o?: { temperature?: number }) => askGemini(user, { model: CLIP_MODEL, system, ...o })
+  const ask = (system: string, user: string, o?: { temperature?: number; thinkingBudget?: number }) => askGemini(user, { model: CLIP_MODEL, system, onUsage, ...o })
   const clips = await findClips({
     words, durationMs, mode: { kind: 'search', criteria }, ask,
     log: msg => console.error('[ai-detect]', msg),
@@ -463,18 +535,51 @@ async function brandKitChoice(userId: string, want: string | undefined): Promise
   return 'default'
 }
 
-export async function createAutoClips(userId: string, videoId: string, clipCount = 5, addBroll = false, options: AutoClipOptions = {}) {
-  const count = Math.round(Number(clipCount))
-  if (!Number.isFinite(count) || count < 1 || count > 10) {
+export interface MakeClipsOptions extends AutoClipOptions {
+  /** 'more' (default): pick from the moments already found, when any are left; 'new': search again */
+  search?: 'more' | 'new'
+  /** The user agreed to pay for a search past the included ones */
+  pay?: boolean
+}
+
+/**
+ * Make my clips. What is limited is what costs (lib/aiLimits.ts, services/aiUsage.ts): AI clips
+ * a month (past them, credits per clip), a daily safety cap, clips per video, and fresh moment
+ * searches per video. "Make more clips" picks from the moments a search already saved, with no new
+ * search. A run asking for more than is left makes what is left and says why (limited_by).
+ */
+export async function createAutoClips(userId: string, videoId: string, clipCount = 5, addBroll = false, options: MakeClipsOptions = {}) {
+  const requested = Math.round(Number(clipCount))
+  const mode = creditsMode()
+  if (!Number.isFinite(requested) || requested < 1 || (mode === 'off' && requested > 10)) {
     throw Object.assign(new Error('Choose between 1 and 10 clips'), { status: 400 })
   }
   const [video] = await sql`
-    SELECT id, status, storage_path FROM videos WHERE id = ${videoId} AND user_id = ${userId}
+    SELECT id, status, storage_path, duration_ms FROM videos WHERE id = ${videoId} AND user_id = ${userId}
   `
   if (!video) throw Object.assign(new Error('Not found'), { status: 404 })
   if (video.status !== 'ready' || !video.storage_path) {
     throw Object.assign(new Error('This video is still processing. Try again once it is ready.'), { status: 409 })
   }
+
+  const aiUsage = await import('./aiUsage')
+  const allowance = await aiUsage.clipAllowance(userId, videoId)
+  let count = requested
+  let limitedBy: LimitedBy | 'saved' = null
+  if (mode === 'on') {
+    const r = clipsAllowed({ requested, perRun: allowance.perRun, dayLeft: allowance.dayLeft, videoLeft: allowance.videoLeft })
+    if (r.count === 0) {
+      throw Object.assign(new Error(r.limitedBy === 'day'
+        ? `You've made ${allowance.clipsToday} of today's ${allowance.clipsPerDay} AI clips. More tomorrow.`
+        : `This video already has ${allowance.videoClips} AI clips, the most for its length (1 per minute of video).`), { status: 429, expose: true })
+    }
+    count = r.count; limitedBy = r.limitedBy
+  }
+  // "More clips" from saved moments while any are left; otherwise (or when asked) a fresh search
+  const fromSaved = options.search !== 'new' && allowance.savedLeft > 0
+  if (fromSaved && count > allowance.savedLeft) { count = allowance.savedLeft; limitedBy = 'saved' }
+  const price = !fromSaved && mode === 'on' ? allowance.nextSearchCredits : 0
+  const clipCost = mode === 'on' ? extraClipCredits(count, allowance.monthLeft) : { extra: 0, credits: 0 }
 
   const { checkClipQuota, getUserPlanConfig } = await import('./quota')
   await checkClipQuota(userId)
@@ -491,25 +596,48 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
       )
     }
   }
+  // Asked after the plan's own clip limit, so the free plan is told to upgrade, not offered paid clips
+  if (clipCost.credits > 0 && !options.pay) throw clipsCostError(clipCost.credits + price, clipCost.extra, price)
+  if (price > 0 && !options.pay) throw searchCostsError(price)
 
   const [running] = await sql`
     SELECT id FROM ai_edit_jobs WHERE video_id = ${videoId} AND status IN ('queued', 'running') LIMIT 1
   `
   if (running) throw Object.assign(new Error('AI is already making clips for this video. Wait for it to finish.'), { status: 409 })
 
-  const [aiJob] = await sql`
-    INSERT INTO ai_edit_jobs (video_id, clip_count, status) VALUES (${videoId}, ${count}, 'queued') RETURNING id
-  `
-  const payload = {
-    ai_edit_job_id: aiJob.id, video_id: videoId, clip_count: count, add_broll: addBroll,
-    captions: options.captions !== false, title: options.title !== false,
-    motion: options.motion !== false, layouts: options.layouts !== false,
-    caption_language: options.captionLanguage === 'roman' ? 'roman' : 'native',
-    title_language: options.titleLanguage === 'english' || options.titleLanguage === 'native' ? options.titleLanguage : 'roman',
-    brand_kit: await brandKitChoice(userId, options.brandKit),
+  const { charge, linkJob, release } = await import('./credits')
+  const hold = price > 0 ? await charge(userId, { amount: price, refType: 'search', refId: videoId }) : null
+  let clipHold: Awaited<ReturnType<typeof charge>> | null = null
+  try {
+    clipHold = clipCost.credits > 0 ? await charge(userId, { amount: clipCost.credits, refType: 'ai_clips', refId: videoId }) : null
+    const [aiJob] = await sql`
+      INSERT INTO ai_edit_jobs (video_id, clip_count, status) VALUES (${videoId}, ${count}, 'queued') RETURNING id
+    `
+    const payload = {
+      ai_edit_job_id: aiJob.id, video_id: videoId, clip_count: count, add_broll: addBroll,
+      captions: options.captions !== false, title: options.title !== false,
+      motion: options.motion !== false, layouts: options.layouts !== false,
+      caption_language: options.captionLanguage === 'roman' ? 'roman' : 'native',
+      title_language: options.titleLanguage === 'english' || options.titleLanguage === 'native' ? options.titleLanguage : 'roman',
+      brand_kit: await brandKitChoice(userId, options.brandKit),
+      // 'saved': pick from video_moments (the worker makes no new search); 'new': search and save
+      search: fromSaved ? 'saved' : 'new',
+      user_id: userId,
+    }
+    const [job] = await sql`INSERT INTO jobs (type, payload, status) VALUES ('ai_edit', ${sql.json(payload)}, 'queued') RETURNING id`
+    // The search's credits follow the job: a run that fails gives them back (credits.sweep)
+    if (hold) await linkJob(hold.id, job.id)
+    if (clipHold) await linkJob(clipHold.id, job.id)
+    if (!fromSaved) await aiUsage.recordSearch(userId, videoId, 'make_clips', aiJob.id, hold ? price : 0)
+    return {
+      ai_edit_job_id: aiJob.id as string, clip_count: count, limited_by: limitedBy, search: fromSaved ? 'saved' as const : 'new' as const,
+      credits: (hold ? price : 0) + (clipHold ? clipCost.credits : 0), extra_clips: clipHold ? clipCost.extra : 0,
+    }
+  } catch (err) {
+    if (hold) await release(hold.id).catch(() => {})
+    if (clipHold) await release(clipHold.id).catch(() => {})
+    throw err
   }
-  await sql`INSERT INTO jobs (type, payload, status) VALUES ('ai_edit', ${sql.json(payload)}, 'queued')`
-  return { ai_edit_job_id: aiJob.id as string }
 }
 
 /**
