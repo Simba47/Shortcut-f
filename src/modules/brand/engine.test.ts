@@ -47,6 +47,19 @@ test('on: logo in its corner, title style on text, caption look, frame colours',
   assert.equal(t.segments[0].frame!.items![0].color, '#ffcc00')
 })
 
+test('a clip with no caption style yet: its capitals are kept as off, never empty, and come back off', () => {
+  // (user, 2026-11-04: the kit taken off such a clip put its capitals back empty; the database takes
+  // no empty value there, so every save of the clip failed — "Connection lost" with the internet fine)
+  const on = putBrandOn(clip({ caption: {} }), kit())
+  assert.equal(on.before.caption!.uppercase, false)
+  assert.equal(on.before.caption!.template, null)
+  const off = takeBrandOff(on.target, kit().data, on.before)
+  assert.equal(off.caption.uppercase, false)
+  // a look kept before the fix, its capitals empty: off as it comes back
+  const old = { ...on.before, caption: { ...on.before.caption!, uppercase: null as unknown as boolean } }
+  assert.equal(takeBrandOff(on.target, kit().data, old).caption.uppercase, false)
+})
+
 test('off: everything goes back, except what the user changed while it was on', () => {
   const on = putBrandOn(clip(), kit())
   // (the user recolours one text while the brand is on)

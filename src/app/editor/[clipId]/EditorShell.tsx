@@ -91,7 +91,8 @@ import { TransitionsPanel, TRANSITION_DEFAULT_MS, TRANSITION_KINDS, playedTransi
 type Tool = 'format' | 'subjects' | 'frames' | 'captions' | 'transitions' | 'text' | 'media' | 'music' | 'cleanup' | 'post' | 'brand'
 /** Media: the user's imported media, or Library (stock footage) */
 type MediaFilter = 'all' | 'video' | 'audio' | 'image'
-type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'retrying'
+/** 'retrying': no answer (the connection); 'refused': the server answered with a failure — both tried again */
+type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'retrying' | 'refused'
 
 interface SegmentRow extends Omit<Segment, never> {
   crop_boxes: (CropBox & { box_keyframes: BoxKeyframe[] })[]
@@ -1557,7 +1558,9 @@ export function EditorShell({
       // edit itself, so keep trying quietly. A 4xx means the save was refused — show Retry.
       const status = (err as { status?: number }).status
       if (status === undefined || status >= 500 || status === 429) {
-        setSaveState('retrying')
+        // (said as it is: "Connection lost" for a save the server turned down sent people to check
+        // an internet that was fine — user, 2026-11-04)
+        setSaveState(status === undefined ? 'retrying' : 'refused')
         const delay = retryDelayRef.current
         retryDelayRef.current = Math.min(delay * 2, 30000)
         if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
@@ -7914,6 +7917,14 @@ function SaveIndicator({ state, leaving, onRetry }: { state: SaveState; leaving?
       <span className={chip} style={{ color: '#fcd34d', background: 'rgba(245,158,11,0.12)' }} aria-live="polite"
         title="The connection dropped — your changes are kept here and will save as soon as it's back">
         Connection lost · retrying… <button onClick={onRetry} className="underline hover:opacity-80">Now</button>
+      </span>
+    )
+  }
+  if (state === 'refused') {
+    return (
+      <span className={chip} style={{ color: '#fcd34d', background: 'rgba(245,158,11,0.12)' }} aria-live="polite"
+        title="The server couldn't save your changes — they're kept here and it keeps trying. If this stays, let us know">
+        Couldn&apos;t save · trying again… <button onClick={onRetry} className="underline hover:opacity-80">Now</button>
       </span>
     )
   }

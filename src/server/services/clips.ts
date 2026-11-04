@@ -316,6 +316,10 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
       const onOff = hasEnabledField ? { enabled: captionEnabled } : {}
       const entries = Object.entries(captionStyle).filter(([k, v]) => styleFields.includes(k) && v !== undefined)
       const fields: Record<string, unknown> = Object.fromEntries(entries)
+      // Capitals are yes or no (the field takes no empty value): empty is off. An editor could send it
+      // empty — a brand kit taken off a clip that had no caption style yet — and every save of that
+      // clip failed, shown as "Connection lost" (user, 2026-11-04)
+      if ('uppercase' in fields && fields.uppercase == null) fields.uppercase = false
       // Key words: saved once the editor has them (picked by AI there, or changed in the Captions
       // panel) — never an empty copy over the ones the export picked
       const emphasis = (captionStyle as Partial<CaptionStyle>).emphasis
