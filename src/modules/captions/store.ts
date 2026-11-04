@@ -55,16 +55,18 @@ export const useCaptionStore = create<CaptionState & CaptionActions>()(set => ({
   captionParts: [],
   pickedCaptionPart: null,
 
-  // Which letters captions use is saved with the caption style (language: 'roman' = English letters)
+  // Which letters captions use is saved with the caption style (language: 'roman' = English letters),
+  // and so is their case (text_case; a style saved before that field: UPPER when uppercase, else Title)
   hydrate: (words, style = { color: '#FFE700' }, showCaptions = false) =>
-    set({ words, captionStyle: { ...style, enabled: showCaptions }, showCaptions, romanize: style.language === 'roman' }),
+    set({ words, captionStyle: { ...style, enabled: showCaptions }, captionTextCase: captionCaseOf(style), showCaptions, romanize: style.language === 'roman' }),
 
   setWords: (words) => set({ words }),
   updateWord: (id, text, field = 'word') => set(s => ({
     words: s.words.map(w => w.id === id ? { ...w, [field]: text } : w),
   })),
   updateCaptionStyle: (updates) => set(s => ({ captionStyle: { ...s.captionStyle, ...updates } })),
-  setCaptionTextCase: (tc) => set({ captionTextCase: tc }),
+  // (kept on the style too, so it is saved and the export writes the words in the same case)
+  setCaptionTextCase: (tc) => set(s => ({ captionTextCase: tc, captionStyle: { ...s.captionStyle, text_case: tc } })),
   setShowCaptions: (show) => set(s => ({ showCaptions: show, captionStyle: { ...s.captionStyle, enabled: show } })),
   setRomanize: (v) => set(s => ({ romanize: v, captionStyle: { ...s.captionStyle, language: v ? 'roman' : 'auto' } })),
   setRetranscribing: (v) => set({ retranscribing: v }),
@@ -75,3 +77,13 @@ export const useCaptionStore = create<CaptionState & CaptionActions>()(set => ({
   setCaptionParts: (parts) => set(s => ({ captionParts: parts, pickedCaptionPart: s.pickedCaptionPart && s.pickedCaptionPart !== 'all' && !parts.some(p => p.id === s.pickedCaptionPart) ? null : s.pickedCaptionPart })),
   pickCaptionPart: (id) => set({ pickedCaptionPart: id }),
 }))
+
+/**
+ * The case captions are written in (the preview's applyCase, the export's render.py _apply_case):
+ * the one saved, else (a style saved before text_case) UPPER when uppercase, else Title
+ */
+export function captionCaseOf(style: Partial<CaptionStyle> | null | undefined): TextCase {
+  const saved = style?.text_case
+  if (saved === 'title' || saved === 'upper' || saved === 'lower') return saved
+  return style?.uppercase ? 'upper' : 'title'
+}
