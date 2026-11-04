@@ -1618,6 +1618,18 @@ export function EditorShell({
     if (!inside.length) return true
     return inside[0].start_ms - kept[0][0] > CAPTION_GAP_MS || kept[kept.length - 1][1] - inside[inside.length - 1].end_ms > CAPTION_GAP_MS
   }
+  /**
+   * A caption word corrected in the Captions panel: shown at once and saved on the transcript, so it
+   * is there when the clip opens again and the export writes it (before 2026-11-04 it stayed in this
+   * editor only: gone on reload, never exported)
+   */
+  function changeWord(id: string, text: string) {
+    const field = romanize ? 'word_roman' : 'word'
+    updateWord(id, text, field)
+    fetch('/api/transcribe/words', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, field, text }) })
+      .then(r => { if (!r.ok) throw new Error(String(r.status)) })
+      .catch(() => notifyLocked('That caption correction wasn’t saved. Check your connection and type it again.'))
+  }
   /** Make captions for the clip as it is now: save first, so the job reads its current start and end */
   async function makeCaptions() {
     if (transcribing || retranscribing || isFreePlan) return
@@ -6572,7 +6584,7 @@ export function EditorShell({
                   <a href="/pricing" className="px-4 py-2 rounded-lg text-xs font-bold" style={{ background: ACCENT, color: '#000' }}>See plans</a>
                 </div>
               ) : editingTranscript ? (
-                <TranscriptPanel words={displayWords} clipStartMs={clip.start_ms} clipEndMs={clip.end_ms} currentTimeMs={currentTimeMs} onSeek={seekToMs} onWordChange={(id, text) => updateWord(id, text, romanize ? 'word_roman' : 'word')} />
+                <TranscriptPanel words={displayWords} clipStartMs={clip.start_ms} clipEndMs={clip.end_ms} currentTimeMs={currentTimeMs} onSeek={seekToMs} onWordChange={changeWord} />
               ) : (
                 <div className="flex flex-col">
                   {/* ── Captions: on/off with its status, the language, and editing the words ── */}
@@ -7003,8 +7015,11 @@ export function EditorShell({
                 </span>
               ) : hasOutput ? (
                 <>
-                  <button onClick={() => requestExport(true)} aria-label="Re-render"
-                    title="Render again with your latest edits. Captions are regenerated too."
+                  {/* (with the captions as they are: read again only where part of the clip has none — it was
+                      made longer. Reading the whole clip again every time changed its words from the ones
+                      in the preview and threw corrections away: user, 2026-11-04) */}
+                  <button onClick={() => requestExport(needsCaptions())} aria-label="Re-render"
+                    title="Render again with your latest edits"
                     className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
                     style={{ color: 'rgb(var(--ed-fg) / 0.75)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

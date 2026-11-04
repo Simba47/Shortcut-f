@@ -419,6 +419,19 @@ export function EditorShellMobile({
     }
   }
 
+  /**
+   * A caption word corrected in the Captions panel: shown at once and saved on the transcript, so it
+   * is there when the clip opens again and the export writes it (before 2026-11-04 it stayed in this
+   * editor only: gone on reload, never exported)
+   */
+  function changeWord(id: string, text: string) {
+    const field = romanize ? 'word_roman' : 'word'
+    updateWord(id, text, field)
+    fetch('/api/transcribe/words', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, field, text }) })
+      .then(r => { if (!r.ok) throw new Error(String(r.status)) })
+      .catch(() => setExportError('That caption correction wasn’t saved. Type it again.'))
+  }
+
   async function handleReEdit() {
     await fetch(`/api/clips/${clip.id}/reedit`, { method: 'POST' })
     setClipStatus('draft'); setOutputUrl(null)
@@ -708,7 +721,7 @@ export function EditorShellMobile({
                 <svg width="13" height="13" viewBox="0 0 15 15" fill="none"><path d="M7.5 2v8M4 7l3.5 3.5L11 7M2 13h11" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 Download
               </a>
-              <button onClick={() => handleExport(true)} disabled={exporting} style={{ padding: '8px 0', borderRadius: 8, background: 'rgba(200,255,0,0.1)', color: '#c8ff00', fontSize: 11, fontWeight: 600, border: '1px solid rgba(200,255,0,0.2)', cursor: 'pointer', opacity: exporting ? 0.5 : 1 }}>{exporting ? 'Queuing…' : 'Re-render'}</button>
+              <button onClick={() => handleExport(false)} disabled={exporting} style={{ padding: '8px 0', borderRadius: 8, background: 'rgba(200,255,0,0.1)', color: '#c8ff00', fontSize: 11, fontWeight: 600, border: '1px solid rgba(200,255,0,0.2)', cursor: 'pointer', opacity: exporting ? 0.5 : 1 }}>{exporting ? 'Queuing…' : 'Re-render'}</button>
               <button onClick={handleReEdit} style={{ padding: '8px 0', borderRadius: 8, background: 'rgba(124,58,237,0.1)', color: '#a78bfa', fontSize: 11, fontWeight: 600, border: '1px solid rgba(124,58,237,0.2)', cursor: 'pointer' }}>Re-edit</button>
             </>
           ) : clipStatus !== 'rendering' && !exporting ? (
@@ -987,7 +1000,7 @@ export function EditorShellMobile({
                     {showCaptions && words.length > 0 && (
                       <TranscriptPanel words={displayWords} clipStartMs={clip.start_ms} clipEndMs={clip.end_ms}
                         currentTimeMs={currentTimeMs} onSeek={seekToMs}
-                        onWordChange={(id, text) => updateWord(id, text, romanize ? 'word_roman' : 'word')} />
+                        onWordChange={changeWord} />
                     )}
                   </>
                 )}
@@ -1050,7 +1063,7 @@ export function EditorShellMobile({
                       <svg width="16" height="16" viewBox="0 0 15 15" fill="none"><path d="M7.5 2v8M4 7l3.5 3.5L11 7M2 13h11" stroke="black" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>
                       Download
                     </a>
-                    <button onClick={() => handleExport(true)} disabled={exporting} style={{ padding: '12px 0', borderRadius: 10, background: 'rgba(200,255,0,0.1)', color: '#c8ff00', fontSize: 13, fontWeight: 600, border: '1px solid rgba(200,255,0,0.2)', cursor: 'pointer', opacity: exporting ? 0.5 : 1 }}>{exporting ? 'Queuing…' : 'Re-render'}</button>
+                    <button onClick={() => handleExport(false)} disabled={exporting} style={{ padding: '12px 0', borderRadius: 10, background: 'rgba(200,255,0,0.1)', color: '#c8ff00', fontSize: 13, fontWeight: 600, border: '1px solid rgba(200,255,0,0.2)', cursor: 'pointer', opacity: exporting ? 0.5 : 1 }}>{exporting ? 'Queuing…' : 'Re-render'}</button>
                     <button onClick={handleReEdit} style={{ padding: '12px 0', borderRadius: 10, background: 'rgba(124,58,237,0.1)', color: '#a78bfa', fontSize: 13, fontWeight: 600, border: '1px solid rgba(124,58,237,0.2)', cursor: 'pointer' }}>Re-edit</button>
                   </div>
                 ) : clipStatus !== 'rendering' && !exporting ? (
