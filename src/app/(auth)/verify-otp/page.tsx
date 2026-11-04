@@ -1,127 +1,116 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useEffect, useRef, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { signIn } from 'next-auth/react'
+import { ArrowRight } from 'lucide-react'
 import { BrandLoader } from '@/components/ui/brand-loader'
+import { AuthShell } from '@/components/auth/AuthShell'
+import { BackToSignIn, CodeInput, Field, Messages, ResendLine, SubmitButton, useCooldown } from '@/components/auth/fields'
+import { AUTH } from '@/components/auth/strings'
 import { takeNextPath } from '@/lib/nextPath'
 
 const RESEND_COOLDOWN = 60
 
+/**
+ * The older code page, in the auth card (sign up now asks for its code in the card itself; nothing
+ * links here, but the address still works): ?email=…&purpose=signup | password_reset.
+ */
 function VerifyOtpForm() {
   const params = useSearchParams()
   const email = params.get('email') ?? ''
   const purpose = (params.get('purpose') ?? 'signup') as 'signup' | 'password_reset'
   const router = useRouter()
+  const t = AUTH.recovery.verify
 
   const [otp, setOtp] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-  const [cooldown, setCooldown] = useState(0)
+  const [cooldown, setCooldown] = useCooldown()
+  const codeRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    if (cooldown <= 0) return
-    const t = setTimeout(() => setCooldown(c => c - 1), 1000)
-    return () => clearTimeout(t)
-  }, [cooldown])
+  useEffect(() => { codeRef.current?.focus() }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setLoading(true)
-    setError(null)
-    const res = await fetch('/api/auth/verify-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, otp, purpose }),
-    })
-    const data = await res.json()
-    if (!res.ok) { setError(data.error); setLoading(false); return }
-
-    if (purpose === 'signup') {
-      const signInRes = await signIn('credentials', {
-        email,
-        password: params.get('__p') ?? '',
-        redirect: false,
+    setLoading(true); setError(null); setNotice(null)
+    try {
+      const res = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otp, purpose }),
       })
-      if (signInRes?.ok) { router.push(takeNextPath()); return }
-      // Password not in URL (security) — ask user to login
-      setSuccess(true)
+      const data = await res.json()
+      if (!res.ok) { setError(data.error ?? AUTH.errors.badCode); setLoading(false); return }
+
+      if (purpose === 'signup') {
+        const signInRes = await signIn('credentials', {
+          email,
+          password: params.get('__p') ?? '',
+          redirect: false,
+        })
+        if (signInRes?.ok) { router.push(takeNextPath()); return }
+        // Password not in URL (security) — ask user to login
+        setSuccess(true)
+        setLoading(false)
+      } else {
+        router.push(`/reset-password?email=${encodeURIComponent(email)}&otp=${encodeURIComponent(otp)}`)
+      }
+    } catch {
+      setError(AUTH.errors.network)
       setLoading(false)
-    } else {
-      router.push(`/reset-password?email=${encodeURIComponent(email)}&otp=${encodeURIComponent(otp)}`)
     }
   }
 
   async function handleResend() {
-    setCooldown(RESEND_COOLDOWN)
-    await fetch('/api/auth/verify-otp', {
+    setCooldown(RESEND_COOLDOWN); setError(null)
+    const r = await fetch('/api/auth/verify-otp', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, purpose }),
-    })
+    }).catch(() => null)
+    setNotice(r?.ok ? AUTH.notes.newCodeSent(email) : null)
+    if (!r?.ok) setError(AUTH.errors.resendFailed)
   }
 
   if (success) {
     return (
-      <div className="text-center">
-        <p className="text-white font-semibold mb-2">Email verified!</p>
-        <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
-          Your account is ready. Sign in to get started.
-        </p>
-        <a href="/login" className="text-sm font-semibold text-white underline">Go to sign in</a>
+      <div className="auth-form">
+        <h1>{t.doneTitle}</h1>
+        <p className="auth-sub">{t.doneBody}</p>
+        <Link href="/login" className="auth-submit">
+          <span>{t.doneCta}</span>
+          <ArrowRight className="auth-submit-arrow" aria-hidden />
+        </Link>
       </div>
     )
   }
 
   return (
-    <>
-      <h1 className="text-2xl font-bold mb-1 text-white">Check your email</h1>
-      <p className="text-sm mb-8" style={{ color: 'var(--text-muted)' }}>
-        We sent a 6-digit code to <strong className="text-white">{email}</strong>
-      </p>
-
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-white">Verification code</label>
-          <input
-            type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6}
-            value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, ''))}
-            required placeholder="000000"
-            className="px-3 py-3 rounded-lg text-center text-2xl font-bold tracking-[0.5em] text-white outline-none"
-            style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', letterSpacing: '0.5em' }}
-          />
-        </div>
-        {error && <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p>}
-        <button type="submit" disabled={loading || otp.length < 6}
-          className="py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-60"
-          style={{ background: 'var(--accent)' }}>
-          {loading ? 'Verifying…' : 'Verify'}
-        </button>
-      </form>
-
-      <p className="mt-5 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
-        Didn&apos;t receive it?{' '}
-        {cooldown > 0 ? (
-          <span>Resend in {cooldown}s</span>
-        ) : (
-          <button onClick={handleResend} className="text-white font-medium hover:underline">
-            Resend code
-          </button>
-        )}
-      </p>
-    </>
+    <form className="auth-form" onSubmit={handleSubmit}>
+      <BackToSignIn />
+      <h1>{t.title}</h1>
+      <p className="auth-sub">{AUTH.code.sentTo} <strong>{email}</strong>.</p>
+      <Field id="verify-code" label={AUTH.fields.code} error={error}>
+        <CodeInput ref={codeRef} id="verify-code" value={otp} invalid={!!error} onChange={v => { setOtp(v); setError(null) }} />
+      </Field>
+      <Messages notice={notice} />
+      <SubmitButton busy={loading} disabled={otp.length < 6} label={t.submit} busyLabel={t.busy} />
+      <ResendLine cooldown={cooldown} onResend={handleResend} />
+    </form>
   )
 }
 
 export default function VerifyOtpPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--bg)' }}>
-      <div className="w-full max-w-sm p-8 rounded-xl" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <Suspense fallback={<BrandLoader size={36} />}>
-          <VerifyOtpForm />
-        </Suspense>
-      </div>
-    </div>
+    <AuthShell>
+      <Suspense fallback={<BrandLoader size={36} />}>
+        <VerifyOtpForm />
+      </Suspense>
+    </AuthShell>
   )
 }
+

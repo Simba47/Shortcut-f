@@ -9,7 +9,7 @@ import { Providers } from './providers'
 
 // Exposed as --font-display; only the landing page opts into it
 const displayFont = Inter_Tight({
-  subsets: ['latin'],
+  subsets: ['latin', 'latin-ext'],
   weight: ['400', '500', '600', '700', '800', '900'],
   variable: '--font-display',
   display: 'swap',
