@@ -560,7 +560,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // video: each clip's captions are made in the editor, for that clip alone.
   // place: waiting its turn (many readings at once), its place in line (1 = next)
   // step / done / total: what the worker is doing and the parts read of all (ReadingProgress)
-  type Reading = { status: 'none' | 'running' | 'ready' | 'failed'; progress: number | null; error: string | null; stopped?: boolean; place?: number | null; step?: 'audio' | 'reading' | 'saving' | null; done?: number | null; total?: number | null; waitingOn?: 'copy' | 'queue' | 'server' | null }
+  type Reading = { status: 'none' | 'running' | 'ready' | 'failed'; progress: number | null; error: string | null; stopped?: boolean; place?: number | null; step?: 'audio' | 'reading' | 'saving' | null; done?: number | null; total?: number | null; waitingOn?: 'copy' | 'queue' | 'server' | null; source?: 'reference' }
   const [reading, setReading] = useState<Reading | null>(null)
   /** What was asked for while the video was being read (runs when it's done), and its name */
   const afterReading = useRef<(() => void) | null>(null)
@@ -582,7 +582,12 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   }, [isReady]) // eslint-disable-line react-hooks/exhaustive-deps
   usePolling(() => checkReading(), reading?.status === 'running')
   /** About how long reading the whole video takes: measured on QA (2026-10-17), 8–17 s a minute of video */
-  const readTotalMs = 30_000 + READ_MS_PER_MIN * Math.max(1, (video.duration_ms ?? 60_000) / 60_000)
+  // The worker's own speech model (reading.source 'reference') reads a long video in a few minutes:
+  // about 40 s to start and 1.6 s a minute of video (measured 3-4 Nov: 2 min in 45 s, 70 min in
+  // 2-3 min, 130 min in 4 min); Gemini's reading is much slower (READ_MS_PER_MIN)
+  const readTotalMs = reading?.source === 'reference'
+    ? 40_000 + 1_600 * Math.max(1, (video.duration_ms ?? 60_000) / 60_000)
+    : 30_000 + READ_MS_PER_MIN * Math.max(1, (video.duration_ms ?? 60_000) / 60_000)
   useEffect(() => {
     if (reading?.status !== 'ready') return
     const run = afterReading.current

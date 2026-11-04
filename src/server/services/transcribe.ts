@@ -58,7 +58,7 @@ export async function ensureVideoTranscript(videoId: string): Promise<'ready' | 
   if (await hasWholeTranscript(videoId, video?.duration_ms ?? null)) return 'ready'
   // The worker's reference transcript is reading it (./referenceTranscript): no Gemini reading is started
   const { pickingState } = await import('./referenceTranscript')
-  if (await pickingState(videoId) === 'reading') return 'running'
+  if ((await pickingState(videoId))?.state === 'reading') return 'running'
   const [last] = await sql`
     SELECT id, status, error, payload->>'reported' AS reported FROM jobs
     WHERE type = 'transcribe' AND payload->>'video_id' = ${videoId} AND payload->>'transcribe_full' = 'true'
@@ -101,7 +101,7 @@ async function hasWholeTranscript(videoId: string, durationMs: number | null): P
   // The worker's reference transcript stands in for the whole video's words when it is marked for
   // picking moments (./referenceTranscript): no Gemini reading of the whole video is needed then
   const { pickingState } = await import('./referenceTranscript')
-  if (await pickingState(videoId) === 'ready') return true
+  if ((await pickingState(videoId))?.state === 'ready') return true
   // (to_jsonb: a database whose worker hasn't added the field yet has no whole_video)
   const [whole] = await sql`
     SELECT 1 FROM transcripts t WHERE t.video_id = ${videoId} AND (to_jsonb(t)->>'whole_video')::boolean LIMIT 1`
@@ -140,6 +140,9 @@ export interface VideoTranscriptState {
    *  long-job slot; 'queue' — other videos' readings are ahead (place); 'server' — the server is busy
    *  with other work or picking it up */
   waitingOn?: 'copy' | 'queue' | 'server' | null
+  /** 'reference': being read by the worker's own speech model (./referenceTranscript), which takes a
+   *  few minutes even for a long video; the clip board paces its bar by that */
+  source?: 'reference'
 }
 
 /** What Stop writes on the reading's job (the worker's READING_STOPPED: it stops when it sees it) */
@@ -196,7 +199,10 @@ export async function videoTranscriptState(userId: string, videoId: string): Pro
   if (await hasWholeTranscript(videoId, video.duration_ms)) return { status: 'ready', progress: 100, error: null }
   // Being read by the worker's reference transcript (a few minutes even for a long video): no Gemini reading
   const { pickingState } = await import('./referenceTranscript')
-  if (await pickingState(videoId) === 'reading') return { status: 'running', progress: null, error: null, step: 'reading' }
+  const reference = await pickingState(videoId)
+  if (reference?.state === 'reading') {
+    return { status: 'running', progress: reference.progress ? Math.min(99, reference.progress) : null, error: null, source: 'reference' }
+  }
   const [last] = await sql<{ id: string; status: string; error: string | null; read_pct: string | null; read_step: string | null; read_done: string | null; read_total: string | null }[]>`
     SELECT id, status, error, payload->>'read_pct' AS read_pct, payload->>'read_step' AS read_step,
       payload->>'read_done' AS read_done, payload->>'read_total' AS read_total FROM jobs

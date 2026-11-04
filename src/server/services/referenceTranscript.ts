@@ -11,14 +11,19 @@ type Word = { word: string; start_ms: number; end_ms: number }
 
 /**
  * Where the video's reference transcript stands for picking moments: 'ready' (done), 'reading' (being
- * made: nothing else needs to read the whole video meanwhile), or null (none, failed, not for picking,
- * or no table yet), when Gemini reads the whole video as before
+ * made: nothing else needs to read the whole video meanwhile; progress 0-100 as the worker last heard,
+ * null before it has started), or null (none, failed, not for picking, or no table yet), when Gemini
+ * reads the whole video as before
  */
-export async function pickingState(videoId: string): Promise<'ready' | 'reading' | null> {
+export async function pickingState(videoId: string): Promise<{ state: 'ready' | 'reading'; progress: number | null } | null> {
   try {
-    const [row] = await sql<{ status: string }[]>`
-      SELECT status FROM reference_transcripts WHERE video_id = ${videoId} AND for_picking LIMIT 1`
-    return row?.status === 'done' ? 'ready' : row?.status === 'submitted' ? 'reading' : null
+    // (to_jsonb: a worker from before progress was recorded has no such column)
+    const [row] = await sql<{ status: string; progress: string | null }[]>`
+      SELECT r.status, to_jsonb(r)->>'progress' AS progress FROM reference_transcripts r
+      WHERE r.video_id = ${videoId} AND r.for_picking LIMIT 1`
+    if (row?.status === 'done') return { state: 'ready', progress: 100 }
+    if (row?.status === 'submitted') return { state: 'reading', progress: row.progress === null ? null : Number(row.progress) }
+    return null
   } catch {
     return null   // a database the worker hasn't set up for it yet
   }
