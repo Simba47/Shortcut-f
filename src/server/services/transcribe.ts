@@ -95,6 +95,10 @@ export async function ensureVideoTranscript(videoId: string): Promise<'ready' | 
  * cover that clip, so they never count.
  */
 async function hasWholeTranscript(videoId: string, durationMs: number | null): Promise<boolean> {
+  // The worker's reference transcript stands in for the whole video's words when it is marked for
+  // picking moments (./referenceTranscript): no Gemini reading of the whole video is needed then
+  const { hasPickingTranscript } = await import('./referenceTranscript')
+  if (await hasPickingTranscript(videoId)) return true
   // (to_jsonb: a database whose worker hasn't added the field yet has no whole_video)
   const [whole] = await sql`
     SELECT 1 FROM transcripts t WHERE t.video_id = ${videoId} AND (to_jsonb(t)->>'whole_video')::boolean LIMIT 1`

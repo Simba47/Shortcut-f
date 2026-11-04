@@ -193,6 +193,30 @@ export async function deleteVideos(userId: string, videoIds: string[]) {
  * Best moments and Ask AI read the whole video's words. Captions aren't made automatically any
  * more, so the first use starts them and asks the user to come back (409).
  */
+/**
+ * The words Best moments and Ask AI pick from: Gemini's reading of the whole video when there is one,
+ * else the worker's reference transcript when it is marked for picking (./referenceTranscript), else
+ * the newest transcript (from before whole readings were recorded). A transcript holding only some
+ * clips' captions (Make my clips from the reference transcript writes those) is never picked from
+ * while a reference transcript is there.
+ */
+async function wordsToPickFrom(videoId: string): Promise<Word[]> {
+  const [whole] = await sql`
+    SELECT t.id FROM transcripts t WHERE t.video_id = ${videoId} AND (to_jsonb(t)->>'whole_video')::boolean
+    ORDER BY t.created_at DESC LIMIT 1`
+  if (!whole) {
+    const { pickingWords } = await import('./referenceTranscript')
+    const reference = await pickingWords(videoId)
+    if (reference) return reference
+  }
+  const [transcriptRow] = whole ? [whole] : await sql`
+    SELECT id FROM transcripts WHERE video_id = ${videoId} ORDER BY created_at DESC LIMIT 1
+  `
+  return transcriptRow
+    ? await sql<Word[]>`SELECT word, start_ms, end_ms FROM transcript_words WHERE transcript_id = ${transcriptRow.id} ORDER BY start_ms`
+    : []
+}
+
 async function needWholeTranscript(videoId: string) {
   const { ensureVideoTranscript } = await import('./transcribe')
   if (await ensureVideoTranscript(videoId) === 'running') {
@@ -219,13 +243,7 @@ export async function getVideoSuggestions(userId: string, videoId: string, extra
   }
 
   await needWholeTranscript(videoId)
-  const [transcriptRow] = await sql`
-    SELECT id FROM transcripts WHERE video_id = ${videoId} ORDER BY created_at DESC LIMIT 1
-  `
-
-  const words: Word[] = transcriptRow
-    ? await sql`SELECT word, start_ms, end_ms FROM transcript_words WHERE transcript_id = ${transcriptRow.id} ORDER BY start_ms`
-    : []
+  const words = await wordsToPickFrom(videoId)
 
   const durationMs = video.duration_ms ?? 0
   if (words.length === 0) return { suggestions: makeTimeChunks(durationMs) }
@@ -332,12 +350,7 @@ export async function getVideoSuggestionsByCriteria(
   }
 
   await needWholeTranscript(videoId)
-  const [transcriptRow] = await sql`
-    SELECT id FROM transcripts WHERE video_id = ${videoId} ORDER BY created_at DESC LIMIT 1
-  `
-  const words: Word[] = transcriptRow
-    ? await sql`SELECT word, start_ms, end_ms FROM transcript_words WHERE transcript_id = ${transcriptRow.id} ORDER BY start_ms`
-    : []
+  const words = await wordsToPickFrom(videoId)
 
   const durationMs = video.duration_ms ?? 0
   if (words.length === 0) {
