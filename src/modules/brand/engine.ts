@@ -281,7 +281,9 @@ export function putBrandOn(t: BrandTarget, kit: BrandKit): { target: BrandTarget
   const before: BrandBefore = {
     ...NO_BEFORE,
     texts: Object.fromEntries(t.texts.filter(x => !x.locked).map(x => [x.id, { font: x.font ?? null, color: x.color ?? null, size: x.size ?? null }])),
-    caption: d.captions.on ? Object.fromEntries(Object.keys(brandCaptionStyle(d.captions)).map(k => [k, (t.caption as unknown as Record<string, unknown>)[k] ?? null])) as Partial<CaptionStyle> : null,
+    // (capitals are yes or no — never empty: a clip with no caption style yet had them off. An empty one
+    // put back made every save fail, user 2026-11-04: "Connection lost" with the internet fine)
+    caption: d.captions.on ? Object.fromEntries(Object.keys(brandCaptionStyle(d.captions)).map(k => [k, (t.caption as unknown as Record<string, unknown>)[k] ?? (k === 'uppercase' ? false : null)])) as Partial<CaptionStyle> : null,
     text_case: d.captions.on ? t.textCase : null,
     // (the bar it had, to put back: kept only when the kit has one)
     progress_bar: d.progress_bar.on ? t.progressBar : null,
@@ -369,7 +371,8 @@ export function takeBrandOff(t0: BrandTarget, d: BrandKitData | null, b: BrandBe
       return { ...x, font: was.font, color: was.color, ...(was.size !== undefined && x.size === d.title.size ? { size: was.size } : {}) }
     })
     if (b.caption && d.captions.on && t.caption.template === d.captions.template && t.caption.color === d.captions.color) {
-      caption = { ...t.caption, ...b.caption }
+      // (a look kept before 2026-11-04 can have its capitals empty: off)
+      caption = { ...t.caption, ...b.caption, uppercase: b.caption.uppercase ?? false }
       if (b.text_case) textCase = b.text_case
     }
   }
