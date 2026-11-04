@@ -1,3 +1,4 @@
+import { TRANSITION_KINDS } from '@/lib/shared/transitionKinds'
 import { savedTextStyle } from '@/modules/editor/textStyle'
 import sql from '@/lib/db'
 import { cleanTrims, trimMap, MAX_CLIP_MS, MIN_CLIP_MS } from '@/lib/trims'
@@ -533,7 +534,8 @@ export async function hasColumn(table: string, column: string): Promise<boolean>
  * minute until every kind is allowed.
  */
 let transitionCheck: { def: string | null; at: number } | null = null
-const ALL_TRANSITION_KINDS = ['pixelize', 'velocity', 'zoomout', 'swipeup', 'shake', 'glitch', 'flare', 'spin', 'warp']
+// (every kind there is: once the database takes them all, it isn't looked up again)
+const ALL_TRANSITION_KINDS: readonly string[] = TRANSITION_KINDS
 export async function transitionKindsAllowed(): Promise<(type: string) => boolean> {
   const fresh = transitionCheck && (Date.now() - transitionCheck.at < 60_000
     || (transitionCheck.def !== null && ALL_TRANSITION_KINDS.every(k => transitionCheck!.def!.includes(`'${k}'`))))

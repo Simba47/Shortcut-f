@@ -305,6 +305,13 @@ export function EditorShell({
   const { videoRef, seekToMs, togglePlay, pause } = useVideoSync(rawClip.start_ms, rawClip.end_ms, pieces, trimmed ? trim.kept : undefined,
     piecesOn ? p => (p.id ? heldPlayedRef.current(p.id) : null) : undefined)
   const { currentTimeMs, durationMs, playing } = usePlayerStore()
+  // The preview-vs-export check (scripts/export-parity) moves the preview to exact moments; in
+  // development only, never in a built site
+  if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
+    (window as unknown as { __exportParity: unknown }).__exportParity = {
+      seek: seekToMs, pause, now: () => usePlayerStore.getState().currentTimeMs, len: () => usePlayerStore.getState().durationMs,
+    }
+  }
   // Append media fragment so browser seeks to clip start at network level,
   // preventing a flash of the video's frame 0 on page load / cache hit.
   const clipVideoUrl = videoUrl && savedClip.start_ms > 0
