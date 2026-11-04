@@ -20,12 +20,14 @@ export interface ClipPreviewData {
   textOverlays: TextOverlay[]
   /** Signed URLs of the B-roll videos the clip shows, by video id */
   stockUrls: Record<string, string>
+  /** Its removed parts (clips.trim_ranges, source ms): the player plays without them, as the export does */
+  trims: [number, number][]
 }
 
 /** Everything needed to play one clip in 9:16 as edited (framing, captions, text, B-roll), without exporting it */
 export async function getClipPreview(userId: string, clipId: string): Promise<ClipPreviewData> {
   const [clip] = await sql`
-    SELECT c.id, c.video_id, c.start_ms, c.end_ms, v.user_id
+    SELECT c.id, c.video_id, c.start_ms, c.end_ms, v.user_id, to_jsonb(c)->'trim_ranges' AS trim_ranges
     FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.id = ${clipId}
   `
   if (!clip) throw Object.assign(new Error('Clip not found'), { status: 404 })
@@ -84,5 +86,6 @@ export async function getClipPreview(userId: string, clipId: string): Promise<Cl
     captionStyle: (style as unknown as CaptionStyle) ?? null,
     textOverlays: (overlays as unknown as TextOverlay[]).filter(t => !t.hidden),
     stockUrls,
+    trims: Array.isArray(clip.trim_ranges) ? clip.trim_ranges : [],
   }
 }

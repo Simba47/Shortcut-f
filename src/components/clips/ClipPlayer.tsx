@@ -16,6 +16,10 @@ function rateFor(v: HTMLVideoElement, p: Piece | null | undefined) {
   if (el.preservesPitch !== !p?.pitch) el.preservesPitch = !p?.pitch
 }
 import { isShot } from '@/modules/editor/shots'
+import { cleanTrims, trimMap } from '@/lib/trims'
+import { toTimelineState } from '@/modules/editor/trimState'
+
+const NO_TRIMS: [number, number][] = []
 
 /**
  * A clip played in 9:16 without exporting it: the source video drawn through the clip's framing,
@@ -24,7 +28,7 @@ import { isShot } from '@/modules/editor/shots'
  * Videos put in between (modules/editor/inserts.ts): the source video waits where one goes in
  * while a clock plays it, then carries on — the clip is that much longer.
  */
-export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, endMs, segments, words, captionStyle, textOverlays }: {
+export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, endMs, segments: savedSegments, words, captionStyle, textOverlays: savedTexts, trims = NO_TRIMS }: {
   videoUrl: string
   /** The clip's own video: split/trio slots naming it are borrowed reactions from another moment */
   mainVideoId?: string | null
@@ -36,17 +40,39 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
   words: TranscriptWord[]
   captionStyle: Partial<CaptionStyle> | null
   textOverlays: TextOverlay[]
+  /** Its removed parts (clips.trim_ranges, source ms) */
+  trims?: [number, number][]
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
   const [ready, setReady] = useState(false)
   const [tMs, setTMs] = useState(0)   // clip-relative
+  // Removed parts (the editor's Delete, Cleanup, Make my clips' pauses): the clip plays without them,
+  // as the export cuts them (render.ts condenseClip) — its sections and text moved up to where they
+  // now play (the editor's toTimelineState), the video jumping over each removed part as over video
+  // cut out of a clip of pieces. (Before 2026-11-04 the whole stretch played: longer than the export.)
+  const removed = useMemo(() => {
+    const clean = cleanTrims(trims, startMs, endMs)
+    if (!clean.length) return null
+    const map = trimMap(clean, startMs, endMs)
+    const keyframes = Object.fromEntries(savedSegments.flatMap(sg => sg.crop_boxes.map(b => [b.id, b.keyframes.map((k, i) => ({ ...k, id: `${b.id}-${i}`, box_id: b.id }))] as const)))
+    const st = toTimelineState({ segments: savedSegments, keyframes, overlays: [], textOverlays: savedTexts, audioTracks: [], transitions: [] }, map, startMs)
+    let at = 0
+    const kept: Piece[] = map.kept.map(([a, b], i) => { const p = { id: `kept-${i}`, at, ms: b - a, from: a - startMs }; at += b - a; return p })
+    return {
+      segments: st.segments.map(sg => ({ ...sg, crop_boxes: sg.crop_boxes.map(b => ({ ...b, keyframes: st.keyframes[b.id]?.map(({ t_ms, x, y, w, h }) => ({ t_ms, x, y, w, h })) ?? b.keyframes })) })),
+      textOverlays: st.textOverlays, pieces: kept,
+    }
+  }, [trims, startMs, endMs, savedSegments, savedTexts])
+  const segments = removed?.segments ?? savedSegments
+  const textOverlays = removed?.textOverlays ?? savedTexts
   // A clip of pieces (inserts.ts): each part from its own moment of the video (a part can skip
   // video), and during a video put in between the clip's own clock runs while the source waits
   const pieces = useMemo(() => {
+    if (removed) return removed.pieces
     const all = piecesOf(segments, mainVideoId, s => isShot(s, mainVideoId))
     return insertsOf(segments, mainVideoId).length || all.some(p => (p.from != null && Math.abs(p.from - p.at) > 1) || (p.speed ?? 1) !== 1) ? all : []
-  }, [segments, mainVideoId])
+  }, [segments, mainVideoId, removed])
   const lengthMs = pieces.length ? piecesLength(pieces) : endMs - startMs
   const tRef = useRef(0)
   const holdRef = useRef<{ piece: Piece; wall: number } | null>(null)

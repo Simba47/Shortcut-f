@@ -274,6 +274,8 @@ export interface CaptionStyle {
   words_per_line?: number | null
   /** Capital letters (only changes Latin text) */
   uppercase?: boolean
+  /** The case the words are written in (the editor's Aa buttons): null = saved before it (UPPER when uppercase, else Title) */
+  text_case?: 'title' | 'upper' | 'lower' | null
   /** Presets: outline thickness in px at 1080 wide */
   stroke_width?: number | null
   /** Words the AI marked important, keyed by the word's start_ms; set by the export */

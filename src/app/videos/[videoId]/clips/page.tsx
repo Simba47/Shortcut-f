@@ -24,7 +24,7 @@ export default async function AutoClipsPage({ params }: { params: Promise<{ vide
   const clipRows = job ? await sql`
     SELECT c.id, c.title, c.start_ms, c.end_ms, c.status, c.output_storage_path, c.ai_edit_job_id, j.created_at AS batch_at,
       (to_jsonb(c)->>'ai_score')::int AS ai_score, to_jsonb(c)->>'ai_reason' AS ai_reason,
-      to_jsonb(c)->>'post_caption' AS post_caption, to_jsonb(c)->'hashtags' AS hashtags
+      to_jsonb(c)->>'post_caption' AS post_caption, to_jsonb(c)->'hashtags' AS hashtags, to_jsonb(c)->'trim_ranges' AS trim_ranges
     FROM clips c JOIN ai_edit_jobs j ON j.id = c.ai_edit_job_id
     WHERE j.video_id = ${videoId}
     ORDER BY j.created_at DESC, (to_jsonb(c)->>'ai_score')::int DESC NULLS LAST, c.start_ms
@@ -79,6 +79,7 @@ export default async function AutoClipsPage({ params }: { params: Promise<{ vide
     words: allWords.filter(w => w.end_ms >= c.start_ms && w.start_ms <= c.end_ms),
     captionStyle: ((styles as unknown as CaptionStyle[]).find(s => s.clip_id === c.id)) ?? null,
     textOverlays: (overlays as unknown as TextOverlay[]).filter(o => o.clip_id === c.id),
+    trims: Array.isArray(c.trim_ranges) ? c.trim_ranges : [],
   })))
 
   return (
