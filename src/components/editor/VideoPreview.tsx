@@ -14,6 +14,7 @@ import { BG_PAD, shownText, textCss, textReplayElapsed, withAlpha, wrapTextLines
 import type { BoxPosition } from '@/lib/interpolation'
 import type { TextCase } from './CaptionStyler'
 import { applyCase } from './CaptionStyler'
+import { captionCaseOf } from '@/modules/captions/store'
 import { normalizedSlotAspect, fitToAspect } from '@/modules/editor/utils'
 import { backgroundPixels, frameBackgroundOf, type FrameBackground } from '@/lib/shared/brandCard'
 import { isFrameLayout, frameSlotLabels, frameLanesFor, frameBandShown, frameOf, itemAt, captionBandAt, cornerGeometry, MIN_ROW_H, mainRect, boxRect, MIN_BOX as MIN_MAIN_BOX, frameAreas, frameBase, areaRadius, frameSlotSize, isTextLane, frameRows, validRowOrder, slotOffers, BLUR_SOURCE_SLOT, FRAME_TEMPLATES, barAt, barFlipped, MIN_MOVABLE_W } from '@/modules/editor/frames'
@@ -1930,7 +1931,7 @@ export function OutputCanvas({
   videoRef, currentTimeMs: timeProp, live = false, clipStartMs = 0, videoToTimeline, activeSegment: segmentProp, getPositionAt, segmentAt, hardCuts = false, sourceFor, slotSourceFor,
   overlays = [], activeOverlayId, onOverlayChange, onSelectOverlay, onDeleteOverlay,
   className, style, skipTransitionRef,
-  words, captionStyle, captionParts, captionTextCase = 'title', showCaptions = false, captionsOffAt,
+  words, captionStyle, captionParts, captionTextCase: textCaseProp, showCaptions = false, captionsOffAt,
   textOverlays = [], activeTextOverlayId, onTextOverlayChange, onSelectTextOverlay, onDeleteTextOverlay, editTextOverlayId, onEditTextDone,
   onCaptionPositionChange, onCaptionSizeChange, transitionCuts, watermark, progressBar, timelineToVideo, clock, frameMedia, onFrameLaneClick, onFrameItemClick, activeFrameItemId, onFrameItemChange, onDeleteFrameItem, onFrameRowsChange, onFrameRowsSwap, onFrameBarChange, onFrameFaceChange, onFrameMainRectChange,
 }: OutputCanvasProps) {
@@ -1989,6 +1990,8 @@ export function OutputCanvas({
 
   // Caption refs — updated synchronously at render time (same pattern as above)
   const captionStyleRef  = useRef(captionStyle)
+  // (not given — the clip board's players: the case saved with the caption style, as the export writes it)
+  const captionTextCase = textCaseProp ?? captionCaseOf(captionStyle)
   const captionCaseRef   = useRef(captionTextCase)
   const showCaptionsRef  = useRef(showCaptions)
   const captionsOffAtRef = useRef(captionsOffAt)
@@ -3087,8 +3090,6 @@ function OverlayBox({ overlay, isActive, onChange, onSelect, onDelete }: Overlay
         position: 'absolute',
         left: `${overlay.x * 100}%`, top: `${overlay.y * 100}%`,
         width: `${overlay.w * 100}%`, height: `${overlay.h * 100}%`,
-        // Not picked: just the picture (a faint outline when pointed at); picked: its frame, ✕ and handles
-        border: `2px solid ${isActive ? color : hover ? `${color}66` : 'transparent'}`,
         boxSizing: 'border-box', cursor: 'move', userSelect: 'none',
         boxShadow: isActive ? `0 0 0 1px ${color}55` : 'none',
         // Turned round its middle (the export turns it the same way)
@@ -3112,6 +3113,10 @@ function OverlayBox({ overlay, isActive, onChange, onSelect, onDelete }: Overlay
           </div>
       }
       </div>
+      {/* Not picked: just the picture (a faint outline when pointed at); picked: its frame, ✕ and handles.
+          The frame is drawn over the picture, never round it: a border of the box itself took 2 px off
+          each side of the picture, so a logo showed about a tenth smaller than the export draws it */}
+      <div aria-hidden="true" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', border: `2px solid ${isActive ? color : hover ? `${color}66` : 'transparent'}` }} />
       {isActive && overlay.type === 'image' && (
         <RotateHandle boxRef={ref} rotation={overlay.rotation ?? 0} onRotate={deg => onChange({ rotation: deg || null })} />
       )}
