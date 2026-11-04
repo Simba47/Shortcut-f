@@ -359,3 +359,15 @@ test('placePeople: without the scan saying, everyone; a person added by hand cou
   const [waiting] = angleRows([scene3], [{ ...markL, status: 'new', path: null } as AngleSubject], [], same2, 210000)
   assert.equal(placePeople(waiting, waiting.places[0]).boxes.length, 1)
 })
+
+test('Follow the speaker: the one talking off screen — the view goes to the biggest face there, not the first marked', () => {
+  // A (small, marked first) and B (big) on screen; C talks the whole time but isn't in this shot
+  const seenAll = (x: number, w: number) => Array.from({ length: 40 }, (_, i) => [i * 250 + 100, x, 0.3, w, w * 1.6, 0] as SubjectPoint)
+  const people = [
+    { id: 'A', path: seenAll(0.2, 0.04), speaking: [] as Array<[number, number]> },
+    { id: 'B', path: seenAll(0.7, 0.09), speaking: [] as Array<[number, number]> },
+    { id: 'C', path: [] as SubjectPoint[], speaking: [[0, 10000]] as Array<[number, number]> },
+  ]
+  const changes = autoDirectChanges(people, 0, 10000, same, { w: 0.316, h: 1 }, undefined, same, AUTO_FORMAT.MIN_HOLD * 1000)!
+  assert.ok(changes[0].x <= 0.7 && changes[0].x + changes[0].w >= 0.7 + 0.045, 'on B')
+})
