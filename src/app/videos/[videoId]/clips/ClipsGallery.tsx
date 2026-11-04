@@ -18,6 +18,8 @@ export interface GalleryClip {
   post_caption: string | null; hashtags: string[] | null; output_url: string | null
   segments: SegmentLocal[]; words: TranscriptWord[]
   captionStyle: CaptionStyle | null; textOverlays: TextOverlay[]
+  /** Its removed parts (clips.trim_ranges, source ms) */
+  trims: [number, number][]
 }
 
 const ACCENT = '#c8ff00'
@@ -198,7 +200,7 @@ export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }
                       stockUrls={Object.fromEntries(c.segments.flatMap(sg => sg.crop_boxes.map(b => b.source_video_id))
                         .filter((id): id is string => !!id && !!stockUrls[id]).map(id => [id, stockUrls[id]]))}
                       startMs={c.start_ms} endMs={c.end_ms} segments={c.segments}
-                      words={c.words} captionStyle={c.captionStyle} textOverlays={c.textOverlays} />
+                      words={c.words} captionStyle={c.captionStyle} textOverlays={c.textOverlays} trims={c.trims} />
                     {/* Score and length on top of the reel */}
                     <div className="ag-overlay" aria-hidden="true">
                       {typeof c.ai_score === 'number' && (

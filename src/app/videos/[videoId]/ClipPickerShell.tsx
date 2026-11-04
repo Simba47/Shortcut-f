@@ -992,7 +992,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           words={previewData.words}
           // No saved style yet: captions off, as the editor opens a new clip
           captionStyle={previewData.captionStyle ?? null}
-          textOverlays={previewData.textOverlays} />
+          textOverlays={previewData.textOverlays} trims={previewData.trims} />
       )}
     </div>
   )

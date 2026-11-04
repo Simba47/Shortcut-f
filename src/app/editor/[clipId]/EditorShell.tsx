@@ -6,7 +6,7 @@ import { musicGainAt, speechRangesInVideo, speechRanges, heardSpeech, type Range
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react'
 import type { Clip, Segment, CropBox, BoxKeyframe, CaptionStyle, TextOverlay, AudioTrack, Transition, TranscriptWord, LayoutType, Overlay } from '@chai-cut/shared'
 import { VideoPreview, OutputCanvas, buildCaptionChunks, captionWordsPerLine, captionDefaultY } from '@/components/editor/VideoPreview'
-import { withoutRanges } from '@/lib/cuts'
+import { withoutRanges, computeCutRanges, reactionRanges } from '@/lib/cuts'
 import { inLineText } from '@/lib/inLine'
 import { cleanTrims, trimMap, addTrim, wordsOnTimeline, MAX_CLIP_MS, MIN_CLIP_MS } from '@/lib/trims'
 import { toTimelineState, toSourceState, rippleDelete, rippleStretch, lockedInRange, insertAtStart, extendEnd, type TimedState } from '@/modules/editor/trimState'
@@ -5656,6 +5656,43 @@ export function EditorShell({
     autoDeleteRef.current = false
     deleteCleanup(cleanupRows)
   }, [cleanupRows]) // eslint-disable-line react-hooks/exhaustive-deps
+  // That switch on a clip opened here (Make my clips clips made before 2026-11-04): the export cut
+  // its pauses and filler words unseen, so it came out seconds shorter than the preview and ahead of
+  // it after each one (user, 2026-11-04). On open they become removed parts — the same ones as the
+  // export found (lib/cuts.ts; a pause with sound in it, a laugh, stays: render.ts loudPauses, here
+  // from the worker's silence scan) — and the switch goes off: the export cuts only what shows. No
+  // scan (an older worker): the switch stays as it was. (Not in a clip of pieces: the export never
+  // applied the switch there.) Clips made since have their pauses saved as removed parts already.
+  const pausesShownRef = useRef(false)
+  useEffect(() => {
+    if (pausesShownRef.current || !removeFillersRef.current || !trimOk || !segments.length || !sourceWords.length) return
+    pausesShownRef.current = true
+    const start = rawClip.start_ms, end = rawClip.end_ms
+    ;(silences?.status === 'done' ? Promise.resolve(silences) : scanSilencesNow()).then(found => {
+      setSilences(found)
+      if (!removeFillersRef.current || rawClip.start_ms !== start || rawClip.end_ms !== end) return
+      const editor = useEditorStore.getState()
+      const map0 = trimMap(editor.trims, start, end)
+      // (as the export measures them: between the words that stay, never in a reaction part)
+      const words = sourceWords.filter(w => !editor.trims.some(([a, b]) => (w.start_ms + w.end_ms) / 2 >= a && (w.start_ms + w.end_ms) / 2 < b))
+      const rows = editor.segments.map(sg => ({ start_ms: map0.toSource(sg.start_ms) - start, end_ms: map0.toSource(sg.end_ms) - start, layout: sg.layout }))
+      const reactions = reactionRanges(rows, start)
+      let pauses = computeCutRanges(words, start, end, reactions)
+      const quiet = (a: number, b: number) => found.ranges.reduce((t, [x, y]) => t + Math.max(0, Math.min(b, y) - Math.max(a, x)), 0)
+      const loud = pauses.filter(([a, b]) => b - a >= 300 && !words.some(w => w.end_ms > a && w.start_ms < b) && quiet(a, b) < 0.8 * (b - a))
+      if (loud.length) pauses = computeCutRanges(words, start, end, [...reactions, ...loud])
+      // (the last first, so an earlier cut doesn't move the later ones; a part with something locked in it stays)
+      for (const [a, b] of [...pauses].sort((x, y) => y[0] - x[0])) {
+        const map = trimMap(useEditorStore.getState().trims, start, end)
+        const ta = map.toTimeline(a), tb = map.toTimeline(b)
+        const now = useEditorStore.getState(), m = useMediaStore.getState()
+        const state: TimedState = { segments: now.segments, keyframes: now.keyframes, overlays: m.overlays, textOverlays: m.textOverlays, audioTracks: m.audioTracks, transitions: m.transitions }
+        if (tb - ta >= 20 && !lockedInRange(state, ta, tb).length) removePart(ta, tb)
+      }
+      setRemoveFillers(false)
+      seekAfterTrimRef.current = 0
+    }).catch(e => console.warn('[editor] the pauses of "remove pauses" not shown:', e instanceof Error ? e.message : e))
+  }, [segments.length, sourceWords, trimOk]) // eslint-disable-line react-hooks/exhaustive-deps
   /** Cut cards out of the clip — the last first, so an earlier cut doesn't move the later ones. One undo step. */
   function deleteCleanup(rows: CleanupRow[]) {
     for (const r of rows.filter(x => !x.deleted).sort((x, y) => y.a - x.a)) {

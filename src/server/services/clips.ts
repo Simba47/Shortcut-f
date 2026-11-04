@@ -203,6 +203,8 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
   const hasEmphasisField = await hasColumn('caption_styles', 'emphasis')
   // Captions moved left or right, once the worker has added the field
   const hasCaptionX = await hasColumn('caption_styles', 'position_x')
+  // The captions' case (Title, UPPER, lower), once the worker has added the field
+  const hasTextCase = await hasColumn('caption_styles', 'text_case')
   // The newer kinds of transition: saved as they are once the backend allows them (else the nearest older kind)
   const transitionKindOk = await transitionKindsAllowed()
   const hasRemoveFillers = typeof body.removeFillers === 'boolean' && await clipsHasRemoveFillers()
@@ -309,7 +311,8 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
         // Animated presets. Not emphasis here: it goes below, only when the editor has some.
         ...(hasPresetFields ? PRESET_STYLE_FIELDS : []),
         ...(hasTemplateField ? ['template'] : []),
-        ...(hasCaptionX ? ['position_x'] : [])]
+        ...(hasCaptionX ? ['position_x'] : []),
+        ...(hasTextCase ? ['text_case'] : [])]
       const onOff = hasEnabledField ? { enabled: captionEnabled } : {}
       const entries = Object.entries(captionStyle).filter(([k, v]) => styleFields.includes(k) && v !== undefined)
       const fields: Record<string, unknown> = Object.fromEntries(entries)
