@@ -130,7 +130,8 @@ async function save(l: Loaded, next: BrandTarget, brand: BrandOn | null) {
   const textOf = (t: TextOverlay | undefined) => [t?.font, t?.color, t?.size, t?.start_ms, t?.end_ms]
   const texts = next.texts.filter((t, i) => !same(textOf(t), textOf(was.texts[i])))
   const fields = CAPTION_FIELDS.filter(k => (k !== 'template' || hasTemplate) && !same(next.caption[k], was.caption[k]))
-  const captionPatch = Object.fromEntries(fields.map(k => [k, next.caption[k] ?? null]))
+  // (capitals are yes or no: the field takes no empty value)
+  const captionPatch = Object.fromEntries(fields.map(k => [k, next.caption[k] ?? (k === 'uppercase' ? false : null)]))
   // The parts (an end card made or taken off): new ones with their boxes and views, gone ones, and
   // those cut shorter or longer or given another layout; every part's order by time (the export
   // joins them in that order); transitions gone and back
