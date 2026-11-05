@@ -13,7 +13,7 @@ import type { FrameLayout, SegmentLocal, Overlay, TextOverlay as TextOverlayType
 import { BG_PAD, shownText, textCss, textReplayElapsed, withAlpha, wrapTextLines, TEXT_LINE_EM, MIN_TEXT_W, MIN_TEXT_H } from '@/modules/editor/textStyle'
 import type { BoxPosition } from '@/lib/interpolation'
 import type { TextCase } from './CaptionStyler'
-import { applyCase } from './CaptionStyler'
+import { applyCase, loadVideoFonts } from './CaptionStyler'
 import { captionCaseOf } from '@/modules/captions/store'
 import { normalizedSlotAspect, fitToAspect } from '@/modules/editor/utils'
 import { backgroundPixels, frameBackgroundOf, type FrameBackground } from '@/lib/shared/brandCard'
@@ -863,6 +863,17 @@ export type TransitionCut = { at: number; ms: number; type: string }
 /** Slides, Whip and Wipe move eased, as the export moves them (render.py _eased_join): a cubic ease in-out */
 const easeInOutCubic = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(2 - 2 * x, 3) / 2)
 
+/**
+ * ffmpeg xfade's dip to a colour (fadeblack / fadewhite, vf_xfade.c, phase 0.2) at `p` (0 → 1 through
+ * the transition): how much of the outgoing part and of the incoming one shows — the rest is the colour.
+ * ffmpeg's progress runs 1 → 0: mix(mix(a, colour, smoothstep(0.8, 1, P)), mix(colour, b, smoothstep(0.2, 1, P)), P)
+ */
+export function dipWeights(p: number): [number, number] {
+  const P = 1 - Math.max(0, Math.min(1, p))
+  const smooth = (e0: number, e1: number, x: number) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t) }
+  return [P * smooth(0.8, 1, P), (1 - P) * (1 - smooth(0.2, 1, P))]
+}
+
 function drawTransition(ctx: CanvasRenderingContext2D, a: HTMLCanvasElement, b: HTMLCanvasElement, p: number, type: string) {
   const W = ctx.canvas.width, H = ctx.canvas.height
   // (the dissolves and dips run straight through, as ffmpeg's xfade does; the moves are eased below)
@@ -872,11 +883,15 @@ function drawTransition(ctx: CanvasRenderingContext2D, a: HTMLCanvasElement, b: 
   ctx.save()
   switch (type) {
     case 'fadeblack': case 'fadewhite': {
-      // Into the colour over the first half, out of it over the second
+      // ffmpeg's own dip (xfade fadeblack / fadewhite), as the export draws it: the colour is reached
+      // about a fifth of the way in, the incoming part comes up slowly after — not at the cut. A plain
+      // dip, darkest at the cut, ran ~0.2 s behind the export (user, 2026-11-04). The colour first,
+      // then each part over it at its weight (dipWeights)
+      const [wA, wB] = dipWeights(lin)
       ctx.fillStyle = type === 'fadeblack' ? '#000' : '#fff'
       ctx.fillRect(0, 0, W, H)
-      ctx.globalAlpha = e < 0.5 ? 1 - e * 2 : e * 2 - 1
-      ctx.drawImage(e < 0.5 ? a : b, 0, 0, W, H)
+      if (wB < 1 && wA > 0) { ctx.globalAlpha = Math.min(1, wA / (1 - wB)); ctx.drawImage(a, 0, 0, W, H) }
+      if (wB > 0) { ctx.globalAlpha = wB; ctx.drawImage(b, 0, 0, W, H) }
       break
     }
     case 'slideleft':
@@ -1268,9 +1283,16 @@ export function karaokeLive(color: string, hl: string) {
 const EXPORT_FONTS: Record<string, { family: string; file: string; em: number }> = {
   'noto-sans-telugu':     { family: 'CC Noto Sans Telugu', file: 'NotoSansTelugu-Regular.ttf', em: 0.677 },
   'noto-sans-devanagari': { family: 'CC Noto Sans Devanagari', file: 'NotoSansDevanagari-Regular.ttf', em: 0.525 },
+  // (the other scripts the export has: em = unitsPerEm / (usWinAscent + usWinDescent), libass's sizing)
+  'noto-sans-tamil':      { family: 'CC Noto Sans Tamil', file: 'NotoSansTamil-Regular.ttf', em: 0.806 },
+  'noto-sans-kannada':    { family: 'CC Noto Sans Kannada', file: 'NotoSansKannada-Regular.ttf', em: 0.608 },
+  'noto-sans-malayalam':  { family: 'CC Noto Sans Malayalam', file: 'NotoSansMalayalam-Regular.ttf', em: 0.802 },
+  'noto-sans-bengali':    { family: 'CC Noto Sans Bengali', file: 'NotoSansBengali-Regular.ttf', em: 0.713 },
   'roboto':               { family: 'CC Roboto', file: 'Roboto-Regular.ttf', em: 0.758 },
   'montserrat-bold':      { family: 'CC Montserrat Bold', file: 'Montserrat-Bold.ttf', em: 0.640 },
 }
+/** The scripts' own fonts, after a caption's font, for the letters it doesn't have (libass does the same with the export's fonts folder) */
+const SCRIPT_FALLBACKS = ['noto-sans-telugu', 'noto-sans-devanagari', 'noto-sans-tamil', 'noto-sans-kannada', 'noto-sans-malayalam', 'noto-sans-bengali']
 const loadedExportFonts = new Set<string>()
 function exportFont(id?: string | null) {
   const f = EXPORT_FONTS[id ?? ''] ?? EXPORT_FONTS.roboto
@@ -1534,12 +1556,16 @@ function drawCaptionsCentred(
   // Roman letters or any other font), sized the way libass sizes it, regular weight, a 3 px black
   // outline and a 2 px half-black shadow (px at 1080 wide)
   const k          = W / 1080
-  const font       = exportFont(style.language === 'roman' ? 'roboto' : style.font)
+  // (in its own script with no font picked: Noto Sans Telugu, as the export's default. Roboto has no
+  // Telugu or Hindi letters, so the browser drew them in a font of the PC's own, ~1.8× the export's
+  // size — user, 2026-11-04; the export's Noto fonts follow any font for letters it doesn't have)
+  const font       = exportFont(style.language === 'roman' ? 'roboto' : (style.font ?? 'noto-sans-telugu'))
+  const scriptFonts = style.language === 'roman' ? '' : SCRIPT_FALLBACKS.map(id => `"${exportFont(id).family}", `).join('')
   const fontSize   = Math.round((style.size ?? 52) * k * font.em)
   const lineHeight = Math.round(fontSize * 1.4)
   const PAD_X      = Math.round(W * 0.05)
   const maxLineW   = W - PAD_X * 2
-  const fontFamily = `${captionEmojiFamily(font.em)}, "${font.family}", sans-serif`
+  const fontFamily = `${captionEmojiFamily(font.em)}, "${font.family}", ${scriptFonts}sans-serif`
 
   ctx.save()
   ctx.font         = `400 ${fontSize}px ${fontFamily}`
@@ -1935,6 +1961,10 @@ export function OutputCanvas({
   textOverlays = [], activeTextOverlayId, onTextOverlayChange, onSelectTextOverlay, onDeleteTextOverlay, editTextOverlayId, onEditTextDone,
   onCaptionPositionChange, onCaptionSizeChange, transitionCuts, watermark, progressBar, timelineToVideo, clock, frameMedia, onFrameLaneClick, onFrameItemClick, activeFrameItemId, onFrameItemChange, onDeleteFrameItem, onFrameRowsChange, onFrameRowsSwap, onFrameBarChange, onFrameFaceChange, onFrameMainRectChange,
 }: OutputCanvasProps) {
+  // The fonts texts and frame texts are in, as soon as the picture shows (the export always has its
+  // own): they used to load only with the Text, Captions or Brand kit panel, so a clip opened on
+  // another tool — or on the clip board — showed its texts in a stand-in font (user, 2026-11-04)
+  useEffect(() => { loadVideoFonts() }, [])
   // Where the captions are drawn right now (from the canvas, each frame), for their box on the
   // preview: kept in state only when it moves noticeably, at most ~10 times a second
   const capOut = useRef<CaptionRectOut>({ rect: null })

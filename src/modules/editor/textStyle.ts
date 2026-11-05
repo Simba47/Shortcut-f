@@ -12,6 +12,29 @@ export type TextStyle = Partial<Pick<TextOverlay,
   'font' | 'color' | 'weight' | 'italic' | 'uppercase' | 'letter_spacing' | 'opacity' | 'rotation' |
   'stroke_color' | 'stroke_width' | 'bg_color' | 'bg_opacity' | 'bg_radius' | 'shadow' | 'shadow_color' | 'animation'>>
 
+/**
+ * The Text-tool look saved together on a text (text_overlays.style; the export draws it:
+ * python/text_style.py). Font, colour, size and rotation have their own fields. Before 2026-11-04
+ * none of this was saved: gone when the clip was opened again, never exported.
+ */
+export const TEXT_STYLE_KEYS = [
+  'weight', 'italic', 'uppercase', 'letter_spacing', 'opacity', 'stroke_color', 'stroke_width',
+  'bg_color', 'bg_opacity', 'bg_radius', 'shadow', 'shadow_color', 'animation',
+] as const
+
+/** A text's look as it is saved (only what it has), or null when it has none */
+export function savedTextStyle(t: Partial<TextOverlay>): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {}
+  for (const k of TEXT_STYLE_KEYS) if (t[k] !== undefined && t[k] !== null) out[k] = t[k]
+  return Object.keys(out).length ? out : null
+}
+
+/** A text as it is read back: its saved look spread over it as its own settings */
+export function withSavedStyle<T extends object>(row: T): T {
+  const { style, ...rest } = row as T & { style?: unknown }
+  return (style && typeof style === 'object' ? { ...(style as object), ...rest } : rest) as T
+}
+
 /** Everything a preset sets, so switching presets never leaves bits of the previous one */
 const BASE: Required<Omit<TextStyle, 'font' | 'color'>> = {
   weight: 700, italic: false, uppercase: false, letter_spacing: 0, opacity: 1, rotation: 0,
