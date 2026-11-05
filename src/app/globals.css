@@ -1447,6 +1447,9 @@ body {
 }
 
 /* ── AI edits page (app/videos/[videoId]/clips/ClipsGallery.tsx) ── */
+.ag-page { background: #0b0b0c; }
+.ag-empty-title { margin: 0; font-size: 16px; font-weight: 600; color: #fff; }
+.ag-strong { color: #fff; }
 .ag-hero {
   position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap;
   padding: 26px 26px 24px; border-radius: 22px; overflow: hidden;
@@ -1539,6 +1542,45 @@ body {
 .ag-post[open] .ag-post-chev { transform: rotate(180deg); }
 .ag-post[open] .ag-post-hint { display: none; }
 .ag-post-body { padding: 2px 12px 12px; }
+
+/* AI edits, light mode (the switch in its top bar; the clip board's light look). The reels and the
+   score / length chips on them stay dark; the lime stays on the main button and the Latest badge,
+   and turns a deep olive where it is text on the light surfaces */
+[data-theme="light"] .ag-page {
+  background: radial-gradient(1200px 420px at 50% -220px, rgba(200, 255, 0, 0.12), transparent 70%), var(--smoke-bg); color: #0c0c0e;
+  --ed-fg: 12 12 14; --ed-accent-text: #3d5000;
+}
+[data-theme="light"] .ag-hero {
+  background: radial-gradient(90% 120% at 0% 0%, rgba(200, 255, 0, 0.14), transparent 55%), var(--smoke);
+  box-shadow: inset 0 0 0 1px rgba(12, 12, 14, 0.07), 0 18px 40px -30px rgba(12, 12, 14, 0.4);
+}
+[data-theme="light"] .ag-eyebrow { color: #3d5000; background: rgba(143, 184, 0, 0.12); box-shadow: inset 0 0 0 1px rgba(143, 184, 0, 0.4); }
+[data-theme="light"] :is(.ag-title, .ag-card-title, .ag-empty-title, .ag-strong, .ag-stat b) { color: #0c0c0e; }
+[data-theme="light"] :is(.ag-sub, .ag-why, .ag-banner-sub) { color: rgba(12, 12, 14, 0.72); }
+[data-theme="light"] .ag-stat { color: rgba(12, 12, 14, 0.72); background: var(--smoke); box-shadow: inset 0 0 0 1px rgba(12, 12, 14, 0.1); }
+[data-theme="light"] .ag-stat-lime b { color: #3d5000; }
+[data-theme="light"] .ag-back { color: #0c0c0e; background: var(--smoke-2); box-shadow: inset 0 0 0 1px rgba(12, 12, 14, 0.1); }
+[data-theme="light"] .ag-back:hover { background: #e2e2de; color: #0c0c0e; }
+[data-theme="light"] .ag-banner { color: rgba(12, 12, 14, 0.78); background: var(--smoke); box-shadow: inset 0 0 0 1px rgba(12, 12, 14, 0.08); }
+[data-theme="light"] .ag-banner-lime { color: #3d5000; background: rgba(143, 184, 0, 0.1); box-shadow: inset 0 0 0 1px rgba(143, 184, 0, 0.4); }
+[data-theme="light"] .ag-banner-red { color: #8f1414; background: rgba(220, 38, 38, 0.06); box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.3); }
+[data-theme="light"] .ag-empty { background: var(--smoke); border-color: rgba(12, 12, 14, 0.16); }
+[data-theme="light"] .ag-empty-icon { color: #3d5000; background: rgba(143, 184, 0, 0.12); box-shadow: inset 0 0 0 1px rgba(143, 184, 0, 0.4); }
+[data-theme="light"] .ag-batch-name { color: #0c0c0e; background: var(--smoke); box-shadow: inset 0 0 0 1px rgba(12, 12, 14, 0.12); }
+[data-theme="light"] .ag-batch-name[data-latest] { color: #0a0a0a; background: #c8ff00; box-shadow: inset 0 0 0 1px rgba(143, 184, 0, 0.6); }
+[data-theme="light"] .ag-batch-meta { color: rgba(12, 12, 14, 0.72); }
+[data-theme="light"] .ag-batch-line { background: linear-gradient(90deg, rgba(12, 12, 14, 0.14), transparent); }
+[data-theme="light"] .ag-card { background: var(--smoke); box-shadow: inset 0 0 0 1px rgba(12, 12, 14, 0.08), 0 1px 2px rgba(12, 12, 14, 0.04); }
+[data-theme="light"] .ag-card:hover { box-shadow: inset 0 0 0 1px rgba(12, 12, 14, 0.14), 0 18px 36px -22px rgba(12, 12, 14, 0.35); }
+[data-theme="light"] .ag-why-label { color: #3d5000; }
+[data-theme="light"] .ag-btn-lime { box-shadow: inset 0 0 0 1px rgba(143, 184, 0, 0.6); }
+[data-theme="light"] .ag-btn-dark { color: #0c0c0e; background: var(--smoke-2); box-shadow: inset 0 0 0 1px rgba(12, 12, 14, 0.1); }
+[data-theme="light"] .ag-btn-dark:hover:not(:disabled) { background: #e2e2de; }
+[data-theme="light"] .ag-post { background: var(--smoke-2); box-shadow: inset 0 0 0 1px rgba(12, 12, 14, 0.07); }
+[data-theme="light"] .ag-post summary { color: rgba(12, 12, 14, 0.8); }
+[data-theme="light"] .ag-post summary:hover { color: #0c0c0e; background: rgba(12, 12, 14, 0.04); }
+[data-theme="light"] .ag-post-hint { color: rgba(12, 12, 14, 0.68); }
+[data-theme="light"] .ag-post-chev { color: rgba(12, 12, 14, 0.5); }
 
 /* ── Profile button + menu, extended (components/ui/account-menu.tsx) ── */
 
@@ -2624,7 +2666,7 @@ body {
 .cb-sheen:hover::after { transform: translateX(110%); transition: transform 1s cubic-bezier(.2, .8, .2, 1); }
 @media (prefers-reduced-motion: reduce) { .cb-sheen::after { display: none; } .cb-reveal .cb-act, .cb-tool-hide { transition: none; } }
 
-/* ── Light mode: the dashboard, the clip board and the editor only (their dark / light switch:
+/* ── Light mode: the dashboard, the clip board, AI edits and the editor only (their dark / light switch:
    components/ui/cinematic-theme-switcher.tsx). Every other page stays dark, and so does every top
    bar (.app-nav): black in both modes. Dark is untouched: all of this is under [data-theme="light"] ── */
 /* the clip board's own colours (ClipPickerShell writes its tints as rgb(var(--cb-fg) / a)) */

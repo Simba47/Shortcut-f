@@ -1,98 +1,135 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useEffect, useRef, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { BrandLoader } from '@/components/ui/brand-loader'
+import { AuthShell, RECOVERY_BRAND } from '@/components/auth/AuthShell'
+import {
+  BackToSignIn, CodeInput, Field, Messages, PasswordInput, PasswordRules, ResendLine, SubmitButton,
+  passwordOk, useCooldown,
+} from '@/components/auth/fields'
+import { AUTH } from '@/components/auth/strings'
 
+/** Seconds before another code can be sent (one was sent just before this page) */
+const RESEND_COOLDOWN = 60
+
+type ErrorAt = 'code' | 'password' | 'confirm'
+
+/**
+ * The emailed reset code and a new password, in the auth card. (From /forgot-password with
+ * ?email=…; from the old code page with the code too, ?otp=…, so no code is asked.) Done → /login,
+ * which says the password is updated.
+ */
 function ResetPasswordForm() {
   const params = useSearchParams()
   const email = params.get('email') ?? ''
   const prefillOtp = params.get('otp') ?? ''
   const router = useRouter()
+  const t = AUTH.recovery.reset
 
   const [otp, setOtp] = useState(prefillOtp)
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setFormError] = useState<{ text: string; at?: ErrorAt } | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [cooldown, setCooldown] = useCooldown(RESEND_COOLDOWN)
+  const codeRef = useRef<HTMLInputElement>(null)
+  const passwordRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { (prefillOtp ? passwordRef : codeRef).current?.focus() }, [prefillOtp])
+
+  const setError = (text: string | null, at?: ErrorAt) => setFormError(text ? { text, at } : null)
+  const errorAt = (at: ErrorAt) => (error?.at === at ? error.text : null)
+  const typed = (at: ErrorAt) => { if (error?.at === at) setFormError(null) }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (password !== confirm) { setError('Passwords do not match'); return }
-    setLoading(true)
-    setError(null)
-    const res = await fetch('/api/auth/reset-password', {
+    if (!passwordOk(password)) { setError(AUTH.errors.weakPassword, 'password'); return }
+    if (password !== confirm) { setError(AUTH.errors.mismatch, 'confirm'); return }
+    setLoading(true); setError(null); setNotice(null)
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otp, password }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        const msg: string = data.error ?? AUTH.errors.resetFailed
+        // (the server's code errors all name the code: they go under the code boxes, when shown)
+        setError(msg, !prefillOtp && /code/i.test(msg) ? 'code' : undefined)
+        setLoading(false)
+        return
+      }
+      router.push('/login?reset=1')
+    } catch {
+      setError(AUTH.errors.network)
+      setLoading(false)
+    }
+  }
+
+  async function resend() {
+    setCooldown(RESEND_COOLDOWN); setError(null)
+    const r = await fetch('/api/auth/forgot-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, otp, password }),
-    })
-    const data = await res.json()
-    if (!res.ok) { setError(data.error); setLoading(false); return }
-    router.push('/login?reset=1')
+      body: JSON.stringify({ email }),
+    }).catch(() => null)
+    setNotice(r?.ok ? AUTH.notes.newCodeSent(email) : null)
+    if (!r?.ok) setError(AUTH.errors.resendFailed)
+  }
+
+  if (!email) {
+    return (
+      <div className="auth-form">
+        <BackToSignIn />
+        <h1>{t.title}</h1>
+        <Messages error={t.missingEmail} />
+        <Link href="/forgot-password" className="auth-submit"><span>{t.startAgain}</span></Link>
+      </div>
+    )
   }
 
   return (
-    <>
-      <h1 className="text-2xl font-bold mb-1 text-white">New password</h1>
-      <p className="text-sm mb-8" style={{ color: 'var(--text-muted)' }}>
-        Enter the code from your email and choose a new password.
-      </p>
-
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        {!prefillOtp && (
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-white">Reset code</label>
-            <input
-              type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6}
-              value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, ''))}
-              required placeholder="000000"
-              className="px-3 py-2 rounded-lg text-sm text-white outline-none"
-              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
-            />
-          </div>
-        )}
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-white">New password</label>
-          <input
-            type="password" value={password} onChange={e => setPassword(e.target.value)}
-            required placeholder="Min 8 chars, 1 uppercase, 1 number"
-            className="px-3 py-2 rounded-lg text-sm text-white outline-none"
-            style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-white">Confirm password</label>
-          <input
-            type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-            required placeholder="••••••••"
-            className="px-3 py-2 rounded-lg text-sm text-white outline-none"
-            style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
-          />
-        </div>
-        {error && <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p>}
-        <button type="submit" disabled={loading}
-          className="py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-60"
-          style={{ background: 'var(--accent)' }}>
-          {loading ? 'Resetting…' : 'Reset password'}
-        </button>
-      </form>
-
-      <p className="mt-5 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
-        <Link href="/login" className="text-white font-medium hover:underline">Back to sign in</Link>
-      </p>
-    </>
+    <form className="auth-form" onSubmit={handleSubmit}>
+      <BackToSignIn />
+      <h1>{t.title}</h1>
+      <p className="auth-sub">{prefillOtp ? t.subNoCode : t.sub} <strong>{email}</strong>.</p>
+      {!prefillOtp && (
+        <Field id="reset-code" label={t.code} error={errorAt('code')}>
+          <CodeInput ref={codeRef} id="reset-code" value={otp} invalid={!!errorAt('code')} onChange={v => { setOtp(v); typed('code') }} />
+        </Field>
+      )}
+      <Field id="reset-password" label={t.password} error={errorAt('password')}>
+        <PasswordInput
+          ref={passwordRef} id="reset-password" value={password} invalid={!!errorAt('password')}
+          onChange={e => { setPassword(e.target.value); typed('password') }}
+          required placeholder={t.passwordPlaceholder} autoComplete="new-password"
+        />
+      </Field>
+      <PasswordRules value={password} />
+      <Field id="reset-confirm" label={AUTH.fields.confirm} error={errorAt('confirm')}>
+        <PasswordInput
+          id="reset-confirm" value={confirm} invalid={!!errorAt('confirm')}
+          onChange={e => { setConfirm(e.target.value); typed('confirm') }}
+          required placeholder={AUTH.signup.confirmPlaceholder} autoComplete="new-password"
+        />
+      </Field>
+      <Messages notice={notice} error={error && !error.at ? error.text : null} />
+      <SubmitButton busy={loading} disabled={!prefillOtp && otp.length < 6} label={t.submit} busyLabel={t.busy} />
+      {!prefillOtp && <ResendLine cooldown={cooldown} onResend={resend} />}
+    </form>
   )
 }
 
 export default function ResetPasswordPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--bg)' }}>
-      <div className="w-full max-w-sm p-8 rounded-xl" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <Suspense fallback={<BrandLoader size={36} />}>
-          <ResetPasswordForm />
-        </Suspense>
-      </div>
-    </div>
+    <AuthShell brand={RECOVERY_BRAND}>
+      <Suspense fallback={<BrandLoader size={36} />}>
+        <ResetPasswordForm />
+      </Suspense>
+    </AuthShell>
   )
 }

@@ -7,6 +7,7 @@ import type { CaptionStyle, SegmentLocal, TextOverlay, TranscriptWord } from '@c
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { BrandLoaderScreen } from '@/components/ui/brand-loader'
 import { AccountMenu } from '@/components/ui/account-menu'
+import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { ClipPlayer } from '@/components/clips/ClipPlayer'
 import { PostText } from '@/components/clips/PostText'
 
@@ -119,9 +120,9 @@ export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }
   // the reel (with its score and length on top), title, why AI picked it, Edit + Export/Download,
   // and the post text folded away until you open it.
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: '#0b0b0c' }}>
+    <div className="ag-page min-h-screen flex flex-col">
       {opening && <BrandLoaderScreen mascot overlay label="Getting your clip ready, please wait…" />}
-      <nav className="flex items-center gap-3 px-4 shrink-0 sticky top-0 z-10"
+      <nav className="app-nav flex items-center gap-3 px-4 shrink-0 sticky top-0 z-10"
         style={{ height: 56, background: 'rgba(14,14,15,0.85)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
         <Breadcrumbs shine items={[
           { label: 'Dashboard', href: '/dashboard' },
@@ -129,6 +130,7 @@ export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }
           { label: 'AI edits' },
         ]} />
         <div className="flex-1" />
+        <ThemeSwitch />
         <AccountMenu />
       </nav>
 
@@ -179,8 +181,8 @@ export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }
             <span className="ag-empty-icon" aria-hidden="true">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 6.3L20.5 10l-6.3 2.2L12 18.5l-2.2-6.3L3.5 10l6.3-1.7z" /></svg>
             </span>
-            <p className="text-base font-semibold text-white">No AI clips yet</p>
-            <p className="ag-sub" style={{ margin: 0 }}>Go back to the clip board and press <b style={{ color: '#fff' }}>Make my clips</b>.</p>
+            <p className="ag-empty-title">No AI clips yet</p>
+            <p className="ag-sub" style={{ margin: 0 }}>Go back to the clip board and press <b className="ag-strong">Make my clips</b>.</p>
           </div>
         )}
 

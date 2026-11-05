@@ -79,6 +79,7 @@ import { viewChanges } from '@/modules/editor/views'
 import { subjectBoxAt, seenShare, followChanges, autoDirectChanges, type SubjectPoint } from '@/modules/editor/subjects'
 import { buildKeyframes } from '@/modules/editor/views'
 import { frameSlotSize } from '@/modules/editor/frames'
+import { edgeDragPath } from '@/modules/editor/edgeDrag'
 import { getBoxPositionAtLerp, type BoxPosition } from '@/lib/interpolation'
 import { SubjectsPanel, type SubjectItem, type AnglesView } from '@/components/editor/SubjectsPanel'
 import { angleRows, angleAt, placePeople, type Angle, type AngleRow } from '@/modules/editor/angles'
@@ -1796,12 +1797,18 @@ export function EditorShell({
     // (user, 2026-11-01: a short part picked, the playhead resting on its last moment — the line into the
     // next part — and Vertical went to the next part, or seemed to do nothing)
     const t = liveTime.get()
-    const picked = pickedSegId ? sections.find(x => x.id === pickedSegId) : undefined
-    if (picked && !isGapPart(picked, mainVideoId) && t >= picked.start_ms - LAYOUT_SNAP_MS && t <= picked.end_ms + LAYOUT_SNAP_MS) {
+    const picked = pickedPartAt(t)
+    if (picked) {
       formatWholePart(picked, id, t)
       return
     }
     handleLayoutChange(id, 'fromPlayhead')
+  }
+  /** The part picked on the timeline, when the playhead is in it or on its edge: a format or frame picked
+   *  now goes on all of it */
+  function pickedPartAt(t: number): SegmentLocal | undefined {
+    const picked = pickedSegId ? sections.find(x => x.id === pickedSegId) : undefined
+    return picked && !isGapPart(picked, mainVideoId) && t >= picked.start_ms - LAYOUT_SNAP_MS && t <= picked.end_ms + LAYOUT_SNAP_MS ? picked : undefined
   }
   /** `seg` all of it in `layout` (joined to a neighbour in the same one); the playhead is put inside it, so
    *  the switch, the preview and the outline all show it (on its edge they read the part beside it) */
@@ -3013,13 +3020,20 @@ export function EditorShell({
   // A Branded card picked: it's filled from the brand kit once it's there (see below)
   const brandFillRef = useRef<{ t: number; until: number } | null>(null)
   function handleApplyFrame(layout: FrameLayout) {
+    // A part picked on the timeline (the playhead in it or on its edge): the frame goes on all of it, no
+    // cut at the playhead — as a format does (user, 2026-11-04: a part picked, Single cut it in two, or
+    // went on the next part when the playhead was on its end)
+    const picked = pickedPartAt(liveTime.get())
     // (with the brand kit on, the brand-on watcher below dresses it, from the kit that's on)
-    brandFillRef.current = layout === 'frame_brand_card' && !useBrandStore.getState().on ? { t: currentTimeMs, until: Date.now() + 4000 } : null
+    brandFillRef.current = layout === 'frame_brand_card' && !useBrandStore.getState().on ? { t: picked ? picked.start_ms : currentTimeMs, until: Date.now() + 4000 } : null
+    if (picked) { formatWholePart(picked, layout, liveTime.get()); return }
     handleLayoutChange(layout, 'fromPlayhead')
   }
   // What a layout or frame picked now will cover (see handleLayoutChange)
   const frameTarget = (() => {
     const t = currentTimeMs
+    const picked = pickedPartAt(t)
+    if (picked) return `${msToLabel(picked.start_ms)}–${msToLabel(picked.end_ms)}`
     if (activeSegment) {
       const whole = t - activeSegment.start_ms <= LAYOUT_SNAP_MS || activeSegment.end_ms - t <= LAYOUT_SNAP_MS
       return `${msToLabel(whole ? activeSegment.start_ms : t)}–${msToLabel(activeSegment.end_ms)}`
@@ -3561,7 +3575,7 @@ export function EditorShell({
    * of the video is removed, what was only in it goes with it, what comes after moves up. One
    * undo step. Saved as a removed part of the source video; the export cuts it out.
    */
-  function removePart(a: number, b: number) {
+  function removePart(a: number, b: number, pieces = piecesOn) {
     pause()
     const editor = useEditorStore.getState(), media = useMediaStore.getState()
     const state: TimedState = {
@@ -3570,9 +3584,9 @@ export function EditorShell({
     }
     const locked = lockedInRange(state, a, b)
     if (locked.length) { notifyLocked(`${locked[0][0].toUpperCase()}${locked[0].slice(1)} in this part is locked — unlock it first`); return }
-    if (piecesOn) {
+    if (pieces) {
       // A clip of pieces: the parts keep their moments of the video, what follows moves up
-      if (segments.some(s => isInsert(s, mainVideoId) && s.start_ms < b && s.end_ms > a && !(s.start_ms >= a && s.end_ms <= b))) {
+      if (editor.segments.some(s => isInsert(s, mainVideoId) && s.start_ms < b && s.end_ms > a && !(s.start_ms >= a && s.end_ms <= b))) {
         notifyLocked('Part of an inserted video is in the way: delete the inserted video itself instead'); return
       }
       const next = rippleCut(state, Math.round(a), Math.round(b), rippleDelete)
@@ -4230,7 +4244,9 @@ export function EditorShell({
    * as it was when the drag began, so the cut (or what comes back) follows the pointer both ways;
    * the whole drag is one undo step (history.ts counts a drag once). Problems are only told on release.
    */
-  const liveEdgeRef = useRef<{ editor: Pick<ReturnType<typeof useEditorStore.getState>, 'segments' | 'keyframes' | 'trims' | 'clipRange'>; media: Pick<ReturnType<typeof useMediaStore.getState>, 'overlays' | 'textOverlays' | 'audioTracks' | 'transitions'> } | null>(null)
+  /** The clip as an edge drag found it: its length and whether it is a clip of pieces */
+  type EdgeAt = { len: number; pieces: boolean; clip?: { start: number; end: number; map: typeof trim; limits: typeof clipEdgeLimits } }
+  const liveEdgeRef = useRef<{ editor: Pick<ReturnType<typeof useEditorStore.getState>, 'segments' | 'keyframes' | 'trims' | 'clipRange'>; media: Pick<ReturnType<typeof useMediaStore.getState>, 'overlays' | 'textOverlays' | 'audioTracks' | 'transitions'>; at: EdgeAt } | null>(null)
   const quietRef = useRef(false)
   function trimByEdgeLive(segId: string, edge: 'start' | 'end', from: number, to: number, done: boolean) {
     const e = useEditorStore.getState(), m = useMediaStore.getState()
@@ -4238,14 +4254,19 @@ export function EditorShell({
       liveEdgeRef.current = {
         editor: { segments: e.segments, keyframes: e.keyframes, trims: e.trims, clipRange: e.clipRange },
         media: { overlays: m.overlays, textOverlays: m.textOverlays, audioTracks: m.audioTracks, transitions: m.transitions },
+        at: { len: clipLengthMs, pieces: piecesOn, clip: { start: rawClip.start_ms, end: rawClip.end_ms, map: trim, limits: clipEdgeLimits } },
       }
     } else {
       useEditorStore.setState(liveEdgeRef.current.editor)
       useMediaStore.setState(liveEdgeRef.current.media)
     }
+    // (every step reads the clip as it was when the drag began — the render's own values are the last
+    // step's: its end had already moved, so the clip's end no longer looked like its end, and the drag
+    // flipped between growing and "Nothing was cut here" — user, 2026-11-04)
+    const at = liveEdgeRef.current.at
     if (done) liveEdgeRef.current = null
     quietRef.current = !done
-    try { if (Math.abs(to - from) >= 50) trimByEdge(segId, edge, from, to, done) }
+    try { if (Math.abs(to - from) >= 50) trimByEdge(segId, edge, from, to, done, at) }
     finally {
       quietRef.current = false
       // (a drag that went outwards at the clip's start or end and came back: its own base goes too)
@@ -4258,30 +4279,32 @@ export function EditorShell({
    * that join before comes back, as much as it was dragged (restoreAtJoin), and what follows moves
    * later. At the clip's own start or end, outwards brings in more of the video (moveClipEdge).
    */
-  function trimByEdge(segId: string, edge: 'start' | 'end', from: number, to: number, done = true) {
+  function trimByEdge(segId: string, edge: 'start' | 'end', from: number, to: number, done = true, at: EdgeAt = { len: clipLengthMs, pieces: piecesOn }) {
     if (blocked({ kind: 'section', id: segId })) return
     const inward = edge === 'start' ? to > from : to < from
     // An inserted video's own edges trim it (what plays of it), the same way
     const ins = useEditorStore.getState().segments.find(s => s.id === segId)
-    if (ins && isInsert(ins, mainVideoId)) { trimInsert(ins, edge, from, to, inward); return }
-    if (inward) {
-      const [a, b] = edge === 'start' ? [from, to] : [to, from]
-      if (clipLengthMs - (b - a) < MIN_CLIP_LEFT_MS) { notifyLocked('A clip must stay at least a second long'); return }
-      removePart(a, b)
-      return
-    }
+    if (ins && isInsert(ins, mainVideoId)) { trimInsert(ins, edge, from, to, inward, at.len); return }
     const d = Math.abs(to - from)
-    if (piecesOn) { restorePiece(segId, edge, from, d); return }
-    if (edge === 'start' && from <= 1) { moveClipEdge('start', -d, done); return }
-    if (edge === 'end' && from >= clipLengthMs - 1) { moveClipEdge('end', d, done); return }
-    restoreAtJoin(segId, edge, from, d)
+    switch (edgeDragPath(edge, from, to, at)) {
+      case 'cut': {
+        const [a, b] = edge === 'start' ? [from, to] : [to, from]
+        if (at.len - (b - a) < MIN_CLIP_LEFT_MS) { notifyLocked('A clip must stay at least a second long'); return }
+        removePart(a, b, at.pieces)
+        return
+      }
+      case 'pieces': restorePiece(segId, edge, from, d, at.len); return
+      case 'clipStart': moveClipEdge('start', -d, done, at.clip); return
+      case 'clipEnd': moveClipEdge('end', d, done, at.clip); return
+      case 'join': restoreAtJoin(segId, edge, from, d, at.len)
+    }
   }
   /**
    * An inserted video's edge dragged: inwards, less of it plays (its start or end cut; what follows
    * moves up); outwards, more of it again — as far as the video itself goes. The main video still
    * waits where it went in.
    */
-  function trimInsert(ins: SegmentLocal, edge: 'start' | 'end', from: number, to: number, inward: boolean) {
+  function trimInsert(ins: SegmentLocal, edge: 'start' | 'end', from: number, to: number, inward: boolean, lenMs = clipLengthMs) {
     pause()
     const editor = useEditorStore.getState(), media = useMediaStore.getState()
     const state: TimedState = {
@@ -4302,7 +4325,7 @@ export function EditorShell({
     const own = videoLibraryRef.current[box?.source_video_id ?? '']?.duration_ms ?? null
     const offset = box?.source_offset_ms ?? 0
     const room = edge === 'start' ? offset : own != null ? own - (offset + (ins.end_ms - ins.start_ms)) : 0
-    const amount = Math.round(Math.min(Math.abs(to - from), Math.max(0, room), MAX_CLIP_MS - clipLengthMs))
+    const amount = Math.round(Math.min(Math.abs(to - from), Math.max(0, room), MAX_CLIP_MS - lenMs))
     if (amount < 50) { notifyLocked(room > 0 ? 'The clip is as long as a clip can be (5 minutes)' : edge === 'start' ? 'This is where the video starts' : 'This is where the video ends'); return }
     const t = edge === 'start' ? ins.start_ms : ins.end_ms
     const next = rippleInsert(state, t, amount)
@@ -4324,7 +4347,7 @@ export function EditorShell({
    * ('end': it plays on that much further). Only video the clip had skipped (or before its first
    * part, within the clip's stretch of the video). Everything after moves later.
    */
-  function restorePiece(segId: string, edge: 'start' | 'end', t: number, d: number) {
+  function restorePiece(segId: string, edge: 'start' | 'end', t: number, d: number, lenMs = clipLengthMs) {
     pause()
     const editor = useEditorStore.getState(), media = useMediaStore.getState()
     const seg = editor.segments.find(s => s.id === segId)
@@ -4341,7 +4364,7 @@ export function EditorShell({
       : (i + 1 < mains.length ? mains[i + 1].from! : lenSrc) - (me.from + pieceVideoMs(me))
     // (room is video; at this part's speed it is room ÷ speed of timeline)
     const sp = me.speed ?? 1
-    const amount = Math.round(Math.min(d, Math.max(0, room) / sp, MAX_CLIP_MS - clipLengthMs))
+    const amount = Math.round(Math.min(d, Math.max(0, room) / sp, MAX_CLIP_MS - lenMs))
     if (amount < 50) { notifyLocked(room > 0 ? 'The clip is as long as a clip can be (5 minutes)' : 'Nothing was cut here: drag the edge inwards to cut, outwards brings back what was cut'); return }
     const state: TimedState = {
       segments: editor.segments, keyframes: editor.keyframes,
@@ -4372,7 +4395,7 @@ export function EditorShell({
    * (edge 'start': it grows back towards the start) or after it ends ('end'). Everything after the
    * join moves later by as much.
    */
-  function restoreAtJoin(segId: string, edge: 'start' | 'end', t: number, d: number) {
+  function restoreAtJoin(segId: string, edge: 'start' | 'end', t: number, d: number, lenMs = clipLengthMs) {
     pause()
     const editor = useEditorStore.getState(), media = useMediaStore.getState()
     const map = trimMap(editor.trims, rawClip.start_ms, rawClip.end_ms)
@@ -4380,7 +4403,7 @@ export function EditorShell({
     const at = edge === 'start' ? map.toSource(t) : map.toSourceEnd(t)
     const cut = editor.trims.find(([a, b]) => (edge === 'start' ? Math.abs(b - at) <= 2 : Math.abs(a - at) <= 2))
     if (!cut) { notifyLocked('Nothing was cut here: drag the edge inwards to cut, outwards brings back what was cut'); return }
-    const room = Math.max(0, Math.min(MAX_CLIP_MS - clipLengthMs, cut[1] - cut[0]))
+    const room = Math.max(0, Math.min(MAX_CLIP_MS - lenMs, cut[1] - cut[0]))
     const amount = Math.round(Math.min(d, room))
     if (amount < 50) { if (!room) notifyLocked('The clip is as long as a clip can be (5 minutes)'); return }
     const nextTrims = cleanTrims(editor.trims.flatMap(r => (r !== cut ? [r]
@@ -4469,13 +4492,14 @@ export function EditorShell({
    */
   type EdgeBase = { state: TimedState; trims: typeof trims; clipRange: typeof clipRange; start: number; end: number; map: typeof trim; limits: typeof clipEdgeLimits }
   const edgeBaseRef = useRef<EdgeBase | null>(null)
-  function moveClipEdge(edge: 'start' | 'end', delta: number, done = true) {
+  function moveClipEdge(edge: 'start' | 'end', delta: number, done = true, orig?: EdgeAt['clip']) {
     let base = edgeBaseRef.current
     if (!base) {
       const editor = useEditorStore.getState(), media = useMediaStore.getState()
       base = {
         state: { segments: editor.segments, keyframes: editor.keyframes, overlays: media.overlays, textOverlays: media.textOverlays, audioTracks: media.audioTracks, transitions: media.transitions },
-        trims: editor.trims, clipRange: editor.clipRange, start: rawClip.start_ms, end: rawClip.end_ms, map: trim, limits: clipEdgeLimits,
+        // (a part's edge dragged: the clip as the drag found it — trimByEdgeLive — not as its last step left it)
+        trims: editor.trims, clipRange: editor.clipRange, start: orig?.start ?? rawClip.start_ms, end: orig?.end ?? rawClip.end_ms, map: orig?.map ?? trim, limits: orig?.limits ?? clipEdgeLimits,
       }
       edgeBaseRef.current = base
       pause()
@@ -7513,6 +7537,8 @@ export function EditorShell({
           videoUrls={videoUrls} mediaLengths={videoLengths}
           // (parts can be cut: an edge trims the video itself, as in InShot)
           onEdgeTrim={cutOk ? trimByEdgeLive : undefined}
+          // (the clip's end dragged out goes as far as the video goes on; a clip of pieces stops it itself)
+          clipEndRoomMs={piecesOn ? undefined : clipEdgeLimits.endLater}
           pickedSegmentId={pickedSegId}
           groupSel={groupLive} onGroupSel={setGroupPick}
           groups={groups} onGroup={groupPicked} onUngroup={ungroupPicked} onGroupRows={moveGroupRows} onGroupParts={moveGroupParts} onGroupPartsToRow={liftParts}
