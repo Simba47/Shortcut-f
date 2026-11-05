@@ -2761,6 +2761,10 @@ body {
 .cb-tool:active { transform: scale(.88); }
 .cb-tool[data-tone="danger"]:hover, .cb-tool[data-tone="danger"][data-on] { color: #f87171; background: rgba(239, 68, 68, 0.12); }
 .cb-tool-hide { opacity: 0; transform: translateX(8px) scale(.85); pointer-events: none; }
+/* A clip's name being changed on its card (ClipPickerShell ClipCard: ✎ or a double-click on the name) */
+.cb-rename { flex: 1; min-width: 0; height: 28px; margin: -3px 0 -3px -6px; padding: 0 6px; border-radius: 7px; font: inherit; font-size: 14px; font-weight: 600;
+  color: var(--cb-text); background: rgb(var(--cb-fg) / 0.06); border: 1px solid rgb(var(--cb-fg) / 0.28); outline: none; }
+.cb-rename:focus { border-color: rgb(var(--cb-fg) / 0.45); box-shadow: 0 0 0 3px rgb(var(--cb-fg) / 0.08); }
 .cb-card:hover .cb-tool-hide, .cb-card:focus-within .cb-tool-hide, .cb-tool-hide[data-on] { opacity: 1; transform: none; pointer-events: auto; }
 @media (hover: none) { .cb-tool-hide, .cb-reveal .cb-act { opacity: 1; transform: none; pointer-events: auto; } }
 /* a soft light sweeps across the card as it's pointed at */

@@ -511,6 +511,19 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       setClipError(e instanceof Error ? e.message : 'Could not save the favourite')
     }
   }
+  /** A clip renamed on its card: saved with the clip (put back if it couldn't be). null: the plain "Clip N" again */
+  async function renameClip(id: string, title: string | null) {
+    const was = clips.find(c => c.id === id)?.title ?? null
+    if ((title ?? null) === was) return
+    setClips(prev => prev.map(c => c.id === id ? { ...c, title } : c))
+    try {
+      const res = await fetch(`/api/clips/${id}/title`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not rename the clip')
+    } catch (e) {
+      setClips(prev => prev.map(c => c.id === id ? { ...c, title: was } : c))
+      setClipError(e instanceof Error ? e.message : 'Could not rename the clip')
+    }
+  }
   /** One clip's ⋮ menu → Delete */
   async function deleteOne(id: string) {
     try {
@@ -1739,6 +1752,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 favorite={!!clip.favorite}
                 reason={clip.reason ?? null}
                 onFavorite={() => toggleFavorite(clip.id)}
+                onRename={t => renameClip(clip.id, t)} defaultTitle={`Clip ${clip.index}`}
                 onDelete={() => deleteOne(clip.id)}
                 onSubEdited={() => router.refresh()}
                 title={clip.title ?? `Clip ${clip.index}`}
@@ -2375,8 +2389,12 @@ function SubEditOverlay({ startedAt, estimate, ahead, onStop }: { startedAt: num
   )
 }
 
-function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, download, onSubEdited, manual, edited, brandTag }: {
+function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, download, onSubEdited, manual, edited, brandTag, onRename, defaultTitle }: {
   id: string
+  /** Renamed from its card (✎ or a double-click on the name): the new name, or null for `defaultTitle` again */
+  onRename?: (title: string | null) => void
+  /** Its name when it has none of its own ("Clip 5") */
+  defaultTitle?: string
   /** (brand kit Phase 2) its brand kit's tag, in the row of labels */
   brandTag?: React.ReactNode
   /** Manual edit board: the slim card shows its start–end and Edit / Download on hover */
@@ -2422,6 +2440,33 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
 }) {
   // The delete button's "Delete this clip?" (no ⋯ menu: Edit and the time line cover the rest)
   const [menu, setMenu] = useState<false | 'confirm'>(false)
+  // Renaming: the name becomes a field (Enter or a click away saves, Esc leaves it as it was)
+  const [renaming, setRenaming] = useState(false)
+  // (Enter saves, then the field's blur would save again: only the first counts)
+  const renameDone = useRef(false)
+  const startRename = (e?: React.SyntheticEvent) => { e?.stopPropagation(); if (onRename && !selecting) { setMenu(false); renameDone.current = false; setRenaming(true) } }
+  const finishRename = (value: string | null) => {
+    if (renameDone.current) return
+    renameDone.current = true
+    setRenaming(false)
+    if (value == null || !onRename) return
+    const t = value.replace(/\s+/g, ' ').trim()
+    onRename(!t || t === defaultTitle ? null : t)
+  }
+  const nameField = renaming && (
+    <input autoFocus defaultValue={title} maxLength={80} aria-label="Clip name" className="cb-rename"
+      onFocus={e => e.currentTarget.select()}
+      onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}
+      onKeyDown={e => {
+        e.stopPropagation()
+        if (e.key === 'Enter') { e.preventDefault(); finishRename(e.currentTarget.value) }
+        if (e.key === 'Escape') { e.preventDefault(); finishRename(null) }
+      }}
+      onBlur={e => finishRename(e.currentTarget.value)} />
+  )
+  // Rename's icon, a text field with a typing cursor (the pencil is Edit's): on the labelled Rename button beside
+  // Edit and Download (user, 2026-11-05: an icon alone at the top wasn't clear)
+  const renameIcon = (size: number) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 4h1a3 3 0 013 3 3 3 0 013-3h1" /><path d="M13 20h-1a3 3 0 01-3-3 3 3 0 01-3 3H5" /><path d="M5 16H4a2 2 0 01-2-2v-4a2 2 0 012-2h1" /><path d="M13 8h7a2 2 0 012 2v4a2 2 0 01-2 2h-7" /><path d="M9 7v10" /></svg>
   const sub = useSubEdit(id, onSubEdited)
   // Opened: a click anywhere outside the card closes it again (not while picking clips, nor in its
   // own pop-ups, nor on the centre panel where it is being previewed: data-keep-clip-open)
@@ -2463,7 +2508,9 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
         <ClipThumb videoUrl={videoUrl} atMs={startMs} number={number} w={84} h={48} />
         <span className="flex-1 min-w-0 flex flex-col gap-1">
           <span className="flex items-start gap-2">
-            <span className="flex-1 min-w-0 text-sm font-semibold text-white leading-snug line-clamp-2 break-words">{title}</span>
+            {nameField || (
+              <span className="flex-1 min-w-0 text-sm font-semibold text-white leading-snug line-clamp-2 break-words" onDoubleClick={startRename}>{title}</span>
+            )}
             {/* ♡ and 🗑, a pair at the top right; the bin slides in beside the heart while the card is pointed at */}
             <span className="cb-tools -mt-1 -mr-1">
               <button type="button" onClick={e => { e.stopPropagation(); setMenu(m => (m ? false : 'confirm')) }} aria-expanded={!!menu}
@@ -2506,6 +2553,12 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
                     )}
                     {download === 'preparing' ? 'Preparing' : download === 'failed' ? 'Retry' : 'Download'}
                   </button>
+                  {onRename && (
+                    <button type="button" onClick={startRename} className="cb-act" data-on={renaming ? '' : undefined} title="Give this clip a name of your own">
+                      {renameIcon(12)}
+                      Rename
+                    </button>
+                  )}
                 </span>
               )}
             </span>
@@ -2547,7 +2600,9 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
         <ClipThumb videoUrl={videoUrl} atMs={startMs} number={number} w={112} h={64} />
         <div className="flex-1 min-w-0 flex flex-col gap-1">
           <div className="flex items-start gap-1">
-            <p className="flex-1 min-w-0 text-sm font-semibold text-white leading-snug line-clamp-2" title={title}>{title}</p>
+            {nameField || (
+              <p className="flex-1 min-w-0 text-sm font-semibold text-white leading-snug line-clamp-2" title={title} onDoubleClick={startRename}>{title}</p>
+            )}
             {!selecting && heart}
             {!selecting && (
               <span className="relative shrink-0">
@@ -2594,7 +2649,7 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
       {/* Edit · Download (a click on the card itself previews it); a Sub-edit already running still shows its overlay */}
       {!selecting && sub.error && <p role="alert" className="mt-2 text-[11px]" style={{ color: '#f87171' }}>{sub.error}</p>}
       {!selecting && (
-        <div className="mt-2.5 grid grid-cols-2 gap-1.5">
+        <div className={`mt-2.5 grid gap-1.5 ${onRename ? 'grid-cols-3' : 'grid-cols-2'}`}>
           <button onClick={e => { e.stopPropagation(); onEdit() }} disabled={disabled} title="Open in the editor"
             className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-white/10 disabled:opacity-40"
             style={{ color: 'rgb(var(--cb-fg) / 0.85)', border: '1px solid rgb(var(--cb-fg) / 0.14)' }}>
@@ -2612,6 +2667,14 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
             )}
             {download === 'preparing' ? 'Preparing' : download === 'failed' ? 'Retry' : 'Download'}
           </button>
+          {onRename && (
+            <button onClick={startRename} title="Give this clip a name of your own"
+              className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-white/10"
+              style={{ color: 'rgb(var(--cb-fg) / 0.85)', border: `1px solid rgb(var(--cb-fg) / ${renaming ? 0.4 : 0.14})` }}>
+              {renameIcon(13)}
+              Rename
+            </button>
+          )}
         </div>
       )}
     </div>
