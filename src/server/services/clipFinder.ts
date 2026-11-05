@@ -53,7 +53,9 @@ export type AskModel = (system: string, user: string, opts?: { temperature?: num
  * a search's cost (5 Nov: ~7,300 thinking tokens a window). Finding moments keeps some; capped, the
  * picks agreed with uncapped ones as often as uncapped runs agree with each other.
  */
-export const THINKING = { find: 1024, edges: 256 }
+// (find 2048: the key's 'medium' thinking level, lib/gemini.ts thinkingLevel; on the 5 Nov test
+// gemini-3.5-flash-lite matched 16/24 at medium, 14/24 at low)
+export const THINKING = { find: 2048, edges: 256 }
 
 export const MIN_CLIP_MS = 15_000
 /** What the model is asked for; a clip may run on to HARD_MAX_CLIP_MS to finish its thought */

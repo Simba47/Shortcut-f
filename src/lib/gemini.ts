@@ -10,7 +10,7 @@
  *
  * GEMINI_FIRST=key (with GEMINI_API_KEY): every request goes to the Gemini API key first (a paid
  * AI Studio project with its own, higher limits: Tier 2), through the Interactions API with
- * GEMINI_KEY_MODEL (default gemini-3.6-flash: projects made since late 2026 cannot use 2.5), and to
+ * GEMINI_KEY_MODEL (default gemini-3.5-flash-lite: projects made since late 2026 cannot use 2.5), and to
  * Vertex when the key fails. A key that has no credit or is refused rests 10 minutes (Vertex only).
  *
  * Built for many users at once: a cap on requests in flight per process (AI_MAX_CONCURRENT) and
@@ -58,9 +58,10 @@ export function withGeminiUsage<T>(onUsage: (u: GeminiUsage) => void, fn: () => 
 }
 
 export const GEMINI_MODEL = 'gemini-2.5-flash'
-// (gemini-3.6-flash: on the 5 Nov six-language test its moments matched 21/24, against 16/24 for
-// gemini-2.5-flash on Vertex and 8-12/24 for gemini-3.5-flash-lite; it costs ~2x 2.5 Flash, ~4x from 2027)
-const KEY_MODEL = process.env.GEMINI_KEY_MODEL || 'gemini-3.6-flash'
+// (gemini-3.5-flash-lite: on the 5 Nov six-language test, with finding moments at 'medium' thinking,
+// its moments matched 16/24 - as gemini-2.5-flash on Vertex - at 2.5 Flash's price ($0.30 / $2.50
+// per 1M tokens). gemini-3.6-flash matched 21/24 at ~2x the cost, ~4x from 2027: set it here for that)
+const KEY_MODEL = process.env.GEMINI_KEY_MODEL || 'gemini-3.5-flash-lite'
 
 /** Where AI requests go: 'vertex', 'gemini-api', or null when neither is configured */
 export function aiProvider(): 'vertex' | 'gemini-api' | null {
