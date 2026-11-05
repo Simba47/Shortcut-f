@@ -20,9 +20,12 @@ import { ClipPlayer } from '@/components/clips/ClipPlayer'
 import type { ClipPreviewData } from '@/server/services/clipPreview'
 import type { SegmentLocal } from '@chai-cut/shared'
 import { defaultCropForSlot, makeBox } from '@/modules/editor/utils'
+import { insidePicture, pictureOrWhole, type PictureBox } from '@/modules/editor/pictureBox'
 
 interface VideoData {
   id: string
+  /** The picture inside its black bars (the worker's jobs/picture.ts), once found */
+  picture_box?: unknown
   title?: string | null
   status: string
   download_progress: number
@@ -973,7 +976,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       {momentPreview ? (
         <ClipPlayer key={`m-${momentPreview.s.id}`} videoUrl={playUrl} mainVideoId={video.id}
           startMs={momentPreview.s.start_ms} endMs={momentPreview.s.end_ms}
-          segments={previewSegments([], momentPreview.s.end_ms - momentPreview.s.start_ms, ratio)}
+          segments={previewSegments([], momentPreview.s.end_ms - momentPreview.s.start_ms, ratio, pictureOrWhole(video.picture_box as Partial<PictureBox> | null))}
           words={[]} captionStyle={null} textOverlays={[]} />
       ) : !previewed ? (
         <p className="text-sm px-6 text-center" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>No clips yet. Make a clip, then preview it here.</p>
@@ -984,7 +987,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       ) : (
         <ClipPlayer key={previewData.id} videoUrl={playUrl} mainVideoId={previewData.video_id} stockUrls={previewData.stockUrls}
           startMs={previewData.start_ms} endMs={previewData.end_ms}
-          segments={previewSegments(previewData.segments, previewData.end_ms - previewData.start_ms, ratio)}
+          segments={previewSegments(previewData.segments, previewData.end_ms - previewData.start_ms, ratio, pictureOrWhole(video.picture_box as Partial<PictureBox> | null))}
           words={previewData.words}
           // No saved style yet: captions off, as the editor opens a new clip
           captionStyle={previewData.captionStyle ?? null}
@@ -2552,17 +2555,18 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
  * The clip's formats as the editor would open them: a clip never opened has none (one centred
  * Vertical), and a crop box never framed has no keyframes (the layout's default framing).
  */
-function previewSegments(segments: SegmentLocal[], lengthMs: number, videoAR: number): SegmentLocal[] {
+function previewSegments(segments: SegmentLocal[], lengthMs: number, videoAR: number, picture: PictureBox): SegmentLocal[] {
+  // (the starting views inside the picture of a video with black bars, as the editor makes them)
   if (!segments.length) {
     return [{
       id: 'preview', start_ms: 0, end_ms: lengthMs, layout: 'vertical', sort_order: 0, frame: null,
-      crop_boxes: [makeBox(0, 'vertical', 0, [{ t_ms: 0, ...defaultCropForSlot('vertical', 0, videoAR) }])],
+      crop_boxes: [makeBox(0, 'vertical', 0, [{ t_ms: 0, ...insidePicture(defaultCropForSlot('vertical', 0, videoAR), picture) }])],
     } as SegmentLocal]
   }
   return segments.map(seg => ({
     ...seg,
     crop_boxes: seg.crop_boxes.map((b, i) => (b.keyframes.length ? b : {
-      ...b, keyframes: [{ t_ms: seg.start_ms, ...defaultCropForSlot(seg.layout, b.slot_index ?? i, videoAR) }],
+      ...b, keyframes: [{ t_ms: seg.start_ms, ...insidePicture(defaultCropForSlot(seg.layout, b.slot_index ?? i, videoAR), picture) }],
     })),
   }))
 }

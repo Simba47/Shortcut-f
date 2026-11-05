@@ -83,7 +83,9 @@ import { getBoxPositionAtLerp, type BoxPosition } from '@/lib/interpolation'
 import { SubjectsPanel, type SubjectItem, type AnglesView } from '@/components/editor/SubjectsPanel'
 import { angleRows, angleAt, placePeople, type Angle, type AngleRow } from '@/modules/editor/angles'
 import { briefView, withWide, WIDEN_MIN_MS } from '@/modules/editor/briefWiden'
-import { decideFormat, decideVertical, AUTO_FORMAT, keepsAll, viewsOverlap } from '@/modules/editor/autoFormat'
+import { decideFormat, decideVertical, AUTO_FORMAT, SOURCE_PX_H, WHOLE_PICTURE, keepsAll, viewsOverlap } from '@/modules/editor/autoFormat'
+import { pictureOrWhole, toPicture, fromPicture, pictureAR } from '@/modules/editor/pictureBox'
+import { setFramePicture, framePicture, inFramePicture } from '@/modules/editor/framePicture'
 import type { SegmentLocal, CropBoxLocal, FrameLayout, FrameLane, FrameItem, TransitionType } from '@chai-cut/shared'
 import { SPEED_MIN, SPEED_MAX } from '@chai-cut/shared'
 import { TransitionsPanel, TRANSITION_DEFAULT_MS, TRANSITION_KINDS, playedTransitionMs, type TransitionJoin } from '@/components/editor/TransitionsPanel'
@@ -226,6 +228,8 @@ export function EditorShell({
   initialCaptionStyles, initialTextOverlays, initialAudioTracks, initialTransitions, initialOverlays,
   initialMusicUrls, initialOriginalSound, initialProgressBar, initialBrand, backStart,
 }: Props) {
+  // The picture inside the video's black bars (none: the whole frame): the views the editor makes keep inside it
+  setFramePicture(pictureOrWhole((savedClip as { picture_box?: Parameters<typeof pictureOrWhole>[0] }).picture_box))
   // (compiled by React's compiler: next.config.ts reactCompiler, annotation mode)
   'use memo'
   // ── Removed parts of the video (lib/trims.ts, modules/editor/trimState.ts) ───
@@ -389,7 +393,7 @@ export function EditorShell({
     const initialKeyframeMap: KeyframeMap = {}
     for (const seg of localSegments) {
       for (const box of seg.crop_boxes) {
-        const kfs = box.keyframes?.length ? box.keyframes : [{ t_ms: seg.start_ms, ...defaultCropForSlot(seg.layout as LayoutType, box.slot_index) }]
+        const kfs = box.keyframes?.length ? box.keyframes : [{ t_ms: seg.start_ms, ...inFramePicture(defaultCropForSlot(seg.layout as LayoutType, box.slot_index)) }]
         initialKeyframeMap[box.id] = kfs.map(k => ({ id: (k as { id?: string }).id ?? crypto.randomUUID(), box_id: box.id, t_ms: k.t_ms, x: k.x, y: k.y, w: k.w, h: k.h })) as typeof initialKeyframeMap[string]
       }
     }
@@ -1311,7 +1315,7 @@ export function EditorShell({
     }
   }, [playParts, uncovered, mainVideoId, clipLengthMs]) // eslint-disable-line react-hooks/exhaustive-deps
   const viewGetPositionAt = useMemo(
-    () => (boxId: string, t: number) => boxId === DEFAULT_BOX_ID || boxId.endsWith(STAND_IN_SUFFIX) ? defaultCropForSlot('vertical', 0, getVideoAR()) : getPositionAt(boxId, t),
+    () => (boxId: string, t: number) => boxId === DEFAULT_BOX_ID || boxId.endsWith(STAND_IN_SUFFIX) ? inFramePicture(defaultCropForSlot('vertical', 0, getVideoAR())) : getPositionAt(boxId, t),
     [getPositionAt], // eslint-disable-line react-hooks/exhaustive-deps
   )
 
@@ -2419,7 +2423,8 @@ export function EditorShell({
           const wide = h * (c.w / c.h)
           return { ...c, x: Math.max(sl, Math.min(l, sr - wide)), w: wide, h, y: Math.max(0, Math.min(c.y - (h - c.h) * 0.4, 1 - h)) }
         })
-        next[box.id] = buildKeyframes(changes.map((c, k) => (k === 0 ? { ...c, t_ms: seg.start_ms } : c)))
+        // (inside the video's picture: never into its black bars)
+        next[box.id] = buildKeyframes(changes.map((c, k) => (k === 0 ? { ...c, t_ms: seg.start_ms } : c))).map(inFramePicture)
           .map(k => ({ id: crypto.randomUUID(), box_id: box.id, t_ms: k.t_ms, x: k.x, y: k.y, w: k.w, h: k.h }))
         framed++
       })
@@ -2580,7 +2585,7 @@ export function EditorShell({
     const found = row.faces.filter(f => !f.pending)
     if (layout !== 'vertical' || found.length !== 1) return undefined
     const f = found[0].box
-    return [defaultCropForSlot('vertical', 0, getVideoAR(), f.x + f.w / 2)]
+    return [inFramePicture(defaultCropForSlot('vertical', 0, getVideoAR(), f.x + f.w / 2))]
   }
   /**
    * In the Subjects tool a format picked is the scene's (user, 2026-10-20): the whole camera shot, cut
@@ -2758,7 +2763,13 @@ export function EditorShell({
         // (the people seen in this place — a scene's places can show fewer of them; people marked by hand and
         // found count too; marks not found yet don't: angles.ts placePeople)
         const { boxes: faces, talk } = placePeople(row, pl)
-        const plan = mode === 'vertical' ? decideVertical(faces, talk, ar) : decideFormat(faces, talk, ar)
+        // Decided in the picture inside the video's black bars (its own shape and height, the faces moved
+        // into it), the views moved back — as Make my clips does (worker clip_formats.ts)
+        const pic = framePicture()
+        const inPic = faces.map(f => toPicture(f, pic))
+        const picAR = pictureAR(ar ?? 16 / 9, pic)
+        const decided = mode === 'vertical' ? decideVertical(inPic, talk, picAR) : decideFormat(inPic, talk, picAR, SOURCE_PX_H * pic.h)
+        const plan = decided && { ...decided, framing: decided.layout === WHOLE_PICTURE ? [] : decided.framing.map(v => fromPicture(v, pic)) }
         return plan ? [{ row, shown: pl.shown, plan, faces }] : []
       })).sort((p, q) => p.shown[0] - q.shown[0])
       // A very short place (under SHORT_PLACE) takes the format of the place right before it, so fast

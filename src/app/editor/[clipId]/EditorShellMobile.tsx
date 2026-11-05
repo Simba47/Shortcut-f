@@ -25,6 +25,8 @@ import { rowsToLocal, normalizeCoverage, msToLabel, uncoveredRanges } from '@/mo
 import { fillUncovered } from '@/modules/editor/place'
 import { insertsOf, insertedMs, piecesOf } from '@/modules/editor/inserts'
 import { isShot } from '@/modules/editor/shots'
+import { pictureOrWhole } from '@/modules/editor/pictureBox'
+import { setFramePicture } from '@/modules/editor/framePicture'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -74,6 +76,8 @@ export function EditorShellMobile({
   clip, videoUrl, words: initialWords, initialSegments,
   initialCaptionStyles, initialTextOverlays, initialAudioTracks, initialTransitions, initialOverlays,
 }: Props) {
+  // The picture inside the video's black bars (none: the whole frame): the views the editor makes keep inside it
+  setFramePicture(pictureOrWhole((clip as { picture_box?: Parameters<typeof pictureOrWhole>[0] }).picture_box))
   // Music: stored when picked (any audio, or a video's sound; up to 20 MB) so it's in the export
   const [musicUploads, setMusicUploads] = useState<Record<string, 'uploading' | 'failed'>>({})
   const [musicNotice, setMusicNotice] = useState<string | null>(null)
