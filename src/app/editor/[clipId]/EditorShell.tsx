@@ -312,6 +312,13 @@ export function EditorShell({
   const { videoRef, seekToMs, togglePlay, pause } = useVideoSync(rawClip.start_ms, rawClip.end_ms, pieces, trimmed ? trim.kept : undefined,
     piecesOn ? p => (p.id ? heldPlayedRef.current(p.id) : null) : undefined)
   const { currentTimeMs, durationMs, playing } = usePlayerStore()
+  // The preview-vs-export check (scripts/export-parity) moves the preview to exact moments; in
+  // development only, never in a built site
+  if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
+    (window as unknown as { __exportParity: unknown }).__exportParity = {
+      seek: seekToMs, pause, now: () => usePlayerStore.getState().currentTimeMs, len: () => usePlayerStore.getState().durationMs,
+    }
+  }
   // Append media fragment so browser seeks to clip start at network level,
   // preventing a flash of the video's frame 0 on page load / cache hit.
   const clipVideoUrl = videoUrl && savedClip.start_ms > 0
@@ -1621,9 +1628,27 @@ export function EditorShell({
     }
   }
 
-  async function handleResetStuckRender() {
-    await fetch(`/api/clips/${clip.id}/reedit`, { method: 'POST' })
-    setClipStatus('draft'); setOutputUrl(null); setRenderStuckSince(null); setRenderElapsed(0)
+  /**
+   * Cancel while exporting: the export stops (the worker stops it within a couple of seconds) and the
+   * clip is as it was before — its last export, if it had one. (It used to be only "Taking too long?
+   * Cancel render" after 3 minutes, which set the clip back but left the render running: its video
+   * came back anyway when it finished.)
+   */
+  const [cancelling, setCancelling] = useState(false)
+  async function cancelExport() {
+    if (cancelling) return
+    setCancelling(true); setExportError(null)
+    try {
+      const res = await fetch(`/api/clips/${clip.id}/cancel-export`, { method: 'POST' })
+      const d = await res.json().catch(() => null) as { status?: string; output_url?: string | null; error?: string } | null
+      if (!res.ok || !d?.status) throw new Error(d?.error ?? 'Couldn’t cancel the export. Try again.')
+      refreshWordsOnDoneRef.current = false
+      setClipStatus(d.status); setOutputUrl(d.output_url ?? null); setRenderStuckSince(null); setRenderElapsed(0)
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Couldn’t cancel the export. Try again.')
+    } finally {
+      setCancelling(false)
+    }
   }
 
   /**
@@ -1638,6 +1663,18 @@ export function EditorShell({
     const inside = sourceWords.filter(w => kept.some(([a, b]) => w.start_ms >= a && w.start_ms < b)).sort((a, b) => a.start_ms - b.start_ms)
     if (!inside.length) return true
     return inside[0].start_ms - kept[0][0] > CAPTION_GAP_MS || kept[kept.length - 1][1] - inside[inside.length - 1].end_ms > CAPTION_GAP_MS
+  }
+  /**
+   * A caption word corrected in the Captions panel: shown at once and saved on the transcript, so it
+   * is there when the clip opens again and the export writes it (before 2026-11-04 it stayed in this
+   * editor only: gone on reload, never exported)
+   */
+  function changeWord(id: string, text: string) {
+    const field = romanize ? 'word_roman' : 'word'
+    updateWord(id, text, field)
+    fetch('/api/transcribe/words', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, field, text }) })
+      .then(r => { if (!r.ok) throw new Error(String(r.status)) })
+      .catch(() => notifyLocked('That caption correction wasn’t saved. Check your connection and type it again.'))
   }
   /** Make captions for the clip as it is now: save first, so the job reads its current start and end */
   async function makeCaptions() {
@@ -6689,7 +6726,7 @@ export function EditorShell({
                   <a href="/pricing" className="px-4 py-2 rounded-lg text-xs font-bold" style={{ background: ACCENT, color: '#000' }}>See plans</a>
                 </div>
               ) : editingTranscript ? (
-                <TranscriptPanel words={displayWords} clipStartMs={clip.start_ms} clipEndMs={clip.end_ms} currentTimeMs={currentTimeMs} onSeek={seekToMs} onWordChange={(id, text) => updateWord(id, text, romanize ? 'word_roman' : 'word')} />
+                <TranscriptPanel words={displayWords} clipStartMs={clip.start_ms} clipEndMs={clip.end_ms} currentTimeMs={currentTimeMs} onSeek={seekToMs} onWordChange={changeWord} />
               ) : (
                 <div className="flex flex-col">
                   {/* ── Captions: on/off with its status, the language, and editing the words ── */}
@@ -7109,7 +7146,9 @@ export function EditorShell({
             <div className="flex items-center gap-1.5 shrink-0">
               {rendering ? (
                 // While the reel renders, the Export button stays and keeps playing its download
-                // animation on a loop (.ed-export[data-busy] in globals.css) until it's done
+                // animation on a loop (.ed-export[data-busy] in globals.css) until it's done; beside
+                // it, Cancel stops the export
+                <>
                 <span className="sbb ed-export" data-busy role="status"
                   aria-label={exporting ? 'Starting the export' : `Exporting, ${formatElapsed(renderElapsed)} so far`}
                   title={exporting ? 'Starting…' : `Exporting · ${formatElapsed(renderElapsed)}`}>
@@ -7118,10 +7157,22 @@ export function EditorShell({
                     <ExportIcon /> Exporting
                   </span>
                 </span>
+                {/* (once the export is on its way: while it starts there is nothing to stop yet) */}
+                {clipStatus === 'rendering' && (
+                  <button onClick={cancelExport} disabled={cancelling} aria-label="Cancel the export" title="Cancel the export"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-60"
+                    style={{ color: '#f87171', background: 'rgba(239,68,68,0.12)', boxShadow: 'inset 0 0 0 1px rgba(239,68,68,0.25)' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                  </button>
+                )}
+                </>
               ) : hasOutput ? (
                 <>
-                  <button onClick={() => requestExport(true)} aria-label="Re-render"
-                    title="Render again with your latest edits. Captions are regenerated too."
+                  {/* (with the captions as they are: read again only where part of the clip has none — it was
+                      made longer. Reading the whole clip again every time changed its words from the ones
+                      in the preview and threw corrections away: user, 2026-11-04) */}
+                  <button onClick={() => requestExport(needsCaptions())} aria-label="Re-render"
+                    title="Render again with your latest edits"
                     className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
                     style={{ color: 'rgb(var(--ed-fg) / 0.75)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -7171,11 +7222,11 @@ export function EditorShell({
                     <p className="text-xs" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>Usually takes a minute or two. You can keep editing.</p>
                     {renderElapsed > 0 && <p className="text-xs tabular-nums mt-1" style={{ color: 'rgba(200,255,0,0.75)' }}>{formatElapsed(renderElapsed)}</p>}
                   </div>
-                  {clipStatus === 'rendering' && renderElapsed > 180 && (
-                    <button onClick={handleResetStuckRender}
-                      className="text-xs px-4 py-1.5 rounded-lg"
+                  {clipStatus === 'rendering' && (
+                    <button onClick={cancelExport} disabled={cancelling}
+                      className="text-xs px-4 py-1.5 rounded-lg disabled:opacity-60"
                       style={{ color: '#f87171', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)' }}>
-                      Taking too long? Cancel render
+                      {cancelling ? 'Stopping…' : 'Cancel export'}
                     </button>
                   )}
                 </div>

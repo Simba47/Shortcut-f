@@ -65,3 +65,30 @@ export async function GET(req: NextRequest) {
   const words = brandCaptionWords([...raw], await brandWordsFor(user.id, clipId && /^[0-9a-f-]{36}$/i.test(clipId) ? clipId : null))
   return NextResponse.json({ words, video_status: video.status, pending })
 }
+
+/**
+ * A caption word corrected in the Captions panel (TranscriptPanel): saved on the video's transcript,
+ * so it stays after the clip is opened again and the export writes it. Before 2026-11-04 a
+ * correction lived only in the open editor: gone on reload, never exported. `field`: the word as
+ * said ('word'), or its English-letter spelling shown when captions are in English letters.
+ */
+export async function PATCH(req: NextRequest) {
+  const user = await requireUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const body = await req.json().catch(() => null) as { id?: unknown; field?: unknown; text?: unknown } | null
+  const id = typeof body?.id === 'string' && /^[0-9a-f-]{36}$/i.test(body.id) ? body.id : null
+  const field = body?.field === 'word_roman' ? 'word_roman' : body?.field === 'word' ? 'word' : null
+  const text = typeof body?.text === 'string' ? body.text.trim().slice(0, 100) : null
+  if (!id || !field || !text) return NextResponse.json({ error: 'id, field and text required' }, { status: 400 })
+  const [row] = field === 'word'
+    ? await sql`
+        UPDATE transcript_words w SET word = ${text}
+        FROM transcripts t JOIN videos v ON v.id = t.video_id
+        WHERE w.id = ${id} AND t.id = w.transcript_id AND v.user_id = ${user.id} RETURNING w.id`
+    : await sql`
+        UPDATE transcript_words w SET word_roman = ${text}
+        FROM transcripts t JOIN videos v ON v.id = t.video_id
+        WHERE w.id = ${id} AND t.id = w.transcript_id AND v.user_id = ${user.id} RETURNING w.id`
+  if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  return NextResponse.json({ ok: true })
+}

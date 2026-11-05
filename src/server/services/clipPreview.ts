@@ -1,3 +1,4 @@
+import { withSavedStyle } from '@/modules/editor/textStyle'
 import { shownSegment } from '@/modules/editor/visibility'
 import { GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
@@ -84,7 +85,7 @@ export async function getClipPreview(userId: string, clipId: string): Promise<Cl
     // (as the brand writes them: its spellings, its hidden words — as the editor and the export show them)
     words: brandCaptionWords([...words] as unknown as TranscriptWord[], await brandWordsFor(userId, clipId)),
     captionStyle: (style as unknown as CaptionStyle) ?? null,
-    textOverlays: (overlays as unknown as TextOverlay[]).filter(t => !t.hidden),
+    textOverlays: (overlays as unknown as TextOverlay[]).filter(t => !t.hidden).map(withSavedStyle),
     stockUrls,
     trims: Array.isArray(clip.trim_ranges) ? clip.trim_ranges : [],
   }

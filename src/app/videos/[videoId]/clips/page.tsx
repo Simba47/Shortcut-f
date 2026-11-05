@@ -1,3 +1,4 @@
+import { withSavedStyle } from '@/modules/editor/textStyle'
 import { redirect, notFound } from 'next/navigation'
 import { GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
@@ -78,7 +79,7 @@ export default async function AutoClipsPage({ params }: { params: Promise<{ vide
     segments: rowsToLocal((segRows as any[]).filter(s => s.clip_id === c.id)),
     words: allWords.filter(w => w.end_ms >= c.start_ms && w.start_ms <= c.end_ms),
     captionStyle: ((styles as unknown as CaptionStyle[]).find(s => s.clip_id === c.id)) ?? null,
-    textOverlays: (overlays as unknown as TextOverlay[]).filter(o => o.clip_id === c.id),
+    textOverlays: (overlays as unknown as TextOverlay[]).filter(o => o.clip_id === c.id).map(withSavedStyle),
     trims: Array.isArray(c.trim_ranges) ? c.trim_ranges : [],
   })))
 
