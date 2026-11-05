@@ -7,6 +7,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { usePolling } from '@/lib/usePolling'
 import { useCredits, type CreditsInfo } from '@/lib/useCredits'
+import { CreditsBadge } from '@/components/ui/credits-badge'
 import { CAPTION_CREDITS_PER_MINUTE, EXPORT_CREDITS_PER_MINUTE } from '@/lib/credits'
 import type { Video } from '@chai-cut/shared'
 import { ACCEPTED_VIDEO_EXTENSIONS } from '@chai-cut/shared'
@@ -219,13 +220,7 @@ export default function DashboardPage() {
               <div className="dash-usage-bar"><div style={{ width: `${usagePct}%` }} /></div>
             </div>
           )}
-          {credits && (
-            <a href="/pricing" className={`dash-credits${credits.balance <= 5 ? ' is-low' : ''}`}
-              title={credits.nextExpiry ? `${credits.nextExpiry.amount} credits expire ${new Date(credits.nextExpiry.at).toLocaleDateString()}` : 'Credits pay for AI reading, captions and exports'}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v10M9.5 9.5h4a1.8 1.8 0 010 3.6h-3a1.8 1.8 0 000 3.6h4.2" /></svg>
-              <span><strong>{credits.balance}</strong> credits</span>
-            </a>
-          )}
+          <CreditsBadge credits={credits} className="dash-credits" />
           {planInfo?.plan === 'free' && (
             <a href="/pricing" className="dash-btn-fill fill-btn fill-btn-sm"><FillButtonContent>Upgrade</FillButtonContent></a>
           )}

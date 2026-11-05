@@ -37,7 +37,7 @@ export function planFeatureRows(plan: Plan): FeatureRow[] {
     { label: `${ai.askAiPerMonth} Ask AI searches ${per}`, included: true },
     { label: `${ai.rewritesPerMonth} hook and title rewrites ${per}`, included: true },
     { label: `${plan.retentionDays} days history`, included: true },
-    { label: 'Auto captions', included: plan.autoCaption },
+    { label: 'Captions on AI clips included', included: plan.autoCaption },
     { label: 'No watermark', included: !plan.watermark },
     { label: 'Priority exports', included: plan.priorityExports },
   ]

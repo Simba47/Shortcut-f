@@ -7,6 +7,8 @@ import { PLANS } from '@/lib/plans'
 import { FREE_SIGNUP_CREDITS, TOPUP_PACKS } from '@/lib/credits'
 import { planFeatureRows, creditUses, readingLabel } from '@/lib/planFeatures'
 import { BrandLogo } from '@/components/ui/brand-logo'
+import { CreditsBadge } from '@/components/ui/credits-badge'
+import { useCredits } from '@/lib/useCredits'
 
 const PLAN_ORDER = ['free', 'starter', 'creator', 'agency'] as const
 
@@ -26,6 +28,7 @@ function loadCheckoutScript(src: string): Promise<void> {
 }
 
 export default function PricingPage() {
+  const { credits, refresh: refreshCredits } = useCredits()
   const { data: session } = useSession()
   const router = useRouter()
   const [loading, setLoading] = useState<string | null>(null)
@@ -108,6 +111,7 @@ export default function PricingPage() {
               const out = await v.json()
               if (!v.ok) throw new Error(out.error ?? 'The payment could not be verified. If money was taken, the credits will show shortly.')
               setNotice(`${out.credits} credits added. You now have ${out.balance}.`)
+              refreshCredits()
               resolve()
             } catch (e) { reject(e) }
           },
@@ -140,9 +144,12 @@ export default function PricingPage() {
           <BrandLogo shine />
         </a>
         {session && (
+          <div className="flex items-center gap-2" style={{ color: 'rgba(255,255,255,0.8)' }}>
+          <CreditsBadge credits={credits} />
           <a href="/dashboard" className="text-xs px-3 py-1.5 rounded-lg" style={{ color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
             Dashboard
           </a>
+          </div>
         )}
       </nav>
 
@@ -293,7 +300,7 @@ export default function PricingPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className="text-xl font-bold text-white text-center mb-1">Need more credits?</h2>
+          <h2 id="topups" className="text-xl font-bold text-white text-center mb-1">Need more credits?</h2>
           <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>Top-up packs for paid plans, paid once. Top-up credits last 12 months.</p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {TOPUP_PACKS.map(pack => (

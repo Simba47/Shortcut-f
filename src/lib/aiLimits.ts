@@ -64,6 +64,14 @@ export function rewriteCredits(paidSoFar: number): number {
   return paidSoFar % REWRITES_PER_CREDIT === 0 ? 1 : 0
 }
 
+/** What the Post panel says beside Regenerate: what is left this month, or what the next rewrite costs */
+export function rewriteNote(used: number, perMonth: number): string {
+  if (used < perMonth) return `${perMonth - used} of ${perMonth} rewrites left this month`
+  const covered = (REWRITES_PER_CREDIT - (used - perMonth) % REWRITES_PER_CREDIT) % REWRITES_PER_CREDIT
+  if (covered === 0) return `Next rewrite: 1 credit, and the ${REWRITES_PER_CREDIT - 1} after it are covered`
+  return `${covered} more rewrite${covered === 1 ? '' : 's'} covered by your last credit`
+}
+
 // Days and months run on India time, so "today" resets at midnight for the user
 const IST_MS = (5 * 60 + 30) * 60_000
 export function istDayStart(now: Date = new Date()): Date {

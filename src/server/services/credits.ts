@@ -97,7 +97,7 @@ export async function reserve(userId: string, a: ReserveArgs, db: Db = sql): Pro
     const plan = allocate(rows.map(toSpendable), a.amount, new Date())
     if (!plan) {
       const have = rows.reduce((n, r) => n + r.remaining, 0)
-      throw Object.assign(new Error(`This needs ${a.amount} credits and you have ${have}. Top up or upgrade to continue.`), { status: 402, expose: true, needed: a.amount, balance: have })
+      throw Object.assign(new Error(`This needs ${a.amount} credit${a.amount === 1 ? '' : 's'} and you have ${have}. Top up or upgrade to continue.`), { status: 402, expose: true, needed: a.amount, balance: have })
     }
     for (const p of plan) await tx`UPDATE credit_grants SET remaining = remaining - ${p.take} WHERE id = ${p.grantId}`
     const [hold] = await tx<{ id: string }[]>`

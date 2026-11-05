@@ -14,6 +14,7 @@ import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from '
 import { useRouter } from 'next/navigation'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { AccountMenu } from '@/components/ui/account-menu'
+import { CreditsBadge, TopUpLink } from '@/components/ui/credits-badge'
 import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { openBrandKits } from '@/components/brand/brandKitsEvents'
 import { BrandLoader, BrandLoaderScreen } from '@/components/ui/brand-loader'
@@ -584,7 +585,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // step / done / total: what the worker is doing and the parts read of all (ReadingProgress)
   type Reading = { status: 'none' | 'running' | 'ready' | 'failed'; progress: number | null; error: string | null; stopped?: boolean; place?: number | null; step?: 'audio' | 'reading' | 'saving' | null; done?: number | null; total?: number | null; waitingOn?: 'copy' | 'queue' | 'server' | null; source?: 'reference'; needsCredits?: boolean }
   const [reading, setReading] = useState<Reading | null>(null)
-  const { refresh: refreshCredits } = useCredits()
+  const { credits, refresh: refreshCredits } = useCredits()
+  // (the allowance is read again after every run and search: so is the balance in the header)
+  useEffect(() => { if (allowance) refreshCredits() }, [allowance, refreshCredits])
   /** What was asked for while the video was being read (runs when it's done), and its name */
   const afterReading = useRef<(() => void) | null>(null)
   // (the one line under the lock says what is being done; what waits for it runs by itself)
@@ -915,7 +918,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   }
 
   // On demand — asks AI to find moments matching a specific, user-typed criteria
-  async function findByCriteria(query?: string, fresh = false) {
+  async function findByCriteria(query?: string, fresh = false, pay = false) {
     const q = (query ?? aiCriteria).trim()
     if (!q) return
     const key = searchKey(q)
@@ -936,11 +939,18 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       const res = await fetch(`/api/videos/${video.id}/ai-detect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ criteria: q }),
+        body: JSON.stringify({ criteria: q, pay }),
         signal: ctl.signal,
       })
       // The video is still being read: this search runs by itself when it's done
       if (res.status === 409) { waitForReading('Ask AI', () => findByCriteria(q, true)); return }
+      // Past the month it costs credits: the price is asked about first
+      if (res.status === 402) {
+        const d = await res.json() as { error?: string; code?: string; credits?: number }
+        if (d.code !== 'ask_costs') throw new Error(d.error ?? 'Not enough credits')
+        if (window.confirm(`${d.error} Use ${d.credits} credits?`)) await findByCriteria(q, true, true)
+        return
+      }
       if (!res.ok) throw new Error((await res.json()).error ?? 'Could not find clips')
       const { suggestions } = await res.json() as { suggestions?: Suggestion[] }
       loadAllowance()
@@ -1366,7 +1376,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           })()}
         </div>
 
-        {autoError && <p className="text-xs" style={{ color: '#f87171' }}>{autoError}</p>}
+        {autoError && <p className="text-xs" style={{ color: '#f87171' }}>{autoError}<TopUpLink message={autoError} /></p>}
         {autoNote && !autoError && <p className="text-xs" style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}>{autoNote}</p>}
         {/* Fewer good moments than clips asked for: nothing is made until the user says yes */}
         {autoAsking && autoJob && (
@@ -1553,7 +1563,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         )}
         {/* Results scroll inside the card, so the card never grows */}
         <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 -mr-2 pr-2">
-        {aiError && <p className="text-xs" style={{ color: '#f87171' }}>{aiError}</p>}
+        {aiError && <p className="text-xs" style={{ color: '#f87171' }}>{aiError}<TopUpLink message={aiError} /></p>}
         {!loadingAi && askFrom && aiSuggestions && (
           <div className="shrink-0 flex items-center gap-2 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
             <span className="flex-1 min-w-0 truncate">Saved results for “{askFrom}”</span>
@@ -1724,6 +1734,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2" /><circle cx="17.5" cy="10.5" r="2" /><circle cx="8.5" cy="7.5" r="2" /><circle cx="6.5" cy="12.5" r="2" /><path d="M12 22a10 10 0 110-20 9 9 0 019 9c0 3-2 4-4 4h-2a2 2 0 00-1 3.7A2 2 0 0112 22z" /></svg>
           <span>Brand kits</span>
         </button>
+        <CreditsBadge credits={credits} />
         <ThemeSwitch />
         <AccountMenu />
       </nav>

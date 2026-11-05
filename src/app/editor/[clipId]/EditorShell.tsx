@@ -35,6 +35,7 @@ import { shownSegment, addedVideoBox, isGapPart, isMainShot, STAND_IN_SUFFIX } f
 import { placeInRow, liftToRow, lowerToRow, liftBlock, fillUncovered } from '@/modules/editor/place'
 import { splitTargets } from '@/modules/editor/split'
 import { AccountMenu } from '@/components/ui/account-menu'
+import { CreditsBadge, TopUpLink } from '@/components/ui/credits-badge'
 import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { BrandLogo } from '@/components/ui/brand-logo'
 import { BrandLoader } from '@/components/ui/brand-loader'
@@ -1694,6 +1695,8 @@ export function EditorShell({
     setShowCaptions(on)
   }
   const { credits, refresh: refreshCredits } = useCredits()
+  // An export taken, finished, cancelled or failed (which gives its credits back): the balance follows
+  useEffect(() => { refreshCredits() }, [clipStatus, refreshCredits])
   /** The part of the clip Get CC reads, and its price: the server works it out the same way (captionSpan) */
   function captionQuote() {
     const kept = trim.kept
@@ -6500,6 +6503,7 @@ export function EditorShell({
               <circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 015 .5c0 1.5-2.5 2-2.5 3.5M12 17h.01" />
             </svg>
           </button>
+          <CreditsBadge credits={credits} onClick={e => { e.preventDefault(); leave(() => { window.location.href = '/billing#credits' }) }} />
           <ThemeSwitch />
           {/* Shared profile button; saves pending edits before leaving the editor */}
           <AccountMenu
@@ -6512,7 +6516,7 @@ export function EditorShell({
       {exportError && (
         <div role="alert" className="shrink-0 flex items-center gap-3 px-4 py-2 text-xs"
           style={{ background: 'rgba(239,68,68,0.12)', borderBottom: '1px solid rgba(239,68,68,0.25)', color: '#fca5a5' }}>
-          <span className="flex-1">{exportError}</span>
+          <span className="flex-1">{exportError}<TopUpLink message={exportError} /></span>
           <button onClick={() => setExportError(null)} className="px-2 py-0.5 rounded hover:bg-[rgb(var(--ed-fg)/0.1)]" aria-label="Dismiss">✕</button>
         </div>
       )}
@@ -6942,7 +6946,7 @@ export function EditorShell({
 
             {tool === 'post' && (
               <div className="p-4">
-                <PostText clipId={clip.id} value={postText} prepare={async () => { await handleSave(); await ensureCaptions() }} onChange={v => setPostText({ title: v.title, post_caption: v.post_caption, hashtags: v.hashtags })} />
+                <PostText clipId={clip.id} value={postText} prepare={async () => { await handleSave(); await ensureCaptions() }} onChange={v => { refreshCredits(); setPostText({ title: v.title, post_caption: v.post_caption, hashtags: v.hashtags }) }} />
               </div>
             )}
 

@@ -399,7 +399,7 @@ export async function addBestMoments(userId: string, videoId: string, sopts: Sug
 // Criteria-steered clip detection ("find me the funniest moments", "controversial takes", etc.) —
 // same transcript source as getVideoSuggestions, but the caller picks what to look for.
 export async function getVideoSuggestionsByCriteria(
-  userId: string, videoId: string, criteria: string,
+  userId: string, videoId: string, criteria: string, opts: { pay?: boolean } = {},
 ): Promise<{ suggestions: ClipSuggestion[] }> {
   const trimmedCriteria = criteria.trim().slice(0, 200)
   if (!trimmedCriteria) throw Object.assign(new Error('Tell the AI what to look for'), { status: 400 })
@@ -421,8 +421,16 @@ export async function getVideoSuggestionsByCriteria(
 
   // Counted against the month's allowance (1 per started hour of the video), then credits; refused past the daily cap.
   // Checked before any AI call, and given back if the AI does not answer.
-  const { beginAiAction } = await import('./aiUsage')
-  const action = await beginAiAction(userId, 'ask_ai', videoId, askAiUnits(durationMs))
+  const { askAiPrice, beginAiAction } = await import('./aiUsage')
+  const units = askAiUnits(durationMs)
+  // Past the month it costs credits: the price is asked about first, as a search and clips are
+  if (!opts.pay) {
+    const price = await askAiPrice(userId, units)
+    if (price > 0) {
+      throw Object.assign(new Error(`This Ask AI search costs ${price} credits${units > 1 ? `: on this video one search counts as ${units}` : ''}.`), { status: 402, expose: true, code: 'ask_costs', credits: price })
+    }
+  }
+  const action = await beginAiAction(userId, 'ask_ai', videoId, units)
   if (!aiProvider()) { await action.fail(); throw Object.assign(new Error('AI clip detection is not configured'), { status: 500 }) }
 
   try {

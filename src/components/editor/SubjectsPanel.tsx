@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { TopUpLink } from '@/components/ui/credits-badge'
 import { useFaceAt, useFrameAt } from '@/modules/clips/thumbs'
 
 // ── Subjects: mark the people, and the view follows them through the clip ─────
@@ -365,7 +366,7 @@ export function SubjectsPanel(p: Props) {
           </div>
         )}
         {p.angles.status === 'failed' && (
-          <p className="text-[11.5px]" style={{ color: muted }}>{p.angles.error ?? 'The people could not be found.'} Press Detect to try again.</p>
+          <p className="text-[11.5px]" style={{ color: muted }}>{p.angles.error ?? 'The people could not be found.'} Press Detect to try again.<TopUpLink message={p.angles.error} /></p>
         )}
         {p.angles.status === 'done' && !listed && (
           <p className="text-[11.5px]" style={{ color: muted }}>No one was found in this clip.</p>
@@ -450,7 +451,7 @@ export function SubjectsPanel(p: Props) {
           <p className="text-[11.5px]" style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>Click a person on the video… (Esc to stop)</p>
         )}
 
-        {p.error && <p role="alert" className="text-xs" style={{ color: '#f87171' }}>{p.error}</p>}
+        {p.error && <p role="alert" className="text-xs" style={{ color: '#f87171' }}>{p.error}<TopUpLink message={p.error} /></p>}
 
         {/* The people and groups marked */}
         {p.loading && !p.subjects.length ? (

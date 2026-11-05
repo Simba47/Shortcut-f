@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { PLANS } from './plans'
 import {
-  aiLimitsFor, videoClipCap, extraSearchCredits, clipsAllowed, istDayStart, istMonthStart, rewriteCredits, extraClipCredits, allowanceSince, readingQuote, askAiUnits, askAiCredits } from './aiLimits'
+  aiLimitsFor, videoClipCap, extraSearchCredits, clipsAllowed, istDayStart, istMonthStart, rewriteCredits, extraClipCredits, allowanceSince, readingQuote, askAiUnits, askAiCredits, rewriteNote } from './aiLimits'
 
 const MIN = 60_000
 
@@ -95,4 +95,13 @@ test('Ask AI counts 1 per started hour of the video, and past the month only the
   assert.equal(askAiCredits(10, 10, 1), 7)   // past it
   assert.equal(askAiCredits(9, 10, 3), 14)   // a 3-hour video with 1 left: 2 are past it
   assert.equal(askAiCredits(20, 10, 3), 21)  // all of it past
+})
+
+test('the rewrite note says what is left, and what the next one costs', () => {
+  assert.equal(rewriteNote(0, 30), '30 of 30 rewrites left this month')
+  assert.equal(rewriteNote(29, 30), '1 of 30 rewrites left this month')
+  assert.equal(rewriteNote(30, 30), 'Next rewrite: 1 credit, and the 4 after it are covered')
+  assert.equal(rewriteNote(31, 30), '4 more rewrites covered by your last credit')
+  assert.equal(rewriteNote(34, 30), '1 more rewrite covered by your last credit')
+  assert.equal(rewriteNote(35, 30), 'Next rewrite: 1 credit, and the 4 after it are covered')
 })

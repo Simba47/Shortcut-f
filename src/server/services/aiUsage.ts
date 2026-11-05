@@ -178,6 +178,16 @@ export async function aiActionCounts(userId: string): Promise<{ askAiThisMonth: 
   return { askAiThisMonth: r.am, askAiToday: r.ad, rewritesThisMonth: r.rm, lastMinute: r.lm }
 }
 
+/** The credits one Ask AI search takes now (0 within the month's, and unless credits are on) */
+export async function askAiPrice(userId: string, units: number): Promise<number> {
+  if (creditsMode() !== 'on') return 0
+  const limits = aiLimitsFor(await getUserPlan(userId))
+  const counts = await aiActionCounts(userId)
+  // (past today's cap it is refused either way: said before any price is asked about)
+  if (counts.askAiToday >= limits.askAiPerDay) throw fail(`You've used today's ${limits.askAiPerDay} Ask AI searches. More tomorrow.`, 429)
+  return askAiCredits(counts.askAiThisMonth, limits.askAiPerMonth, units)
+}
+
 export interface AiActionHandle {
   /** Credits taken for this one (0 while within the allowance) */
   credits: number

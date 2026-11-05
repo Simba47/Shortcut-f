@@ -71,7 +71,7 @@ after(async () => {
 test('a top-up pack is bought, paid and verified: credits arrive once, with an invoice', opts, async () => {
   const u = await newUser()
   const order = await topup.startTopup(u, 'medium')
-  assert.equal(order.amountPaise, 49900); assert.equal(order.credits, 500)
+  assert.equal(order.amountPaise, 48900); assert.equal(order.credits, 500)
   assert.equal(order.keyId, KEY); assert.equal(order.checkoutScript, '/dev/razorpay-checkout.js')
   const paid = await mock.mockPay({ orderId: order.orderId, outcome: 'success' }, collect)
   assert.ok(paid.ok)

@@ -91,11 +91,27 @@ export function exportCredits(clipMs: number | null | undefined): number {
 /** Credit packs: about ₹1 a credit, a little less on the bigger ones */
 export const TOPUP_PACKS = [
   { key: 'small', credits: 200, price: 199 },
-  { key: 'medium', credits: 500, price: 499 },
+  { key: 'medium', credits: 500, price: 489 },
   { key: 'large', credits: 1250, price: 1199 },
   { key: 'bulk', credits: 3000, price: 2799 },
 ] as const
 export type TopupPackKey = typeof TOPUP_PACKS[number]['key']
+
+const SPENT_ON: Record<string, string> = {
+  render: 'Export', caption: 'Captions', transcribe: 'Captions', subjects: 'Subjects', ask_ai: 'Ask AI', rewrite: 'Rewrites',
+  search: 'New moment search', ai_clips: 'AI clips', reading: 'Reading past your plan',
+}
+const GRANTED: Record<string, string> = {
+  plan: 'Monthly plan credits', topup: 'Top-up', free: 'Free credits', bonus: 'Bonus credits', refund: 'Credits refunded',
+}
+/** One row of the credit history in plain words (billing page) */
+export function ledgerLabel(reason: string, refType: string | null): string {
+  if (reason.startsWith('grant:')) return GRANTED[reason.slice(6)] ?? 'Credits added'
+  const what = (refType && SPENT_ON[refType]) || 'Credits used'
+  if (reason === 'spend') return what
+  if (reason === 'release') return `${what}: credits returned`
+  return 'Credits changed'
+}
 
 export type GrantKind = 'free' | 'plan' | 'topup' | 'bonus' | 'refund'
 export interface SpendableGrant { id: string; remaining: number; expiresAt: Date | null; kind: GrantKind; createdAt: Date }

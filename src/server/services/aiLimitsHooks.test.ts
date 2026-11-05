@@ -164,6 +164,21 @@ test('Ask AI past the daily cap is refused before any AI call', opts, async () =
   await assert.rejects(videos.getVideoSuggestionsByCriteria(userId, videoId, 'funny moments'), (e: { status?: number }) => e.status === 429)
 })
 
+test('Ask AI past the month asks its price first, and the answer carries it', opts, async () => {
+  const { apiError } = await import('@/lib/api-error')
+  const { userId, videoId } = await setup('free', 20 * MIN, 10)
+  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${userId}, 'ask_ai', now() - interval '2 days' FROM generate_series(1, 3)`
+  const asked = await videos.getVideoSuggestionsByCriteria(userId, videoId, 'funny moments').catch(e => e)
+  assert.equal(asked.status, 402); assert.equal(asked.code, 'ask_costs'); assert.equal(asked.credits, 7)
+  const body = await apiError(asked).json()
+  assert.equal(body.code, 'ask_costs'); assert.equal(body.credits, 7)
+  assert.equal((await credits.balance(userId)).balance, 10)   // nothing taken for asking
+  // Agreed to: it goes on past the question (no AI here, so it fails there and gives the credits back)
+  const went = await videos.getVideoSuggestionsByCriteria(userId, videoId, 'funny moments', { pay: true }).catch(e => e)
+  assert.notEqual(went.code, 'ask_costs')
+  assert.equal((await credits.balance(userId)).balance, 10)
+})
+
 test('a rewrite past the allowance with no credits is refused (402)', opts, async () => {
   const { userId, videoId } = await setup('free', 20 * MIN)
   await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${userId}, 'rewrite', now() - interval '2 minutes' FROM generate_series(1, 20)`

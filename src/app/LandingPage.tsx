@@ -40,7 +40,7 @@ function planFeatures(plan: (typeof PLANS)[keyof typeof PLANS]) {
     { text: 'AI finds the best moments', included: plan.autoCaption },
     { text: `Up to ${plan.maxFileSizeGb} GB per video`, included: true },
     { text: `${plan.retentionDays}-day history`, included: true },
-    { text: 'Auto-captions in Telugu, Hindi & Hinglish', included: plan.autoCaption },
+    { text: 'Captions on AI clips in Telugu, Hindi & Hinglish', included: plan.autoCaption },
     { text: 'Your logo on your clips', included: true },
     { text: 'No watermark', included: !plan.watermark },
   ]

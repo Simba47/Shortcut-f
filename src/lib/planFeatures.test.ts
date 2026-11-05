@@ -18,7 +18,7 @@ test('a paid plan lists every limit the server applies, with the numbers from pl
     '10 Ask AI searches a month',
     '30 hook and title rewrites a month',
     '30 days history',
-    'Auto captions',
+    'Captions on AI clips included',
     'No watermark',
     'x Priority exports',
   ])
@@ -33,7 +33,7 @@ test('the free plan says its clips are 3 in total, not per day', () => {
   assert.ok(rows.includes('3 uploads in total'))
   assert.ok(rows.includes('3 Ask AI searches in total'))
   assert.ok(rows.includes('20 hook and title rewrites in total'))
-  assert.ok(rows.includes('x Auto captions'))
+  assert.ok(rows.includes('x Captions on AI clips included'))
   assert.ok(rows.includes('x No watermark'))
 })
 

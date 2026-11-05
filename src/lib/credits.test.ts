@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  creditsMode, subjectsCredits, subjectsNewMs, captionCredits, exportCredits, extraReadingCredits, captionSpan, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS,
+  creditsMode, ledgerLabel, subjectsCredits, subjectsNewMs, captionCredits, exportCredits, extraReadingCredits, captionSpan, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS,
   type SpendableGrant,
 } from './credits'
 import { PLANS } from './plans'
@@ -41,7 +41,7 @@ test('plans carry their monthly credits; the free plan gets a one-time grant ins
 })
 
 test('a credit is about ₹1: a pack never gives more than 3,000 credits for ₹2,799', () => {
-  assert.deepEqual(TOPUP_PACKS.map(p => [p.credits, p.price]), [[200, 199], [500, 499], [1250, 1199], [3000, 2799]])
+  assert.deepEqual(TOPUP_PACKS.map(p => [p.credits, p.price]), [[200, 199], [500, 489], [1250, 1199], [3000, 2799]])
   for (const pack of TOPUP_PACKS) {
     const perCredit = pack.price / pack.credits
     assert.ok(perCredit >= 0.93 && perCredit <= 1, `${pack.key}: ₹${perCredit} a credit`)
@@ -109,4 +109,26 @@ test('Subjects: 2 credits per started minute of what no earlier payment covers',
   assert.equal(subjectsNewMs(-30_000, 120_000, [{ start_ms: 0, end_ms: 90_000 }]), 60_000) // both ends: both new parts
   assert.equal(subjectsNewMs(0, 180_000, [{ start_ms: 0, end_ms: 60_000 }, { start_ms: 120_000, end_ms: 180_000 }]), 60_000) // the gap
   assert.equal(subjectsNewMs(0, 90_400, [{ start_ms: 0, end_ms: 90_000 }]), 0)             // under a second: the frames were read
+})
+
+test('each bigger top-up pack costs less per credit', () => {
+  const each = TOPUP_PACKS.map(p => p.price / p.credits)
+  for (let i = 1; i < each.length; i++) assert.ok(each[i] < each[i - 1], `pack ${i}: ${each[i]} is not under ${each[i - 1]}`)
+})
+
+test('credit history says in plain words what each row was', () => {
+  assert.equal(ledgerLabel('spend', 'render'), 'Export')
+  assert.equal(ledgerLabel('spend', 'caption'), 'Captions')
+  assert.equal(ledgerLabel('spend', 'subjects'), 'Subjects')
+  assert.equal(ledgerLabel('spend', 'ask_ai'), 'Ask AI')
+  assert.equal(ledgerLabel('spend', 'rewrite'), 'Rewrites')
+  assert.equal(ledgerLabel('spend', 'search'), 'New moment search')
+  assert.equal(ledgerLabel('spend', 'ai_clips'), 'AI clips')
+  assert.equal(ledgerLabel('spend', 'reading'), 'Reading past your plan')
+  assert.equal(ledgerLabel('release', 'render'), 'Export: credits returned')
+  assert.equal(ledgerLabel('grant:plan', null), 'Monthly plan credits')
+  assert.equal(ledgerLabel('grant:topup', null), 'Top-up')
+  assert.equal(ledgerLabel('grant:free', null), 'Free credits')
+  assert.equal(ledgerLabel('spend', 'something_new'), 'Credits used')
+  assert.equal(ledgerLabel('whatever', null), 'Credits changed')
 })
