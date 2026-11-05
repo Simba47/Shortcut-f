@@ -5,6 +5,7 @@ import type { BoxKeyframe, SegmentLocal, CropBoxLocal, LayoutType, FrameBand, Fr
 import { LAYOUT_SLOT_COUNT } from '@chai-cut/shared'
 import { getBoxPositionAtLerp, type BoxPosition } from '@/lib/interpolation'
 import { makeBox, defaultCropForSlot } from './utils'
+import { inFramePicture } from './framePicture'
 import { isFrameLayout, DEFAULT_BAND, defaultFrame, frameOf, placeNewItem } from './frames'
 import { setViewAt, recordMotionAt, removeViewChangeAt, moveViewChange, duplicateViewChange, type ViewKeyframe } from './views'
 import { isShot } from './shots'
@@ -268,7 +269,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     const start = Math.round(startMs), end = Math.round(endMs)
     const slotPos = (i: number) => Array.isArray(pos) ? pos[i] : i === 0 ? pos : undefined
     const crop_boxes: CropBoxLocal[] = Array.from({ length: LAYOUT_SLOT_COUNT[layout] }, (_, i) => ({
-      ...makeBox(i, layout, start, [{ t_ms: start, ...(slotPos(i) ?? defaultCropForSlot(layout, i, videoAR)) }]),
+      ...makeBox(i, layout, start, [{ t_ms: start, ...inFramePicture(slotPos(i) ?? defaultCropForSlot(layout, i, videoAR)) }]),
       source_offset_ms: start, // main video: where in the video this format starts
     }))
     set(s => {
@@ -297,7 +298,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     // parts cut, not always its start on the timeline)
     const mainAt = seg.crop_boxes.find(b => !b.source_video_id && !b.image_path)?.source_offset_ms ?? seg.start_ms
     const crop_boxes: CropBoxLocal[] = Array.from({ length: LAYOUT_SLOT_COUNT[layout] }, (_, i) => {
-      const keyframes = [{ t_ms: seg.start_ms, ...(framing?.[i] ?? defaultCropForSlot(layout, i, videoAR, i === 0 ? centerX : undefined)) }]
+      // (inside the video's picture: never into its black bars — framePicture.ts)
+      const keyframes = [{ t_ms: seg.start_ms, ...inFramePicture(framing?.[i] ?? defaultCropForSlot(layout, i, videoAR, i === 0 ? centerX : undefined)) }]
       const old = seg.crop_boxes[i]
       // Frame crop boxes always frame the main video — other media sits on the frame's lanes
       const kept = old && toFrame

@@ -1,6 +1,7 @@
 import type { CropBoxLocal, BoxKeyframeLocal, LayoutType, SegmentLocal, Segment, CropBox, BoxKeyframe } from '@chai-cut/shared'
 import type { BoxPosition } from '@/lib/interpolation'
 import { isFrameLayout, frameSlotSize, frameOf, type RowLayout } from './frames'
+import { inFramePicture } from './framePicture'
 
 // ── Crop geometry ─────────────────────────────────────────────────────────────
 // Crop boxes are stored normalised to the source frame (0–1 on each axis). The renderer
@@ -89,7 +90,7 @@ export function makeBox(
     slot_index: slotIndex,
     source_video_id: null,
     source_offset_ms: 0,
-    keyframes: keyframes ?? [{ t_ms: startMs, ...defaultCropForSlot(layout, slotIndex) }],
+    keyframes: keyframes ?? [{ t_ms: startMs, ...inFramePicture(defaultCropForSlot(layout, slotIndex)) }],
   }
 }
 
