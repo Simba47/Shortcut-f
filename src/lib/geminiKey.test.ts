@@ -67,8 +67,6 @@ test("the answer's text and tokens are read from the interaction's steps (though
 })
 
 test('audio goes inside the request up to 5 minutes of it, and by upload only when larger', () => {
-  // 5 Nov load test: the upload step answered 402 "credits depleted" under load with money on the
-  // project, and worked seconds later; a request with the audio inside never did
   const small = Buffer.from('abc')
   assert.deepEqual(sttAudioInput(small), { type: 'audio', data: 'YWJj', mime_type: 'audio/wav' })
   assert.equal(sttAudioInput(Buffer.alloc(STT_INLINE_MAX_BYTES + 1)), null)
