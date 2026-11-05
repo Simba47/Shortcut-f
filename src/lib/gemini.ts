@@ -94,6 +94,13 @@ export function sttOrder(s: { vertex: boolean; key: boolean; keyFirst: boolean; 
 }
 export const sttKeyFirst = (env: Env = process.env) => !!env.GEMINI_API_KEY && keyFirst(env)
 
+/** Audio up to this size goes inside the request (a 5-minute chunk is 9.6 MB): no upload step */
+export const STT_INLINE_MAX_BYTES = 12 * 1024 * 1024
+/** The audio as a part of the request, or null when it is too large and needs the Files upload */
+export function sttAudioInput(buf: Buffer): { type: 'audio'; data: string; mime_type: 'audio/wav' } | null {
+  return buf.length <= STT_INLINE_MAX_BYTES ? { type: 'audio', data: buf.toString('base64'), mime_type: 'audio/wav' } : null
+}
+
 /** An ask as the Interactions API's input (images at low resolution: ~260 tokens a frame, as on Vertex) */
 export function toInteractionInput(input: string | GeminiPart[]): string | Array<Record<string, string>> {
   if (typeof input === 'string') return input

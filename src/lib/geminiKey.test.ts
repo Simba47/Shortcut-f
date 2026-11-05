@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { geminiOrder, toInteractionInput, toJsonSchema, thinkingLevel, interactionAnswer, sttOrder } from './gemini.js'
+import { geminiOrder, toInteractionInput, toJsonSchema, thinkingLevel, interactionAnswer, sttOrder, sttAudioInput, STT_INLINE_MAX_BYTES } from './gemini.js'
 
 test('GEMINI_FIRST=key: the Gemini key first, Vertex as the fallback; otherwise as before', () => {
   const both = { GOOGLE_CLOUD_PROJECT: 'p', GEMINI_API_KEY: 'k' }
@@ -64,4 +64,14 @@ test("the answer's text and tokens are read from the interaction's steps (though
   }
   assert.deepEqual(interactionAnswer(body), { text: '["a","b"]', inputTokens: 28, outputTokens: 19 })
   assert.deepEqual(interactionAnswer({}), { text: '', inputTokens: 0, outputTokens: 0 })
+})
+
+test('audio goes inside the request up to 5 minutes of it, and by upload only when larger', () => {
+  // 5 Nov load test: the upload step answered 402 "credits depleted" under load with money on the
+  // project, and worked seconds later; a request with the audio inside never did
+  const small = Buffer.from('abc')
+  assert.deepEqual(sttAudioInput(small), { type: 'audio', data: 'YWJj', mime_type: 'audio/wav' })
+  assert.equal(sttAudioInput(Buffer.alloc(STT_INLINE_MAX_BYTES + 1)), null)
+  // a 5-minute chunk (16 kHz mono 16-bit wav: 9.6 MB) still fits
+  assert.ok(STT_INLINE_MAX_BYTES >= 300 * 16000 * 2 + 1000)
 })
