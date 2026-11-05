@@ -7,6 +7,8 @@ import type {
 } from '@chai-cut/shared'
 import { VideoPreview, OutputCanvas } from '@/components/editor/VideoPreview'
 import { computeCutRanges, reactionRanges, removedMs } from '@/lib/cuts'
+import { captionCredits, captionSpan } from '@/lib/credits'
+import { useCredits } from '@/lib/useCredits'
 import { SegmentTimeline } from '@/components/editor/SegmentTimeline'
 import { CaptionStyler } from '@/components/editor/CaptionStyler'
 import { TextOverlayPanel } from '@/components/editor/TextOverlayPanel'
@@ -458,14 +460,22 @@ export function EditorShellMobile({
     }
   }
 
-  /** Captions on: made now for this clip if it has none yet (nothing is captioned until asked) */
+  const { credits, refresh: refreshCredits } = useCredits()
+  /** Captions on: asks the price first, then makes them for this clip if it has none yet (nothing is captioned until asked) */
   function turnCaptions(on: boolean) {
     setShowCaptions(on)
-    const has = words.some(w => w.start_ms >= clip.start_ms && w.start_ms < clip.end_ms)
-    if (on && !has && !transcribing && !retranscribing && !isFreePlan) handleRetranscribe('unknown')
+    const span = captionSpan(clip.start_ms, clip.end_ms, words)
+    if (!on || !span || transcribing || retranscribing || isFreePlan) return
+    const price = captionCredits(span.end_ms - span.start_ms)
+    if (!credits || window.confirm(`Get captions for this clip (main video only)? ${price} credits (₹${price}). You have ${credits.balance}.`)) handleRetranscribe('unknown')
+  }
+  /** Regenerate reads all of the clip again */
+  function askRegenerate() {
+    const price = captionCredits(clip.end_ms - clip.start_ms)
+    if (!credits || window.confirm(`Regenerate captions? All of this clip is read again, and words you corrected are replaced. ${price} credits (₹${price}). You have ${credits.balance}.`)) handleRetranscribe('unknown', true)
   }
 
-  async function handleRetranscribe(languageCode: string) {
+  async function handleRetranscribe(languageCode: string, readAll = false) {
     setRetranscribing(true); setRetranscribeElapsed(0); setRetranscribeError(null); setRetranscribePlace(null)
     if (retranscribeTimerRef.current) clearInterval(retranscribeTimerRef.current)
     const startedAt = Date.now()
@@ -479,9 +489,10 @@ export function EditorShellMobile({
     try {
       const res = await fetch('/api/transcribe/retranscribe', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clip_id: clip.id, language_code: languageCode }),
+        body: JSON.stringify({ clip_id: clip.id, language_code: languageCode, ...(readAll ? { read_all: true } : {}) }),
       })
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Retranscription failed')
+      refreshCredits()
       const videoId = (clip as unknown as { video_id: string }).video_id
       const queuedAt = new Date().toISOString()
       const { job_id: jobId } = await res.json().catch(() => ({})) as { job_id?: string | null }
@@ -805,7 +816,7 @@ export function EditorShellMobile({
                 <CaptionStyler
                   style={captionStyle} textCase={captionTextCase}
                   onChange={updateCaptionStyle} onTextCaseChange={setCaptionTextCase}
-                  onEditCaptions={() => {}} onRetranscribe={handleRetranscribe}
+                  onEditCaptions={() => {}} onRetranscribe={askRegenerate}
                   retranscribing={retranscribing} retranscribeElapsed={retranscribeElapsed} retranscribePlace={retranscribePlace} retranscribeError={retranscribeError}
                   hasWords={words.length > 0} hasRoman={hasRoman} romanize={romanize} romanizeLabel={scriptLabel} onRomanizeChange={setRomanize}
                 />
@@ -1013,7 +1024,7 @@ export function EditorShellMobile({
                       <CaptionStyler
                         style={captionStyle} textCase={captionTextCase}
                         onChange={updateCaptionStyle} onTextCaseChange={setCaptionTextCase}
-                        onEditCaptions={() => {}} onRetranscribe={handleRetranscribe}
+                        onEditCaptions={() => {}} onRetranscribe={askRegenerate}
                         retranscribing={retranscribing} retranscribeElapsed={retranscribeElapsed} retranscribePlace={retranscribePlace} retranscribeError={retranscribeError}
                         hasWords={words.length > 0} hasRoman={hasRoman} romanize={romanize} romanizeLabel={scriptLabel} onRomanizeChange={setRomanize}
                       />

@@ -128,7 +128,7 @@ test('a paid top-up order becomes credits by its pack, never by the credits in t
   const c = topupChange(orderPaid())
   assert.ok(c)
   assert.equal(c.userId, 'u1'); assert.equal(c.pack, 'medium'); assert.equal(c.orderId, 'order_1')
-  assert.equal(c.credits, 150)
+  assert.equal(c.credits, 500)
   assert.equal(c.payment.id, 'pay_1'); assert.equal(c.payment.amountPaise, 49900)
 })
 

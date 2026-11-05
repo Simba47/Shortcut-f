@@ -23,6 +23,7 @@ import type Lenis from 'lenis'
 import { InsightsSection, ProblemSection, ProofSection } from '@/components/landing/sections'
 import { neutralStyle, useLiteMotion } from '@/components/ui/use-lite-motion'
 import { PLANS } from '@/lib/plans'
+import { readingLabel } from '@/lib/planFeatures'
 import { COMPANY, MODEL_CREDIT } from '@/lib/company'
 import { GMAIL_COMPOSE, openMailAppOnPhones } from '@/components/ui/email-link'
 
@@ -32,7 +33,7 @@ const business = PLANS.agency // shown as "Business"
 
 // Annual pricing is display-only for now: billing only supports monthly.
 // Every card lists the same rows (✓/✗) so plans are easy to compare.
-// Notes: video limits are totals, not monthly (see checkVideoQuota); AI clip
+// Notes: hours of video are a month on paid plans, once only on Free; AI clip
 // suggestions need a transcript, which only plans with auto-captions get.
 function planFeatures(plan: (typeof PLANS)[keyof typeof PLANS]) {
   return [
@@ -45,14 +46,13 @@ function planFeatures(plan: (typeof PLANS)[keyof typeof PLANS]) {
   ]
 }
 
-const videos = (n: number) => `${n} long video${n === 1 ? '' : 's'}`
 
 const PRICING_PLANS: PricingPlan[] = [
   {
     name: 'Free',
     price: free.price,
     yearlyPrice: free.price,
-    headline: `Process ${videos(free.maxVideos)}`,
+    headline: `Process ${readingLabel(free.readingMinutes)} of video`,
     subline: `Cut up to ${free.maxClips} clips`,
     features: planFeatures(free),
     buttonText: 'Start for free',
@@ -62,7 +62,7 @@ const PRICING_PLANS: PricingPlan[] = [
     name: 'Pro',
     price: pro.price,
     yearlyPrice: Math.round(pro.price * 0.8),
-    headline: `Process ${videos(pro.maxVideos)}`,
+    headline: `Process ${readingLabel(pro.readingMinutes)} of video a month`,
     subline: 'Cut as many clips as you want',
     features: planFeatures(pro),
     buttonText: 'Go Pro',
@@ -74,7 +74,7 @@ const PRICING_PLANS: PricingPlan[] = [
     name: 'Business',
     price: business.price,
     yearlyPrice: Math.round(business.price * 0.8),
-    headline: `Process ${videos(business.maxVideos)}`,
+    headline: `Process ${readingLabel(business.readingMinutes)} of video a month`,
     subline: 'Cut as many clips as you want',
     features: planFeatures(business),
     buttonText: 'Go Business',

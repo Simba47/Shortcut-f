@@ -139,6 +139,26 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
   }, [busy])
   useEffect(() => () => { stopAll(); abortMultipart(mpRef.current) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** The file's length, read once: sent when the upload starts, so the plan's hours are checked before it runs */
+  const durationRef = useRef<number | undefined>(undefined)
+  /**
+   * The part of this video past the plan's hours costs credits: asked before anything is uploaded.
+   * (Nothing asked when credits are off, or if the price can't be fetched: the server still checks.)
+   */
+  async function askReadingPrice(file: File) {
+    durationRef.current = await readDurationMs(file)
+    if (asset || !durationRef.current) return
+    const res = await fetch('/api/ingest/reading-price', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ duration_ms: durationRef.current }),
+    }).catch(() => null)
+    const p = await res?.json().catch(() => null) as { on?: boolean; credits?: number; overMs?: number; balance?: number } | null
+    if (!p?.on || !p.credits || !p.overMs) return
+    // (without enough credits the server refuses the upload and says so)
+    if (p.credits > (p.balance ?? 0)) return
+    const yes = window.confirm(`${Math.ceil(p.overMs / 60_000)} min of this video is past your plan's hours. Reading it costs ${p.credits} credits (₹${p.credits}). You have ${p.balance}. Upload it?`)
+    if (!yes) throw userError('Upload stopped. No credits were used.', true)
+  }
+
   async function sign(body: Record<string, unknown>) {
     const f = fileRef.current
     // (a request on a connection that died never answers: asked again after SIGN_TIMEOUT_MS)
@@ -147,7 +167,7 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
       res = await fetch('/api/ingest/sign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, file: f ? { name: f.name, size: f.size, type: f.type } : undefined, ...(asset ? { asset: true } : {}) }),
+        body: JSON.stringify({ ...body, file: f ? { name: f.name, size: f.size, type: f.type, ...(durationRef.current ? { duration_ms: durationRef.current } : {}) } : undefined, ...(asset ? { asset: true } : {}) }),
         signal: timed(SIGN_TIMEOUT_MS),
       })
     } catch (e) {
@@ -346,7 +366,7 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
 
   async function finish(file: File, key: string) {
     setState(s => ({ ...s, phase: 'finishing', progress: 100, loaded: file.size, bytesPerSec: null, secondsLeft: null }))
-    const durationMs = await readDurationMs(file)
+    const durationMs = durationRef.current ?? await readDurationMs(file)
     const res = await fetch('/api/ingest/complete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -365,7 +385,10 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
       let key = uploadedKeyRef.current
       if (!key) {
         await online()
-        if (!mpRef.current) mpRef.current = await create(file)
+        if (!mpRef.current) {
+          await askReadingPrice(file)
+          mpRef.current = await create(file)
+        }
         const mp = mpRef.current
         await uploadParts(file, mp)
         await complete(mp)

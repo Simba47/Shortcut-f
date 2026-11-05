@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  creditsMode, readingCredits, captionCredits, exportCredits, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS,
+  creditsMode, captionCredits, exportCredits, extraReadingCredits, captionSpan, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS,
   type SpendableGrant,
 } from './credits'
 import { PLANS } from './plans'
@@ -16,47 +16,61 @@ test('mode: off unless set; shadow and on are recognised; anything else is off',
   assert.equal(creditsMode({ CREDITS_MODE: 'yes' }), 'off')
 })
 
-test('a whole-video reading by Gemini (the fallback) costs 1 credit per started 10 minutes, at least 1', () => {
-  // (the worker's own speech model reads videos for free: no reading is charged then)
-  assert.equal(readingCredits(40 * MIN), 4)
-  assert.equal(readingCredits(40 * MIN + 1), 5)
-  assert.equal(readingCredits(70 * MIN), 7)
-  assert.equal(readingCredits(10_000), 1)
-  assert.equal(readingCredits(null), 1)
+test('clip captions cost 2 credits per started clip minute', () => {
+  assert.equal(captionCredits(30_000), 2)
+  assert.equal(captionCredits(90_000), 4)
+  assert.equal(captionCredits(2 * MIN), 4)
+  assert.equal(captionCredits(2 * MIN + 1), 6)
 })
 
-test('clip captions cost 1 credit per started clip minute, at least 1', () => {
-  assert.equal(captionCredits(30_000), 1)
-  assert.equal(captionCredits(2 * MIN), 2)
-  assert.equal(captionCredits(2 * MIN + 1), 3)
-})
-
-test('an export costs 1 credit up to 3 minutes, 2 up to 5 minutes, and is blocked beyond', () => {
+test('an export costs 1 credit per started clip minute, and is blocked past 5 minutes', () => {
+  assert.equal(exportCredits(30_000), 1)
   assert.equal(exportCredits(60_000), 1)
-  assert.equal(exportCredits(3 * MIN), 1)
-  assert.equal(exportCredits(3 * MIN + 1), 2)
-  assert.equal(exportCredits(5 * MIN), 2)
+  assert.equal(exportCredits(90_000), 2)
+  assert.equal(exportCredits(5 * MIN), 5)
   assert.equal(MAX_CLIP_MS, 5 * MIN)
   assert.throws(() => exportCredits(5 * MIN + 1), (e: { status?: number; message?: string }) => e.status === 400 && /5 minutes/.test(e.message ?? ''))
 })
 
 test('plans carry their monthly credits; the free plan gets a one-time grant instead', () => {
   assert.equal(PLANS.free.monthlyCredits, 0)
-  assert.equal(PLANS.starter.monthlyCredits, 200)
-  assert.equal(PLANS.creator.monthlyCredits, 400)
-  assert.equal(PLANS.agency.monthlyCredits, 1000)
-  assert.equal(FREE_SIGNUP_CREDITS, 30)
+  assert.equal(PLANS.starter.monthlyCredits, 120)
+  assert.equal(PLANS.creator.monthlyCredits, 200)
+  assert.equal(PLANS.agency.monthlyCredits, 500)
+  assert.equal(FREE_SIGNUP_CREDITS, 10)
 })
 
-test('a top-up pack costs more per credit than the cheapest plan whose month covers it', () => {
-  const perCredit = (price: number, credits: number) => price / credits
-  const plans = (['starter', 'creator', 'agency'] as const).map(k => PLANS[k])
+test('a credit is about ₹1: a pack never gives more than 3,000 credits for ₹2,799', () => {
+  assert.deepEqual(TOPUP_PACKS.map(p => [p.credits, p.price]), [[200, 199], [500, 499], [1250, 1199], [3000, 2799]])
   for (const pack of TOPUP_PACKS) {
-    const covering = plans.filter(p => p.monthlyCredits >= pack.credits).map(p => perCredit(p.price, p.monthlyCredits))
-    assert.ok(covering.length > 0, `no plan covers the ${pack.key} pack`)
-    assert.ok(perCredit(pack.price, pack.credits) > Math.min(...covering), `${pack.key} is cheaper than a plan`)
+    const perCredit = pack.price / pack.credits
+    assert.ok(perCredit >= 0.93 && perCredit <= 1, `${pack.key}: ₹${perCredit} a credit`)
   }
-  assert.deepEqual(TOPUP_PACKS.map(p => [p.credits, p.price]), [[50, 199], [150, 499], [400, 1199], [1000, 2799]])
+})
+
+test('reading past the plan: 15 credits per started 10 minutes, nothing when none is over', () => {
+  assert.equal(extraReadingCredits(0), 0)
+  assert.equal(extraReadingCredits(-5), 0)
+  assert.equal(extraReadingCredits(1), 15)
+  assert.equal(extraReadingCredits(10 * MIN), 15)
+  assert.equal(extraReadingCredits(10 * MIN + 1), 30)
+  assert.equal(extraReadingCredits(60 * MIN), 90)
+})
+
+const said = (start_ms: number, end_ms: number) => ({ start_ms, end_ms })
+test('captionSpan: no words means the whole clip is read', () => {
+  assert.deepEqual(captionSpan(10_000, 70_000, []), { start_ms: 10_000, end_ms: 70_000 })
+  assert.deepEqual(captionSpan(10_000, 70_000, [said(80_000, 81_000)]), { start_ms: 10_000, end_ms: 70_000 })
+})
+test('captionSpan: a clip with its captions needs nothing (a short pause at an edge is not a gap)', () => {
+  assert.equal(captionSpan(0, 60_000, [said(1_000, 2_000), said(30_000, 58_000)]), null)
+})
+test('captionSpan: made longer at one end, only the new part is read', () => {
+  assert.deepEqual(captionSpan(0, 60_000, [said(20_000, 21_000), said(40_000, 58_000)]), { start_ms: 0, end_ms: 20_000 })
+  assert.deepEqual(captionSpan(0, 60_000, [said(1_000, 2_000), said(30_000, 40_000)]), { start_ms: 40_000, end_ms: 60_000 })
+})
+test('captionSpan: made longer at both ends, the whole clip is read', () => {
+  assert.deepEqual(captionSpan(0, 60_000, [said(20_000, 40_000)]), { start_ms: 0, end_ms: 60_000 })
 })
 
 const at = (iso: string) => new Date(iso)

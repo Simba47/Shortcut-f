@@ -1,6 +1,9 @@
 // Credits: what each action costs and how spending picks which credits to use. Pure (no database,
 // no React) so the prices and the order of spending are tested on their own (credits.test.ts) and
 // the pricing page can read the same numbers the server charges.
+//
+// 1 credit = ₹1 (about ₹0.83 reaches us after GST and fees). Each price keeps 60%+ even on the
+// biggest top-up pack, from the 5 Nov costs (Shortcut-Unit-Economics-Nov-2026.pdf).
 
 /**
  * off:    nothing is recorded or checked (how the site ran before credits)
@@ -14,7 +17,7 @@ export function creditsMode(env: Record<string, string | undefined> = process.en
 }
 
 /** Given once, when an account is first seen with credits switched on (CREDITS_FREE_SIGNUP changes it; 0 gives none) */
-export const FREE_SIGNUP_CREDITS = 30
+export const FREE_SIGNUP_CREDITS = 10
 export function freeSignupCredits(env: Record<string, string | undefined> = process.env): number {
   const n = Number(env.CREDITS_FREE_SIGNUP)
   return env.CREDITS_FREE_SIGNUP !== undefined && env.CREDITS_FREE_SIGNUP.trim() !== '' && Number.isInteger(n) && n >= 0 ? n : FREE_SIGNUP_CREDITS
@@ -28,35 +31,49 @@ export const HOLD_TTL_HOURS = 6
 const MINUTE = 60_000
 const minutesStarted = (ms: number | null | undefined) => Math.max(1, Math.ceil((ms ?? 0) / MINUTE))
 
-/**
- * Edit with AI when Gemini reads the whole video (the fallback): 1 credit per started 10 minutes.
- * The worker's own speech model reads videos at about 1/20th of Gemini's cost, and that reading is
- * not charged at all (transcribe.ts charges only when it starts a Gemini reading). Was 1 a minute.
- */
-export const readingCredits = (videoMs: number | null | undefined) => Math.max(1, Math.ceil((videoMs ?? 0) / (10 * MINUTE)))
-/** Manual edit: captions for one clip only, 1 credit per started clip minute */
-export const captionCredits = (clipMs: number | null | undefined) => minutesStarted(clipMs)
+/** Reading past the plan's hours (the first search of that part included): per started 10 minutes. Costs us about ₹4.10 */
+export const EXTRA_READING_CREDITS = 15
+export const extraReadingCredits = (overMs: number) => (overMs > 0 ? EXTRA_READING_CREDITS * Math.ceil(overMs / (10 * MINUTE)) : 0)
 
-/** Exports up to this length cost EXPORT_CREDITS; up to MAX_CLIP_MS they cost LONG_EXPORT_CREDITS */
-export const SHORT_EXPORT_MS = 3 * MINUTE
+/** Manual edit: captions for one clip only, per started clip minute. Costs us about ₹0.59 */
+export const CAPTION_CREDITS_PER_MINUTE = 2
+export const captionCredits = (clipMs: number | null | undefined) => CAPTION_CREDITS_PER_MINUTE * minutesStarted(clipMs)
+
+/** Silence this long at a clip's start or end means that part has no captions yet */
+export const CAPTION_GAP_MS = 4000
+/**
+ * The part of a clip that "Get CC" reads and charges for: all of it with no words; only the new
+ * part when it was made longer at one end; all of it when made longer at both; null when it has
+ * its captions. Used by the editor for the price and by the server for the job, so they agree.
+ */
+export function captionSpan(startMs: number, endMs: number, words: { start_ms: number; end_ms: number }[]): { start_ms: number; end_ms: number } | null {
+  const inside = words.filter(w => w.start_ms >= startMs && w.start_ms < endMs)
+  if (!inside.length) return { start_ms: startMs, end_ms: endMs }
+  const first = Math.min(...inside.map(w => w.start_ms)), last = Math.max(...inside.map(w => w.end_ms))
+  const head = first - startMs > CAPTION_GAP_MS, tail = endMs - last > CAPTION_GAP_MS
+  if (head && tail) return { start_ms: startMs, end_ms: endMs }
+  if (head) return { start_ms: startMs, end_ms: first }
+  if (tail) return { start_ms: last, end_ms: endMs }
+  return null
+}
+
 export const MAX_CLIP_MS = 5 * MINUTE
-// (an export costs about ₹1.1 to make, 5 Nov; a credit brings in ₹2.08-2.49 after GST and fees)
-export const EXPORT_CREDITS = 1
-export const LONG_EXPORT_CREDITS = 2
+/** An export, per started clip minute: about ₹0.15 a minute to make (measured on clips of about a minute) */
+export const EXPORT_CREDITS_PER_MINUTE = 1
 export function exportCredits(clipMs: number | null | undefined): number {
   const ms = clipMs ?? 0
   if (ms > MAX_CLIP_MS) {
     throw Object.assign(new Error(`Clips can be up to ${MAX_CLIP_MS / MINUTE} minutes. Trim it to export.`), { status: 400, expose: true })
   }
-  return ms > SHORT_EXPORT_MS ? LONG_EXPORT_CREDITS : EXPORT_CREDITS
+  return EXPORT_CREDITS_PER_MINUTE * minutesStarted(ms)
 }
 
-/** Credit packs: always dearer per credit than any plan, so heavy users move up a plan */
+/** Credit packs: about ₹1 a credit, a little less on the bigger ones */
 export const TOPUP_PACKS = [
-  { key: 'small', credits: 50, price: 199 },
-  { key: 'medium', credits: 150, price: 499 },
-  { key: 'large', credits: 400, price: 1199 },
-  { key: 'bulk', credits: 1000, price: 2799 },
+  { key: 'small', credits: 200, price: 199 },
+  { key: 'medium', credits: 500, price: 499 },
+  { key: 'large', credits: 1250, price: 1199 },
+  { key: 'bulk', credits: 3000, price: 2799 },
 ] as const
 export type TopupPackKey = typeof TOPUP_PACKS[number]['key']
 

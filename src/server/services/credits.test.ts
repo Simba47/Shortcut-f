@@ -60,7 +60,7 @@ test('the free grant is given once per account', opts, async () => {
   try {
     await svc.ensureFreeGrant(u)
     await svc.ensureFreeGrant(u)
-    assert.equal((await svc.balance(u)).balance, 30)
+    assert.equal((await svc.balance(u)).balance, 10)
   } finally { if (before !== undefined) process.env.CREDITS_FREE_SIGNUP = before }
 })
 
@@ -183,7 +183,7 @@ test('a billing cycle grants its plan credits once, to last until the end of the
   assert.equal((await svc.grantPlanCredits(u, 'creator', 'sub_1:2026-11', cycleEnd)).granted, true)
   assert.equal((await svc.grantPlanCredits(u, 'creator', 'sub_1:2026-11', cycleEnd)).granted, false)
   const [g] = await sql<{ amount: number; expires_at: Date }[]>`SELECT amount, expires_at FROM credit_grants WHERE user_id = ${u}`
-  assert.equal(g.amount, 400)
+  assert.equal(g.amount, 200)
   assert.ok(g.expires_at.getTime() > cycleEnd.getTime() + 25 * 86_400_000, 'rolls over one more month')
 })
 

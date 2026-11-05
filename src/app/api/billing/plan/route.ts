@@ -4,6 +4,7 @@ import { getUserPlan, getUserPlanConfig } from '@/server/services/quota'
 import sql from '@/lib/db'
 import { razorpayConfigured, razorpayMode } from '@/lib/razorpay'
 import { subscriptionSummary } from '@/server/services/billing'
+import { readingUse } from '@/server/services/readingUsage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -28,11 +29,15 @@ export async function GET() {
     `,
   ])
 
+  const reading = await readingUse(user.id).catch(() => ({ uploads: 0, usedMs: 0 }))
+
   return NextResponse.json({
     plan: planKey,
     planName: plan.name,
     price: plan.price,
     maxVideos: plan.maxVideos,
+    readingMinutes: plan.readingMinutes,
+    uploadsPerMonth: plan.uploadsPerMonth,
     maxClips: plan.maxClips,
     maxFileSizeGb: plan.maxFileSizeGb,
     maxFileSizeBytes: plan.maxFileSizeBytes,
@@ -48,6 +53,8 @@ export async function GET() {
     usage: {
       videos: parseInt(videoRow[0]?.count ?? '0', 10),
       clips: parseInt(clipRow[0]?.count ?? '0', 10),
+      uploads: reading.uploads,
+      readingMinutes: Math.ceil(reading.usedMs / 60_000),
     },
   })
 }

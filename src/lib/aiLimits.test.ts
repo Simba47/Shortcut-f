@@ -2,16 +2,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { PLANS } from './plans'
 import {
-  aiLimitsFor, videoClipCap, extraSearchCredits, clipsAllowed, istDayStart, istMonthStart, rewriteCredits, extraClipCredits,
+  aiLimitsFor, videoClipCap, extraSearchCredits, clipsAllowed, istDayStart, istMonthStart, rewriteCredits, extraClipCredits, allowanceSince, readingQuote,
 } from './aiLimits'
 
 const MIN = 60_000
 
 test('each plan has its AI limits; clips per run, searches per video and daily clips grow with the plan', () => {
-  assert.deepEqual(aiLimitsFor('free'), { clipsPerRun: 3, clipsPerDay: 3, clipsPerMonth: 3, searchesPerVideo: 1, askAiPerMonth: 10, askAiPerDay: 5, rewritesPerMonth: 20 })
-  assert.deepEqual(aiLimitsFor('starter'), { clipsPerRun: 10, clipsPerDay: 30, clipsPerMonth: 60, searchesPerVideo: 3, askAiPerMonth: 100, askAiPerDay: 30, rewritesPerMonth: 150 })
-  assert.deepEqual(aiLimitsFor('creator'), { clipsPerRun: 15, clipsPerDay: 60, clipsPerMonth: 120, searchesPerVideo: 3, askAiPerMonth: 200, askAiPerDay: 50, rewritesPerMonth: 300 })
-  assert.deepEqual(aiLimitsFor('agency'), { clipsPerRun: 20, clipsPerDay: 150, clipsPerMonth: 300, searchesPerVideo: 5, askAiPerMonth: 600, askAiPerDay: 150, rewritesPerMonth: 1000 })
+  assert.deepEqual(aiLimitsFor('free'), { clipsPerRun: 3, clipsPerDay: 3, clipsPerMonth: 3, searchesPerVideo: 1, askAiPerMonth: 3, askAiPerDay: 3, rewritesPerMonth: 20 })
+  assert.deepEqual(aiLimitsFor('starter'), { clipsPerRun: 10, clipsPerDay: 30, clipsPerMonth: 20, searchesPerVideo: 3, askAiPerMonth: 10, askAiPerDay: 10, rewritesPerMonth: 30 })
+  assert.deepEqual(aiLimitsFor('creator'), { clipsPerRun: 15, clipsPerDay: 60, clipsPerMonth: 30, searchesPerVideo: 3, askAiPerMonth: 15, askAiPerDay: 15, rewritesPerMonth: 60 })
+  assert.deepEqual(aiLimitsFor('agency'), { clipsPerRun: 20, clipsPerDay: 150, clipsPerMonth: 80, searchesPerVideo: 5, askAiPerMonth: 40, askAiPerDay: 40, rewritesPerMonth: 150 })
   assert.equal(PLANS.creator.ai.clipsPerRun, 15)
   assert.deepEqual(aiLimitsFor('nonsense'), aiLimitsFor('free'))
 })
@@ -23,11 +23,11 @@ test('a video can have at most 1 AI clip per minute of video (at least 1)', () =
   assert.equal(videoClipCap(null), 1)
 })
 
-test('a fresh search beyond the included ones costs 1 credit per started 10 minutes of video', () => {
-  assert.equal(extraSearchCredits(5 * MIN), 1)
-  assert.equal(extraSearchCredits(10 * MIN), 1)
-  assert.equal(extraSearchCredits(10 * MIN + 1), 2)
-  assert.equal(extraSearchCredits(60 * MIN), 6)
+test('a fresh search beyond the included ones costs 5 credits per started 10 minutes of video', () => {
+  assert.equal(extraSearchCredits(5 * MIN), 5)
+  assert.equal(extraSearchCredits(10 * MIN), 5)
+  assert.equal(extraSearchCredits(10 * MIN + 1), 10)
+  assert.equal(extraSearchCredits(60 * MIN), 30)
 })
 
 test('a run makes the lowest of: asked, the plan per run, what is left today, what is left for the video', () => {
@@ -53,13 +53,34 @@ test('rewrites past the allowance cost 1 credit for every 5 (charged on the 1st,
   assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 10].map(rewriteCredits), [1, 0, 0, 0, 0, 1, 0, 1])
 })
 
-test('AI clips past the month\'s included ones cost 1 credit each; the included ones are used first', () => {
+test('AI clips past the month\'s included ones cost 5 credits each; the included ones are used first', () => {
   assert.deepEqual(extraClipCredits(5, 60), { extra: 0, credits: 0 })
-  assert.deepEqual(extraClipCredits(5, 2), { extra: 3, credits: 3 })
-  assert.deepEqual(extraClipCredits(5, 0), { extra: 5, credits: 5 })
-  assert.deepEqual(extraClipCredits(5, -4), { extra: 5, credits: 5 })
+  assert.deepEqual(extraClipCredits(5, 2), { extra: 3, credits: 15 })
+  assert.deepEqual(extraClipCredits(5, 0), { extra: 5, credits: 25 })
+  assert.deepEqual(extraClipCredits(5, -4), { extra: 5, credits: 25 })
 })
 
 test('each plan includes fewer AI clips a month than its credits could pay to read (1 clip per video minute)', () => {
   for (const p of Object.values(PLANS)) if (p.monthlyCredits) assert.ok(p.ai.clipsPerMonth <= p.monthlyCredits / 3, p.key)
+})
+
+test('a paid plan counts from the start of the India month, Free counts everything it ever used', () => {
+  const now = new Date('2026-11-20T10:00:00Z')
+  assert.equal(allowanceSince('starter', now).toISOString(), istMonthStart(now).toISOString())
+  assert.equal(allowanceSince('free', now).getTime(), 0)
+  assert.equal(allowanceSince('nonsense', now).getTime(), 0)
+})
+
+const HOUR = 60 * 60_000
+test('readingQuote: inside the plan is free; only the part past it costs credits', () => {
+  const plan = { uploadsPerMonth: 10, readingMinutes: 180 }
+  assert.deepEqual(readingQuote(plan, { uploads: 0, usedMs: 0 }, HOUR), { uploadsLeft: 10, msLeft: 3 * HOUR, overMs: 0, credits: 0 })
+  // 2.5 hours used and a 1-hour video: 30 minutes are past it, 3 × 15 credits
+  assert.deepEqual(readingQuote(plan, { uploads: 4, usedMs: 2.5 * HOUR }, HOUR), { uploadsLeft: 6, msLeft: 0.5 * HOUR, overMs: 0.5 * HOUR, credits: 45 })
+  // already past it: all of the video
+  assert.deepEqual(readingQuote(plan, { uploads: 9, usedMs: 3.2 * HOUR }, HOUR), { uploadsLeft: 1, msLeft: 0, overMs: HOUR, credits: 90 })
+})
+test('readingQuote: a video of unknown length is priced at nothing yet, and the uploads never go below 0', () => {
+  const plan = { uploadsPerMonth: 10, readingMinutes: 180 }
+  assert.deepEqual(readingQuote(plan, { uploads: 12, usedMs: 0 }, null), { uploadsLeft: 0, msLeft: 3 * HOUR, overMs: 0, credits: 0 })
 })

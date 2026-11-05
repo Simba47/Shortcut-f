@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'clip_id and language_code required' }, { status: 400 })
   }
   try {
-    const jobId = await queueRetranscribe(user.id, body.clip_id, body.language_code)
+    const jobId = await queueRetranscribe(user.id, body.clip_id, body.language_code, undefined, { readAll: body.read_all === true })
     return NextResponse.json({ ok: true, job_id: jobId ?? null })
   } catch (err: unknown) {
     const e = err as { message?: string; status?: number }

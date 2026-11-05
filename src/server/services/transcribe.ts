@@ -1,9 +1,14 @@
 import sql from '@/lib/db'
-import { readingCredits, captionCredits } from '@/lib/credits'
+import { captionCredits, captionSpan } from '@/lib/credits'
 import { charge, linkJob } from './credits'
 
 // renderAfter: when set, the worker queues this render job once transcription finishes
-export async function queueRetranscribe(userId: string, clipId: string, languageCode: string, renderAfter?: { clip_id: string; video_storage_path: string; quality: string; watermark: boolean; user_id?: string; priority?: boolean }) {
+export async function queueRetranscribe(
+  userId: string, clipId: string, languageCode: string,
+  renderAfter?: { clip_id: string; video_storage_path: string; quality: string; watermark: boolean; user_id?: string; priority?: boolean },
+  /** Regenerate: read all of the clip again, words or no words */
+  opts: { readAll?: boolean } = {},
+) {
   const [row] = await sql`
     SELECT c.video_id, c.start_ms, c.end_ms, v.storage_path, v.user_id
     FROM clips c JOIN videos v ON v.id = c.video_id
@@ -25,6 +30,22 @@ export async function queueRetranscribe(userId: string, clipId: string, language
     if (existing?.language) resolvedLang = existing.language
   }
 
+  // "Get CC" (no language picked, no fresh-captions export): only what has no words is read and
+  // paid for, nothing at all on a video already read in full. Anything else reads the whole clip.
+  const fillGaps = !renderAfter && !opts.readAll && (!languageCode || languageCode === 'unknown')
+  let span = { start_ms: row.start_ms as number, end_ms: row.end_ms as number }
+  let free = false
+  if (fillGaps) {
+    const [latest] = await sql<{ id: string; whole_video: boolean | null }[]>`
+      SELECT id, whole_video FROM transcripts WHERE video_id = ${row.video_id} ORDER BY created_at DESC LIMIT 1`
+    if (latest?.whole_video) free = true
+    else if (latest) {
+      const words = await sql<{ start_ms: number; end_ms: number }[]>`
+        SELECT start_ms, end_ms FROM transcript_words WHERE transcript_id = ${latest.id} AND start_ms >= ${row.start_ms} AND start_ms < ${row.end_ms}`
+      span = captionSpan(row.start_ms, row.end_ms, words) ?? span
+    }
+  }
+
   const { getUserPlanConfig } = await import('./quota')
   const plan = await getUserPlanConfig(userId)
   const payload = {
@@ -33,20 +54,19 @@ export async function queueRetranscribe(userId: string, clipId: string, language
     language_code: resolvedLang,
     is_retranscribe: true,
     clip_id: clipId,
-    clip_start_ms: row.start_ms,
-    clip_end_ms: row.end_ms,
+    clip_start_ms: span.start_ms,
+    clip_end_ms: span.end_ms,
     user_id: userId,
     // The top plan: first in the worker's line and in the shared Google line, as its exports
     ...(plan.priorityExports ? { priority: true } : {}),
-    // "Captions on" (no language picked, no fresh-captions export): only parts with no words need
-    // reading, so a video already read in full needs no new reading (the worker checks)
-    ...(!renderAfter && (!languageCode || languageCode === 'unknown') ? { fill_gaps: true } : {}),
+    // (a video already read in full needs no new reading: the worker checks)
+    ...(fillGaps ? { fill_gaps: true } : {}),
     ...(renderAfter ? { render_after: renderAfter } : {}),
   }
-  // Captions for this clip alone: 1 credit per clip minute. The hold and the job are made together,
-  // so a clip that cannot be paid for queues nothing.
+  // Captions for this clip alone, its main video: per started minute of what is read. The hold and
+  // the job are made together, so a clip that cannot be paid for queues nothing.
   const job = await sql.begin(async tx => {
-    const hold = await charge(userId, { amount: captionCredits(row.end_ms - row.start_ms), refType: 'caption', refId: clipId }, tx)
+    const hold = free ? null : await charge(userId, { amount: captionCredits(span.end_ms - span.start_ms), refType: 'caption', refId: clipId }, tx)
     const [made] = await tx`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${tx.json(payload)}, 'queued') RETURNING id`
     if (hold && made) await linkJob(hold.id, made.id, tx)
     return made
@@ -96,11 +116,9 @@ export async function ensureVideoTranscript(videoId: string): Promise<'ready' | 
         SELECT 1 FROM jobs WHERE type = 'transcribe' AND payload->>'video_id' = ${videoId}
           AND payload->>'transcribe_full' = 'true' AND status IN ('queued', 'processing') LIMIT 1`
       if (busy) return
-      // The whole video is read once: 1 credit per video minute, charged here, in the same
-      // transaction as the job, so a user who cannot pay queues nothing (402)
-      const hold = await charge(video.user_id, { amount: readingCredits(video.duration_ms), refType: 'transcribe', refId: videoId }, tx)
-      const [made] = await tx`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${tx.json(payload)}, 'queued') RETURNING id`
-      if (hold && made) await linkJob(hold.id, made.id, tx)
+      // A Gemini reading happens when our transcriber could not read the video: on us, not charged.
+      // Reading is counted against the plan's hours at upload (readingUsage.ts).
+      await tx`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${tx.json(payload)}, 'queued')`
     })
   }
   return 'running'

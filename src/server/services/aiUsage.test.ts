@@ -90,17 +90,17 @@ test('fresh searches: included per plan, then priced by the video length; a fail
   const bad = await run(videoId, 1, 0, 'failed'); await ai.recordSearch(userId, videoId, 'make_clips', bad, 0)
   assert.deepEqual(pick(await ai.clipAllowance(userId, videoId)), { searchesUsed: 2, searchesIncluded: 3, nextSearchCredits: 0 })
   await ai.recordSearch(userId, videoId, 'best_moments', null, 0)
-  assert.deepEqual(pick(await ai.clipAllowance(userId, videoId)), { searchesUsed: 3, searchesIncluded: 3, nextSearchCredits: 6 })
+  assert.deepEqual(pick(await ai.clipAllowance(userId, videoId)), { searchesUsed: 3, searchesIncluded: 3, nextSearchCredits: 30 })
 })
 const pick = (a: { searchesUsed: number; searchesIncluded: number; nextSearchCredits: number }) =>
   ({ searchesUsed: a.searchesUsed, searchesIncluded: a.searchesIncluded, nextSearchCredits: a.nextSearchCredits })
 
-test('Ask AI: free within the month\'s allowance, then 1 credit each; refused with 402 when credits run out', opts, async () => {
-  const { userId, videoId } = await setup('free', 20 * MIN, 1)   // free plan: 10 a month, 5 a day
-  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${userId}, 'ask_ai', ${await monthStart()} FROM generate_series(1, 10)`
+test('Ask AI: free within the allowance, then 7 credits each; refused with 402 when credits run out', opts, async () => {
+  const { userId, videoId } = await setup('free', 20 * MIN, 7)   // free plan: 3 in total, 3 a day
+  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${userId}, 'ask_ai', ${await monthStart()} FROM generate_series(1, 3)`
   await withAskAiDayCap('free', 1000, async () => {
     const a1 = await ai.beginAiAction(userId, 'ask_ai', videoId)
-    assert.equal(a1.credits, 1)
+    assert.equal(a1.credits, 7)
     await a1.done()
     assert.equal((await credits.balance(userId)).balance, 0)
     await assert.rejects(ai.beginAiAction(userId, 'ask_ai', videoId), (e: { status?: number }) => e.status === 402)
@@ -109,16 +109,16 @@ test('Ask AI: free within the month\'s allowance, then 1 credit each; refused wi
 
 test('Ask AI: the daily cap holds even with credits, and a failed search gives its credit and count back', opts, async () => {
   const { userId, videoId } = await setup('free', 20 * MIN, 50)
-  for (let i = 0; i < 5; i++) await (await ai.beginAiAction(userId, 'ask_ai', videoId)).done()
+  for (let i = 0; i < 3; i++) await (await ai.beginAiAction(userId, 'ask_ai', videoId)).done()
   await assert.rejects(ai.beginAiAction(userId, 'ask_ai', videoId), (e: { status?: number; message?: string }) => e.status === 429 && /today/i.test(e.message ?? ''))
   // a failure: back to where it was
-  const { userId: u2, videoId: v2 } = await setup('starter', 20 * MIN, 5)
-  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${u2}, 'ask_ai', ${await monthStart()} FROM generate_series(1, 100)`
+  const { userId: u2, videoId: v2 } = await setup('starter', 20 * MIN, 8)
+  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${u2}, 'ask_ai', ${await monthStart()} FROM generate_series(1, 10)`
   const h = await withAskAiDayCap('starter', 1000, () => ai.beginAiAction(u2, 'ask_ai', v2))
-  assert.equal((await credits.balance(u2)).balance, 4)
+  assert.equal((await credits.balance(u2)).balance, 1)
   await h.fail()
-  assert.equal((await credits.balance(u2)).balance, 5)
-  assert.equal((await ai.aiActionCounts(u2)).askAiThisMonth, 100)
+  assert.equal((await credits.balance(u2)).balance, 8)
+  assert.equal((await ai.aiActionCounts(u2)).askAiThisMonth, 10)
 })
 
 test('rewrites: the allowance, then 1 credit for every 5', opts, async () => {
@@ -155,4 +155,12 @@ test('AI cost is recorded per call with its tokens and an estimated price', opts
   const rows = await sql<{ model: string; cost_micro_usd: string | null }[]>`SELECT model, cost_micro_usd FROM ai_usage WHERE user_id = ${userId} ORDER BY id`
   assert.equal(Number(rows[0].cost_micro_usd), 300_000 + 250_000)   // $0.30 in + $0.25 out
   assert.equal(rows[1].cost_micro_usd, null)                          // no price known: tokens only
+})
+
+test('Free\'s allowances are once only: last month\'s use still counts; a paid plan starts again', opts, async () => {
+  const { userId: free } = await setup('free', 20 * MIN)
+  const { userId: paid } = await setup('starter', 20 * MIN)
+  for (const u of [free, paid]) await sql`INSERT INTO ai_actions (user_id, kind, created_at) VALUES (${u}, 'ask_ai', now() - interval '60 days')`
+  assert.equal((await ai.aiActionCounts(free)).askAiThisMonth, 1)
+  assert.equal((await ai.aiActionCounts(paid)).askAiThisMonth, 0)
 })

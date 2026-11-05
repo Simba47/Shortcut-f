@@ -16,9 +16,9 @@ export async function queueRender(userId: string, clipId: string, quality: Rende
   if (row.status === 'rendering') throw Object.assign(new Error('Already rendering'), { status: 409 })
   if (!row.storage_path) throw Object.assign(new Error('Video not ready (no storage path)'), { status: 400 })
 
-  // Credits: 2 for a clip up to 3 minutes, 3 up to 5 minutes, none longer (checked only when credits
-  // are on, so the site behaves as before until then). Taken before anything changes, given back if
-  // the export cannot be queued.
+  // Credits: per started clip minute, up to 5 minutes (checked only when credits are on, so the site
+  // behaves as before until then). Taken before anything changes, given back if the export cannot
+  // be queued.
   let hold: Hold | null = null
   if (creditsMode() !== 'off') {
     hold = await charge(userId, { amount: exportCredits(row.end_ms - row.start_ms), refType: 'render', refId: clipId })

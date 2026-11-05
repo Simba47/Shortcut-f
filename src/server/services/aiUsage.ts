@@ -1,7 +1,7 @@
 import sql from '@/lib/db'
 import { creditsMode } from '@/lib/credits'
 import {
-  aiLimitsFor, videoClipCap, extraSearchCredits, istDayStart, istMonthStart, rewriteCredits,
+  aiLimitsFor, allowanceSince, videoClipCap, extraSearchCredits, istDayStart, rewriteCredits,
   ASK_AI_EXTRA_CREDITS, AI_REQUESTS_PER_MINUTE, EXTRA_CLIP_CREDITS,
 } from '@/lib/aiLimits'
 import { charge, release, settle, type Hold } from './credits'
@@ -129,7 +129,8 @@ const runClips = sql`
 
 export async function clipAllowance(userId: string, videoId: string): Promise<ClipAllowance> {
   await ensureAiUsageSchema()
-  const limits = aiLimitsFor(await getUserPlan(userId))
+  const planKey = await getUserPlan(userId)
+  const limits = aiLimitsFor(planKey)
   const [video] = await sql<{ duration_ms: number | null }[]>`SELECT duration_ms FROM videos WHERE id = ${videoId} AND user_id = ${userId}`
   if (!video) throw fail('Not found', 404)
   const [today] = await sql<{ n: string }[]>`
@@ -137,7 +138,7 @@ export async function clipAllowance(userId: string, videoId: string): Promise<Cl
     WHERE v.user_id = ${userId} AND j.created_at >= ${istDayStart()}`
   const [month] = await sql<{ n: string }[]>`
     SELECT COALESCE(SUM(${runClips}), 0) AS n FROM ai_edit_jobs j JOIN videos v ON v.id = j.video_id
-    WHERE v.user_id = ${userId} AND j.created_at >= ${istMonthStart()}`
+    WHERE v.user_id = ${userId} AND j.created_at >= ${allowanceSince(planKey)}`
   const [forVideo] = await sql<{ n: string }[]>`SELECT COALESCE(SUM(${runClips}), 0) AS n FROM ai_edit_jobs j WHERE j.video_id = ${videoId}`
   const [searches] = await sql<{ n: number }[]>`
     SELECT count(*)::int AS n FROM moment_searches s LEFT JOIN ai_edit_jobs j ON j.id = s.ai_edit_job_id
@@ -162,11 +163,12 @@ export type AiActionKind = 'ask_ai' | 'rewrite'
 
 export async function aiActionCounts(userId: string): Promise<{ askAiThisMonth: number; askAiToday: number; rewritesThisMonth: number; lastMinute: number }> {
   await ensureAiUsageSchema()
+  const since = allowanceSince(await getUserPlan(userId))
   const [r] = await sql<{ am: number; ad: number; rm: number; lm: number }[]>`
     SELECT
-      count(*) FILTER (WHERE kind = 'ask_ai' AND created_at >= ${istMonthStart()})::int AS am,
+      count(*) FILTER (WHERE kind = 'ask_ai' AND created_at >= ${since})::int AS am,
       count(*) FILTER (WHERE kind = 'ask_ai' AND created_at >= ${istDayStart()})::int AS ad,
-      count(*) FILTER (WHERE kind = 'rewrite' AND created_at >= ${istMonthStart()})::int AS rm,
+      count(*) FILTER (WHERE kind = 'rewrite' AND created_at >= ${since})::int AS rm,
       count(*) FILTER (WHERE created_at >= now() - interval '1 minute')::int AS lm
     FROM ai_actions WHERE user_id = ${userId}`
   return { askAiThisMonth: r.am, askAiToday: r.ad, rewritesThisMonth: r.rm, lastMinute: r.lm }

@@ -8,6 +8,8 @@ import type { Clip, Segment, CropBox, BoxKeyframe, CaptionStyle, TextOverlay, Au
 import { VideoPreview, OutputCanvas, buildCaptionChunks, captionWordsPerLine, captionDefaultY } from '@/components/editor/VideoPreview'
 import { withoutRanges, computeCutRanges, reactionRanges } from '@/lib/cuts'
 import { inLineText } from '@/lib/inLine'
+import { CAPTION_CREDITS_PER_MINUTE, CAPTION_GAP_MS, captionCredits, captionSpan, exportCredits } from '@/lib/credits'
+import { useCredits } from '@/lib/useCredits'
 import { cleanTrims, trimMap, addTrim, wordsOnTimeline, MAX_CLIP_MS, MIN_CLIP_MS } from '@/lib/trims'
 import { toTimelineState, toSourceState, rippleDelete, rippleStretch, lockedInRange, insertAtStart, extendEnd, type TimedState } from '@/modules/editor/trimState'
 import { insertsOf, insertedMs, rippleInsert, isInsert, goesAfterMain, piecesOf, piecesLength, videoAtPieces, timelineAtPieces, rippleCut, pieceAt, speedOf, pieceVideoMs, mainFrom } from '@/modules/editor/inserts'
@@ -1661,7 +1663,6 @@ export function EditorShell({
    * more than CAPTION_GAP_MS at its start or end with none (the clip was made longer after its
    * captions were made). A pause that long at an end is rare; captioning it again is cheap.
    */
-  const CAPTION_GAP_MS = 4000
   function needsCaptions(): boolean {
     const kept = trim.kept
     if (!kept.length) return false
@@ -1688,21 +1689,54 @@ export function EditorShell({
     await handleSave()
     handleRetranscribe('unknown')
   }
-  /** Captions on: made now for this clip if any part of it has none yet (nothing is captioned until asked) */
+  /** Captions on or off. Nothing is read until Get CC is pressed: it costs credits, so the price comes first */
   function turnCaptions(on: boolean) {
     setShowCaptions(on)
-    if (on && needsCaptions()) makeCaptions()
   }
-  // Captions are on and the clip was just made longer: caption the new part too (once the drag is over)
-  const captionAfterEdgeRef = useRef(false)
-  const [edgeDragsDone, setEdgeDragsDone] = useState(0)
-  useEffect(() => {
-    if (!captionAfterEdgeRef.current) return
-    captionAfterEdgeRef.current = false
-    if (showCaptions && needsCaptions()) makeCaptions()
-  }, [edgeDragsDone]) // eslint-disable-line react-hooks/exhaustive-deps
+  const { credits, refresh: refreshCredits } = useCredits()
+  /** The part of the clip Get CC reads, and its price: the server works it out the same way (captionSpan) */
+  function captionQuote() {
+    const kept = trim.kept
+    const start = kept[0]?.[0] ?? clip.start_ms, end = kept[kept.length - 1]?.[1] ?? clip.end_ms
+    const span = captionSpan(start, end, sourceWords) ?? { start_ms: start, end_ms: end }
+    const ms = span.end_ms - span.start_ms
+    return { ms, credits: captionCredits(ms), newPart: ms < end - start }
+  }
+  /** Asks before a step that makes captions on its own (Post, Cleanup). With credits off there is no price to ask about. */
+  function withCaptionPrice(go: () => void, notNow?: () => void) {
+    if (!credits) { go(); return }
+    const q = captionQuote()
+    confirm({
+      title: `Get captions for ${q.credits} credits (₹${q.credits})?`,
+      body: `This needs the clip's captions first, from its main video. You have ${credits.balance} credits.`,
+      confirmLabel: 'Get CC', cancelLabel: 'Not now', onCancel: notNow,
+    }, go)
+  }
+  /** Regenerate reads all of the clip again, words or no words */
+  function askRegenerate() {
+    const clipMs = trim.kept.length ? trim.kept[trim.kept.length - 1][1] - trim.kept[0][0] : clip.end_ms - clip.start_ms
+    const go = async () => { setRetranscribing(true); await handleSave(); handleRetranscribe('unknown', true) }
+    if (!credits) { void go(); return }
+    const price = captionCredits(clipMs)
+    confirm({
+      title: `Regenerate captions for ${price} credits (₹${price})?`,
+      body: `All of this clip is read again, from its main video, and caption words you corrected are replaced. You have ${credits.balance} credits.`,
+      confirmLabel: 'Regenerate', cancelLabel: 'Not now',
+    }, () => { void go() })
+  }
+  /** Re-render when part of the clip has no captions: the export reads all of the clip first, so both prices are asked about */
+  function askRender() {
+    if (!needsCaptions() || !credits) { requestExport(needsCaptions()); return }
+    const clipMs = trim.kept.length ? trim.kept[trim.kept.length - 1][1] - trim.kept[0][0] : clip.end_ms - clip.start_ms
+    const price = captionCredits(clipMs), render = exportCredits(clipLengthMs)
+    confirm({
+      title: `Render with captions for ${price + render} credits (₹${price + render})?`,
+      body: `Part of this clip has no captions, so all of it is read first (${price} credits), then exported (${render}). You have ${credits.balance} credits.`,
+      confirmLabel: 'Render', cancelLabel: 'Not now',
+    }, () => requestExport(true))
+  }
 
-  async function handleRetranscribe(languageCode: string) {
+  async function handleRetranscribe(languageCode: string, readAll = false) {
     setRetranscribing(true); setRetranscribeElapsed(0); setRetranscribeError(null); setRetranscribePlace(null)
     if (retranscribeTimerRef.current) clearInterval(retranscribeTimerRef.current)
     const startedAt = Date.now()
@@ -1716,12 +1750,13 @@ export function EditorShell({
     try {
       const res = await fetch('/api/transcribe/retranscribe', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clip_id: clip.id, language_code: languageCode }),
+        body: JSON.stringify({ clip_id: clip.id, language_code: languageCode, ...(readAll ? { read_all: true } : {}) }),
       })
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}))
         throw new Error(errBody?.error ?? `Retranscription failed (${res.status})`)
       }
+      refreshCredits()
       const videoId = (clip as unknown as { video_id: string }).video_id
       const queuedAt = new Date().toISOString()
       const { job_id: jobId } = await res.json().catch(() => ({})) as { job_id?: string | null }
@@ -1742,6 +1777,7 @@ export function EditorShell({
             if (failed) {
               stopTimer(); setRetranscribing(false)
               setRetranscribeError(`Captions couldn't be made: ${failed}`)
+              refreshCredits()
               return
             }
           }
@@ -4504,7 +4540,7 @@ export function EditorShell({
       edgeBaseRef.current = base
       pause()
     }
-    if (done) { edgeBaseRef.current = null; setEdgeDragsDone(n => n + 1) }
+    if (done) edgeBaseRef.current = null
     const lim = base.limits
     const d = Math.round(edge === 'start'
       ? Math.max(-lim.startEarlier, Math.min(lim.startLater, delta))
@@ -4518,8 +4554,6 @@ export function EditorShell({
     }
     const step = edgeStep(base, edge, d)
     if (!step) return
-    if (step.added) captionAfterEdgeRef.current = true
-    if (!done) captionAfterEdgeRef.current = false   // only once the drag is over
     skipCanvasTransitionRef.current = true
     seekAfterTrimRef.current = step.playhead
     editor.applyTrim(step.next.segments, step.next.keyframes, cleanTrims(base.trims, step.start, step.end), [step.start, step.end])
@@ -5654,8 +5688,11 @@ export function EditorShell({
     if (!needsCaptions()) return Promise.resolve()
     if (isFreePlan) return Promise.reject(new Error('Captions aren\u2019t part of the Free plan, so there are no words to work from.'))
     return new Promise((resolve, reject) => {
-      captionsWaitRef.current = { resolve, reject, started: transcribing || retranscribing }
-      if (!transcribing && !retranscribing) { setRetranscribeError(null); makeCaptions() }
+      if (transcribing || retranscribing) { captionsWaitRef.current = { resolve, reject, started: true }; return }
+      withCaptionPrice(() => {
+        captionsWaitRef.current = { resolve, reject, started: false }
+        setRetranscribeError(null); makeCaptions()
+      }, () => reject(new Error('No captions were made, so nothing was used.')))
     })
   }
   useEffect(() => {
@@ -6797,6 +6834,14 @@ export function EditorShell({
                             style={{ top: 3, left: showCaptions ? 21 : 3, width: 16, height: 16, background: showCaptions ? '#0a0a0a' : '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
                         </button>
                       </div>
+                      {needsCaptions() && !transcribing && !retranscribing && (() => {
+                        const q = captionQuote()
+                        return (
+                          <GetCaptions lengthMs={q.ms} price={q.credits} newPart={q.newPart} balance={credits?.balance ?? null} freePlan={isFreePlan}
+                            hasAddedVideos={shots.length > 0 || segments.some(sg => isInsert(sg, mainVideoId))}
+                            onGet={() => { setShowCaptions(true); setRetranscribeError(null); makeCaptions() }} />
+                        )
+                      })()}
                     </div>
 
                     {showCaptions && words.length > 0 && (
@@ -6841,7 +6886,7 @@ export function EditorShell({
                       onChange={changeCaptionStyle}
                       onTextCaseChange={setCaptionTextCase}
                       onEditCaptions={() => setEditingTranscript(true)}
-                      onRetranscribe={handleRetranscribe}
+                      onRetranscribe={askRegenerate}
                       retranscribing={retranscribing} retranscribeElapsed={retranscribeElapsed} retranscribePlace={retranscribePlace}
                       retranscribeError={retranscribeError} hasWords={words.length > 0}
                       hasRoman={hasRoman} romanize={romanize} romanizeLabel={scriptLabel}
@@ -7206,7 +7251,7 @@ export function EditorShell({
                   {/* (with the captions as they are: read again only where part of the clip has none — it was
                       made longer. Reading the whole clip again every time changed its words from the ones
                       in the preview and threw corrections away: user, 2026-11-04) */}
-                  <button onClick={() => requestExport(needsCaptions())} aria-label="Re-render"
+                  <button onClick={askRender} aria-label="Re-render"
                     title="Render again with your latest edits"
                     className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
                     style={{ color: 'rgb(var(--ed-fg) / 0.75)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }}>
@@ -7229,7 +7274,7 @@ export function EditorShell({
                   data-pressed={exportPress || undefined}
                   className="ed-export rounded-[10px]"
                   surfaceClassName="gap-1.5 h-8 px-3.5 text-xs font-bold">
-                  <ExportIcon /> Export
+                  <ExportIcon /> Export{credits && clipLengthMs <= MAX_CLIP_MS ? ` · ${exportCredits(clipLengthMs)} credit${exportCredits(clipLengthMs) === 1 ? '' : 's'}` : ''}
                 </SpinningBorderButton>
               )}
             </div>
@@ -8091,6 +8136,56 @@ function PlayRing({ lengthMs }: { lengthMs: number }) {
 }
 
 /** The playhead's time / the clip's length, over the timeline: 0:12.4 / 1:43 */
+/** "1 min 30 s" */
+function captionLengthLabel(ms: number) {
+  const sec = Math.round(ms / 1000), m = Math.floor(sec / 60), rest = sec % 60
+  return m ? `${m} min${rest ? ` ${rest} s` : ''}` : `${rest} s`
+}
+
+/** The price of a clip's captions, and the button that gets them: nothing is read or charged until it is pressed */
+function GetCaptions({ lengthMs, price, newPart, balance, freePlan, hasAddedVideos, onGet }: {
+  lengthMs: number; price: number; newPart: boolean; balance: number | null; freePlan: boolean; hasAddedVideos: boolean; onGet: () => void
+}) {
+  const muted = { color: 'rgb(var(--ed-fg) / 0.6)' }
+  if (freePlan) {
+    return (
+      <div className="mt-3 flex flex-col gap-2 text-[11.5px] leading-snug" style={muted}>
+        <span>Captions aren&rsquo;t part of the Free plan.</span>
+        <a href="/pricing" className="cap-link justify-center font-semibold">Upgrade to get captions</a>
+      </div>
+    )
+  }
+  const short = balance !== null && balance < price ? price - balance : 0
+  return (
+    <div className="mt-3 flex flex-col gap-2 text-[11.5px] leading-snug">
+      {balance !== null && (
+        <>
+          <div className="flex justify-between gap-3" style={muted}>
+            <span>{newPart ? 'New part of the clip' : 'Clip length'} (main video only)</span>
+            <span className="shrink-0">{captionLengthLabel(lengthMs)} → {price / CAPTION_CREDITS_PER_MINUTE} min</span>
+          </div>
+          <div className="flex justify-between gap-3 font-semibold text-[var(--ed-text)]">
+            <span>Cost: {price} credits (₹{price})</span>
+            <span className="shrink-0 font-normal" style={muted}>You have {balance}</span>
+          </div>
+        </>
+      )}
+      {hasAddedVideos && <span style={muted}>Added videos don&rsquo;t get captions.</span>}
+      {short > 0 ? (
+        <>
+          <span style={{ color: '#f87171' }}>You need {short} more credit{short === 1 ? '' : 's'}.</span>
+          <a href="/pricing" className="cap-link justify-center font-semibold">Buy a top-up</a>
+        </>
+      ) : (
+        <button type="button" onClick={onGet} className="h-9 rounded-lg text-[12.5px] font-bold transition-opacity hover:opacity-90"
+          style={{ background: ACCENT, color: '#0a0a0a' }}>
+          Get CC
+        </button>
+      )}
+    </div>
+  )
+}
+
 function ClipClock({ lengthMs }: { lengthMs: number }) {
   const now = useLiveTimeMs()
   const fmt = (ms: number, tenths: boolean) => {

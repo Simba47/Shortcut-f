@@ -5,6 +5,14 @@ export const PLANS = {
     price: 0,
     // Credits given every billing month (the free plan gets a one-time grant instead: FREE_SIGNUP_CREDITS)
     monthlyCredits: 0,
+    // Video read and uploads: a month on paid plans (past the hours, credits: lib/credits.ts
+    // EXTRA_READING_CREDITS); once only on Free (allowancesOnce, as its AI allowances). Deleting a
+    // video gives none of it back. Reading is what costs most, so these keep each plan's profit at
+    // 60%+ even at full use (Shortcut-Unit-Economics-Nov-2026.pdf).
+    readingMinutes: 30,
+    uploadsPerMonth: 3,
+    allowancesOnce: true,
+    // Held at once, a total: a month's uploads must fit for as long as they are kept
     maxVideos: 1,
     maxFileSizeBytes: 1 * 1024 * 1024 * 1024,
     maxFileSizeGb: 1,
@@ -17,15 +25,18 @@ export const PLANS = {
     // AI use (lib/aiLimits.ts): clips per Make my clips run; AI clips included a month (then credits)
     // and a daily safety cap; fresh moment searches per video; Ask AI searches and hook/title
     // rewrites per month (then credits)
-    ai: { clipsPerRun: 3, clipsPerDay: 3, clipsPerMonth: 3, searchesPerVideo: 1, askAiPerMonth: 10, askAiPerDay: 5, rewritesPerMonth: 20 },
+    ai: { clipsPerRun: 3, clipsPerDay: 3, clipsPerMonth: 3, searchesPerVideo: 1, askAiPerMonth: 3, askAiPerDay: 3, rewritesPerMonth: 20 },
   },
   starter: {
     key: 'starter' as const,
     name: 'Starter',
     price: 599,
     // Credits given every billing month (the free plan gets a one-time grant instead: FREE_SIGNUP_CREDITS)
-    monthlyCredits: 200,
-    maxVideos: 5,
+    monthlyCredits: 120,
+    readingMinutes: 180,
+    uploadsPerMonth: 10,
+    allowancesOnce: false,
+    maxVideos: 10,
     maxFileSizeBytes: 5 * 1024 * 1024 * 1024,
     maxFileSizeGb: 5,
     maxClips: null,
@@ -33,15 +44,18 @@ export const PLANS = {
     watermark: false,
     priorityExports: false,
     retentionDays: 30,
-    ai: { clipsPerRun: 10, clipsPerDay: 30, clipsPerMonth: 60, searchesPerVideo: 3, askAiPerMonth: 100, askAiPerDay: 30, rewritesPerMonth: 150 },
+    ai: { clipsPerRun: 10, clipsPerDay: 30, clipsPerMonth: 20, searchesPerVideo: 3, askAiPerMonth: 10, askAiPerDay: 10, rewritesPerMonth: 30 },
   },
   creator: {
     key: 'creator' as const,
     name: 'Creator',
     price: 999,
     // Credits given every billing month (the free plan gets a one-time grant instead: FREE_SIGNUP_CREDITS)
-    monthlyCredits: 400,
-    maxVideos: 15,
+    monthlyCredits: 200,
+    readingMinutes: 300,
+    uploadsPerMonth: 20,
+    allowancesOnce: false,
+    maxVideos: 30,
     maxFileSizeBytes: 8 * 1024 * 1024 * 1024,
     maxFileSizeGb: 8,
     maxClips: null,
@@ -49,15 +63,18 @@ export const PLANS = {
     watermark: false,
     priorityExports: false,
     retentionDays: 45,
-    ai: { clipsPerRun: 15, clipsPerDay: 60, clipsPerMonth: 120, searchesPerVideo: 3, askAiPerMonth: 200, askAiPerDay: 50, rewritesPerMonth: 300 },
+    ai: { clipsPerRun: 15, clipsPerDay: 60, clipsPerMonth: 30, searchesPerVideo: 3, askAiPerMonth: 15, askAiPerDay: 15, rewritesPerMonth: 60 },
   },
   agency: {
     key: 'agency' as const,
     name: 'Agency',
     price: 2599,
     // Credits given every billing month (the free plan gets a one-time grant instead: FREE_SIGNUP_CREDITS)
-    monthlyCredits: 1000,
-    maxVideos: 30,
+    monthlyCredits: 500,
+    readingMinutes: 840,
+    uploadsPerMonth: 50,
+    allowancesOnce: false,
+    maxVideos: 100,
     maxFileSizeBytes: 12 * 1024 * 1024 * 1024,
     maxFileSizeGb: 12,
     maxClips: null,
@@ -65,7 +82,7 @@ export const PLANS = {
     watermark: false,
     priorityExports: true,
     retentionDays: 60,
-    ai: { clipsPerRun: 20, clipsPerDay: 150, clipsPerMonth: 300, searchesPerVideo: 5, askAiPerMonth: 600, askAiPerDay: 150, rewritesPerMonth: 1000 },
+    ai: { clipsPerRun: 20, clipsPerDay: 150, clipsPerMonth: 80, searchesPerVideo: 5, askAiPerMonth: 40, askAiPerDay: 40, rewritesPerMonth: 150 },
   },
 } as const
 

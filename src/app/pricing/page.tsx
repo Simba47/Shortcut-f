@@ -4,15 +4,11 @@ import { useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { PLANS } from '@/lib/plans'
-import { FREE_SIGNUP_CREDITS, TOPUP_PACKS, EXPORT_CREDITS } from '@/lib/credits'
-import { planFeatureRows, creditUses } from '@/lib/planFeatures'
+import { FREE_SIGNUP_CREDITS, TOPUP_PACKS } from '@/lib/credits'
+import { planFeatureRows, creditUses, readingLabel } from '@/lib/planFeatures'
 import { BrandLogo } from '@/components/ui/brand-logo'
 
 const PLAN_ORDER = ['free', 'starter', 'creator', 'agency'] as const
-
-// An hour of video with 8 clips costs 76 credits (60 to read it + 8 exports of 2): the plan's credits in that unit
-const CREDITS_PER_HOUR_WITH_CLIPS = 60 + 8 * EXPORT_CREDITS
-const hoursOfVideo = (credits: number) => Math.round((credits / CREDITS_PER_HOUR_WITH_CLIPS) * 10) / 10
 
 declare global {
   interface Window { Razorpay: new (o: Record<string, unknown>) => { open: () => void; on: (e: string, cb: (r: never) => void) => void } }
@@ -153,7 +149,7 @@ export default function PricingPage() {
       <main className="max-w-5xl mx-auto px-6 pt-14 pb-20">
         <h1 className="text-3xl font-bold text-white text-center mb-2">Simple, transparent pricing</h1>
         <p className="text-center mb-3" style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.9rem' }}>
-          Credits pay for AI reading, captions and exports. The editor is always free · Paid plans renew monthly · Cancel anytime
+          Your plan includes hours of video and AI tools. Credits pay for captions, exports and anything past your plan. The editor is always free · Paid plans renew monthly · Cancel anytime
         </p>
 
         {mine?.testMode && (
@@ -231,7 +227,7 @@ export default function PricingPage() {
                     <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.5)' }}>{isPaid ? ' every month' : ' to start, once'}</span>
                   </div>
                   <div className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                    About {hoursOfVideo(isPaid ? plan.monthlyCredits : FREE_SIGNUP_CREDITS)} hours of video with 8 clips each
+                    1 credit = ₹1 · {readingLabel(plan.readingMinutes)} of video read {isPaid ? 'a month' : 'in total'}
                     {isPaid ? ' · unused credits roll over one month' : ''}
                   </div>
                 </div>
@@ -298,7 +294,7 @@ export default function PricingPage() {
 
         <section className="mt-14">
           <h2 className="text-xl font-bold text-white text-center mb-1">Need more credits?</h2>
-          <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>Top-up packs for paid plans, paid once. Top-up credits last 12 months. A bigger plan costs less per credit.</p>
+          <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>Top-up packs for paid plans, paid once. Top-up credits last 12 months.</p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {TOPUP_PACKS.map(pack => (
               <div key={pack.key} className="rounded-2xl p-4 text-center" style={{ background: '#161616', border: '1px solid rgba(255,255,255,0.08)' }}>

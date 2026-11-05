@@ -7,7 +7,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { usePolling } from '@/lib/usePolling'
 import { useCredits, type CreditsInfo } from '@/lib/useCredits'
-import { readingCredits, EXPORT_CREDITS, LONG_EXPORT_CREDITS } from '@/lib/credits'
+import { CAPTION_CREDITS_PER_MINUTE, EXPORT_CREDITS_PER_MINUTE } from '@/lib/credits'
 import type { Video } from '@chai-cut/shared'
 import { ACCEPTED_VIDEO_EXTENSIONS } from '@chai-cut/shared'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -928,9 +928,8 @@ function EditModeDialog({ videoId, title, videoUrl, durationMs, credits, onClose
     window.addEventListener('keydown', esc)
     return () => window.removeEventListener('keydown', esc)
   }, [onClose, picked])
-  // AI edit reads the whole video once: 1 credit per started minute. Short of that, the card leads to credits instead.
-  // A video that is being read, or already read, is paid for: AI edit costs nothing more, and
-  // the card must not ask for the credits again. (Until the video's state is known, no price is shown as short.)
+  // Reading is in the plan's hours, counted at upload: nothing more to pay here. A video that is being
+  // read, or already read, says so.
   const [reading, setReading] = useState<'unknown' | 'paid' | 'unpaid'>('unknown')
   useEffect(() => {
     let live = true
@@ -940,11 +939,8 @@ function EditModeDialog({ videoId, title, videoUrl, durationMs, credits, onClose
       .catch(() => { if (live) setReading('unpaid') })
     return () => { live = false }
   }, [videoId])
-  const aiCost = readingCredits(durationMs)
-  const aiShort = !!credits && reading === 'unpaid' && credits.balance < aiCost
   const pick = (mode: 'ai' | 'manual') => {
     if (picked) return
-    if (mode === 'ai' && aiShort) { window.location.assign('/pricing'); return }
     setPicked(mode); onPick(mode)
   }
   const options = [
@@ -1021,21 +1017,19 @@ function EditModeDialog({ videoId, title, videoUrl, durationMs, credits, onClose
                   ))}
                 </span>
                 {credits && (o.mode === 'ai' ? (
-                  <span className={`emd-cost${aiShort ? ' is-short' : ''}`}>
+                  <span className="emd-cost">
                     {reading === 'paid'
-                      ? <>This video is <b>already read</b>. AI edit, Best moments, Ask AI and Make my clips cost nothing more.</>
-                      : aiShort
-                      ? <>Needs <b>{aiCost} credits</b> to read this video. You have {credits.balance}.</>
-                      : <>Uses <b>{aiCost} credit{aiCost === 1 ? '' : 's'}</b> to read this video, once. Best moments, Ask AI and Make my clips are then free.</>}
+                      ? <>This video is <b>already read</b>. Use your plan&apos;s AI clips, searches and Ask AI on it.</>
+                      : <>Reading is included in your plan&apos;s hours.</>}
                   </span>
                 ) : (
                   <span className="emd-cost">
-                    Cutting and editing are free. Captions: <b>1 credit</b> per clip minute. Each export: <b>{EXPORT_CREDITS} credits</b> ({LONG_EXPORT_CREDITS} over 3 min).
+                    Cutting and editing are free. Captions: <b>{CAPTION_CREDITS_PER_MINUTE} credits</b> per clip minute. Export: <b>{EXPORT_CREDITS_PER_MINUTE} credit</b> per clip minute. 1 credit = ₹1.
                   </span>
                 ))}
               </span>
               <span className="emd-cta">
-                {picked === o.mode ? <><span className="dash-spinner" />Opening…</> : <>{o.mode === 'ai' && aiShort ? 'Get credits' : o.cta}
+                {picked === o.mode ? <><span className="dash-spinner" />Opening…</> : <>{o.cta}
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></>}
               </span>
             </button>

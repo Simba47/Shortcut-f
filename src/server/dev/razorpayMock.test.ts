@@ -77,7 +77,7 @@ test('a top-up order: paying it gives an order signature and an order.paid webho
   const ev = sent.find(d => JSON.parse(d.body).event === 'order.paid')!
   assert.equal(verifyWebhookSignature(ev.body, ev.headers['x-razorpay-signature'], HOOK), true)
   const t = topupChange(JSON.parse(ev.body))
-  assert.ok(t); assert.equal(t.credits, 150); assert.equal(t.userId, 'u1')
+  assert.ok(t); assert.equal(t.credits, 500); assert.equal(t.userId, 'u1')
   const fetched = await mockApi('GET', `/orders/${order.body.id}`, undefined, auth)
   assert.equal(fetched.body.status, 'paid'); assert.equal(fetched.body.amount_paid, 49900)
 })

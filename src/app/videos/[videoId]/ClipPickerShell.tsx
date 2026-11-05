@@ -10,7 +10,7 @@ import { ScrubPlayer } from '@/components/clips/ScrubPlayer'
 import { useLocalVideo } from '@/modules/clips/localVideo'
 import { usePolling } from '@/lib/usePolling'
 import { useCredits } from '@/lib/useCredits'
-import { readingCredits } from '@/lib/credits'
+import { ASK_AI_EXTRA_CREDITS } from '@/lib/aiLimits'
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -585,9 +585,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // step / done / total: what the worker is doing and the parts read of all (ReadingProgress)
   type Reading = { status: 'none' | 'running' | 'ready' | 'failed'; progress: number | null; error: string | null; stopped?: boolean; place?: number | null; step?: 'audio' | 'reading' | 'saving' | null; done?: number | null; total?: number | null; waitingOn?: 'copy' | 'queue' | 'server' | null; source?: 'reference'; needsCredits?: boolean }
   const [reading, setReading] = useState<Reading | null>(null)
-  // Credits (null when they are off): the reading costs 1 per video minute, so the unlock button says so
-  const { credits, refresh: refreshCredits } = useCredits()
-  const readingCost = readingCredits(video.duration_ms)
+  const { refresh: refreshCredits } = useCredits()
   /** What was asked for while the video was being read (runs when it's done), and its name */
   const afterReading = useRef<(() => void) | null>(null)
   // (the one line under the lock says what is being done; what waits for it runs by itself)
@@ -1551,7 +1549,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           <p className="shrink-0 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
             {allowance.askAi.usedThisMonth < allowance.askAi.perMonth
               ? `${allowance.askAi.perMonth - allowance.askAi.usedThisMonth} of ${allowance.askAi.perMonth} searches left this month`
-              : 'Monthly searches used · 1 credit a search'}
+              : `Monthly searches used · ${ASK_AI_EXTRA_CREDITS} credits a search`}
           </p>
         )}
         {/* Results scroll inside the card, so the card never grows */}
@@ -1703,9 +1701,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 017.5-2" />
                 </svg>
-                Unlock edit tools{credits ? ` · ${readingCost} credit${readingCost === 1 ? '' : 's'}` : ''}
+                Unlock edit tools
               </button>
-              {credits && <p className="text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>You have {credits.balance} credits. Reading is charged once per video.</p>}
             </div>
           )}
         </div>

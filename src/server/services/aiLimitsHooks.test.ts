@@ -68,9 +68,9 @@ test('"Make more clips" picks from saved moments: free, no search counted, at mo
 })
 
 test('the day\'s clips run out: a run makes what is left, then is refused until tomorrow', opts, async () => {
-  const { userId, videoId } = await setup('starter', 60 * MIN)
+  const { userId, videoId } = await setup('starter', 60 * MIN, 100)
   await doneRun(videoId, 28)
-  const r = await videos.createAutoClips(userId, videoId, 10)
+  const r = await videos.createAutoClips(userId, videoId, 10, false, { pay: true })
   assert.equal(r.clip_count, 2); assert.equal(r.limited_by, 'day')
   await sql`UPDATE ai_edit_jobs SET status = 'done' WHERE video_id = ${videoId}`
   await sql`INSERT INTO clips (video_id, start_ms, end_ms, status, ai_edit_job_id) SELECT ${videoId}, 0, 10, 'draft', id FROM ai_edit_jobs WHERE video_id = ${videoId} AND clip_count = 2`
@@ -88,10 +88,10 @@ test('a fresh search past the included ones asks first, then takes its credits w
   const { userId, videoId } = await setup('starter', 20 * MIN, 10)
   for (let i = 0; i < 3; i++) await ai.recordSearch(userId, videoId, 'best_moments', null, 0)
   await assert.rejects(videos.createAutoClips(userId, videoId, 3, false, { search: 'new' }),
-    (e: { status?: number; code?: string; credits?: number }) => e.status === 402 && e.code === 'search_costs' && e.credits === 2)
+    (e: { status?: number; code?: string; credits?: number }) => e.status === 402 && e.code === 'search_costs' && e.credits === 10)
   const r = await videos.createAutoClips(userId, videoId, 3, false, { search: 'new', pay: true })
-  assert.equal(r.credits, 2); assert.equal(r.search, 'new')
-  assert.equal((await credits.balance(userId)).balance, 8)
+  assert.equal(r.credits, 10); assert.equal(r.search, 'new')
+  assert.equal((await credits.balance(userId)).balance, 0)
   const [hold] = await sql<{ job_id: string | null; ref_type: string }[]>`SELECT job_id, ref_type FROM credit_holds WHERE user_id = ${userId}`
   assert.equal(hold.ref_type, 'search'); assert.ok(hold.job_id, 'tied to the job, so a failed run gives it back')
 })
@@ -105,21 +105,21 @@ async function withDayCap<T>(plan: 'starter' | 'free', n: number, fn: () => Prom
   try { return await fn() } finally { ai.clipsPerDay = was }
 }
 
-test('past the month\'s included AI clips, a run asks first, then charges 1 credit per extra clip', opts, async () => {
-  const { userId, videoId } = await setup('starter', 120 * MIN, 10)
+test('past the month\'s included AI clips, a run asks first, then charges 5 credits per extra clip', opts, async () => {
+  const { userId, videoId } = await setup('starter', 120 * MIN, 20)
   await ai.saveMoments(videoId, moments(20))
-  await doneRun(videoId, 58)                                   // 2 of Starter's 60 left
+  await doneRun(videoId, 18)                                   // 2 of Starter's 20 left
   await withDayCap('starter', 1000, async () => {
     await assert.rejects(videos.createAutoClips(userId, videoId, 5),
-      (e: { status?: number; code?: string; credits?: number }) => e.status === 402 && e.code === 'clips_cost' && e.credits === 3)
+      (e: { status?: number; code?: string; credits?: number }) => e.status === 402 && e.code === 'clips_cost' && e.credits === 15)
     const r = await videos.createAutoClips(userId, videoId, 5, false, { pay: true })
-    assert.equal(r.clip_count, 5); assert.equal(r.credits, 3)
+    assert.equal(r.clip_count, 5); assert.equal(r.credits, 15)
   })
-  assert.equal((await credits.balance(userId)).balance, 7)
+  assert.equal((await credits.balance(userId)).balance, 5)
   const [hold] = await sql<{ job_id: string | null; ref_type: string }[]>`SELECT job_id, ref_type FROM credit_holds WHERE user_id = ${userId}`
   assert.equal(hold.ref_type, 'ai_clips'); assert.ok(hold.job_id, 'tied to the job, so a failed run gives it back')
   const a = await ai.clipAllowance(userId, videoId)
-  assert.equal(a.clipsPerMonth, 60); assert.equal(a.clipsThisMonth, 63); assert.equal(a.monthLeft, 0)
+  assert.equal(a.clipsPerMonth, 20); assert.equal(a.clipsThisMonth, 23); assert.equal(a.monthLeft, 0)
 })
 
 test('within the month\'s included clips nothing is charged or asked', opts, async () => {
@@ -154,7 +154,7 @@ test('Best moments with nothing saved and no included searches left asks before 
   const { userId, videoId } = await setup('free', 20 * MIN, 10)
   await ai.recordSearch(userId, videoId, 'make_clips', null, 0)   // free: 1 search per video
   await assert.rejects(videos.getVideoSuggestions(userId, videoId),
-    (e: { status?: number; code?: string; credits?: number }) => e.status === 402 && e.code === 'search_costs' && e.credits === 2)
+    (e: { status?: number; code?: string; credits?: number }) => e.status === 402 && e.code === 'search_costs' && e.credits === 10)
 })
 
 test('Ask AI past the daily cap is refused before any AI call', opts, async () => {
