@@ -37,6 +37,14 @@ export function extraClipCredits(count: number, monthLeft: number): { extra: num
 
 /** Ask AI past the month's allowance, per search (about ₹2 on a 1-hour video) */
 export const ASK_AI_EXTRA_CREDITS = 7
+/** What one Ask AI search counts as: 1 per started hour of the video, since it reads all of it (a 5-hour video costs us 5 times as much) */
+export function askAiUnits(durationMs: number | null | undefined): number {
+  return Math.max(1, Math.ceil((durationMs ?? 0) / (60 * MINUTE)))
+}
+/** A search that counts as `units`, with `used` of `perMonth` used: only the part past the month costs credits */
+export function askAiCredits(used: number, perMonth: number, units: number): number {
+  return ASK_AI_EXTRA_CREDITS * Math.min(units, Math.max(0, used + units - perMonth))
+}
 /** Rewrites past the allowance: 1 credit for every 5 */
 export const REWRITES_PER_CREDIT = 5
 /** AI requests one person can send in a minute (Ask AI, rewrites, Best moments): only scripts ever reach it */

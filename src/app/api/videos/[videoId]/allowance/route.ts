@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/server/auth'
 import { apiError } from '@/lib/api-error'
 import { creditsMode } from '@/lib/credits'
-import { aiLimitsFor } from '@/lib/aiLimits'
+import { aiLimitsFor, askAiCredits, askAiUnits } from '@/lib/aiLimits'
 import { aiActionCounts, clipAllowance } from '@/server/services/aiUsage'
 import { getUserPlan } from '@/server/services/quota'
 
@@ -23,9 +23,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ vid
   try {
     const [clips, actions, plan] = await Promise.all([clipAllowance(user.id, videoId), aiActionCounts(user.id), getUserPlan(user.id)])
     const limits = aiLimitsFor(plan)
+    const units = askAiUnits(clips.durationMs)
     return NextResponse.json({
       mode, clips,
-      askAi: { usedThisMonth: actions.askAiThisMonth, perMonth: limits.askAiPerMonth, usedToday: actions.askAiToday, perDay: limits.askAiPerDay },
+      askAi: {
+        usedThisMonth: actions.askAiThisMonth, perMonth: limits.askAiPerMonth, usedToday: actions.askAiToday, perDay: limits.askAiPerDay,
+        // A search on this video: what it counts as, and its credits now
+        countsAs: units, nextCredits: askAiCredits(actions.askAiThisMonth, limits.askAiPerMonth, units),
+      },
       rewrites: { usedThisMonth: actions.rewritesThisMonth, perMonth: limits.rewritesPerMonth },
     })
   } catch (err) {

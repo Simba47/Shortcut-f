@@ -8,7 +8,7 @@ export const PLANS = {
     // Video read and uploads: a month on paid plans (past the hours, credits: lib/credits.ts
     // EXTRA_READING_CREDITS); once only on Free (allowancesOnce, as its AI allowances). Deleting a
     // video gives none of it back. Reading is what costs most, so these keep each plan's profit at
-    // 60%+ even at full use (Shortcut-Unit-Economics-Nov-2026.pdf).
+    // 60%+ even at full use, with the rules in lib/aiLimits.ts and Subjects' credits (Shortcut-Unit-Economics-Simple-Nov-2026.pdf).
     readingMinutes: 30,
     uploadsPerMonth: 3,
     allowancesOnce: true,
@@ -23,8 +23,8 @@ export const PLANS = {
     priorityExports: false,
     retentionDays: 30,
     // AI use (lib/aiLimits.ts): clips per Make my clips run; AI clips included a month (then credits)
-    // and a daily safety cap; fresh moment searches per video; Ask AI searches and hook/title
-    // rewrites per month (then credits)
+    // and a daily safety cap; free moment searches per video (1 on every plan: each one reads the whole
+    // transcript, the biggest cost at full use); Ask AI searches and hook/title rewrites per month (then credits)
     ai: { clipsPerRun: 3, clipsPerDay: 3, clipsPerMonth: 3, searchesPerVideo: 1, askAiPerMonth: 3, askAiPerDay: 3, rewritesPerMonth: 20 },
   },
   starter: {
@@ -44,7 +44,7 @@ export const PLANS = {
     watermark: false,
     priorityExports: false,
     retentionDays: 30,
-    ai: { clipsPerRun: 10, clipsPerDay: 30, clipsPerMonth: 20, searchesPerVideo: 3, askAiPerMonth: 10, askAiPerDay: 10, rewritesPerMonth: 30 },
+    ai: { clipsPerRun: 10, clipsPerDay: 30, clipsPerMonth: 20, searchesPerVideo: 1, askAiPerMonth: 10, askAiPerDay: 10, rewritesPerMonth: 30 },
   },
   creator: {
     key: 'creator' as const,
@@ -63,7 +63,7 @@ export const PLANS = {
     watermark: false,
     priorityExports: false,
     retentionDays: 45,
-    ai: { clipsPerRun: 15, clipsPerDay: 60, clipsPerMonth: 30, searchesPerVideo: 3, askAiPerMonth: 15, askAiPerDay: 15, rewritesPerMonth: 60 },
+    ai: { clipsPerRun: 15, clipsPerDay: 60, clipsPerMonth: 40, searchesPerVideo: 1, askAiPerMonth: 20, askAiPerDay: 20, rewritesPerMonth: 60 },
   },
   agency: {
     key: 'agency' as const,
@@ -82,7 +82,7 @@ export const PLANS = {
     watermark: false,
     priorityExports: true,
     retentionDays: 60,
-    ai: { clipsPerRun: 20, clipsPerDay: 150, clipsPerMonth: 80, searchesPerVideo: 5, askAiPerMonth: 40, askAiPerDay: 40, rewritesPerMonth: 150 },
+    ai: { clipsPerRun: 20, clipsPerDay: 150, clipsPerMonth: 90, searchesPerVideo: 1, askAiPerMonth: 40, askAiPerDay: 40, rewritesPerMonth: 130 },
   },
 } as const
 

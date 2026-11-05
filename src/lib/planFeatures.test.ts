@@ -14,7 +14,7 @@ test('a paid plan lists every limit the server applies, with the numbers from pl
     'Unlimited clips you cut yourself',
     '20 AI clips a month, then 5 credits each',
     'Up to 10 clips per Make my clips',
-    '3 AI moment searches per video',
+    '1 AI moment search per video',
     '10 Ask AI searches a month',
     '30 hook and title rewrites a month',
     '30 days history',
@@ -43,9 +43,9 @@ test('no plan claims unlimited AI clips, and only Agency gets priority exports',
     assert.ok(!rows.some(r => r.label === 'Unlimited clips'), key)
     assert.equal(rows.find(r => r.label === 'Priority exports')?.included, key === 'agency', key)
   }
-  assert.ok(labels('agency').includes('80 AI clips a month, then 5 credits each'))
+  assert.ok(labels('agency').includes('90 AI clips a month, then 5 credits each'))
   assert.ok(labels('agency').includes('14 hours of video read a month'))
-  assert.ok(labels('creator').includes('15 Ask AI searches a month'))
+  assert.ok(labels('creator').includes('20 Ask AI searches a month'))
 })
 
 test('what a credit buys does not call AI features free without limits', () => {
@@ -57,6 +57,8 @@ test('what a credit buys does not call AI features free without limits', () => {
   assert.match(text, /7 credits per Ask AI search/)
   assert.match(text, /5 credits per AI clip past/)
   assert.match(text, /2 credits per clip minute/)
+  assert.match(text, /Subjects/)                       // charged like captions
+  assert.match(text, /per started hour/)               // Ask AI on a long video
   assert.match(text, /1 credit per clip minute/)       // an export
   assert.match(text, /1 credit per 5 rewrites/)
   assert.match(text, /Reading your video In your plan/)

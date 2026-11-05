@@ -10,7 +10,6 @@ import { ScrubPlayer } from '@/components/clips/ScrubPlayer'
 import { useLocalVideo } from '@/modules/clips/localVideo'
 import { usePolling } from '@/lib/usePolling'
 import { useCredits } from '@/lib/useCredits'
-import { ASK_AI_EXTRA_CREDITS } from '@/lib/aiLimits'
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -359,7 +358,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // credits are off, and then nothing extra is shown). Reloaded after every run and search.
   type Allowance = {
     clips: { perRun: number; clipsPerDay: number; clipsToday: number; dayLeft: number; clipsPerMonth: number; clipsThisMonth: number; monthLeft: number; extraClipCredits: number; videoCap: number; videoClips: number; videoLeft: number; savedLeft: number; searchesIncluded: number; searchesUsed: number; nextSearchCredits: number }
-    askAi: { usedThisMonth: number; perMonth: number; usedToday: number; perDay: number }
+    askAi: { usedThisMonth: number; perMonth: number; usedToday: number; perDay: number; countsAs: number; nextCredits: number }
   }
   const [allowance, setAllowance] = useState<Allowance | null>(null)
   /** Why a run makes fewer clips than asked for, or what it used */
@@ -1547,9 +1546,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         </div>
         {allowance && (
           <p className="shrink-0 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
-            {allowance.askAi.usedThisMonth < allowance.askAi.perMonth
-              ? `${allowance.askAi.perMonth - allowance.askAi.usedThisMonth} of ${allowance.askAi.perMonth} searches left this month`
-              : `Monthly searches used · ${ASK_AI_EXTRA_CREDITS} credits a search`}
+            {allowance.askAi.nextCredits > 0
+              ? `${allowance.askAi.nextCredits} credits for a search on this video`
+              : `${allowance.askAi.perMonth - allowance.askAi.usedThisMonth} of ${allowance.askAi.perMonth} searches left this month${allowance.askAi.countsAs > 1 ? ` · on this video one counts as ${allowance.askAi.countsAs}` : ''}`}
           </p>
         )}
         {/* Results scroll inside the card, so the card never grows */}
@@ -2383,13 +2382,20 @@ function useSubEdit(clipId: string, onDone?: () => void) {
   }, [url])
   useEffect(() => { check() }, [check])
   usePolling(check, busy)
-  async function start() {
+  async function start(pay = false) {
     setError(null)
     setState('queued')
     setStartedAt(null)
     try {
-      const res = await fetch(url, { method: 'POST' })
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pay }) })
       const data = await res.json().catch(() => ({}))
+      // Subjects costs credits once per clip: the price is asked about first
+      if (res.status === 402 && data.code === 'subjects_cost') {
+        if (window.confirm(`${data.error} Continue?`)) { await start(true); return }
+        stateRef.current = 'none'
+        setState('none')
+        return
+      }
       if (!res.ok) { setState('failed'); setError(data.error ?? 'Sub-edit could not start. Try again.'); return }
       setState(data.status ?? 'queued')
       if (data.estimate_ms) setEstimate(data.estimate_ms)

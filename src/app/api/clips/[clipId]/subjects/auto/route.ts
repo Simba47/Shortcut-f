@@ -7,12 +7,13 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 // Sub-edit (the clip board): find the people, track them, frame the clip on whoever is talking
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ clipId: string }> }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ clipId: string }> }) {
   const user = await requireUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { clipId } = await params
   try {
-    return NextResponse.json(await startSubEdit(user.id, clipId))
+    const body = await req.json().catch(() => ({}))
+    return NextResponse.json(await startSubEdit(user.id, clipId, body))
   } catch (err) {
     return apiError(err)
   }

@@ -2,16 +2,15 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { PLANS } from './plans'
 import {
-  aiLimitsFor, videoClipCap, extraSearchCredits, clipsAllowed, istDayStart, istMonthStart, rewriteCredits, extraClipCredits, allowanceSince, readingQuote,
-} from './aiLimits'
+  aiLimitsFor, videoClipCap, extraSearchCredits, clipsAllowed, istDayStart, istMonthStart, rewriteCredits, extraClipCredits, allowanceSince, readingQuote, askAiUnits, askAiCredits } from './aiLimits'
 
 const MIN = 60_000
 
-test('each plan has its AI limits; clips per run, searches per video and daily clips grow with the plan', () => {
+test('each plan has its AI limits; clips per run and daily clips grow with the plan, and every plan has 1 free search per video', () => {
   assert.deepEqual(aiLimitsFor('free'), { clipsPerRun: 3, clipsPerDay: 3, clipsPerMonth: 3, searchesPerVideo: 1, askAiPerMonth: 3, askAiPerDay: 3, rewritesPerMonth: 20 })
-  assert.deepEqual(aiLimitsFor('starter'), { clipsPerRun: 10, clipsPerDay: 30, clipsPerMonth: 20, searchesPerVideo: 3, askAiPerMonth: 10, askAiPerDay: 10, rewritesPerMonth: 30 })
-  assert.deepEqual(aiLimitsFor('creator'), { clipsPerRun: 15, clipsPerDay: 60, clipsPerMonth: 30, searchesPerVideo: 3, askAiPerMonth: 15, askAiPerDay: 15, rewritesPerMonth: 60 })
-  assert.deepEqual(aiLimitsFor('agency'), { clipsPerRun: 20, clipsPerDay: 150, clipsPerMonth: 80, searchesPerVideo: 5, askAiPerMonth: 40, askAiPerDay: 40, rewritesPerMonth: 150 })
+  assert.deepEqual(aiLimitsFor('starter'), { clipsPerRun: 10, clipsPerDay: 30, clipsPerMonth: 20, searchesPerVideo: 1, askAiPerMonth: 10, askAiPerDay: 10, rewritesPerMonth: 30 })
+  assert.deepEqual(aiLimitsFor('creator'), { clipsPerRun: 15, clipsPerDay: 60, clipsPerMonth: 40, searchesPerVideo: 1, askAiPerMonth: 20, askAiPerDay: 20, rewritesPerMonth: 60 })
+  assert.deepEqual(aiLimitsFor('agency'), { clipsPerRun: 20, clipsPerDay: 150, clipsPerMonth: 90, searchesPerVideo: 1, askAiPerMonth: 40, askAiPerDay: 40, rewritesPerMonth: 130 })
   assert.equal(PLANS.creator.ai.clipsPerRun, 15)
   assert.deepEqual(aiLimitsFor('nonsense'), aiLimitsFor('free'))
 })
@@ -83,4 +82,17 @@ test('readingQuote: inside the plan is free; only the part past it costs credits
 test('readingQuote: a video of unknown length is priced at nothing yet, and the uploads never go below 0', () => {
   const plan = { uploadsPerMonth: 10, readingMinutes: 180 }
   assert.deepEqual(readingQuote(plan, { uploads: 12, usedMs: 0 }, null), { uploadsLeft: 0, msLeft: 3 * HOUR, overMs: 0, credits: 0 })
+})
+
+test('Ask AI counts 1 per started hour of the video, and past the month only the part over costs credits', () => {
+  assert.equal(askAiUnits(null), 1)
+  assert.equal(askAiUnits(20 * 60_000), 1)
+  assert.equal(askAiUnits(60 * 60_000), 1)
+  assert.equal(askAiUnits(61 * 60_000), 2)
+  assert.equal(askAiUnits(5 * 60 * 60_000), 5)
+  assert.equal(askAiCredits(3, 10, 1), 0)    // within the month
+  assert.equal(askAiCredits(9, 10, 1), 0)    // the last one
+  assert.equal(askAiCredits(10, 10, 1), 7)   // past it
+  assert.equal(askAiCredits(9, 10, 3), 14)   // a 3-hour video with 1 left: 2 are past it
+  assert.equal(askAiCredits(20, 10, 3), 21)  // all of it past
 })

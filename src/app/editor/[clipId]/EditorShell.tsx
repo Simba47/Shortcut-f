@@ -1709,7 +1709,7 @@ export function EditorShell({
     confirm({
       title: `Get captions for ${q.credits} credits (₹${q.credits})?`,
       body: `This needs the clip's captions first, from its main video. You have ${credits.balance} credits.`,
-      confirmLabel: 'Get CC', cancelLabel: 'Not now', onCancel: notNow,
+      confirmLabel: 'Get CC', cancelLabel: 'Not now', onCancel: notNow, tone: 'warning',
     }, go)
   }
   /** Regenerate reads all of the clip again, words or no words */
@@ -1721,7 +1721,7 @@ export function EditorShell({
     confirm({
       title: `Regenerate captions for ${price} credits (₹${price})?`,
       body: `All of this clip is read again, from its main video, and caption words you corrected are replaced. You have ${credits.balance} credits.`,
-      confirmLabel: 'Regenerate', cancelLabel: 'Not now',
+      confirmLabel: 'Regenerate', cancelLabel: 'Not now', tone: 'warning',
     }, () => { void go() })
   }
   /** Re-render when part of the clip has no captions: the export reads all of the clip first, so both prices are asked about */
@@ -1732,7 +1732,7 @@ export function EditorShell({
     confirm({
       title: `Render with captions for ${price + render} credits (₹${price + render})?`,
       body: `Part of this clip has no captions, so all of it is read first (${price} credits), then exported (${render}). You have ${credits.balance} credits.`,
-      confirmLabel: 'Render', cancelLabel: 'Not now',
+      confirmLabel: 'Render', cancelLabel: 'Not now', tone: 'warning',
     }, () => requestExport(true))
   }
 
@@ -2308,9 +2308,19 @@ export function EditorShell({
   async function subjectsCall(url: string, init: RequestInit) {
     const res = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json' } })
     const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(data.error ?? 'Something went wrong')
+    if (!res.ok) throw Object.assign(new Error(data.error ?? 'Something went wrong'), { code: data.code, credits: data.credits })
     return data
   }
+  /** Subjects costs credits once per clip: the server answers 402 subjects_cost with the price, which is asked about first */
+  function askSubjectsPrice(price: number, go: () => void, notNow?: () => void) {
+    confirm({
+      title: `Follow people in this clip for ${price} credits (₹${price})?`,
+      body: `You pay once for this clip: adding or marking people again is free. Only making the clip longer costs more. You have ${credits?.balance ?? 0} credits.`,
+      confirmLabel: 'Continue', cancelLabel: 'Not now', onCancel: notNow, tone: 'warning',
+    }, go)
+  }
+  const askSubjectsPriceRef = useRef(askSubjectsPrice)
+  askSubjectsPriceRef.current = askSubjectsPrice
   // A tap while the last mark is still being saved is ignored (user, 2026-10-24: a double tap on a
   // face made C and C — the face showed unmarked until the first was saved)
   const markingSubjectRef = useRef(false)
@@ -2406,13 +2416,21 @@ export function EditorShell({
     setMarking(false)
     await trackSubjectsNow(true)
   }
-  async function trackSubjectsNow(all: boolean) {
-    setSubjectNotice(null)
+  async function trackSubjectsNow(all: boolean, pay = false) {
+    if (!pay) setSubjectNotice(null)
     try {
-      const { subjects: list } = await subjectsCall(`${subjectsUrl}/track`, { method: 'POST', body: JSON.stringify({ start_ms: rawClip.start_ms, end_ms: rawClip.end_ms, all }) })
+      const { subjects: list } = await subjectsCall(`${subjectsUrl}/track`, { method: 'POST', body: JSON.stringify({ start_ms: rawClip.start_ms, end_ms: rawClip.end_ms, all, pay }) })
       takeSubjects(list)
       setSubjectsError(null)
-    } catch (e) { setSubjectsError(e instanceof Error ? e.message : 'Could not start tracking') }
+      if (pay) refreshCredits()
+    } catch (e) {
+      const asks = e as { code?: string; credits?: number }
+      if (asks.code === 'subjects_cost' && asks.credits) {
+        askSubjectsPrice(asks.credits, () => { void trackSubjectsNow(all, true) }, () => setSubjectNotice(null))
+        return
+      }
+      setSubjectsError(e instanceof Error ? e.message : 'Could not start tracking')
+    }
   }
   async function removeSubject(id: string) {
     setSubjects(list => list.filter(s => s.id !== id))
@@ -2656,11 +2674,13 @@ export function EditorShell({
   // The scenes last found: what a stopped scan goes back to (as the server's stop does)
   const lastDoneAnglesRef = useRef<AnglesData | null>(null)
   useEffect(() => { if (anglesData?.status === 'done') lastDoneAnglesRef.current = anglesData }, [anglesData])
-  const loadAngles = useCallback(async (scan = false) => {
+  // The scan stopped to ask its price: the panel's Detect button stops showing "Starting…"
+  const [scanPriceAsked, setScanPriceAsked] = useState(0)
+  const loadAngles = useCallback(async (scan = false, pay = false) => {
     const gen = stopGenRef.current
     try {
       const res = await fetch(`${subjectsUrl}/angles`, scan
-        ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start_ms: rawClip.start_ms, end_ms: rawClip.end_ms }) }
+        ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start_ms: rawClip.start_ms, end_ms: rawClip.end_ms, pay }) }
         : undefined)
       const data = await res.json().catch(() => ({}))
       if (gen !== stopGenRef.current) {
@@ -2668,13 +2688,23 @@ export function EditorShell({
         if (scan && res.ok) fetch(`${subjectsUrl}/stop`, { method: 'POST' }).catch(() => {})
         return
       }
+      if (res.status === 402 && data.code === 'subjects_cost') {
+        setScanPriceAsked(n => n + 1)
+        askSubjectsPriceRef.current(data.credits, () => { void loadAngles(true, true) }, () => {
+          if (!autoAfterScanRef.current) return
+          autoAfterScanRef.current = false   // Auto format was waiting for this scan
+          setAutoPhase('idle')
+        })
+        return
+      }
       if (!res.ok) throw new Error(data.error ?? 'The camera angles could not be listed.')
+      if (pay) refreshCredits()
       setAnglesData(data)
     } catch (e) {
       if (gen !== stopGenRef.current) return
       setAnglesData({ status: 'failed', progress: 0, error: e instanceof Error ? e.message : 'The camera angles could not be listed.', angles: [], scan_start_ms: null, scan_end_ms: null })
     }
-  }, [subjectsUrl, rawClip.start_ms, rawClip.end_ms])
+  }, [subjectsUrl, rawClip.start_ms, rawClip.end_ms, refreshCredits])
   // (read when the editor opens — no scan — so a format picked anywhere can snap to the camera cuts)
   useEffect(() => { if (!anglesData) loadAngles() }, [anglesData, loadAngles])
   // The clip grew past what was read: the list misses the new part (Detect again)
@@ -3024,6 +3054,7 @@ export function EditorShell({
       const t = setTimeout(() => ctl.abort(), 20_000)
       try {
         const data = await subjectsCall(`${subjectsUrl}/stop`, { method: 'POST', signal: ctl.signal })
+        refreshCredits()   // a stopped job gives its credits back
         if (gen === stopGenRef.current) {
           takeSubjects(data.subjects)
           if (data.angles) setAnglesData(data.angles)
@@ -6747,7 +6778,7 @@ export function EditorShell({
             {tool === 'subjects' && (
               <SubjectsPanel
                 angles={anglesView} onOpenAngle={openAngle} onMarkFace={markAngleFace} savingFace={savingFace} onClickMark={markByClick}
-                onScanAngles={() => loadAngles(true)}
+                onScanAngles={() => loadAngles(true)} scanPriceAsked={scanPriceAsked}
                 subjects={subjectItems} loading={subjectsLoading} error={subjectsError}
                 marking={marking} onToggleMarking={markFromView} onMarkShot={markShot} onMarkInClip={markInWholeClip} retrack={needsRetrack}
                 onAutoFormat={runAutoFormat} autoPhase={autoPhase} autoMode={autoMode} onAutoMode={setAutoMode} onStop={stopSubjectsWork}

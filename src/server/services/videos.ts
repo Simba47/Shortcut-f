@@ -1,3 +1,4 @@
+import { askAiUnits } from '@/lib/aiLimits'
 import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { aiProvider, askGemini, GEMINI_MODEL, type GeminiUsage } from '@/lib/gemini'
@@ -418,10 +419,10 @@ export async function getVideoSuggestionsByCriteria(
     throw Object.assign(new Error('This video has no transcript yet'), { status: 400 })
   }
 
-  // Counted against the month's allowance, then 1 credit a search; refused past the daily cap.
+  // Counted against the month's allowance (1 per started hour of the video), then credits; refused past the daily cap.
   // Checked before any AI call, and given back if the AI does not answer.
   const { beginAiAction } = await import('./aiUsage')
-  const action = await beginAiAction(userId, 'ask_ai', videoId)
+  const action = await beginAiAction(userId, 'ask_ai', videoId, askAiUnits(durationMs))
   if (!aiProvider()) { await action.fail(); throw Object.assign(new Error('AI clip detection is not configured'), { status: 500 }) }
 
   try {

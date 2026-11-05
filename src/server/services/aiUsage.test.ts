@@ -82,15 +82,13 @@ test('saved moments left are the saved ones not already made into a clip', opts,
   assert.deepEqual((await ai.unusedMoments(videoId)).map(m => m.title), ['b', 'c'])
 })
 
-test('fresh searches: included per plan, then priced by the video length; a failed run does not count', opts, async () => {
+test('fresh searches: 1 included per video, then priced by the video length; a failed run does not count', opts, async () => {
   const { userId, videoId } = await setup('starter', 60 * MIN)
-  assert.deepEqual(pick(await ai.clipAllowance(userId, videoId)), { searchesUsed: 0, searchesIncluded: 3, nextSearchCredits: 0 })
-  const j1 = await run(videoId, 1, 1); await ai.recordSearch(userId, videoId, 'make_clips', j1, 0)
-  await ai.recordSearch(userId, videoId, 'best_moments', null, 0)
+  assert.deepEqual(pick(await ai.clipAllowance(userId, videoId)), { searchesUsed: 0, searchesIncluded: 1, nextSearchCredits: 0 })
   const bad = await run(videoId, 1, 0, 'failed'); await ai.recordSearch(userId, videoId, 'make_clips', bad, 0)
-  assert.deepEqual(pick(await ai.clipAllowance(userId, videoId)), { searchesUsed: 2, searchesIncluded: 3, nextSearchCredits: 0 })
-  await ai.recordSearch(userId, videoId, 'best_moments', null, 0)
-  assert.deepEqual(pick(await ai.clipAllowance(userId, videoId)), { searchesUsed: 3, searchesIncluded: 3, nextSearchCredits: 30 })
+  assert.deepEqual(pick(await ai.clipAllowance(userId, videoId)), { searchesUsed: 0, searchesIncluded: 1, nextSearchCredits: 0 })
+  const j1 = await run(videoId, 1, 1); await ai.recordSearch(userId, videoId, 'make_clips', j1, 0)
+  assert.deepEqual(pick(await ai.clipAllowance(userId, videoId)), { searchesUsed: 1, searchesIncluded: 1, nextSearchCredits: 30 })
 })
 const pick = (a: { searchesUsed: number; searchesIncluded: number; nextSearchCredits: number }) =>
   ({ searchesUsed: a.searchesUsed, searchesIncluded: a.searchesIncluded, nextSearchCredits: a.nextSearchCredits })
@@ -163,4 +161,18 @@ test('Free\'s allowances are once only: last month\'s use still counts; a paid p
   for (const u of [free, paid]) await sql`INSERT INTO ai_actions (user_id, kind, created_at) VALUES (${u}, 'ask_ai', now() - interval '60 days')`
   assert.equal((await ai.aiActionCounts(free)).askAiThisMonth, 1)
   assert.equal((await ai.aiActionCounts(paid)).askAiThisMonth, 0)
+})
+
+test('Ask AI on a long video counts 1 per started hour, and past the month the part over costs credits', opts, async () => {
+  const { userId, videoId } = await setup('starter', 150 * MIN, 50)
+  await withAskAiDayCap('starter', 1000, async () => {
+    const a = await ai.beginAiAction(userId, 'ask_ai', videoId, 3)
+    assert.equal(a.credits, 0); await a.done()
+    assert.equal((await ai.aiActionCounts(userId)).askAiThisMonth, 3)
+    await sql`INSERT INTO ai_actions (user_id, kind) SELECT ${userId}, 'ask_ai' FROM generate_series(1, 6)`   // 9 of 10 used
+    const b = await ai.beginAiAction(userId, 'ask_ai', videoId, 3)
+    assert.equal(b.credits, 14); await b.fail()                             // 2 of the 3 are past the month
+    assert.equal((await ai.aiActionCounts(userId)).askAiThisMonth, 9)       // a failure counts nothing
+    assert.equal((await credits.balance(userId)).balance, 50)               // and costs nothing
+  })
 })

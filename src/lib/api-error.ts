@@ -31,8 +31,8 @@ export function apiError(err: unknown) {
       ? (e.message ?? 'Something went wrong')
       : 'Something went wrong. Please try again.'
   // Out of credits: the page shows what the action needs and what is left, with Top up and Upgrade
-  // or a fresh moment search past the included ones: the page asks before paying
+  // or a fresh moment search past the included ones, or Subjects on a clip: the page asks before paying
   const credits = status === 402 && typeof e.needed === 'number' ? { code: 'insufficient_credits', needed: e.needed, balance: e.balance ?? 0 }
-    : status === 402 && (e.code === 'search_costs' || e.code === 'clips_cost') ? { code: e.code, credits: e.credits } : {}
+    : status === 402 && (e.code === 'search_costs' || e.code === 'clips_cost' || e.code === 'subjects_cost') ? { code: e.code, credits: e.credits } : {}
   return NextResponse.json({ error: message, ...credits }, { status, ...(offline ? { headers: { 'Retry-After': '2' } } : {}) })
 }

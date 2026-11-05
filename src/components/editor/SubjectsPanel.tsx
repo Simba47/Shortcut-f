@@ -77,6 +77,8 @@ interface Props {
   onClickMark: () => void
   /** Look for the people and scenes (Detect subjects, Detect again, Try again) — only when pressed */
   onScanAngles: () => void
+  /** Goes up each time a scan stops to ask its price (the press has its answer) */
+  scanPriceAsked?: number
   subjects: SubjectItem[]
   loading: boolean
   error: string | null
@@ -166,6 +168,7 @@ export function SubjectsPanel(p: Props) {
   useEffect(() => {
     if (pending === 'stop' ? !working : pending === 'detect' ? scanning || p.angles.status === 'failed' : pending === 'auto' && p.autoPhase !== 'idle') setPending(null)
   }, [pending, working, scanning, p.angles.status, p.autoPhase])
+  useEffect(() => { if (p.scanPriceAsked) setPending(null) }, [p.scanPriceAsked])
   useEffect(() => { if (!pending) return; const id = setTimeout(() => setPending(null), 30_000); return () => clearTimeout(id) }, [pending])
   // (after a few seconds, a line says it's on its way, so a slow answer doesn't look like a dead button)
   const [slowPress, setSlowPress] = useState(false)

@@ -41,6 +41,26 @@ export const captionCredits = (clipMs: number | null | undefined) => CAPTION_CRE
 
 /** Silence this long at a clip's start or end means that part has no captions yet */
 export const CAPTION_GAP_MS = 4000
+
+/** Subjects: finding and following people on the worker, per started minute of the part not paid for yet. About ₹0.10-0.30 a minute to run */
+export const SUBJECTS_CREDITS_PER_MINUTE = 2
+export const subjectsCredits = (newMs: number) => (newMs > 0 ? SUBJECTS_CREDITS_PER_MINUTE * minutesStarted(newMs) : 0)
+/**
+ * How much of [startMs, endMs] no earlier payment covers. Once per clip: only a clip made longer
+ * pays again, for the new part. Under a second isn't counted (as the editor's "the clip grew": a
+ * scan reads a little either side).
+ */
+export function subjectsNewMs(startMs: number, endMs: number, paid: { start_ms: number; end_ms: number }[]): number {
+  let at = startMs, uncovered = 0
+  for (const p of [...paid].sort((a, b) => a.start_ms - b.start_ms)) {
+    if (p.end_ms <= at) continue
+    if (p.start_ms >= endMs) break
+    if (p.start_ms > at) uncovered += p.start_ms - at
+    at = Math.max(at, p.end_ms)
+  }
+  if (at < endMs) uncovered += endMs - at
+  return uncovered < 1000 ? 0 : uncovered
+}
 /**
  * The part of a clip that "Get CC" reads and charges for: all of it with no words; only the new
  * part when it was made longer at one end; all of it when made longer at both; null when it has

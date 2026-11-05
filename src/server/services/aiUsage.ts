@@ -2,7 +2,7 @@ import sql from '@/lib/db'
 import { creditsMode } from '@/lib/credits'
 import {
   aiLimitsFor, allowanceSince, videoClipCap, extraSearchCredits, istDayStart, rewriteCredits,
-  ASK_AI_EXTRA_CREDITS, AI_REQUESTS_PER_MINUTE, EXTRA_CLIP_CREDITS,
+  askAiCredits, AI_REQUESTS_PER_MINUTE, EXTRA_CLIP_CREDITS,
 } from '@/lib/aiLimits'
 import { charge, release, settle, type Hold } from './credits'
 import { getUserPlan } from './quota'
@@ -48,6 +48,8 @@ export function ensureAiUsageSchema(): Promise<void> {
         credits INTEGER NOT NULL DEFAULT 0,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`
+    // What an Ask AI search counted as (aiLimits askAiUnits)
+    await sql`ALTER TABLE ai_actions ADD COLUMN IF NOT EXISTS units INTEGER NOT NULL DEFAULT 1`
     await sql`CREATE INDEX IF NOT EXISTS ai_actions_user_idx ON ai_actions (user_id, kind, created_at DESC)`
     await sql`
       CREATE TABLE IF NOT EXISTS ai_usage (
@@ -108,6 +110,8 @@ export async function recordSearch(userId: string, videoId: string, source: 'mak
 // ── What is left ──────────────────────────────────────────────────────────────
 
 export interface ClipAllowance {
+  /** How long the video is (Ask AI counts 1 per started hour of it) */
+  durationMs: number | null
   perRun: number
   clipsPerDay: number; clipsToday: number; dayLeft: number
   /** AI clips included a month; past them each clip costs credits (EXTRA_CLIP_CREDITS) */
@@ -150,7 +154,7 @@ export async function clipAllowance(userId: string, videoId: string): Promise<Cl
     clipsPerDay: limits.clipsPerDay, clipsToday, dayLeft: Math.max(0, limits.clipsPerDay - clipsToday),
     clipsPerMonth: limits.clipsPerMonth, clipsThisMonth, monthLeft: Math.max(0, limits.clipsPerMonth - clipsThisMonth),
     extraClipCredits: EXTRA_CLIP_CREDITS,
-    videoCap, videoClips, videoLeft: Math.max(0, videoCap - videoClips),
+    videoCap, videoClips, videoLeft: Math.max(0, videoCap - videoClips), durationMs: video.duration_ms,
     savedLeft: (await unusedMoments(videoId)).length,
     searchesIncluded: limits.searchesPerVideo, searchesUsed: searches.n,
     nextSearchCredits: searches.n < limits.searchesPerVideo ? 0 : extraSearchCredits(video.duration_ms),
@@ -166,8 +170,8 @@ export async function aiActionCounts(userId: string): Promise<{ askAiThisMonth: 
   const since = allowanceSince(await getUserPlan(userId))
   const [r] = await sql<{ am: number; ad: number; rm: number; lm: number }[]>`
     SELECT
-      count(*) FILTER (WHERE kind = 'ask_ai' AND created_at >= ${since})::int AS am,
-      count(*) FILTER (WHERE kind = 'ask_ai' AND created_at >= ${istDayStart()})::int AS ad,
+      COALESCE(sum(units) FILTER (WHERE kind = 'ask_ai' AND created_at >= ${since}), 0)::int AS am,
+      COALESCE(sum(units) FILTER (WHERE kind = 'ask_ai' AND created_at >= ${istDayStart()}), 0)::int AS ad,
       count(*) FILTER (WHERE kind = 'rewrite' AND created_at >= ${since})::int AS rm,
       count(*) FILTER (WHERE created_at >= now() - interval '1 minute')::int AS lm
     FROM ai_actions WHERE user_id = ${userId}`
@@ -184,11 +188,11 @@ export interface AiActionHandle {
 }
 
 /**
- * Starts one Ask AI search or rewrite: checks the speed limit and daily cap, counts it against
+ * Starts one Ask AI search or rewrite (`units`: what it counts as, aiLimits askAiUnits): checks the speed limit and daily cap, counts it against
  * the month's allowance, and past the allowance takes its credits (402 if there are not enough).
  * Call done() when the AI answered, fail() when it did not.
  */
-export async function beginAiAction(userId: string, kind: AiActionKind, videoId: string | null = null): Promise<AiActionHandle> {
+export async function beginAiAction(userId: string, kind: AiActionKind, videoId: string | null = null, units = 1): Promise<AiActionHandle> {
   const mode = creditsMode()
   const noop: AiActionHandle = { credits: 0, done: async () => {}, fail: async () => {} }
   if (mode === 'off') return noop
@@ -201,12 +205,12 @@ export async function beginAiAction(userId: string, kind: AiActionKind, videoId:
     throw fail(`You've used today's ${limits.askAiPerDay} Ask AI searches. More tomorrow.`, 429)
   }
   let price = 0
-  if (kind === 'ask_ai' && counts.askAiThisMonth >= limits.askAiPerMonth) price = ASK_AI_EXTRA_CREDITS
+  if (kind === 'ask_ai') price = askAiCredits(counts.askAiThisMonth, limits.askAiPerMonth, units)
   if (kind === 'rewrite' && counts.rewritesThisMonth >= limits.rewritesPerMonth) price = rewriteCredits(counts.rewritesThisMonth - limits.rewritesPerMonth)
 
   let hold: Hold | null = null
   if (enforce && price > 0) hold = await charge(userId, { amount: price, refType: kind, refId: videoId ?? undefined })
-  const [row] = await sql<{ id: string }[]>`INSERT INTO ai_actions (user_id, kind, video_id, credits) VALUES (${userId}, ${kind}, ${videoId}, ${hold ? price : 0}) RETURNING id`
+  const [row] = await sql<{ id: string }[]>`INSERT INTO ai_actions (user_id, kind, video_id, credits, units) VALUES (${userId}, ${kind}, ${videoId}, ${hold ? price : 0}, ${units}) RETURNING id`
   return {
     credits: hold ? price : 0,
     done: async () => { if (hold) await settle(hold.id) },

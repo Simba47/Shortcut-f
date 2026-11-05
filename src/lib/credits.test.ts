@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  creditsMode, captionCredits, exportCredits, extraReadingCredits, captionSpan, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS,
+  creditsMode, subjectsCredits, subjectsNewMs, captionCredits, exportCredits, extraReadingCredits, captionSpan, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS,
   type SpendableGrant,
 } from './credits'
 import { PLANS } from './plans'
@@ -96,4 +96,17 @@ test('allocate: expired and empty grants are skipped', () => {
 
 test('allocate: an amount of zero or less takes nothing', () => {
   assert.deepEqual(allocate([g('a', 5, null)], 0, NOW), [])
+})
+
+test('Subjects: 2 credits per started minute of what no earlier payment covers', () => {
+  assert.equal(subjectsCredits(0), 0)
+  assert.equal(subjectsCredits(90_000), 4)
+  assert.equal(subjectsCredits(5 * MIN), 10)
+  assert.equal(subjectsNewMs(0, 90_000, []), 90_000)                                       // never paid: the whole clip
+  assert.equal(subjectsNewMs(0, 90_000, [{ start_ms: 0, end_ms: 90_000 }]), 0)             // the same clip again
+  assert.equal(subjectsNewMs(10_000, 50_000, [{ start_ms: 0, end_ms: 90_000 }]), 0)        // trimmed inside it
+  assert.equal(subjectsNewMs(0, 150_000, [{ start_ms: 0, end_ms: 90_000 }]), 60_000)       // grown at one end: the new part
+  assert.equal(subjectsNewMs(-30_000, 120_000, [{ start_ms: 0, end_ms: 90_000 }]), 60_000) // both ends: both new parts
+  assert.equal(subjectsNewMs(0, 180_000, [{ start_ms: 0, end_ms: 60_000 }, { start_ms: 120_000, end_ms: 180_000 }]), 60_000) // the gap
+  assert.equal(subjectsNewMs(0, 90_400, [{ start_ms: 0, end_ms: 90_000 }]), 0)             // under a second: the frames were read
 })
