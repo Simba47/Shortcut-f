@@ -1,7 +1,7 @@
 'use client'
 
 import { preloadMascot } from '@/components/ui/mascot'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { CaptionStyle, SegmentLocal, TextOverlay, TranscriptWord } from '@chai-cut/shared'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -10,6 +10,7 @@ import { AccountMenu } from '@/components/ui/account-menu'
 import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { ClipPlayer } from '@/components/clips/ClipPlayer'
 import { PostText } from '@/components/clips/PostText'
+import { FilterChip } from '@/components/ui/filter-chip'
 
 export interface GalleryClip {
   id: string; title: string | null; start_ms: number; end_ms: number; status: string
@@ -50,6 +51,38 @@ export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }
     return acc
   }, [])
   const exporting = clips.some(c => c.status === 'rendering')
+
+  // ── Filters (user, 2026-11-05: "filter and get the required video"): a search over each clip's title,
+  // why AI picked it, its post text and what's said in it (both scripts), its length, its viral score,
+  // and the order within each run. Runs with nothing left hide; "Latest" stays the newest run's.
+  const [query, setQuery] = useState('')
+  const [lenF, setLenF] = useState<LenFilter>('all')
+  const [scoreF, setScoreF] = useState<ScoreFilter>('all')
+  const [sortBy, setSortBy] = useState<SortBy>('score')
+  const haystacks = useMemo(() => new Map(clips.map(c => [c.id, [
+    c.title, c.ai_reason, c.post_caption, ...(c.hashtags ?? []),
+    c.words.map(w => w.word).join(' '), c.words.map(w => w.word_roman ?? '').join(' '),
+  ].filter(Boolean).join(' \n ').toLowerCase()])), [clips])
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const lenOf = (c: GalleryClip) => c.end_ms - c.start_ms
+  const keep = (c: GalleryClip) => {
+    const ms = lenOf(c)
+    if (lenF === 'short' && ms >= 30000) return false
+    if (lenF === 'mid' && (ms < 30000 || ms > 60000)) return false
+    if (lenF === 'long' && ms <= 60000) return false
+    if (scoreF !== 'all' && (c.ai_score ?? -1) < Number(scoreF)) return false
+    const hay = haystacks.get(c.id) ?? ''
+    return terms.every(t => hay.includes(t))
+  }
+  const order = (a: GalleryClip, b: GalleryClip) =>
+    sortBy === 'score' ? (b.ai_score ?? -1) - (a.ai_score ?? -1)
+      : sortBy === 'short' ? lenOf(a) - lenOf(b)
+      : sortBy === 'long' ? lenOf(b) - lenOf(a)
+      : 0   // 'made': the order the AI made them in
+  const filtering = terms.length > 0 || lenF !== 'all' || scoreF !== 'all'
+  const shownBatches = batches.map(b => ({ ...b, clips: b.clips.filter(keep).sort(order) })).filter(b => b.clips.length)
+  const shownCount = shownBatches.reduce((n, b) => n + b.clips.length, 0)
+  const clearFilters = () => { setQuery(''); setLenF('all'); setScoreF('all') }
 
   // While the AI is still making clips, or clips are exporting, check every 3 s
   useEffect(() => {
@@ -141,12 +174,17 @@ export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }
               AI edits
             </p>
             <h1 className="ag-title" title={video.title ?? undefined}>{video.title || 'Your video'}</h1>
-            <p className="ag-sub">Play any clip to watch it as a reel. Like it? Download it. Edit it to make changes.</p>
-            <div className="flex flex-wrap items-center gap-2 mt-4">
-              <span className="ag-stat"><b>{clips.length}</b> clip{clips.length === 1 ? '' : 's'}</span>
-              {batches.length > 1 && <span className="ag-stat"><b>{batches.length}</b> batches</span>}
-              {best != null && <span className="ag-stat ag-stat-lime" title="The highest viral score (0–99)">Best score <b>{best}</b></span>}
-            </div>
+            {/* What's here, as one quiet line of text (user, 2026-11-05: not button-like pills) */}
+            <p className="ag-stats">
+              <span><b>{clips.length}</b> clip{clips.length === 1 ? '' : 's'}</span>
+              {best != null && (
+                <span title="The highest viral score (0–99)">
+                  <svg className="ag-stats-bolt" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z" /></svg>
+                  <b>{best}</b> best score
+                </span>
+              )}
+              {batches.length > 1 && <span><b>{batches.length}</b> batches</span>}
+            </p>
           </div>
           <a href={`/videos/${video.id}`} className="ag-back">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
@@ -184,12 +222,52 @@ export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }
           </div>
         )}
 
-        {/* ── Batches ── */}
-        {batches.map((b, bi) => (
+        {/* ── Filters ── */}
+        {clips.length > 1 && (
+          <div className="ag-filters" role="search">
+            {/* (the search pill and the filters from the left, as the dashboard's toolbar; then how many are shown) */}
+            <div className="ag-tools">
+              <label className="ag-search" title="Search titles, captions or what’s said">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                  <path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <input className="ag-search-input" type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search clips"
+                  aria-label="Search the clips: titles, captions or what’s said" onKeyDown={e => { if (e.key === 'Escape' && query) { e.preventDefault(); setQuery('') } }} />
+                {query && (
+                  <button type="button" onClick={() => setQuery('')} aria-label="Clear the search" className="ag-search-clear">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                  </button>
+                )}
+              </label>
+              <FilterChip label="Length" value={lenF} onChange={setLenF} clearable
+                options={[['all', 'Any length'], ['short', 'Under 30s'], ['mid', '30–60s'], ['long', 'Over 1 min']]} />
+              <FilterChip label="Score" value={scoreF} onChange={setScoreF} clearable
+                options={[['all', 'Any score'], ['70', '70 and up'], ['80', '80 and up']]} />
+              <FilterChip label="Sort" value={sortBy} onChange={setSortBy}
+                options={[['score', 'Best score'], ['made', 'AI’s order'], ['short', 'Shortest first'], ['long', 'Longest first']]} />
+            </div>
+            <p className="ag-filter-count" role="status">
+              {filtering
+                ? <><span>{shownCount} of {clips.length} clips</span><span aria-hidden="true">·</span><button type="button" onClick={clearFilters}>Clear all</button></>
+                : <span>{clips.length} clips</span>}
+            </p>
+          </div>
+        )}
+        {filtering && shownCount === 0 && (
+          <div className="ag-empty">
+            <p className="ag-empty-title">No clips match</p>
+            <p className="ag-sub" style={{ margin: 0 }}>Try other words, or another length or score.</p>
+            <button type="button" className="ag-btn ag-btn-dark" style={{ padding: '0 16px', marginTop: 6 }} onClick={clearFilters}>Clear filters</button>
+          </div>
+        )}
+
+        {/* ── Batches (filtered and sorted) ── */}
+        {shownBatches.map(b => ({ ...b, bi: batches.findIndex(x => x.id === b.id) })).map(({ bi, ...b }) => (
           <section key={b.id} className="flex flex-col gap-4">
             <div className="ag-batch">
               <span className="ag-batch-name" data-latest={bi === 0 || undefined}>{bi === 0 ? 'Latest' : `Batch ${batches.length - bi}`}</span>
-              <span className="ag-batch-meta">{b.clips.length} clip{b.clips.length === 1 ? '' : 's'} · {fmtWhen(b.at)}</span>
+              <span className="ag-batch-meta">{filtering ? `${b.clips.length} of ${batches[bi].clips.length}` : b.clips.length} clip{(filtering ? batches[bi].clips.length : b.clips.length) === 1 ? '' : 's'} · {fmtWhen(b.at)}</span>
               <span className="ag-batch-line" aria-hidden="true" />
             </div>
             <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
@@ -267,3 +345,7 @@ export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }
     </div>
   )
 }
+
+type LenFilter = 'all' | 'short' | 'mid' | 'long'
+type ScoreFilter = 'all' | '70' | '80'
+type SortBy = 'score' | 'made' | 'short' | 'long'
