@@ -53,6 +53,9 @@ export interface TimelineProps {
   onSelectSegment: (id: string) => void
   /** A part's grip dragged (live: `done` false; once more on release) — see SegmentTimeline */
   onEdgeTrim?: (segId: string, edge: 'start' | 'end', fromMs: number, toMs: number, done: boolean) => void
+  /** How much later the clip's end can go (more of the video after it): the last part's end grip stops
+   *  there. Unset: no stop here (the editor stops it) */
+  clipEndRoomMs?: number
   textOverlays?: TextOverlay[]
   activeTextOverlayId?: string | null
   onSelectTextOverlay?: (id: string) => void
@@ -208,6 +211,13 @@ const ROW_ICO_X = 82
 const ADD_CTL_BOX = { left: 10, width: 68 }
 /** Room at each end of the timeline, so the grips at the clip's very ends stay clear of the border */
 const PAD = 16
+/** An end grip dragged out: how far past it the timeline opens up (room to drag into) */
+const REACH_AHEAD_MS = 6000
+/** A grip dragged: how often the clip itself is worked out again (the grip follows every frame) */
+const LIVE_APPLY_MS = 90
+/** Holding a grip at the view's edge: the fastest it scrolls (px a frame), and (ms of video a frame: 15 s a second) */
+const EDGE_SCROLL_MAX = 60
+const EDGE_SCROLL_MAX_MS = 250
 const GRIP_W = 14
 /** Within this many pixels of a cut (or an item's edge) the playhead clicks onto it */
 const SNAP_PX = 8
@@ -253,7 +263,7 @@ function formatTag(seg: SegmentLocal): string {
 
 export function Timeline({
   segments, mainVideoId, clipStartMs, clipEndMs, currentTimeMs, activeSegmentId, videoUrl, sourceAt, sourceKey,
-  safeDurationMs, onSeek, onScrubStart, onSelectSegment, onEdgeTrim,
+  safeDurationMs, onSeek, onScrubStart, onSelectSegment, onEdgeTrim, clipEndRoomMs,
   textOverlays = [], photos = [], activePhotoId = null, onSelectPhoto, onPhotoTimeChange,
   musicTracks = [], onMusicMove, onMusicTrim, selectedMusicId = null, onSelectMusic,
   activeTextOverlayId, onSelectTextOverlay, onTextOverlayUpdate,
@@ -325,6 +335,8 @@ export function Timeline({
   const [dropAt, setDropAt] = useState<{ ms: number; lane: string | null; what: string; y: number; end?: number } | null>(null)
   /** How far what's being dragged in reaches (ms), while it reaches past the clip's end */
   const [dropReach, setDropReach] = useState<number | null>(null)
+  /** An end grip dragged out: the timeline reaches this far (the scale held), so there is room to drag into and scroll along */
+  const [edgeReach, setEdgeReach] = useState<number | null>(null)
   // A transition tile dragged over the timeline: the cut it would land on
   const [dropCut, setDropCut] = useState<string | null>(null)
   // A cut's marker right-clicked: its menu (where, which cut)
@@ -373,7 +385,7 @@ export function Timeline({
   // (while something is carried the scale is held exactly as it was: nothing — the clip growing, the
   // view's own width — changes it under the pointer)
   const pxPerMs = carryScaleRef.current ?? (zoom * base) / scaleDur
-  const viewDur = Math.max(duration, frozenDur ?? 0, dropReach ?? 0, 1)
+  const viewDur = Math.max(duration, frozenDur ?? 0, dropReach ?? 0, edgeReach ?? 0, 1)
   const contentW = viewDur * pxPerMs
   const pct = (ms: number) => (ms / viewDur) * 100
   const at = pct
@@ -1013,52 +1025,78 @@ export function Timeline({
     const isMain = !(seg.video_offset_ms != null && seg.crop_boxes[0]?.source_video_id)
     const videoBefore = edge === 'start' && isMain ? Math.max(0, sourceAt ? sourceAt(seg.start_ms) : clipStartMs + seg.start_ms) : 0
     const minTo = edge === 'start' ? from - videoBefore : -Infinity
+    // The clip's own end dragged out: as far as there is more video (clipEndRoomMs). The timeline opens
+    // up past it as it goes, so there's room to drag straight out at any zoom (user, 2026-11-04:
+    // extending "takes a bit harder… keep it simple")
+    const atClipEnd = edge === 'end' && from >= duration - 1
+    const maxTo = atClipEnd && clipEndRoomMs != null ? from + Math.max(0, clipEndRoomMs) : Infinity
+    const opens = atClipEnd && maxTo > from
+    const reachFor = (t: number) => Math.min(Math.max(from, t) + REACH_AHEAD_MS, maxTo + 400)
     // The layer keeps still meanwhile (the playhead line goes to the edge being cut, as in CapCut)
     const tx0 = currentTx()
     freezeRef.current = tx0
     setFrozenDur(duration)
+    if (opens) setEdgeReach(reachFor(from))
     setDragging(`${edge}-${seg.id}`)
     const vr = viewRef.current?.getBoundingClientRect()
-    let raf = 0, seekRaf = 0, auto = 0
-    // The preview shows the frame the cut lands on (a start dragged in: its new first frame; an end:
-    // its new last frame — after the clip was redrawn with the cut)
+    let raf = 0, timer = 0, seekRaf = 0, auto = 0, lastApply = 0, held = 0
+    // The preview shows the frame the edge is on: a start dragged in, its new first frame; an end, its
+    // new last frame, in or out (out: the last of what comes back), once the clip is redrawn with it
     const follow = () => {
       if (seekRaf) return
       seekRaf = requestAnimationFrame(() => {
         seekRaf = requestAnimationFrame(() => {
           seekRaf = 0
           if (edge === 'start' && to > from) onSeek(Math.round(to))
-          if (edge === 'end' && to < from) onSeek(Math.max(seg.start_ms, Math.round(to) - 1))
+          if (edge === 'end' && to !== from) onSeek(Math.max(seg.start_ms, Math.round(to) - 1))
         })
       })
     }
-    const apply = () => { raf = 0; onEdgeTrim(seg.id, edge, Math.round(from), Math.round(to), false); follow() }
+    // The clip itself is worked out again at most every LIVE_APPLY_MS (each time the whole editor
+    // redraws); the grip, its outline and its time follow the pointer every frame meanwhile
+    const apply = () => {
+      raf = 0; timer = 0
+      const wait = LIVE_APPLY_MS - (performance.now() - lastApply)
+      if (wait > 0) { timer = window.setTimeout(apply, wait); return }
+      lastApply = performance.now()
+      onEdgeTrim(seg.id, edge, Math.round(from), Math.round(to), false)
+      follow()
+    }
     const update = () => {
       // (the layer may have been scrolled along by holding near the view's edge)
       const shift = (freezeRef.current ?? tx0) - tx0
       const t = from + (lastX - sx - shift) * k - extra
-      to = edge === 'start' ? Math.max(minTo, Math.min(seg.end_ms - MIN_PART_MS, t)) : Math.max(seg.start_ms + MIN_PART_MS, t)
+      to = edge === 'start' ? Math.max(minTo, Math.min(seg.end_ms - MIN_PART_MS, t)) : Math.min(maxTo, Math.max(seg.start_ms + MIN_PART_MS, t))
       setEdgeGhost({ id: seg.id, from, to, edge })
-      if (edge === 'end' && !raf) raf = requestAnimationFrame(apply)
+      if (opens) setEdgeReach(r => { const want = reachFor(to); return r != null && want <= r ? r : want })
+      if (edge === 'end' && !raf && !timer) raf = requestAnimationFrame(apply)
       if (edge === 'start') follow()
     }
-    // Holding near the view's edge scrolls the timeline along (more to cut, or to bring back)
+    // Holding near the view's edge scrolls the timeline along (more to cut, or to bring back): faster
+    // the deeper into the edge and the longer it's held, so a long stretch is a short hold
     const autoScroll = () => {
       auto = 0
       if (!vr || freezeRef.current == null) return
-      const edgeZone = 40
-      const v = lastX < vr.left + edgeZone ? (vr.left + edgeZone - lastX) : lastX > vr.right - edgeZone ? -(lastX - (vr.right - edgeZone)) : 0
+      const edgeZone = 48
+      // (only towards where the pointer went from where it pressed: a grip near the view's edge, grabbed
+      // and dragged the other way, doesn't set the view scrolling)
+      const v = lastX < vr.left + edgeZone && lastX < sx - 4 ? (vr.left + edgeZone - lastX)
+        : lastX > vr.right - edgeZone && lastX > sx + 4 ? -(lastX - (vr.right - edgeZone)) : 0
+      held = v !== 0 && moved ? held + 1 : 0
+      // (in time, not pixels, so it feels the same at any zoom: a few seconds of video a second at first,
+      // up to EDGE_SCROLL_MAX_MS a frame after a few seconds held; px a frame, at most EDGE_SCROLL_MAX)
+      const speed = (depth: number) => Math.min(EDGE_SCROLL_MAX, Math.min(EDGE_SCROLL_MAX_MS, (20 + Math.min(depth, 80) * 1) * (1 + Math.min(held / 90, 3))) / k)
       // A start held at the left edge with the layer as far left as it goes (the clip's 0:00 in view):
       // more video comes back, faster the further into the edge, the layer still
       if (v > 0 && moved && edge === 'start' && freezeRef.current >= PAD - 0.5 && to > minTo + 1) {
-        extra = Math.min(from - minTo, extra + Math.min(18, v * 0.35) * k)
+        extra = Math.min(from - minTo, extra + speed(v) * k)
         update()
         auto = requestAnimationFrame(autoScroll)
         return
       }
       if (v !== 0 && moved) {
-        // (only as far as there is more of the clip to show: at 1× the whole clip is in view)
-        const next = Math.max(PAD - maxScroll(), Math.min(PAD, freezeRef.current + Math.max(-18, Math.min(18, v * 0.35))))
+        // (only as far as there is more of the clip to show, or, the clip's end dragged out, the room opened past it)
+        const next = Math.max(PAD - maxScroll(), Math.min(PAD, freezeRef.current + Math.sign(v) * speed(Math.abs(v))))
         if (next !== freezeRef.current) {
           freezeRef.current = next
           place()
@@ -1078,11 +1116,13 @@ export function Timeline({
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       if (raf) cancelAnimationFrame(raf)
+      if (timer) clearTimeout(timer)
       if (seekRaf) cancelAnimationFrame(seekRaf)
       if (auto) cancelAnimationFrame(auto)
       setDragging(null)
       setEdgeGhost(null)
       setFrozenDur(null)
+      setEdgeReach(null)
       if (moved) onEdgeTrim(seg.id, edge, Math.round(from), Math.round(to), true)
       // (dragged out: what it gained shows for a moment)
       if (moved && (edge === 'start' ? to < from : to > from)) setGrown({ id: seg.id, edge, before: seg.end_ms - seg.start_ms, key: performance.now() })

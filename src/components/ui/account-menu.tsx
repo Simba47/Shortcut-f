@@ -1,6 +1,5 @@
 'use client'
 
-import { openBrandKits } from '@/components/brand/brandKitsEvents'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useSession, signOut } from 'next-auth/react'
@@ -121,11 +120,6 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
     if (!onNavigate) return
     e.preventDefault(); setOpen(false); onNavigate(href)
   }
-  const soon = (label: string, icon: React.ReactNode) => (
-    <div className="am-item" role="menuitem" aria-disabled="true" title={`${label} — coming soon`}>
-      <Icon d={icon} /><span className="flex-1">{label}</span><span className="am-soon">Soon</span>
-    </div>
-  )
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -168,10 +162,6 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
             <a href="/pricing" onClick={go('/pricing')} className="am-item" role="menuitem">
               <Icon d={<><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /></>} /><span className="flex-1">Plans &amp; billing</span>
             </a>
-            {soon('Invoices', <><path d="M6 2h9l5 5v15H6z" /><path d="M14 2v6h6M9 13h6M9 17h6" /></>)}
-            <button type="button" onClick={() => { setOpen(false); openBrandKits() }} className="am-item" role="menuitem">
-              <Icon d={<><circle cx="13.5" cy="6.5" r="2" /><circle cx="17.5" cy="10.5" r="2" /><circle cx="8.5" cy="7.5" r="2" /><circle cx="6.5" cy="12.5" r="2" /><path d="M12 22a10 10 0 110-20 9 9 0 019 9c0 3-2 4-4 4h-2a2 2 0 00-1 3.7A2 2 0 0112 22z" /></>} /><span className="flex-1">Brand kits</span>
-            </button>
           </div>
 
           {/* Help */}
@@ -200,7 +190,7 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
             </button>
           </div>
           <p className="am-legal">
-            <a href="/#faq">Privacy</a><span aria-hidden="true">·</span><a href="/#faq">Terms</a><span aria-hidden="true">·</span><span>Shortcut</span>
+            <a href="/privacy" onClick={go('/privacy')}>Privacy</a><span aria-hidden="true">·</span><a href="/terms" onClick={go('/terms')}>Terms</a><span aria-hidden="true">·</span><span>Shortcut</span>
           </p>
         </div>
       )}

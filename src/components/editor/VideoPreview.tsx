@@ -2518,7 +2518,9 @@ export function OutputCanvas({
 
   return (
     <GuideContext.Provider value={setGuides}>
-    <div className={className} style={{ ...style, position: 'relative', containerType: 'inline-size' }}
+    {/* (isolate: the boxes' z-indexes order them among themselves only, so the platform's buttons and
+        the full view button over the preview stay over them) */}
+    <div className={className} style={{ ...style, position: 'relative', containerType: 'inline-size', isolation: 'isolate' }}
       onClick={() => {
         // A click on an empty part of the preview unselects (a text, and anything picked in a frame)
         onSelectTextOverlay?.(null)
@@ -3122,6 +3124,9 @@ function OverlayBox({ overlay, isActive, onChange, onSelect, onDelete }: Overlay
         width: `${overlay.w * 100}%`, height: `${overlay.h * 100}%`,
         boxSizing: 'border-box', cursor: 'move', userSelect: 'none',
         boxShadow: isActive ? `0 0 0 1px ${color}55` : 'none',
+        // Above a frame's own draggable boxes (main video: 18, bars: 25, face cam: 26) so a logo or
+        // photo over them can be grabbed; under the captions' box (30)
+        zIndex: 28,
         // Turned round its middle (the export turns it the same way)
         ...(overlay.rotation ? { transform: `rotate(${overlay.rotation}deg)` } : {}),
       }}
@@ -3458,6 +3463,8 @@ function TextOverlayBox({ overlay, isActive, onChange, onSelect, onDelete, editi
         transform: [centred ? 'translateX(-50%)' : '', overlay.rotation ? `rotate(${overlay.rotation}deg)` : ''].join(' ').trim() || undefined,
         cursor: editing ? 'text' : 'move',
         userSelect: 'none',
+        // Above a frame's own draggable boxes, as the photos are (and after them, so over them)
+        zIndex: 28,
         // (all white when picked, no lime — user, 2026-11-01: the line, its glow and the tint inside)
         border: `1.5px solid ${isActive || editing ? '#ffffff' : 'transparent'}`,
         borderRadius: 3,

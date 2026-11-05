@@ -1,6 +1,6 @@
-/* ── AUTH: sign in / sign up as a split card (components/auth/AuthSlider.tsx) ──
+/* ── AUTH: every auth screen in one split card (components/auth/AuthShell.tsx) ──
    The page is exactly the window's height on desktop — nothing to scroll (user, 2026-10-31): one
-   card in the middle (user: "make them into a card"), the lime brand side on its left, the form on
+   card in the middle (user: "make them into a card"), the brand side on its left, the form on
    its right. The card is the window's height less a margin, up to 656 px, and 80% of the window's
    width, up to 1056 px (user, 2026-10-31: "reduce the div size 20%"); sizes and gaps inside follow
    the CARD's height and width (cqh / cqi: the card is their container), so even a short laptop
@@ -12,6 +12,12 @@
   --auth-ink: #0A0A0A;
   --auth-gap: clamp(8px, 1.5cqh, 14px);
   --auth-box-h: clamp(42px, 5.6cqh, 50px);
+  --auth-field-bg: rgb(255 255 255 / 0.035);
+  --auth-field-border: rgb(255 255 255 / 0.12);
+  --auth-danger: #F87171;
+  --auth-warn: #FBBF24;
+  /* (quiet text — the legal line, unmet rules, placeholders — still 5:1 against the dark: WCAG AA) */
+  --auth-dim: rgb(244 244 245 / 0.52);
 
   display: flex; align-items: center; justify-content: center;
   height: 100vh;
@@ -39,7 +45,9 @@
     0 30px 120px -50px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
-/* ── brand side ── */
+/* ── brand side ──
+   Wide windows: a creator, full bleed, with Shortcut at work over them (BrandScene, styled in the
+   desktop block further down). Phones: a short header — logo and headline (their 899 px rules). */
 .auth-brand {
   --logo: var(--auth-ink);
   position: relative;
@@ -47,80 +55,30 @@
   display: flex; flex-direction: column;
   padding: clamp(20px, 3.6cqh, 40px) clamp(24px, 3.6cqi, 48px);
   color: #f4f4f5;
-  /* The same lime, less of it (user, 2026-11-01, option A): full lime in the top corner behind the
-     logo, fading into the dark card by the middle — the words sit on the dark part, in white; lime
-     stays in the ticks and the clip */
-  background:
-    radial-gradient(ellipse 115% 70% at 0% 0%, var(--auth-lime) 0%, #B4E600 24%, rgba(154,204,0,0.5) 48%, rgba(20,20,20,0) 80%),
-    #121213;
+  background: #101011;
 }
-/* (no grid lines over the lime — user, 2026-11-01) */
-.auth-home { position: relative; z-index: 1; align-self: flex-start; text-decoration: none; color: inherit; }
+.auth-home { position: relative; z-index: 2; align-self: flex-start; text-decoration: none; color: inherit; border-radius: 8px; }
+.auth-home:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .auth-home .brand-word { color: var(--auth-ink); }
-/* The words and the clip side by side in the middle (never on top of each other); the clip goes
-   when the side is too narrow for both (container query below) */
-.auth-stage {
-  position: relative; z-index: 1; margin: auto 0;
-  display: flex; align-items: center; justify-content: space-between; gap: clamp(16px, 2vw, 48px);
-}
-.auth-pitch { flex: 1 1 auto; min-width: 0; max-width: 680px; container-type: inline-size; }
+.auth-stage { position: relative; z-index: 2; margin: auto 0; display: flex; flex-direction: column; gap: clamp(14px, 2.6cqh, 22px); }
+.auth-pitch { min-width: 0; max-width: 460px; }
 .auth-pitch h2 {
   margin: 0;
-  /* (the second line is the longest: ~12 font sizes wide — so the size follows the room the words have) */
-  font-size: clamp(22px, min(4.6cqh, 8cqi), 54px); font-weight: 900; letter-spacing: -0.035em; line-height: 1.02;
+  font-size: clamp(22px, min(4.4cqh, 7.6cqi), 46px); font-weight: 800; letter-spacing: -0.04em; line-height: 1.04;
+  overflow-wrap: break-word;
 }
-.auth-pitch p { margin: clamp(10px, 1.8cqh, 16px) 0 0; font-size: clamp(14px, 1.9cqh, 16px); line-height: 1.5; color: rgba(244,244,245,0.7); }
-.auth-pitch ul { list-style: none; margin: clamp(16px, 3cqh, 28px) 0 0; padding: 0; display: grid; gap: clamp(8px, 1.4cqh, 12px); }
-.auth-pitch li { display: flex; align-items: center; gap: 10px; font-size: clamp(13px, 1.8cqh, 15px); font-weight: 700; }
-.auth-pitch li span {
-  flex-shrink: 0; width: 22px; height: 22px; display: grid; place-items: center;
-  border-radius: 999px; background: var(--auth-lime); color: var(--auth-ink);
-}
-.auth-pitch li svg { width: 13px; height: 13px; stroke-width: 3; }
-.auth-fine { position: relative; z-index: 1; margin: 0; font-size: 12.5px; font-weight: 700; color: rgba(244,244,245,0.55); }
+.auth-pitch p { margin: clamp(10px, 1.8cqh, 14px) 0 0; font-size: clamp(13.5px, 1.9cqh, 15px); line-height: 1.55; color: rgb(244 244 245 / 0.62); }
+.auth-pitch ul { list-style: none; margin: clamp(12px, 2.4cqh, 20px) 0 0; padding: 0; display: grid; gap: clamp(6px, 1.2cqh, 10px); }
+.auth-pitch li { display: flex; align-items: flex-start; gap: 10px; font-size: clamp(13px, 1.8cqh, 14px); font-weight: 600; line-height: 1.4; color: rgb(244 244 245 / 0.82); }
+.auth-pitch li svg { flex-shrink: 0; width: 15px; height: 15px; margin-top: 1px; stroke-width: 2.5; color: rgb(244 244 245 / 0.5); }
+.auth-fine { position: relative; z-index: 2; margin: 0; font-size: 12.5px; font-weight: 600; color: rgb(244 244 245 / 0.56); }
+/* (the scene's parts only exist on wide windows — the desktop block shows them) */
+.auth-photo, .auth-short, .auth-edit, .auth-nav, .auth-foot { display: none; }
+.auth-brand { container-type: inline-size; }
 
-/* A vertical clip, tilted beside the words (decoration): a head and shoulders, a caption, its progress */
-.auth-reel {
-  position: relative; flex: none; margin-right: 8px;
-  rotate: 5deg;
-  animation: auth-reel-in .8s cubic-bezier(.2,.8,.2,1) .2s both;
-}
-.auth-reel-phone {
-  position: relative; overflow: hidden;
-  height: clamp(170px, 28cqh, 250px); aspect-ratio: 9 / 16;
-  border-radius: 22px; border: 3px solid var(--auth-ink);
-  background: linear-gradient(180deg, #2a2a2e 0%, #121214 100%);
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.12), 0 30px 60px -20px rgba(0,0,0,0.75);
-}
-.auth-reel-head {
-  position: absolute; left: 50%; top: 24%; translate: -50% 0;
-  width: 34%; aspect-ratio: 1; border-radius: 50%;
-  background: linear-gradient(160deg, #c79b7c, #8e6a54);
-}
-.auth-reel-body {
-  position: absolute; left: 50%; top: 46%; translate: -50% 0;
-  width: 78%; height: 60%; border-radius: 45% 45% 0 0;
-  background: linear-gradient(180deg, #e8e8ea, #b9b9bf);
-}
-.auth-reel-cap {
-  position: absolute; left: 8%; right: 8%; bottom: 17%; margin: 0;
-  text-align: center; font-size: clamp(9px, 1.4cqh, 12px); font-weight: 900; line-height: 1.15; letter-spacing: -0.01em;
-  color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,0.6);
-}
-.auth-reel-cap span { color: var(--auth-ink); background: var(--auth-lime); padding: 0 3px; border-radius: 3px; text-shadow: none; }
-.auth-reel-bar { position: absolute; left: 8%; right: 8%; bottom: 7%; height: 3px; border-radius: 2px; background: rgba(255,255,255,0.25); overflow: hidden; }
-.auth-reel-bar i { display: block; height: 100%; width: 0; background: var(--auth-lime); animation: auth-reel-play 6s linear 1s infinite; }
-.auth-reel-tag {
-  position: absolute; left: -18px; top: 16%;
-  padding: 5px 10px; border-radius: 999px;
-  background: var(--auth-ink); color: var(--auth-lime); box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
-  font-size: 11px; font-weight: 800; letter-spacing: .02em; white-space: nowrap;
-  rotate: -5deg;
-}
-@keyframes auth-reel-in { from { opacity: 0; translate: 0 24px; rotate: 10deg; } }
-@keyframes auth-reel-play { to { width: 100%; } }
-
-/* ── form side ── */
+/* ── form side ──
+   Premium and quiet (user, 2026-11-03: "premium feel"): dark-tinted boxes with a hairline edge, a
+   neutral tab pill, and the lime kept for what matters — the main button, focus, met rules. */
 .auth-side {
   min-width: 0; overflow-y: auto;
   display: flex;
@@ -132,29 +90,34 @@
 /* (narrower: the boxes looked too wide — user, 2026-10-31) */
 .auth-panel { width: 100%; max-width: 340px; margin: auto; }
 
-/* Sign in · Create account: a sliding lime pill behind the picked tab (the flow switches it too) */
+/* Sign in · Create account: a soft raised pill slides behind the picked tab (the flow switches it too) */
 .auth-tabs {
   position: relative;
   display: grid; grid-template-columns: 1fr 1fr;
   padding: 4px; margin-bottom: clamp(14px, 2.6cqh, 26px);
   border-radius: 999px;
-  background: var(--bg); border: 1px solid var(--border-strong);
+  background: rgb(255 255 255 / 0.03); border: 1px solid var(--border);
 }
 .auth-tabs button {
   position: relative; z-index: 1;
-  height: clamp(34px, 4.6cqh, 40px);
+  min-height: clamp(34px, 4.6cqh, 40px); padding: 4px 10px;
   border: 0; border-radius: 999px; background: transparent;
-  color: var(--text-muted); font: inherit; font-size: 14px; font-weight: 700;
+  color: var(--text-muted); font: inherit; font-size: 14px; font-weight: 600; line-height: 1.2;
   cursor: pointer; transition: color .25s;
 }
-.auth-tabs button[aria-selected="true"] { color: var(--auth-ink); }
+.auth-tabs button:hover,
+.auth-tabs button[aria-selected="true"] { color: var(--text); }
 .auth-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .auth-tab-pill {
-  position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px);
-  border-radius: 999px; background: var(--auth-lime);
+  position: absolute; top: 4px; bottom: 4px; inset-inline-start: 4px; width: calc(50% - 4px);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.09);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 1px 2px rgb(0 0 0 / 0.5), 0 6px 16px -8px rgb(0 0 0 / 0.6);
   transition: translate .35s cubic-bezier(.65,0,.35,1);
 }
 .auth-tab-pill[data-at="signup"] { translate: 100% 0; }
+/* (right-to-left languages: the tabs read the other way, so the pill slides the other way) */
+[dir="rtl"] .auth-tab-pill[data-at="signup"] { translate: -100% 0; }
 
 /* The form (both tabs share it), and the emailed code after Create account: each rises in */
 .auth-form {
@@ -167,115 +130,187 @@
 /* "Forgot password?" only on Sign in: fades away on Create account (keeps its place, so nothing jumps) */
 .auth-forgot { transition: opacity .25s, visibility .25s; }
 .auth-forgot[data-off] { opacity: 0; visibility: hidden; pointer-events: none; }
-/* Confirm password: under the password, closed on Sign in. Create account opens its row and it comes
-   up from under; Sign in sends it back down and closes the row. (Closed, its gap in the column is
-   taken back by the margin, so the form below doesn't keep an empty space.) */
+/* The password rules and Confirm password: under the password, closed on Sign in. Create account
+   opens their row and they come up from under; Sign in sends them back down and closes the row.
+   (Closed, its gap in the column is taken back by the margin, so the form below doesn't keep an
+   empty space.) */
 .auth-reveal {
   display: grid; grid-template-rows: 0fr;
   margin-top: calc(-1 * var(--auth-gap));
   transition: grid-template-rows .4s cubic-bezier(.65,0,.35,1), margin-top .4s cubic-bezier(.65,0,.35,1);
 }
-.auth-reveal > div { min-height: 0; overflow: hidden; }
-.auth-reveal .auth-field {
+.auth-reveal > div { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: var(--auth-gap); }
+.auth-reveal > div > * {
   opacity: 0; translate: 0 18px;
   transition: opacity .3s ease, translate .4s cubic-bezier(.65,0,.35,1);
 }
 .auth-reveal[data-open] { grid-template-rows: 1fr; margin-top: 0; }
 /* (open: no clipping once it's up, so the box's focus ring shows in full) */
 .auth-reveal[data-open] > div { overflow: visible; animation: auth-clip .4s; }
-.auth-reveal[data-open] .auth-field { opacity: 1; translate: 0 0; transition-delay: .08s, 0s; }
+.auth-reveal[data-open] > div > * { opacity: 1; translate: 0 0; transition-delay: .08s, 0s; }
 @keyframes auth-clip { from, to { overflow: hidden; } }
 .auth-form h1 {
   margin: 0;
-  font-size: clamp(26px, 3.8cqh, 34px); font-weight: 900; letter-spacing: -0.03em; line-height: 1.05;
+  font-size: clamp(26px, 3.8cqh, 34px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.1;
+  overflow-wrap: break-word;
 }
 .auth-sub { margin: -4px 0 4px; font-size: 14px; line-height: 1.5; color: var(--text-muted); }
-.auth-sub strong { color: var(--text); font-weight: 700; overflow-wrap: anywhere; }
-/* A note from the flow ("no account for … yet — confirm your password"): a lime-edged box, easy to see */
-.auth-note {
+.auth-sub strong { color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+/* A note from the flow ("no account for … yet — confirm your password"), and an error about no one
+   box: the same quiet edged box, lime or red */
+.auth-note, .auth-error {
   margin: 0; padding: 9px 12px; border-radius: 10px;
-  border-left: 3px solid var(--auth-lime);
-  background: color-mix(in srgb, var(--auth-lime) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--auth-lime) 28%, transparent);
+  background: color-mix(in srgb, var(--auth-lime) 7%, transparent);
   font-size: 13px; line-height: 1.45; color: var(--text);
+  animation: auth-swap .3s ease;
 }
+.auth-error { border-color: color-mix(in srgb, var(--auth-danger) 35%, transparent); background: color-mix(in srgb, var(--auth-danger) 9%, transparent); }
 /* "← Back" above a later step's title */
 .auth-back {
   align-self: flex-start; display: inline-flex; align-items: center; gap: 6px;
-  margin: 0 0 2px; padding: 4px 8px 4px 4px; border: 0; border-radius: 8px;
+  margin: 0 0 2px; padding-block: 4px; padding-inline: 4px 8px; border: 0; border-radius: 8px;
   background: none; color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 600;
   cursor: pointer; transition: color .15s, background .15s;
 }
-.auth-back:hover { color: var(--text); background: rgb(255 255 255 / 0.06); }
+.auth-back:hover { color: var(--text); background: var(--hover); }
+.auth-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .auth-back svg { width: 15px; height: 15px; }
-/* The emailed code: one wide box, big spaced digits */
-.auth-form .auth-code {
-  width: 100%; height: calc(var(--auth-box-h) + 8px);
-  padding: 0 16px; border-radius: 14px;
-  border: 1px solid rgba(10,10,10,0.1); background: #FFFFFF; color: #0A0A0A;
-  font: inherit; font-size: 26px; font-weight: 800; letter-spacing: .5em; text-align: center;
-  outline: none; transition: border-color .2s, box-shadow .2s;
-}
-.auth-form .auth-code::placeholder { color: rgba(10,10,10,0.2); }
-.auth-form .auth-code:focus { border-color: var(--auth-lime); box-shadow: 0 0 0 4px color-mix(in srgb, var(--auth-lime) 45%, transparent); }
+[dir="rtl"] .auth-back svg { scale: -1 1; }
 
-/* Labelled fields: label row on top, then a white box with an icon on the left */
-.auth-field { display: flex; flex-direction: column; gap: 6px; }
+/* Labelled fields: label row on top, then the box, then (if any) its error */
+.auth-field { display: flex; flex-direction: column; gap: 7px; }
 .auth-field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.auth-field-head label { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.auth-field-head label { font-size: 13px; font-weight: 600; color: rgb(244 244 245 / 0.86); }
 .auth-box {
   position: relative; width: 100%;
   display: flex; align-items: center; gap: 12px;
-  height: var(--auth-box-h); padding: 0 16px;
-  border-radius: 14px;
-  border: 1px solid rgba(10,10,10,0.1);
-  background: #FFFFFF;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 4px 12px -6px rgba(0,0,0,0.12);
-  transition: border-color .2s, box-shadow .2s;
+  height: var(--auth-box-h); padding-inline: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--auth-field-border);
+  background: var(--auth-field-bg);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  transition: border-color .2s, box-shadow .2s, background .2s;
 }
-/* Focus ring in the brand lime */
+.auth-box:hover { border-color: rgb(255 255 255 / 0.2); }
+/* Focus: a lime edge and a soft lime glow */
 .auth-box:focus-within {
-  border-color: var(--auth-lime);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--auth-lime) 45%, transparent);
+  border-color: color-mix(in srgb, var(--auth-lime) 75%, transparent);
+  background: rgb(255 255 255 / 0.05);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--auth-lime) 16%, transparent);
 }
-.auth-box-icon { flex-shrink: 0; width: 18px; height: 18px; color: rgba(10,10,10,0.6); }
+.auth-box-icon { flex-shrink: 0; width: 17px; height: 17px; color: var(--text-dim); transition: color .2s; }
+.auth-box:focus-within .auth-box-icon { color: var(--text-muted); }
 .auth-form .auth-box input {
   flex: 1; min-width: 0; height: 100%;
   padding: 0; border: 0; outline: none; background: transparent;
-  color: #0A0A0A; font: inherit; font-size: 15px;
+  color: var(--text); font: inherit; font-size: 15px;
 }
-.auth-form .auth-box input::placeholder { color: rgba(10,10,10,0.4); }
-/* Keep browser autofill from tinting the white boxes */
+.auth-form .auth-box input::placeholder { color: var(--auth-dim); }
+/* Keep browser autofill from tinting the dark boxes */
 .auth-form .auth-box input:-webkit-autofill {
-  -webkit-text-fill-color: #0A0A0A;
-  -webkit-box-shadow: 0 0 0 40px #FFFFFF inset;
-  caret-color: #0A0A0A;
+  -webkit-text-fill-color: var(--text);
+  -webkit-box-shadow: 0 0 0 40px #1b1b1b inset;
+  caret-color: var(--text);
 }
-/* Password box: the eye sits at the right end */
+/* An error on this box: red edge, a red glow, one small shake, the message under it */
+.auth-field[data-invalid] .auth-box,
+.auth-field[data-invalid] .auth-box:focus-within {
+  border-color: color-mix(in srgb, var(--auth-danger) 80%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--auth-danger) 14%, transparent);
+}
+.auth-field[data-invalid] .auth-box,
+.auth-field[data-invalid] .auth-code { animation: auth-shake .4s cubic-bezier(.36,.07,.19,.97); }
+@keyframes auth-shake {
+  20% { translate: -4px 0; } 40% { translate: 4px 0; } 60% { translate: -2px 0; } 80% { translate: 2px 0; }
+}
+.auth-field-error {
+  display: flex; align-items: flex-start; gap: 6px;
+  margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--auth-danger);
+  animation: auth-swap .25s ease;
+}
+.auth-field-error svg { flex-shrink: 0; width: 14px; height: 14px; margin-top: 2px; }
+/* "Caps Lock is on" under a password box */
+.auth-caps {
+  display: flex; align-items: center; gap: 6px;
+  margin: 0; font-size: 12px; font-weight: 600; color: var(--auth-warn);
+  animation: auth-swap .2s ease;
+}
+.auth-caps svg { width: 13px; height: 13px; }
+/* Password box: the eye sits at the end */
 .auth-eye {
-  flex-shrink: 0; margin-right: -8px;
+  flex-shrink: 0; margin-inline-end: -8px;
   width: 34px; height: 34px;
   display: grid; place-items: center;
   border: 0; border-radius: 8px;
   background: transparent;
-  color: rgba(10,10,10,0.55);
+  color: var(--text-dim);
   cursor: pointer;
   transition: color .15s, background .15s;
 }
-.auth-eye:hover { color: #0A0A0A; background: rgba(10,10,10,0.06); }
-.auth-eye:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; color: #0A0A0A; }
-.auth-eye svg { width: 18px; height: 18px; }
+.auth-eye:hover { color: var(--text); background: var(--hover); }
+.auth-eye:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; color: var(--text); }
+.auth-eye svg { width: 17px; height: 17px; }
 .auth-link { font-size: 13px; color: var(--text-muted); text-decoration: none; transition: color .15s; }
 .auth-link:hover { color: var(--text); }
-.auth-error { margin: 0; font-size: 13px; line-height: 1.45; color: var(--danger); }
+.auth-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* What a new password needs: three small rules, each ticking lime as it's met */
+.auth-rules {
+  list-style: none; margin: calc(-0.5 * var(--auth-gap)) 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 6px 14px;
+}
+.auth-rules li {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--auth-dim); transition: color .2s;
+}
+.auth-rules li > span:first-child {
+  width: 15px; height: 15px; display: grid; place-items: center; flex-shrink: 0;
+  border-radius: 999px; border: 1px solid var(--border-strong); color: transparent;
+  transition: background .2s, border-color .2s, color .2s, scale .2s cubic-bezier(.2,.8,.2,1);
+}
+.auth-rules li svg { width: 9px; height: 9px; stroke-width: 3.5; }
+.auth-rules li[data-met] { color: var(--text-muted); }
+.auth-rules li[data-met] > span:first-child { background: var(--auth-lime); border-color: var(--auth-lime); color: var(--auth-ink); scale: 1.08; }
+
+/* The emailed code: six boxes. The real input lies over them, unseen; the boxes show its digits,
+   the next one's box lit with a blinking caret */
+.auth-code { position: relative; }
+.auth-code input {
+  position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%;
+  opacity: 0; border: 0; padding: 0; cursor: text;
+  font-size: 16px; /* (no zoom-in on focus) */
+}
+.auth-code-cells { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; direction: ltr; }
+.auth-code-cells span {
+  position: relative;
+  height: calc(var(--auth-box-h) + 8px);
+  display: grid; place-items: center;
+  border-radius: 12px; border: 1px solid var(--auth-field-border); background: var(--auth-field-bg);
+  font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text);
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.auth-code-cells span[data-filled] { border-color: rgb(255 255 255 / 0.22); }
+.auth-code-cells span[data-active] {
+  border-color: color-mix(in srgb, var(--auth-lime) 75%, transparent);
+  background: rgb(255 255 255 / 0.05);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--auth-lime) 16%, transparent);
+}
+.auth-code-cells span[data-active]:not([data-filled])::after {
+  content: ""; width: 2px; height: 40%; border-radius: 1px; background: var(--auth-lime);
+  animation: auth-caret 1s steps(1) infinite;
+}
+@keyframes auth-caret { 50% { opacity: 0; } }
+.auth-code[data-invalid] .auth-code-cells span { border-color: color-mix(in srgb, var(--auth-danger) 80%, transparent); }
 
 /* "Continue with Google": Google's dark button (its G, #131314, #8E918F outline, #E3E3E3 text), then
    "or use your email" between it and the form */
 .auth-google {
-  width: 100%; height: var(--auth-box-h);
+  width: 100%; min-height: var(--auth-box-h); padding: 6px 14px;
   display: flex; align-items: center; justify-content: center; gap: 12px;
-  border-radius: 14px; border: 1px solid #8E918F;
+  border-radius: 12px; border: 1px solid #8E918F;
   background: #131314; color: #E3E3E3;
-  font: inherit; font-size: 15px; font-weight: 600;
+  font: inherit; font-size: 15px; font-weight: 600; line-height: 1.2;
   cursor: pointer; transition: background .15s, border-color .15s;
 }
 .auth-google:hover { background: #1f1f21; border-color: #a5a8a6; }
@@ -284,35 +319,286 @@
 .auth-google svg { width: 20px; height: 20px; flex-shrink: 0; }
 .auth-or {
   display: flex; align-items: center; gap: 12px;
-  font-size: 12px; color: var(--text-muted);
+  font-size: 12px; color: var(--auth-dim);
 }
-.auth-or::before, .auth-or::after { content: ''; flex: 1; height: 1px; background: var(--border-strong); }
+.auth-or::before, .auth-or::after { content: ""; flex: 1; height: 1px; background: var(--border-strong); }
 
-/* Submit uses the site's fill button (lime circle fills it on hover) */
-.auth-form .auth-submit {
-  --fill-r: 24px; --fill-arrow: 16px; --fill-inset: 14px; --fill-shift: 10px;
-  width: 100%;
-  margin-top: 4px;
-  padding: clamp(11px, 1.6cqh, 13px) 26px;
-  border: 1px solid var(--border-strong);
-  background: transparent;
-  color: var(--text);
-  font-size: 14px; font-weight: 700;
+/* The main button: solid lime, black words and an arrow that nudges forward on hover; pressed, it
+   sinks a little; busy, a spinner in front of the busy words */
+.auth-submit {
+  position: relative;
+  width: 100%; min-height: var(--auth-box-h); margin-top: 4px; padding: 8px 20px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  border: 0; border-radius: 12px;
+  background: var(--auth-lime); color: var(--auth-ink);
+  font: inherit; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.2;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.45),
+    inset 0 -1px 0 rgb(0 0 0 / 0.12),
+    0 8px 20px -12px color-mix(in srgb, var(--auth-lime) 45%, transparent);
+  transition: background .2s, box-shadow .2s, translate .12s, scale .12s, opacity .2s;
 }
-.auth-form .auth-submit:disabled { opacity: .6; pointer-events: none; }
+.auth-submit:hover:not(:disabled) {
+  background: #D4FF33;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.5),
+    inset 0 -1px 0 rgb(0 0 0 / 0.12),
+    0 10px 24px -12px color-mix(in srgb, var(--auth-lime) 60%, transparent);
+}
+.auth-submit:active:not(:disabled) { translate: 0 1px; scale: .99; }
+.auth-submit:focus-visible { outline: 2px solid var(--auth-lime); outline-offset: 3px; }
+.auth-submit:disabled { cursor: not-allowed; background: rgb(255 255 255 / 0.07); color: var(--text-dim); box-shadow: inset 0 0 0 1px var(--border); }
+/* (waiting on the server: the lime stays, a little quieter, with its spinner) */
+.auth-submit[aria-busy] { cursor: progress; background: var(--auth-lime); color: var(--auth-ink); opacity: .85; box-shadow: none; }
+.auth-submit-arrow { width: 17px; height: 17px; flex-shrink: 0; transition: translate .25s cubic-bezier(.2,.8,.2,1); }
+.auth-submit:hover:not(:disabled) .auth-submit-arrow { translate: 3px 0; }
+[dir="rtl"] .auth-submit-arrow { scale: -1 1; }
+[dir="rtl"] .auth-submit:hover:not(:disabled) .auth-submit-arrow { translate: -3px 0; }
+.auth-spinner {
+  width: 16px; height: 16px; flex-shrink: 0; border-radius: 50%;
+  border: 2px solid rgb(10 10 10 / 0.22); border-top-color: var(--auth-ink);
+  animation: auth-spin .7s linear infinite;
+}
+@keyframes auth-spin { to { rotate: 360deg; } }
+/* "By creating an account, you agree to our Terms and Privacy Policy" under Create account */
+.auth-legal {
+  margin: 0; text-align: center; font-size: 12px; line-height: 1.5; color: var(--auth-dim);
+  animation: auth-swap .3s ease;
+}
+.auth-legal a {
+  color: var(--text-muted); white-space: nowrap;
+  text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px;
+  transition: color .15s, text-decoration-color .15s;
+}
+.auth-legal a:hover { color: var(--text); text-decoration-color: var(--text-muted); }
+/* Under Sign in: "Secure sign-in · Terms · Privacy" */
+.auth-secure { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 4px 14px; }
+.auth-secure span { display: inline-flex; align-items: center; gap: 5px; }
+.auth-secure svg { width: 13px; height: 13px; }
+/* The browser's own surfaces, in the palette: selection, the caret, the form side's scrollbar */
+.auth-root ::selection { background: color-mix(in srgb, var(--auth-lime) 30%, transparent); color: #fff; }
+.auth-root input { caret-color: var(--auth-lime); }
+.auth-side { scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / 0.16) transparent; }
 /* (the code step's "Send a new code · Use another email") */
 .auth-switch { margin: 2px 0 0; text-align: center; font-size: 13.5px; color: var(--text-muted); }
 .auth-switch button {
   padding: 0; border: 0; background: none; cursor: pointer;
-  font: inherit; font-weight: 700; color: var(--text);
+  font: inherit; font-weight: 600; color: var(--text);
   text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px;
 }
+.auth-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+/* (the Back link and the lime button are also links on some screens: no underline) */
+a.auth-back, a.auth-submit { text-decoration: none; }
 @keyframes auth-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
-/* The clip only where the brand side has room for it beside the words, and the window is tall enough */
-.auth-brand { container-type: inline-size; }
-@container (max-width: 399px) { .auth-reel { display: none; } }
-@media (max-height: 600px) { .auth-reel { display: none; } }
+/* ── Desktop ──
+   The lime kept to a minimum (user, 2026-11-03): the logo's mark, the picked moment, the main
+   button. No lime haze round the card or behind the form. (Phones keep their lime header: these
+   rules are for wide windows only.) */
+@media (min-width: 900px) {
+  /* The page in three rows (user, 2026-11-03: "decrease the size of the card so that I can add nav
+     bar and footer"): the slim bar, the card in the middle (smaller: up to 880 × 560), the footer.
+     Still exactly the window's height — nothing to scroll. */
+  .auth-root {
+    display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto;
+    justify-items: center; align-items: center;
+    padding: 0;
+    background: radial-gradient(ellipse 55% 45% at 50% 100%, rgb(255 255 255 / 0.035), transparent 70%), var(--bg);
+  }
+  .auth-card {
+    container-name: auth-card; box-shadow: 0 40px 100px -30px rgb(0 0 0 / 0.75), 0 0 0 1px rgb(255 255 255 / 0.02);
+    width: min(880px, calc(100% - 48px)); height: min(100%, 560px);
+  }
+  .auth-nav, .auth-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 24px;
+    /* (the page's full width: logo and links at its edges, not the card's) */
+    width: 100%; padding-inline: clamp(24px, 3.4vw, 56px);
+  }
+  .auth-nav { height: clamp(56px, 8vh, 72px); }
+  .auth-foot {
+    height: clamp(44px, 6.5vh, 60px);
+    font-size: 12.5px; color: rgb(244 244 245 / 0.72);
+  }
+  /* (the company: the quieter half of "© 2026 Shortcut · Stoory Marketing Pvt. Ltd.") */
+  .auth-foot-co { color: rgb(244 244 245 / 0.56); }
+  .auth-nav nav, .auth-foot nav { display: flex; align-items: center; gap: clamp(16px, 2vw, 28px); }
+  .auth-nav-logo { display: inline-flex; color: inherit; text-decoration: none; border-radius: 8px; }
+  .auth-nav-logo .brand-word { color: #f4f4f5; }
+  .auth-nav a:not(.auth-nav-logo), .auth-foot a {
+    color: var(--text-muted); text-decoration: none; transition: color .15s;
+  }
+  .auth-nav a:not(.auth-nav-logo) { font-size: 14px; font-weight: 500; }
+  .auth-nav a:hover, .auth-foot a:hover { color: var(--text); }
+  /* The switch: "New here?" and a small outlined button */
+  .auth-nav-switch { display: inline-flex; align-items: center; gap: 10px; }
+  .auth-nav-prompt { font-size: 13.5px; color: var(--text-muted); }
+  .auth-nav .auth-nav-btn {
+    display: inline-flex; align-items: center; height: 34px; padding: 0 14px;
+    border-radius: 999px; border: 1px solid var(--border-strong); background: rgb(255 255 255 / 0.03);
+    color: var(--text); font: inherit; font-size: 13.5px; font-weight: 600; line-height: 1;
+    cursor: pointer; text-decoration: none; transition: background .15s, border-color .15s;
+  }
+  .auth-nav .auth-nav-btn:hover { background: var(--hover); border-color: rgb(255 255 255 / 0.28); }
+  .auth-nav .auth-nav-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .auth-nav a:focus-visible, .auth-foot a:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+  /* (the bar carries the logo now, so the photo doesn't repeat it) */
+  .auth-brand .auth-home { display: none; }
+  .auth-brand { --logo: var(--auth-lime); border-inline-end: 1px solid rgb(255 255 255 / 0.06); }
+  .auth-home .brand-word { color: #f4f4f5; }
+  .auth-side { background: radial-gradient(ellipse 60% 50% at 70% 0%, rgb(255 255 255 / 0.03), transparent 70%), var(--surface); }
+
+  /* ── The scene (BrandScene) ──
+     A creator full bleed, darkened top (for the logo) and bottom (for the words); film grain over
+     it. One authored moment, every ~6.5 s: their words come up in the transcript → the moment is
+     picked (the phrase, then its stretch of the waveform) → it comes out as a short. */
+  .auth-brand[data-scene] { background: #0b0b0c; }
+  .auth-brand[data-scene]::before {
+    content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+    opacity: .06; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .auth-photo { display: block; position: absolute; inset: 0; z-index: 0; }
+  .auth-photo img {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+    opacity: 0; transition: opacity 1.2s cubic-bezier(.22,1,.36,1);
+  }
+  .auth-photo img[data-on] { opacity: 1; animation: auth-drift 7s linear both; }
+  @keyframes auth-drift { from { scale: 1.06; } to { scale: 1; } }
+  .auth-photo::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(180deg,
+      rgb(8 8 9 / 0.62) 0%, rgb(8 8 9 / 0.08) 20%, rgb(8 8 9 / 0) 34%,
+      rgb(8 8 9 / 0.5) 52%, rgb(8 8 9 / 0.9) 70%, #0b0b0c 88%);
+  }
+
+  .auth-brand[data-scene] .auth-stage { margin: auto 0 0; }
+  .auth-brand[data-scene] .auth-fine { margin-top: clamp(14px, 2.6cqh, 24px); }
+  .auth-brand[data-scene] .auth-pitch h2 {
+    font-size: clamp(24px, min(4.2cqh, 7cqi), 40px); font-weight: 700; letter-spacing: -0.025em; line-height: 1.08;
+    text-wrap: balance;
+  }
+  .auth-brand[data-scene] .auth-pitch p { max-width: 40ch; color: rgb(244 244 245 / 0.72); }
+
+  /* What they're saying: a frosted strip — the words come up one by one (dim until then, so the line
+     is always whole), then the picked phrase is marked, then its stretch of the waveform lights */
+  .auth-edit {
+    display: block; width: min(100%, 340px);
+    padding: 11px 13px 12px; border-radius: 14px;
+    background: rgb(14 14 16 / 0.66);
+    backdrop-filter: blur(16px) saturate(1.3); -webkit-backdrop-filter: blur(16px) saturate(1.3);
+    border: 1px solid rgb(255 255 255 / 0.1);
+    box-shadow: 0 18px 40px -18px rgb(0 0 0 / 0.75), inset 0 1px 0 rgb(255 255 255 / 0.06);
+    animation: auth-rise-in .7s cubic-bezier(.22,1,.36,1) .1s both;
+  }
+  @keyframes auth-rise-in { from { opacity: 0; translate: 0 10px; } }
+  .auth-edit-head {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11.5px; font-weight: 600; color: rgb(244 244 245 / 0.74); font-variant-numeric: tabular-nums;
+  }
+  .auth-edit-head span:first-child { display: inline-flex; align-items: center; gap: 7px; }
+  /* (a small recording light) */
+  .auth-edit-head i { width: 6px; height: 6px; border-radius: 50%; background: #F87171; box-shadow: 0 0 0 3px rgb(248 113 113 / 0.18); animation: auth-rec 1.6s ease-in-out infinite; }
+  @keyframes auth-rec { 50% { opacity: .35; } }
+  .auth-edit-line { margin: 7px 0 10px; font-size: 13.5px; line-height: 1.55; color: #f4f4f5; }
+  .auth-word { opacity: .3; animation: auth-say .35s ease-out calc(var(--i) * .13s + .35s) forwards; }
+  @keyframes auth-say { to { opacity: 1; } }
+  .auth-edit-line mark {
+    color: inherit; border-radius: 4px; padding: 1px 3px; margin: 0 -3px;
+    -webkit-box-decoration-break: clone; box-decoration-break: clone;
+    background: linear-gradient(color-mix(in srgb, var(--auth-lime) 24%, transparent), color-mix(in srgb, var(--auth-lime) 24%, transparent)) no-repeat left / 0% 100%;
+    animation: auth-pick .6s cubic-bezier(.22,1,.36,1) 2.2s forwards;
+  }
+  [dir="rtl"] .auth-edit-line mark { background-position: right; }
+  @keyframes auth-pick { to { background-size: 100% 100%; } }
+  /* The timeline: a fine grey waveform; once the phrase is picked, the clip is selected on it (its
+     part of the waveform turns bright, a lime frame with trim handles draws open from its start),
+     its length shows under it, and a playhead runs through it. Time runs left to right in every
+     language, as in any editor. */
+  .auth-tl { direction: ltr; }
+  .auth-tl-track { position: relative; height: 28px; }
+  .auth-tl-track svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .auth-tl-track path { fill: none; stroke: rgb(255 255 255 / 0.24); stroke-width: 1.4; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+  .auth-tl-track .auth-tl-lit path { stroke: #f4f4f5; }
+  .auth-tl-lit { opacity: 0; animation: auth-fade-in .5s ease-out 2.6s forwards; }
+  .auth-tl-sel {
+    position: absolute; top: -3px; bottom: -3px;
+    border-radius: 5px;
+    border: 1px solid color-mix(in srgb, var(--auth-lime) 85%, transparent);
+    background: color-mix(in srgb, var(--auth-lime) 7%, transparent);
+    clip-path: inset(0 100% 0 0 round 5px);
+    animation: auth-sel-open .6s cubic-bezier(.22,1,.36,1) 2.5s forwards;
+  }
+  @keyframes auth-sel-open { to { clip-path: inset(0 0 0 0 round 5px); } }
+  @keyframes auth-fade-in { to { opacity: 1; } }
+  /* (trim handles: a short lime bar on each end) */
+  .auth-tl-sel::before, .auth-tl-sel::after {
+    content: ""; position: absolute; top: 50%; width: 3px; height: 14px; translate: 0 -50%;
+    border-radius: 2px; background: var(--auth-lime);
+  }
+  .auth-tl-sel::before { left: -2px; }
+  .auth-tl-sel::after { right: -2px; }
+  /* (the playhead, running through the clip) */
+  .auth-tl-sel i {
+    position: absolute; top: 2px; bottom: 2px; left: 0; width: 1.5px; border-radius: 1px;
+    background: #fff; box-shadow: 0 0 6px rgb(255 255 255 / 0.6);
+    opacity: 0; animation: auth-play 2.6s linear 3.1s infinite;
+  }
+  @keyframes auth-play { 0% { left: 4%; opacity: 1; } 92% { opacity: 1; } 100% { left: 96%; opacity: 0; } }
+  .auth-tl-times {
+    position: relative; display: flex; justify-content: space-between; margin-top: 6px;
+    font-size: 10.5px; font-weight: 600; line-height: 1.2; color: rgb(244 244 245 / 0.62); font-variant-numeric: tabular-nums;
+  }
+  .auth-tl-clip {
+    position: absolute; top: 0; translate: -50% 0; white-space: nowrap;
+    color: #f4f4f5; opacity: 0; animation: auth-fade-in .4s ease-out 2.9s forwards;
+  }
+
+  /* The moment, out as a short: floats on the side away from the face, comes in last */
+  .auth-short {
+    display: block; position: absolute; z-index: 2;
+    top: clamp(28px, 6cqh, 44px); inset-inline-end: clamp(20px, 4cqi, 40px);
+    width: clamp(96px, 17cqh, 124px);
+    animation: auth-short-in .8s cubic-bezier(.16,1,.3,1) 2.9s both;
+  }
+  .auth-short[data-side="start"] { inset-inline-end: auto; inset-inline-start: clamp(20px, 4cqi, 40px); }
+  @keyframes auth-short-in { from { opacity: 0; translate: 0 16px; scale: .94; filter: blur(6px); } }
+  .auth-short-frame {
+    position: relative; aspect-ratio: 9 / 16; overflow: hidden;
+    border-radius: 14px; border: 1px solid rgb(255 255 255 / 0.22);
+    box-shadow: 0 0 0 4px rgb(10 10 10 / 0.5), 0 28px 50px -18px rgb(0 0 0 / 0.85);
+  }
+  .auth-short-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .auth-short-cap {
+    position: absolute; left: 8%; right: 8%; bottom: 9%; margin: 0;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: .1em .28em;
+    text-align: center; text-transform: uppercase;
+    font-size: clamp(9px, 1.45cqh, 11px); font-weight: 800; line-height: 1.2; letter-spacing: -0.01em;
+    color: #fff; text-shadow: 0 2px 8px rgb(0 0 0 / 0.75);
+  }
+  .auth-short-cap span[data-key] { color: var(--auth-ink); background: #fff; padding: 0 .2em; border-radius: 3px; text-shadow: none; }
+  /* Its label and score, pinned over its top edge */
+  .auth-chip {
+    position: absolute; z-index: 1; top: -12px; inset-inline-start: -10px;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 8px 4px 6px; border-radius: 999px; white-space: nowrap;
+    background: rgb(16 16 18 / 0.72); border: 1px solid rgb(255 255 255 / 0.14);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 8px 20px -8px rgb(0 0 0 / 0.7);
+    font-size: 11px; font-weight: 600; color: #f4f4f5;
+  }
+  .auth-short[data-side="end"] .auth-chip { inset-inline-start: auto; inset-inline-end: -10px; }
+  .auth-chip svg { width: 12px; height: 12px; color: var(--auth-lime); }
+  .auth-chip b { padding-inline-start: 6px; margin-inline-start: 1px; border-inline-start: 1px solid rgb(255 255 255 / 0.18); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* Room: the short only where the card is tall and the brand side wide enough for it beside the
+     words; the transcript strip only where the card isn't short */
+  @container auth-card (max-height: 459px) { .auth-short { display: none; } }
+  @container auth-card (max-height: 400px) { .auth-edit { display: none; } }
+}
+@media (min-width: 900px) {
+  @container (max-width: 299px) { .auth-short { display: none; } }
+}
 
 /* ── phones and narrow windows: the brand side is a header, the page scrolls ── */
 @media (max-width: 899px) {
@@ -333,5 +619,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .auth-root *, .auth-root *::before, .auth-root *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
-  .auth-reel-bar i { animation: none; width: 40%; }
+  .auth-brand *, .auth-brand *::before, .auth-brand *::after { animation-delay: 0s !important; }
+  /* (no looping playhead or blinking light: still means still) */
+  .auth-tl-sel i, .auth-edit-head i { animation: none !important; }
 }
