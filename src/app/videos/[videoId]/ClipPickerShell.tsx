@@ -11,6 +11,7 @@ import { useLocalVideo } from '@/modules/clips/localVideo'
 import { usePolling } from '@/lib/usePolling'
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
+import { FilterChip } from '@/components/ui/filter-chip'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { AccountMenu } from '@/components/ui/account-menu'
 import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
@@ -417,7 +418,28 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const isEdited = (c: { layout: string | null; origin: ClipOrigin }) => c.layout != null && (!manualOnly || c.origin === 'yours')
   // (brand kit Phase 2) each clip's kit, for its tag, and "Put on all"
   const brands = useClipBrands(initialVideo.id, boardClips.map(c => c.id))
-  const shownClips = clipTab === 'all' ? boardClips : clipTab === 'fav' ? boardClips.filter(c => c.favorite) : clipTab === 'edited' ? byTime.filter(isEdited) : byTime.filter(c => c.origin === clipTab)
+  const tabClips = clipTab === 'all' ? boardClips : clipTab === 'fav' ? boardClips.filter(c => c.favorite) : clipTab === 'edited' ? byTime.filter(isEdited) : byTime.filter(c => c.origin === clipTab)
+  // Filters on the tab's clips (user, 2026-11-05: "get the clips easily", no search): their length, exported
+  // or not, and the order — newest first (as before), oldest first, as they come in the video, shortest, longest
+  const [lenF, setLenF] = useState<'all' | 'short' | 'mid' | 'long'>('all')
+  const [expF, setExpF] = useState<'all' | 'yes' | 'no'>('all')
+  const [sortBy, setSortBy] = useState<'new' | 'old' | 'video' | 'short' | 'long'>('new')
+  const lenOf = (c: { start_ms: number; end_ms: number }) => c.end_ms - c.start_ms
+  const exported = (c: { status: string; output_url: string | null }) => c.status === 'done' && !!c.output_url
+  const clipFiltering = lenF !== 'all' || expF !== 'all'
+  const shownClips = tabClips.filter(c => {
+    const ms = lenOf(c)
+    if (lenF === 'short' && ms >= 30000) return false
+    if (lenF === 'mid' && (ms < 30000 || ms > 60000)) return false
+    if (lenF === 'long' && ms <= 60000) return false
+    if (expF !== 'all' && exported(c) !== (expF === 'yes')) return false
+    return true
+  })
+  if (sortBy === 'old') shownClips.reverse()
+  else if (sortBy === 'video') shownClips.sort((a, b) => a.start_ms - b.start_ms)
+  else if (sortBy === 'short') shownClips.sort((a, b) => lenOf(a) - lenOf(b))
+  else if (sortBy === 'long') shownClips.sort((a, b) => lenOf(b) - lenOf(a))
+  const clearClipFilters = () => { setLenF('all'); setExpF('all') }
   // Clip preview plays 9:16 clips as edited: in Manual edit only the edited ones
   const previewable = manualOnly ? byTime.filter(isEdited) : boardClips
   // A clip to bring into view and flash in the list (e.g. the clip a Best moment was saved as)
@@ -1724,6 +1746,22 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           {/* (brand kit Phase 2) a kit on every clip at once */}
           {/* (shown while selecting too: the kit then goes on the ticked clips only) */}
           <div className="px-4 pb-3 shrink-0"><BrandAllBar b={brands} total={boardClips.length} selected={selecting ? [...selected] : []} /></div>
+          {tabClips.length > 1 && (
+            <div className="cb-filters px-4 pb-3 shrink-0" role="group" aria-label="Filter the clips">
+              <FilterChip size="sm" label="Length" value={lenF} onChange={setLenF} clearable
+                options={[['all', 'Any length'], ['short', 'Under 30s'], ['mid', '30–60s'], ['long', 'Over 1 min']]} />
+              <FilterChip size="sm" label="Exported" value={expF} onChange={setExpF} clearable
+                options={[['all', 'Any'], ['yes', 'Exported'], ['no', 'Not exported yet']]} />
+              <FilterChip size="sm" label="Sort" value={sortBy} onChange={setSortBy}
+                options={[['new', 'Newest first'], ['old', 'Oldest first'], ['video', 'Order in the video'], ['short', 'Shortest first'], ['long', 'Longest first']]} />
+              {clipFiltering && (
+                <p className="cb-filter-count" role="status">
+                  {shownClips.length} of {tabClips.length}
+                  <button type="button" onClick={clearClipFilters}>Clear</button>
+                </p>
+              )}
+            </div>
+          )}
           {clipError && (
             <div role="alert" className="mx-4 mb-2 px-3 py-2 rounded-lg flex items-center justify-between gap-2" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)' }}>
               <span className="text-xs" style={{ color: '#f87171' }}>{clipError}</span>
@@ -1736,9 +1774,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 You can start clipping once the video has finished processing.
               </p>
             )}
-            {boardClips.length > 0 && shownClips.length === 0 && (
+            {boardClips.length > 0 && tabClips.length === 0 && (
               <p className="text-xs leading-relaxed" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
                 {CLIP_TABS.find(t => t.id === clipTab)?.empty}
+              </p>
+            )}
+            {tabClips.length > 0 && shownClips.length === 0 && (
+              <p className="text-xs leading-relaxed" style={{ color: 'rgb(var(--cb-fg) / 0.55)' }}>
+                No clips match these filters. <button type="button" onClick={clearClipFilters} className="font-semibold underline underline-offset-2">Clear filters</button>
               </p>
             )}
             {shownClips.map(clip => (
