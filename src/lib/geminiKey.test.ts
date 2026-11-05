@@ -49,6 +49,9 @@ test('a thinking budget becomes a thinking level', () => {
   assert.equal(thinkingLevel(256), 'low')
   assert.equal(thinkingLevel(1024), 'low')
   assert.equal(thinkingLevel(4096), 'medium')
+  // a model without 'minimal' (gemini-3.6-flash): the lowest it has
+  assert.equal(thinkingLevel(0, false), 'low')
+  assert.equal(thinkingLevel(4096, false), 'medium')
 })
 
 test("the answer's text and tokens are read from the interaction's steps (thoughts left out)", () => {

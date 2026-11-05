@@ -10,7 +10,7 @@
  *
  * GEMINI_FIRST=key (with GEMINI_API_KEY): every request goes to the Gemini API key first (a paid
  * AI Studio project with its own, higher limits: Tier 2), through the Interactions API with
- * GEMINI_KEY_MODEL (default gemini-3.5-flash: projects made since late 2026 cannot use 2.5), and to
+ * GEMINI_KEY_MODEL (default gemini-3.6-flash: projects made since late 2026 cannot use 2.5), and to
  * Vertex when the key fails. A key that has no credit or is refused rests 10 minutes (Vertex only).
  *
  * Built for many users at once: a cap on requests in flight per process (AI_MAX_CONCURRENT) and
@@ -58,7 +58,9 @@ export function withGeminiUsage<T>(onUsage: (u: GeminiUsage) => void, fn: () => 
 }
 
 export const GEMINI_MODEL = 'gemini-2.5-flash'
-const KEY_MODEL = process.env.GEMINI_KEY_MODEL || 'gemini-3.5-flash'
+// (gemini-3.6-flash: on the 5 Nov six-language test its moments matched 21/24, against 16/24 for
+// gemini-2.5-flash on Vertex and 8-12/24 for gemini-3.5-flash-lite; it costs ~2x 2.5 Flash, ~4x from 2027)
+const KEY_MODEL = process.env.GEMINI_KEY_MODEL || 'gemini-3.6-flash'
 
 /** Where AI requests go: 'vertex', 'gemini-api', or null when neither is configured */
 export function aiProvider(): 'vertex' | 'gemini-api' | null {
@@ -112,11 +114,13 @@ export function toJsonSchema(schema: unknown): unknown {
   return out
 }
 
-/** A thinking budget (tokens) as the Interactions API's thinking level */
-export function thinkingLevel(budget: number | undefined): 'minimal' | 'low' | 'medium' | undefined {
+/** A thinking budget (tokens) as the Interactions API's thinking level ('low' for none on a model without 'minimal') */
+export function thinkingLevel(budget: number | undefined, minimalOk = true): 'minimal' | 'low' | 'medium' | undefined {
   if (budget === undefined) return undefined
-  return budget <= 0 ? 'minimal' : budget <= 1024 ? 'low' : 'medium'
+  return budget <= 0 ? (minimalOk ? 'minimal' : 'low') : budget <= 1024 ? 'low' : 'medium'
 }
+/** Set once the key's model refuses thinking level 'minimal' (gemini-3.6-flash does): 'low' from then on */
+let minimalRefused = false
 
 /** The answer's text (its model_output steps) and tokens (thoughts counted as output) */
 export function interactionAnswer(body: unknown): { text: string; inputTokens: number; outputTokens: number } {
@@ -183,7 +187,7 @@ export async function askGemini(input: string | GeminiPart[], opts: AskOptions =
 async function askKey(input: string | GeminiPart[], opts: AskOptions): Promise<string> {
   const generation_config: Record<string, unknown> = {}
   if (opts.temperature !== undefined) generation_config.temperature = opts.temperature
-  const level = thinkingLevel(opts.thinkingBudget)
+  const level = thinkingLevel(opts.thinkingBudget, !minimalRefused)
   if (level) generation_config.thinking_level = level
   const body = JSON.stringify({
     model: KEY_MODEL,
@@ -217,6 +221,11 @@ async function askKey(input: string | GeminiPart[], opts: AskOptions): Promise<s
     if ((res.status === 429 || res.status >= 500) && attempt < KEY_TRIES) {
       await pause(retryDelayMs(attempt, retryAfterMs(res.headers.get('retry-after'))))
       continue
+    }
+    // This model has no 'minimal' thinking: ask again at 'low', and use 'low' from now on
+    if (res.status === 400 && level === 'minimal' && /thinking level/i.test(text)) {
+      minimalRefused = true
+      return askKey(input, opts)
     }
     throw new GeminiError(`Gemini ${res.status} (key): ${text.slice(0, 300)}`, res.status)
   }

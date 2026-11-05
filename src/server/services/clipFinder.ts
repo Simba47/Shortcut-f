@@ -212,7 +212,7 @@ export function buildPrompt(mode: FinderMode, window: TranscriptLine[], duration
     + (taken.length ? `\nAlready made into clips (pick other moments, not these): ${taken.map(([a, b]) => `${mmss(a)}–${mmss(b)}`).join(', ')}.` : '')
 
   if (mode.kind === 'best') {
-    const system = `You are a viral short-clip detector for Reels and Shorts. From this part of a video transcript, pick up to ${perWindow} moments that would work best as standalone vertical clips. Fewer is fine if this part is weak.
+    const system = `You are a viral short-clip detector for Reels and Shorts. From this part of a video transcript, pick the ${perWindow} moments that would work best as standalone vertical clips, best first (each is scored: the app keeps only the best). Return fewer only if this part really has fewer usable moments.
 
 ${LINE_RULES}
 
