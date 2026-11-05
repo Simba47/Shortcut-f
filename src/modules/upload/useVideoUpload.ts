@@ -141,13 +141,18 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
 
   /** The file's length, read once: sent when the upload starts, so the plan's hours are checked before it runs */
   const durationRef = useRef<number | undefined>(undefined)
+  // The price the upload card is asking about, and the answer it is waiting for
+  const [priceAsk, setPriceAsk] = useState<{ minutes: number; credits: number; balance: number } | null>(null)
+  const priceAnswerRef = useRef<((yes: boolean) => void) | null>(null)
+  /** The file already said yes to: a dropped connection or Retry doesn't ask again */
+  const pricePaidForRef = useRef<File | null>(null)
   /**
    * Reading a video costs credits: asked before anything is uploaded.
    * (Nothing asked when credits are off, or if the price can't be fetched: the server still checks.)
    */
   async function askReadingPrice(file: File) {
     durationRef.current = await readDurationMs(file)
-    if (asset || !durationRef.current) return
+    if (asset || !durationRef.current || pricePaidForRef.current === file) return
     const res = await fetch('/api/ingest/reading-price', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ duration_ms: durationRef.current }),
     }).catch(() => null)
@@ -155,8 +160,15 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
     if (!p?.on || !p.credits) return
     // (past the hours, or without enough credits, the server refuses the upload and says so)
     if (p.overMs || p.credits > (p.balance ?? 0)) return
-    const yes = window.confirm(`Reading this ${Math.ceil(durationRef.current / 60_000)} min video costs ${p.credits} credits (₹${p.credits}). You have ${p.balance}. Upload it?`)
+    // Asked on the upload card (priceAsk); Cancel there ends the upload (cancel, which answers no)
+    const yes = await new Promise<boolean>(resolve => {
+      priceAnswerRef.current = resolve
+      setPriceAsk({ minutes: Math.ceil(durationRef.current! / 60_000), credits: p.credits!, balance: p.balance ?? 0 })
+    })
+    priceAnswerRef.current = null
+    setPriceAsk(null)
     if (!yes) throw userError('Upload stopped. No credits were used.', true)
+    pricePaidForRef.current = file
   }
 
   async function sign(body: Record<string, unknown>) {
@@ -422,6 +434,7 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
   }
 
   const start = useCallback((file: File) => {
+    priceAnswerRef.current?.(false)
     stopAll()
     abortMultipart(mpRef.current)
     fileRef.current = file
@@ -441,6 +454,7 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
   /** Stop the upload and remove what reached R2 */
   const cancel = useCallback(() => {
     fileRef.current = null
+    priceAnswerRef.current?.(false)
     stopAll()
     // The parts of an unfinished upload go with it
     abortMultipart(mpRef.current)
@@ -462,5 +476,8 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
     setState(IDLE)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { state, start, retry, cancel }
+  /** Yes to the price the card is asking about */
+  const confirmPrice = useCallback(() => { priceAnswerRef.current?.(true) }, [])
+
+  return { state, start, retry, cancel, priceAsk, confirmPrice }
 }

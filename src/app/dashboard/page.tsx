@@ -293,6 +293,13 @@ export default function DashboardPage() {
                 <p className="dash-drop-error" role="alert">{upload.state.error}</p>
                 <div className="dash-progress"><div style={{ width: `${upload.state.progress}%` }} /></div>
               </>
+            ) : upload.priceAsk ? (
+              <>
+                <p className="dash-upload-title" title={upload.state.fileName}>Upload {upload.state.fileName}?</p>
+                <p className="dash-upload-pace">
+                  Reading this {upload.priceAsk.minutes} min video costs <b>{upload.priceAsk.credits} credits</b> (₹{upload.priceAsk.credits}). You have {upload.priceAsk.balance}.
+                </p>
+              </>
             ) : uploading ? (
               <>
                 <p className="dash-upload-title" title={upload.state.fileName}>
@@ -332,6 +339,11 @@ export default function DashboardPage() {
               {upload.state.canRetry && (
                 <button type="button" className="dash-upload-btn dash-upload-btn--plain" onClick={upload.retry}>Retry</button>
               )}
+            </div>
+          ) : upload.priceAsk ? (
+            <div className="dash-drop-actions">
+              <button type="button" className="dash-link-btn" onClick={upload.cancel}>Cancel</button>
+              <button type="button" className="dash-upload-btn dash-upload-btn--plain" onClick={upload.confirmPrice}>Upload · {upload.priceAsk.credits} credits</button>
             </div>
           ) : upload.state.phase === 'uploading' ? (
             <button type="button" className="dash-link-btn" onClick={upload.cancel}>Cancel</button>
