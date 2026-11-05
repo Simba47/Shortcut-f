@@ -297,7 +297,7 @@ export default function DashboardPage() {
               <>
                 <p className="dash-upload-title" title={upload.state.fileName}>Upload {upload.state.fileName}?</p>
                 <p className="dash-upload-pace">
-                  Reading this {upload.priceAsk.minutes} min video costs <b>{upload.priceAsk.credits} credits</b> (₹{upload.priceAsk.credits}). You have {upload.priceAsk.balance}.
+                  Reading this {upload.priceAsk.minutes} min video costs <b>{upload.priceAsk.credits} credits</b>. You have {upload.priceAsk.balance}.
                 </p>
               </>
             ) : uploading ? (
@@ -1032,7 +1032,7 @@ function EditModeDialog({ videoId, title, videoUrl, durationMs, credits, onClose
                   </span>
                 ) : (
                   <span className="emd-cost">
-                    Cutting and editing are free. Captions: <b>{CAPTION_CREDITS_PER_MINUTE} credits</b> per clip minute. Export: <b>{EXPORT_CREDITS_PER_MINUTE} credit</b> per clip minute. 1 credit = ₹1.
+                    Cutting and editing are free. Captions: <b>{CAPTION_CREDITS_PER_MINUTE} credits</b> per clip minute. Export: <b>{EXPORT_CREDITS_PER_MINUTE} credit</b> per clip minute.
                   </span>
                 ))}
               </span>

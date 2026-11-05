@@ -1710,7 +1710,7 @@ export function EditorShell({
     if (!credits) { go(); return }
     const q = captionQuote()
     confirm({
-      title: `Get captions for ${q.credits} credits (₹${q.credits})?`,
+      title: `Get captions for ${q.credits} credits?`,
       body: `This needs the clip's captions first, from its main video. You have ${credits.balance} credits.`,
       confirmLabel: 'Get CC', cancelLabel: 'Not now', onCancel: notNow, tone: 'warning',
     }, go)
@@ -1722,7 +1722,7 @@ export function EditorShell({
     if (!credits) { void go(); return }
     const price = captionCredits(clipMs)
     confirm({
-      title: `Regenerate captions for ${price} credits (₹${price})?`,
+      title: `Regenerate captions for ${price} credits?`,
       body: `All of this clip is read again, from its main video, and caption words you corrected are replaced. You have ${credits.balance} credits.`,
       confirmLabel: 'Regenerate', cancelLabel: 'Not now', tone: 'warning',
     }, () => { void go() })
@@ -1733,7 +1733,7 @@ export function EditorShell({
     const clipMs = trim.kept.length ? trim.kept[trim.kept.length - 1][1] - trim.kept[0][0] : clip.end_ms - clip.start_ms
     const price = captionCredits(clipMs), render = exportCredits(clipLengthMs)
     confirm({
-      title: `Render with captions for ${price + render} credits (₹${price + render})?`,
+      title: `Render with captions for ${price + render} credits?`,
       body: `Part of this clip has no captions, so all of it is read first (${price} credits), then exported (${render}). You have ${credits.balance} credits.`,
       confirmLabel: 'Render', cancelLabel: 'Not now', tone: 'warning',
     }, () => requestExport(true))
@@ -2317,7 +2317,7 @@ export function EditorShell({
   /** Subjects costs credits once per clip: the server answers 402 subjects_cost with the price, which is asked about first */
   function askSubjectsPrice(price: number, go: () => void, notNow?: () => void) {
     confirm({
-      title: `Follow people in this clip for ${price} credits (₹${price})?`,
+      title: `Follow people in this clip for ${price} credits?`,
       body: `You pay once for this clip: adding or marking people again is free. Only making the clip longer costs more. You have ${credits?.balance ?? 0} credits.`,
       confirmLabel: 'Continue', cancelLabel: 'Not now', onCancel: notNow, tone: 'warning',
     }, go)
@@ -8200,7 +8200,7 @@ function GetCaptions({ lengthMs, price, newPart, balance, freePlan, hasAddedVide
             <span className="shrink-0">{captionLengthLabel(lengthMs)} → {price / CAPTION_CREDITS_PER_MINUTE} min</span>
           </div>
           <div className="flex justify-between gap-3 font-semibold text-[var(--ed-text)]">
-            <span>Cost: {price} credits (₹{price})</span>
+            <span>Cost: {price} credits</span>
             <span className="shrink-0 font-normal" style={muted}>You have {balance}</span>
           </div>
         </>

@@ -47,7 +47,7 @@ export function planFeatureRows(plan: Plan): FeatureRow[] {
 export function creditUses(): { name: string; price: string; note: string }[] {
   return [
     { name: 'Reading your video', price: `${READING_CREDITS} credits per 10 minutes`,
-      note: `Taken when you upload, up to your plan's hours. 1 credit = ₹1. A video that fails gives them back.` },
+      note: `Taken when you upload, up to your plan's hours. A video that fails gives them back.` },
     { name: 'AI clips', price: `${plural(CLIP_CREDITS, 'credit', 'credits')} per AI clip`,
       note: `Captions, title and framing included. Ask AI costs ${plural(ASK_AI_CREDITS, 'credit', 'credits')} per Ask AI search (a long video: per started hour), a new moment search past the free one 5 credits per 10 minutes of video, and rewrites 1 credit per ${REWRITES_PER_CREDIT} rewrites.` },
     { name: 'Manual edit', price: `${plural(CAPTION_CREDITS_PER_MINUTE, 'credit', 'credits')} per clip minute`,

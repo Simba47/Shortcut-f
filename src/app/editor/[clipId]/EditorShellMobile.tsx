@@ -467,12 +467,12 @@ export function EditorShellMobile({
     const span = captionSpan(clip.start_ms, clip.end_ms, words)
     if (!on || !span || transcribing || retranscribing || isFreePlan) return
     const price = captionCredits(span.end_ms - span.start_ms)
-    if (!credits || window.confirm(`Get captions for this clip (main video only)? ${price} credits (₹${price}). You have ${credits.balance}.`)) handleRetranscribe('unknown')
+    if (!credits || window.confirm(`Get captions for this clip (main video only)? ${price} credits. You have ${credits.balance}.`)) handleRetranscribe('unknown')
   }
   /** Regenerate reads all of the clip again */
   function askRegenerate() {
     const price = captionCredits(clip.end_ms - clip.start_ms)
-    if (!credits || window.confirm(`Regenerate captions? All of this clip is read again, and words you corrected are replaced. ${price} credits (₹${price}). You have ${credits.balance}.`)) handleRetranscribe('unknown', true)
+    if (!credits || window.confirm(`Regenerate captions? All of this clip is read again, and words you corrected are replaced. ${price} credits. You have ${credits.balance}.`)) handleRetranscribe('unknown', true)
   }
 
   async function handleRetranscribe(languageCode: string, readAll = false) {

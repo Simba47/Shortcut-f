@@ -51,7 +51,7 @@ test('no plan claims unlimited AI clips, and only Agency gets priority exports',
 test('what a credit buys does not call AI features free without limits', () => {
   const text = creditUses().map(u => `${u.name} ${u.price} ${u.note}`).join(' ')
   assert.ok(!/are then free/.test(text))
-  assert.match(text, /1 credit = ₹1/)
+  assert.ok(!/₹/.test(text), 'credits are shown without rupees')
   assert.match(text, /5 credits per 10 minutes/)       // a search past the free one
   assert.match(text, /15 credits per 10 minutes/)      // reading
   assert.match(text, /7 credits per Ask AI search/)

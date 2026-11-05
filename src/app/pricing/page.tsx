@@ -234,7 +234,7 @@ export default function PricingPage() {
                     <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.5)' }}>{isPaid ? ' every month' : ' to start, once'}</span>
                   </div>
                   <div className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                    1 credit = ₹1 · {readingLabel(plan.readingMinutes)} of video read {isPaid ? 'a month' : 'in total'}
+                    {readingLabel(plan.readingMinutes)} of video read {isPaid ? 'a month' : 'in total'}
                     {isPaid ? ' · unused credits roll over one month' : ''}
                   </div>
                 </div>
@@ -308,7 +308,6 @@ export default function PricingPage() {
                 <div className="text-2xl font-bold text-white">{pack.credits}</div>
                 <div className="text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>credits</div>
                 <div className="text-lg font-semibold text-white mt-2">₹{pack.price}</div>
-                <div className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>₹{(pack.price / pack.credits).toFixed(2)} a credit</div>
                 {mine && mine.plan !== 'free' ? (
                   <button onClick={() => handleTopup(pack.key)} disabled={!!topupBusy}
                     className="w-full mt-3 py-2 rounded-xl text-xs font-semibold transition-opacity"
