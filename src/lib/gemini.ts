@@ -8,12 +8,18 @@
  * (`gcloud auth application-default login` on a developer PC). Without GOOGLE_CLOUD_PROJECT the
  * request goes to the Gemini API with GEMINI_API_KEY, as before.
  *
+ * GEMINI_FIRST=key (with GEMINI_API_KEY): every request goes to the Gemini API key first (a paid
+ * AI Studio project with its own, higher limits: Tier 2), through the Interactions API with
+ * GEMINI_KEY_MODEL (default gemini-3.5-flash: projects made since late 2026 cannot use 2.5), and to
+ * Vertex when the key fails. A key that has no credit or is refused rests 10 minutes (Vertex only).
+ *
  * Built for many users at once: a cap on requests in flight per process (AI_MAX_CONCURRENT) and
  * retries spread out at random (see "Many users at once" below).
  *
  * Only Node built-ins, so this file is copied as-is between the repos:
  * chai-cut-backend/src/lib/gemini.ts and chai-cut-frontend/src/lib/gemini.ts. Keep the two identical.
  */
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createSign } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -42,7 +48,17 @@ export interface AskOptions {
 /** Tokens one answer used: thinking is billed as output, so it is counted there */
 export interface GeminiUsage { model: string; inputTokens: number; outputTokens: number }
 
+const usageScope = new AsyncLocalStorage<(u: GeminiUsage) => void>()
+/**
+ * Every askGemini call made while `fn` runs reports its tokens to `onUsage` (unless the call has
+ * its own): one wrapper around a job records all of its calls, helpers included (lib/aiUsage.ts).
+ */
+export function withGeminiUsage<T>(onUsage: (u: GeminiUsage) => void, fn: () => Promise<T>): Promise<T> {
+  return usageScope.run(onUsage, fn)
+}
+
 export const GEMINI_MODEL = 'gemini-2.5-flash'
+const KEY_MODEL = process.env.GEMINI_KEY_MODEL || 'gemini-3.5-flash'
 
 /** Where AI requests go: 'vertex', 'gemini-api', or null when neither is configured */
 export function aiProvider(): 'vertex' | 'gemini-api' | null {
@@ -50,6 +66,70 @@ export function aiProvider(): 'vertex' | 'gemini-api' | null {
   if (process.env.GEMINI_API_KEY) return 'gemini-api'
   return null
 }
+
+type Env = Record<string, string | undefined>
+const keyFirst = (env: Env) => (env.GEMINI_FIRST ?? '').trim().toLowerCase() === 'key'
+
+/**
+ * The order requests try: 'key' (the Gemini API key, Interactions API), 'vertex', or 'gemini-api'
+ * (the key's older generateContent path, used only when there is no Vertex and no GEMINI_FIRST)
+ */
+export function geminiOrder(env: Env = process.env): Array<'key' | 'vertex' | 'gemini-api'> {
+  const vertex = !!env.GOOGLE_CLOUD_PROJECT, key = !!env.GEMINI_API_KEY
+  if (key && keyFirst(env)) return vertex ? ['key', 'vertex'] : ['key']
+  if (vertex) return ['vertex']
+  return key ? ['gemini-api'] : []
+}
+
+/** Speech-to-text's sides, in order (transcribe.ts sttSides): the same rule for the captions' reading */
+export function sttOrder(s: { vertex: boolean; key: boolean; keyFirst: boolean; resting: boolean; audioSec: number | null; shortSec: number }): Array<'vertex' | 'key'> {
+  if (!s.vertex) return ['key']
+  if (!s.key || s.resting) return ['vertex']
+  if (s.keyFirst) return ['key', 'vertex']
+  if (!s.shortSec) return ['vertex']
+  return s.audioSec != null && s.audioSec <= s.shortSec ? ['vertex', 'key'] : ['key', 'vertex']
+}
+export const sttKeyFirst = (env: Env = process.env) => !!env.GEMINI_API_KEY && keyFirst(env)
+
+/** An ask as the Interactions API's input (images at low resolution: ~260 tokens a frame, as on Vertex) */
+export function toInteractionInput(input: string | GeminiPart[]): string | Array<Record<string, string>> {
+  if (typeof input === 'string') return input
+  return input.map((p): Record<string, string> => 'text' in p ? { type: 'text', text: p.text } : { type: 'image', data: p.inlineData.data, mime_type: p.inlineData.mimeType, resolution: 'low' })
+}
+
+/** Gemini's responseSchema (OpenAPI subset, types in capitals, `nullable`) as a JSON schema */
+export function toJsonSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(toJsonSchema)
+  if (!schema || typeof schema !== 'object') return schema
+  const out: Record<string, unknown> = {}
+  const src = schema as Record<string, unknown>
+  for (const [k, v] of Object.entries(src)) {
+    if (k === 'nullable') continue
+    if (k === 'type' && typeof v === 'string') out.type = src.nullable ? [v.toLowerCase(), 'null'] : v.toLowerCase()
+    else if (k === 'properties' && v && typeof v === 'object') out.properties = Object.fromEntries(Object.entries(v).map(([n, d]) => [n, toJsonSchema(d)]))
+    else out[k] = toJsonSchema(v)
+  }
+  return out
+}
+
+/** A thinking budget (tokens) as the Interactions API's thinking level */
+export function thinkingLevel(budget: number | undefined): 'minimal' | 'low' | 'medium' | undefined {
+  if (budget === undefined) return undefined
+  return budget <= 0 ? 'minimal' : budget <= 1024 ? 'low' : 'medium'
+}
+
+/** The answer's text (its model_output steps) and tokens (thoughts counted as output) */
+export function interactionAnswer(body: unknown): { text: string; inputTokens: number; outputTokens: number } {
+  const b = (body ?? {}) as { steps?: { type?: string; content?: { type?: string; text?: string }[] }[]; usage?: Record<string, number | undefined> }
+  const text = (b.steps ?? []).filter(st => st.type === 'model_output')
+    .flatMap(st => st.content ?? []).filter(c => c.type === 'text').map(c => c.text ?? '').join('')
+  const u = b.usage ?? {}
+  return { text, inputTokens: u.total_input_tokens ?? 0, outputTokens: (u.total_output_tokens ?? 0) + (u.total_thought_tokens ?? 0) }
+}
+
+/** The Gemini key rests (Vertex only) until then: it had no credit, was refused, or kept failing */
+let keyRestUntil = 0
+const KEY_REST_MS = 10 * 60_000
 
 /** An error from Gemini that carries the HTTP status (429 / 5xx are worth retrying) */
 export class GeminiError extends Error {
@@ -78,8 +158,73 @@ const pause = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 /** Sends one request and returns the answer's text (thinking parts left out) */
 export async function askGemini(input: string | GeminiPart[], opts: AskOptions = {}): Promise<string> {
-  const provider = aiProvider()
-  if (!provider) throw new Error('AI is not configured: set GOOGLE_CLOUD_PROJECT (Vertex AI) or GEMINI_API_KEY')
+  const order = geminiOrder()
+  if (!order.length) throw new Error('AI is not configured: set GOOGLE_CLOUD_PROJECT (Vertex AI) or GEMINI_API_KEY')
+  if (order[0] === 'key' && order.length > 1) {
+    if (Date.now() >= keyRestUntil) {
+      try {
+        return await askKey(input, opts)
+      } catch (e) {
+        // (the caller's own time limit or stop is not the key's fault: Vertex would not answer it either)
+        const name = (e as { name?: unknown } | null)?.name
+        if (name === 'AbortError') throw e
+        const status = e instanceof GeminiError ? e.status : 0
+        if ([401, 402, 403].includes(status) || status === 429 || status >= 500) keyRestUntil = Date.now() + KEY_REST_MS
+        console.warn(`[gemini] the Gemini key failed (${e instanceof Error ? e.message.slice(0, 160) : e}): asking Vertex${keyRestUntil > Date.now() ? ' (key rests 10 min)' : ''}`)
+      }
+    }
+    return askGenerate(input, opts, 'vertex')
+  }
+  if (order[0] === 'key') return askKey(input, opts)
+  return askGenerate(input, opts, order[0])
+}
+
+/** The Gemini API key, Interactions API (GEMINI_FIRST=key) */
+async function askKey(input: string | GeminiPart[], opts: AskOptions): Promise<string> {
+  const generation_config: Record<string, unknown> = {}
+  if (opts.temperature !== undefined) generation_config.temperature = opts.temperature
+  const level = thinkingLevel(opts.thinkingBudget)
+  if (level) generation_config.thinking_level = level
+  const body = JSON.stringify({
+    model: KEY_MODEL,
+    input: toInteractionInput(input),
+    ...(opts.system ? { system_instruction: opts.system } : {}),
+    ...(Object.keys(generation_config).length ? { generation_config } : {}),
+    ...(opts.json || opts.schema ? { response_format: { type: 'text', mime_type: 'application/json', ...(opts.schema ? { schema: toJsonSchema(opts.schema) } : {}) } } : {}),
+  })
+  const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY! }
+  // (fewer tries than Vertex: a busy key hands over to Vertex instead of waiting a minute)
+  for (let attempt = 1; ; attempt++) {
+    let res: Response
+    try {
+      res = await inTurn(() => fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+        method: 'POST', headers, body, signal: AbortSignal.timeout(opts.timeoutMs ?? 120_000),
+      }))
+    } catch (e) {
+      if (!isNetworkDrop(e) || attempt >= KEY_TRIES) throw e
+      await pause(retryDelayMs(attempt))
+      continue
+    }
+    if (res.ok) {
+      const answer = interactionAnswer(await res.json())
+      const report = opts.onUsage ?? usageScope.getStore()
+      if (report) {
+        try { report({ model: KEY_MODEL, inputTokens: answer.inputTokens, outputTokens: answer.outputTokens }) } catch { /* recording never fails the answer */ }
+      }
+      return answer.text
+    }
+    const text = await res.text()
+    if ((res.status === 429 || res.status >= 500) && attempt < KEY_TRIES) {
+      await pause(retryDelayMs(attempt, retryAfterMs(res.headers.get('retry-after'))))
+      continue
+    }
+    throw new GeminiError(`Gemini ${res.status} (key): ${text.slice(0, 300)}`, res.status)
+  }
+}
+const KEY_TRIES = 2
+
+/** Vertex AI, or the Gemini API key's older generateContent path */
+async function askGenerate(input: string | GeminiPart[], opts: AskOptions, provider: 'vertex' | 'gemini-api'): Promise<string> {
   const model = opts.model ?? GEMINI_MODEL
 
   const generationConfig: Record<string, unknown> = {}
@@ -123,9 +268,10 @@ export async function askGemini(input: string | GeminiPart[], opts: AskOptions =
         candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[]
         usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
       }
-      if (opts.onUsage) {
+      const report = opts.onUsage ?? usageScope.getStore()
+      if (report) {
         const u = data.usageMetadata ?? {}
-        try { opts.onUsage({ model, inputTokens: u.promptTokenCount ?? 0, outputTokens: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0) }) } catch { /* recording never fails the answer */ }
+        try { report({ model, inputTokens: u.promptTokenCount ?? 0, outputTokens: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0) }) } catch { /* recording never fails the answer */ }
       }
       return (data.candidates?.[0]?.content?.parts ?? []).filter(p => !p.thought).map(p => p.text ?? '').join('')
     }
