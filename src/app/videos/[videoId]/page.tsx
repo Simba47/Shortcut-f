@@ -20,11 +20,13 @@ export default async function VideoPickerPage({
   const user = await requireUser()
   if (!user) redirect('/login')
 
-  type VideoRow = { id: string; user_id: string; title: string | null; status: string; download_progress: number; duration_ms: number | null; created_at: string; storage_path: string | null; proxy_path: string | null; stock_ref: string | null }
+  type VideoRow = { id: string; user_id: string; title: string | null; status: string; download_progress: number; duration_ms: number | null; created_at: string; storage_path: string | null; proxy_path: string | null; stock_ref: string | null; picture_box: unknown }
   const [row] = await sql`
     SELECT id, user_id, title, status, download_progress, duration_ms, created_at, storage_path,
       -- (read through to_jsonb: works before the worker adds the columns)
-      to_jsonb(videos)->>'proxy_path' AS proxy_path, to_jsonb(videos)->>'stock_ref' AS stock_ref
+      to_jsonb(videos)->>'proxy_path' AS proxy_path, to_jsonb(videos)->>'stock_ref' AS stock_ref,
+      -- (the picture inside its black bars, once the worker has found it)
+      to_jsonb(videos)->'picture_box' AS picture_box
     FROM videos WHERE id = ${videoId}
   ` as unknown as VideoRow[]
   if (!row || row.user_id !== user.id) notFound()

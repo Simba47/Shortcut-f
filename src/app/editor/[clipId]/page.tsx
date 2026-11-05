@@ -36,7 +36,9 @@ export default async function EditorPage({
 
   const [clip] = await sql`
     SELECT c.*, v.storage_path, v.status AS video_status, v.user_id, v.title AS video_title, v.duration_ms AS video_duration_ms,
-      to_jsonb(v)->>'proxy_path' AS proxy_path
+      to_jsonb(v)->>'proxy_path' AS proxy_path,
+      -- (the picture inside the video's black bars, once the worker has found it: jobs/picture.ts)
+      to_jsonb(v)->'picture_box' AS picture_box
     FROM clips c JOIN videos v ON v.id = c.video_id
     WHERE c.id = ${clipId}
   `
