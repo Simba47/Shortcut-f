@@ -11,7 +11,7 @@
  * GEMINI_FIRST=key (with GEMINI_API_KEY): every request goes to the Gemini API key first (a paid
  * AI Studio project with its own, higher limits: Tier 2), through the Interactions API with
  * GEMINI_KEY_MODEL (default gemini-3.5-flash-lite: projects made since late 2026 cannot use 2.5), and to
- * Vertex when the key fails. A key that has no credit or is refused rests 10 minutes (Vertex only).
+ * Vertex when the key fails. A key with no credit rests 10 minutes (Vertex only), a refused or busy one a minute.
  *
  * Built for many users at once: a cap on requests in flight per process (AI_MAX_CONCURRENT) and
  * retries spread out at random (see "Many users at once" below).
@@ -132,9 +132,10 @@ export function interactionAnswer(body: unknown): { text: string; inputTokens: n
   return { text, inputTokens: u.total_input_tokens ?? 0, outputTokens: (u.total_output_tokens ?? 0) + (u.total_thought_tokens ?? 0) }
 }
 
-/** The Gemini key rests (Vertex only) until then: it had no credit, was refused, or kept failing */
+/** The Gemini key rests (Vertex only) until then: 10 minutes with no credit, a minute when refused or busy */
 let keyRestUntil = 0
 const KEY_REST_MS = 10 * 60_000
+const KEY_PAUSE_MS = 60_000
 
 /** An error from Gemini that carries the HTTP status (429 / 5xx are worth retrying) */
 export class GeminiError extends Error {
@@ -174,8 +175,9 @@ export async function askGemini(input: string | GeminiPart[], opts: AskOptions =
         const name = (e as { name?: unknown } | null)?.name
         if (name === 'AbortError') throw e
         const status = e instanceof GeminiError ? e.status : 0
-        if ([401, 402, 403].includes(status) || status === 429 || status >= 500) keyRestUntil = Date.now() + KEY_REST_MS
-        console.warn(`[gemini] the Gemini key failed (${e instanceof Error ? e.message.slice(0, 160) : e}): asking Vertex${keyRestUntil > Date.now() ? ' (key rests 10 min)' : ''}`)
+        // (only an empty balance rests it long: under load Google also refuses for a moment)
+        if ([401, 402, 403].includes(status) || status === 429 || status >= 500) keyRestUntil = Date.now() + (status === 402 ? KEY_REST_MS : KEY_PAUSE_MS)
+        console.warn(`[gemini] the Gemini key failed (${e instanceof Error ? e.message.slice(0, 160) : e}): asking Vertex`)
       }
     }
     return askGenerate(input, opts, 'vertex')
