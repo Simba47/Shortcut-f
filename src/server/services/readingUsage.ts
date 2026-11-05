@@ -1,6 +1,6 @@
 import type postgres from 'postgres'
 import sql from '@/lib/db'
-import { creditsMode } from '@/lib/credits'
+import { creditsMode, EXTRA_READING_CREDITS } from '@/lib/credits'
 import { allowanceSince, readingQuote } from '@/lib/aiLimits'
 import { readingLabel } from '@/lib/planFeatures'
 import { PLANS } from '@/lib/plans'
@@ -28,6 +28,7 @@ function ensureSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`
     await sql`CREATE INDEX IF NOT EXISTS reading_usage_user_idx ON reading_usage (user_id, created_at DESC)`
+    await sql`ALTER TABLE videos ADD COLUMN IF NOT EXISTS reading_limit_ms BIGINT`
   })().catch(e => { ready = null; throw e })
   return ready
 }
@@ -95,12 +96,17 @@ export async function checkBeforeUpload(userId: string, durationMs: number | nul
     throw fail(`This video is ${minutes(durationMs ?? 0)} min and ${quote.msLeft > 0 ? `only ${minutes(quote.msLeft)} min` : 'none'} of your ${hours} ${quote.msLeft > 0 ? 'is' : 'are'} left. The rest needs ${quote.credits} credits and you have ${have}. Top up or upgrade to continue.`, 402)
   }
   // No length yet (a link, a file the browser can't read): with nothing left, at least one 10-minute price must be there
-  if (durationMs == null && quote.msLeft <= 0 && have < 15) {
-    throw fail(`You've used your ${readingLabel(plan.readingMinutes)} ${per}. More reading needs credits: 15 per 10 minutes of video, and you have ${have}. Top up or upgrade to continue.`, 402)
+  if (durationMs == null && quote.msLeft <= 0 && have < EXTRA_READING_CREDITS) {
+    throw fail(`You've used your ${readingLabel(plan.readingMinutes)} ${per}. More reading needs credits: ${EXTRA_READING_CREDITS} per 10 minutes of video, and you have ${have}. Top up or upgrade to continue.`, 402)
   }
 }
 
-/** A new video is counted (once, however many times it is asked), and the part past the hours paid for. No length yet: counted when the worker has found it. */
+/**
+ * A new video is counted (once, however many times it is asked), and the part past the hours paid
+ * for. No length yet (a link, a file the browser can't read): what the plan and the credits still
+ * cover is written on the video, and the worker refuses it if it turns out longer, before reading it
+ * (chai-cut-backend lib/readingLimit.ts); it is charged when the length is found (readingUse).
+ */
 export async function recordReading(userId: string, videoId: string, durationMs: number | null | undefined): Promise<void> {
   if (creditsMode() === 'off') return
   await ensureSchema()
@@ -114,7 +120,11 @@ export async function recordReading(userId: string, videoId: string, durationMs:
       INSERT INTO reading_usage (user_id, video_id, duration_ms) VALUES (${userId}, ${videoId}, ${durationMs ?? null})
       ON CONFLICT (video_id) DO NOTHING RETURNING id`
     if (!row) return
-    const { credits } = readingQuote(PLANS[plan], { uploads: u.uploads, usedMs: Number(u.used) }, durationMs)
+    const { credits, msLeft } = readingQuote(PLANS[plan], { uploads: u.uploads, usedMs: Number(u.used) }, durationMs)
     if (credits > 0) await chargeOver(userId, videoId, row.id, credits, tx)
+    if (durationMs == null && creditsMode() === 'on') {
+      const bought = Math.floor((await balance(userId, tx)).balance / EXTRA_READING_CREDITS) * 10 * 60_000
+      await tx`UPDATE videos SET reading_limit_ms = ${msLeft + bought} WHERE id = ${videoId}`
+    }
   })
 }

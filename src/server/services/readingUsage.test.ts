@@ -114,6 +114,23 @@ test('a link or unreadable file with no hours left needs at least one 10-minute 
   await assert.rejects(reading.checkBeforeUpload(u, null), (e: { status?: number; message?: string }) => e.status === 402 && /15 per 10 minutes/.test(e.message ?? ''))
 })
 
+test('a length not known yet: what is left is written on the video, for the worker to check', opts, async () => {
+  const u = await user('free', 40)                                         // 40 credits buy 2 × 10 minutes
+  await reading.recordReading(u, await video(u, 25 * MIN), 25 * MIN)       // 5 minutes left
+  const v = await video(u, null)
+  await reading.recordReading(u, v, null)
+  const [row] = await sql<{ reading_limit_ms: string }[]>`SELECT reading_limit_ms FROM videos WHERE id = ${v}`
+  assert.equal(Number(row.reading_limit_ms), 25 * MIN)
+})
+
+test('a length known at upload needs no limit on the video', opts, async () => {
+  const u = await user('free')
+  const v = await video(u, 5 * MIN)
+  await reading.recordReading(u, v, 5 * MIN)
+  const [row] = await sql<{ reading_limit_ms: string | null }[]>`SELECT reading_limit_ms FROM videos WHERE id = ${v}`
+  assert.equal(row.reading_limit_ms, null)
+})
+
 test('credits off: nothing is checked or counted', opts, async () => {
   process.env.CREDITS_MODE = 'off'
   try {
