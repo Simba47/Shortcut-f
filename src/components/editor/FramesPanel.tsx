@@ -3,7 +3,7 @@
 import { InfoTip } from '@/components/ui/info-tip'
 import { useEffect, useState } from 'react'
 import type { SegmentLocal, FrameLayout, FrameItem, FrameSettings, SlotMotion, CornerStyle, BrollPick } from '@chai-cut/shared'
-import { FRAME_TEMPLATES, FRAME_LAYOUTS, isFrameLayout, frameLanes, frameOf, cornerGeometry, CORNER_MAX, mainSlotSound, frameAreas, frameBase, isTextLane, startLayout } from '@/modules/editor/frames'
+import { FRAME_TEMPLATES, FRAME_LAYOUTS, isFrameLayout, frameLanes, frameOf, cornerGeometry, CORNER_MAX, mainSlotSound, frameAreas, frameBase, isTextLane, startLayout, defaultFrame, frameSlotCount } from '@/modules/editor/frames'
 import { frameItemColor, FRAME_ITEM_COLORS } from './SegmentTimeline'
 import { ItemTimeRange } from './ItemTimeRange'
 import { FrameBackgroundFields } from './FrameBackgroundFields'
@@ -94,10 +94,12 @@ function msToLabel(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
-/** Mini diagram of a frame: each area where it sits — slots as frosted-glass panes (round where they are; the main
- *  video the brightest, with a small play mark), text areas with text lines, the caption strip as a fine lime line,
- *  the sound wave as bars. (user, 2026-10-31: "looks odd, keep them premium" — no blue / green / pink blocks) */
+/** Mini diagram of a frame: each area where it sits — slots as frosted-glass panes (round where they are; your
+ *  video with a small play mark, a spot you add a video or photo to with a small +), text areas with text lines,
+ *  the caption strip as a fine lime line, the sound wave as bars. (user, 2026-10-31: "looks odd, keep them
+ *  premium" — no blue / green / pink blocks; 2026-11-04: show which is your video and which you add) */
 export function FrameThumb({ layout }: { layout: FrameLayout }) {
+  const main = mainSlotsOf(layout)
   // The panes from the main video down: each a little softer, so they read apart without colours
   const panes = [
     'linear-gradient(160deg, rgba(255,255,255,0.34), rgba(255,255,255,0.16))',
@@ -139,14 +141,27 @@ export function FrameThumb({ layout }: { layout: FrameLayout }) {
             boxShadow: 'inset 0 0 0 1px rgb(255 255 255 / 0.16), inset 0 1px 0 rgb(255 255 255 / 0.2)',
             borderRadius: a.radius === 'circle' ? '50%' : a.radius ? 3 : 2,
           }}>
-            {a.slot === 0 && a.w * a.h > 0.08 && (
-              <svg width="7" height="7" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l5 3-5 3z" fill="rgb(255 255 255 / 0.75)" /></svg>
-            )}
+            {a.w * a.h > 0.06 && (main.includes(a.slot)
+              ? <svg width="7" height="7" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 2l5 3-5 3z" fill="rgb(255 255 255 / 0.75)" /></svg>
+              : <svg width="6" height="6" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1.5v7M1.5 5h7" stroke="rgb(255 255 255 / 0.6)" strokeWidth="1.6" strokeLinecap="round" /></svg>)}
           </div>
         )
       })}
     </div>
   )
+}
+
+/** The slots a new frame of this template puts your video in (the first, when it starts with it under the frame) */
+function mainSlotsOf(layout: FrameLayout): number[] {
+  const main = defaultFrame(layout).main_slots ?? []
+  return main.length ? main : [0]
+}
+/** The gallery's groups: by how many videos or photos a frame shows (user, 2026-11-04) */
+const mediaGroupLabel = (n: number) => (n === 1 ? '1 video' : `${n} videos or photos`)
+function mediaTip(layout: FrameLayout) {
+  const n = frameSlotCount(layout), mine = mainSlotsOf(layout).length, add = n - mine
+  if (n === 1) return 'Your video, with room for text'
+  return add > 0 ? `${n} spots: your video and ${add} you add a video or photo to` : `${n} spots, each showing your video (swap any for another video or photo)`
 }
 
 /** A frame's shape in miniature (its card in the list): slots filled, text areas outlined */
@@ -157,8 +172,8 @@ function FrameIcon({ layout, on }: { layout: FrameLayout; on: boolean }) {
         <span key={i} className="absolute" style={{
           left: `${a.x * 100}%`, top: `${a.y * 100}%`, width: `${a.w * 100}%`, height: `${a.h * 100}%`,
           borderRadius: a.kind === 'slot' && a.radius === 'circle' ? '50%' : 1.5,
-          background: a.kind === 'slot' ? (on ? '#c8ff00' : '#9ca3af') : 'transparent',
-          boxShadow: a.kind === 'slot' ? 'inset 0 0 0 0.5px rgba(0,0,0,0.6)' : `inset 0 0 0 1px ${on ? 'rgba(200,255,0,0.6)' : 'rgba(156,163,175,0.6)'}`,
+          background: a.kind === 'slot' ? (on ? 'var(--ed-text)' : '#9ca3af') : 'transparent',
+          boxShadow: a.kind === 'slot' ? 'inset 0 0 0 0.5px rgba(0,0,0,0.6)' : `inset 0 0 0 1px ${on ? 'rgb(var(--ed-fg) / 0.7)' : 'rgba(156,163,175,0.6)'}`,
         }} />
       ))}
     </span>
@@ -201,23 +216,34 @@ export function FramesPanel({
         {!targetLabel && (
           <p className="text-xs" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>Move the playhead onto a format first.</p>
         )}
-        {/* 4 across, the most used first. A clip already using a frame no longer offered still shows it here */}
-        <div className="grid grid-cols-4 gap-1.5">
-          {[...brandFrames, ...FRAME_LAYOUTS.filter(l => !brandFrames.includes(l)), ...frames.map(f => f.layout as FrameLayout).filter((l, i, all) => isFrameLayout(l) && !FRAME_LAYOUTS.includes(l) && all.indexOf(l) === i)].map(id => {
-            const t = FRAME_TEMPLATES[id]
-            const on = current === id
-            const ours = brandFrames.includes(id)
-            return (
-              <button key={id} onClick={() => onApply(id)} disabled={!targetLabel} aria-pressed={on} title={t.description}
-                className="min-w-0 flex flex-col items-center gap-1 px-0.5 py-1.5 rounded-lg text-center transition-colors disabled:opacity-40 hover:bg-[rgb(var(--ed-fg)/0.05)]"
-                style={{ background: on ? 'rgb(var(--ed-fg) / 0.08)' : 'rgb(var(--ed-fg) / 0.02)', boxShadow: `inset 0 0 0 ${on ? 1.5 : 1}px ${on ? ACCENT : 'rgb(var(--ed-fg) / 0.08)'}` }}>
-                <FrameThumb layout={id} />
-                <span className="w-full text-[9.5px] font-semibold leading-[1.15]" style={{ color: on ? 'var(--ed-text)' : 'rgb(var(--ed-fg) / 0.75)' }}>{t.name}</span>
-                {ours && <span className="text-[8.5px] font-bold uppercase tracking-wide" style={{ color: 'var(--ed-accent-text)' }} title="One of your brand kit's frames">Brand</span>}
-              </button>
-            )
-          })}
-        </div>
+        {/* Grouped by how many videos or photos each shows (1, 2, 3), 4 across; in each group the brand
+            kit's frames first, then the most used. A clip already using a frame no longer offered still shows it here */}
+        {(() => {
+          const all = [...brandFrames, ...FRAME_LAYOUTS.filter(l => !brandFrames.includes(l)), ...frames.map(f => f.layout as FrameLayout).filter((l, i, list) => isFrameLayout(l) && !FRAME_LAYOUTS.includes(l) && list.indexOf(l) === i)]
+          const counts = [...new Set(all.map(frameSlotCount))].sort((a, b) => a - b)
+          return counts.map(n => (
+            <section key={n} className="flex flex-col gap-1.5" aria-label={mediaGroupLabel(n)}>
+              <h3 className="text-[11px] font-medium" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>{mediaGroupLabel(n)}</h3>
+              <div className="grid grid-cols-4 gap-1.5">
+                {all.filter(id => frameSlotCount(id) === n).map(id => {
+                  const t = FRAME_TEMPLATES[id]
+                  const on = current === id
+                  const ours = brandFrames.includes(id)
+                  return (
+                    <button key={id} onClick={() => onApply(id)} disabled={!targetLabel} aria-pressed={on} title={`${t.description}
+${mediaTip(id)}`}
+                      className="min-w-0 flex flex-col items-center gap-1 px-0.5 py-1.5 rounded-lg text-center transition-colors disabled:opacity-40 hover:bg-[rgb(var(--ed-fg)/0.05)]"
+                      style={{ background: on ? 'rgb(var(--ed-fg) / 0.08)' : 'rgb(var(--ed-fg) / 0.02)', boxShadow: `inset 0 0 0 ${on ? 1.5 : 1}px ${on ? ACCENT : 'rgb(var(--ed-fg) / 0.08)'}` }}>
+                      <FrameThumb layout={id} />
+                      <span className="w-full text-[9.5px] font-semibold leading-[1.15]" style={{ color: on ? 'var(--ed-text)' : 'rgb(var(--ed-fg) / 0.75)' }}>{t.name}</span>
+                      {ours && <span className="text-[8.5px] font-bold uppercase tracking-wide" style={{ color: 'var(--ed-accent-text)' }} title="One of your brand kit's frames">Brand</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          ))
+        })()}
       </div>
 
       {/* Frames in this clip */}
@@ -245,15 +271,16 @@ export function FramesPanel({
             <div key={seg.id} role="button" tabIndex={0} aria-expanded={isOpen} aria-current={isActive || undefined}
               className="group relative flex flex-col rounded-xl cursor-pointer overflow-hidden transition-[background,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(200,255,0,0.6)]"
               style={{
-                background: isActive ? 'linear-gradient(180deg, rgba(200,255,0,0.06), rgba(200,255,0,0.015))' : 'rgb(var(--ed-fg) / 0.03)',
-                boxShadow: isActive ? 'inset 0 0 0 1px rgba(200,255,0,0.45), 0 8px 22px -16px rgba(200,255,0,0.5)' : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.07)',
+                // (the frame under the playhead: a step lighter with a finer, brighter edge — no lime but its dot; user, 2026-11-04)
+                background: isActive ? 'rgb(var(--ed-fg) / 0.055)' : 'rgb(var(--ed-fg) / 0.03)',
+                boxShadow: isActive ? 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.2), 0 10px 24px -18px rgb(0 0 0 / 0.8)' : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.07)',
               }}
               onClick={() => { onOpenFrame(seg.id); if (!isOpen) toggle(seg.id) }}
               onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) { onOpenFrame(seg.id); toggle(seg.id) } }}>
               <div className="flex items-start gap-2.5 pl-2.5 pr-1.5 pt-2 pb-1.5">
                 {/* A tiny diagram of the frame */}
                 <span className="shrink-0 w-8 h-8 mt-px flex items-center justify-center rounded-lg"
-                  style={{ background: isActive ? 'rgba(200,255,0,0.1)' : 'rgb(var(--ed-fg) / 0.06)' }}>
+                  style={{ background: isActive ? 'rgb(var(--ed-fg) / 0.1)' : 'rgb(var(--ed-fg) / 0.06)' }}>
                   <FrameIcon layout={layout} on={isActive} />
                 </span>
                 <div className="flex-1 min-w-0 flex flex-col">
