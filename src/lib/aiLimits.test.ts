@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { PLANS } from './plans'
 import {
-  aiLimitsFor, videoClipCap, extraSearchCredits, clipsAllowed, istDayStart, istMonthStart, rewriteCredits, extraClipCredits, allowanceSince, readingQuote, askAiUnits, askAiCredits, rewriteNote } from './aiLimits'
+  aiLimitsFor, videoClipCap, extraSearchCredits, clipsAllowed, istDayStart, istMonthStart, rewriteCredits, clipCredits, allowanceSince, readingQuote, askAiUnits, askAiCredits, rewriteNote } from './aiLimits'
 
 const MIN = 60_000
 
@@ -30,12 +30,14 @@ test('a fresh search beyond the included ones costs 5 credits per started 10 min
 })
 
 test('a run makes the lowest of: asked, the plan per run, what is left today, what is left for the video', () => {
-  assert.deepEqual(clipsAllowed({ requested: 10, perRun: 15, dayLeft: 60, videoLeft: 45 }), { count: 10, limitedBy: null })
-  assert.deepEqual(clipsAllowed({ requested: 20, perRun: 10, dayLeft: 30, videoLeft: 45 }), { count: 10, limitedBy: 'run' })
-  assert.deepEqual(clipsAllowed({ requested: 10, perRun: 10, dayLeft: 2, videoLeft: 45 }), { count: 2, limitedBy: 'day' })
-  assert.deepEqual(clipsAllowed({ requested: 10, perRun: 10, dayLeft: 30, videoLeft: 4 }), { count: 4, limitedBy: 'video' })
-  assert.deepEqual(clipsAllowed({ requested: 5, perRun: 10, dayLeft: 0, videoLeft: 4 }), { count: 0, limitedBy: 'day' })
-  assert.deepEqual(clipsAllowed({ requested: 5, perRun: 10, dayLeft: 9, videoLeft: 0 }), { count: 0, limitedBy: 'video' })
+  assert.deepEqual(clipsAllowed({ requested: 10, perRun: 15, dayLeft: 60, videoLeft: 45, monthLeft: 99 }), { count: 10, limitedBy: null })
+  assert.deepEqual(clipsAllowed({ requested: 20, perRun: 10, dayLeft: 30, videoLeft: 45, monthLeft: 99 }), { count: 10, limitedBy: 'run' })
+  assert.deepEqual(clipsAllowed({ requested: 10, perRun: 10, dayLeft: 2, videoLeft: 45, monthLeft: 99 }), { count: 2, limitedBy: 'day' })
+  assert.deepEqual(clipsAllowed({ requested: 10, perRun: 10, dayLeft: 30, videoLeft: 4, monthLeft: 99 }), { count: 4, limitedBy: 'video' })
+  assert.deepEqual(clipsAllowed({ requested: 5, perRun: 10, dayLeft: 0, videoLeft: 4, monthLeft: 99 }), { count: 0, limitedBy: 'day' })
+  assert.deepEqual(clipsAllowed({ requested: 5, perRun: 10, dayLeft: 9, videoLeft: 0, monthLeft: 99 }), { count: 0, limitedBy: 'video' })
+  assert.deepEqual(clipsAllowed({ requested: 5, perRun: 10, dayLeft: 9, videoLeft: 9, monthLeft: 2 }), { count: 2, limitedBy: 'month' })
+  assert.deepEqual(clipsAllowed({ requested: 5, perRun: 10, dayLeft: 9, videoLeft: 9, monthLeft: 0 }), { count: 0, limitedBy: 'month' })
 })
 
 test('days and months start at midnight India time (UTC+5:30)', () => {
@@ -53,10 +55,8 @@ test('rewrites past the allowance cost 1 credit for every 5 (charged on the 1st,
 })
 
 test('AI clips past the month\'s included ones cost 5 credits each; the included ones are used first', () => {
-  assert.deepEqual(extraClipCredits(5, 60), { extra: 0, credits: 0 })
-  assert.deepEqual(extraClipCredits(5, 2), { extra: 3, credits: 15 })
-  assert.deepEqual(extraClipCredits(5, 0), { extra: 5, credits: 25 })
-  assert.deepEqual(extraClipCredits(5, -4), { extra: 5, credits: 25 })
+  assert.equal(clipCredits(1), 5)
+  assert.equal(clipCredits(5), 25)
 })
 
 test('each plan includes fewer AI clips a month than its credits could pay to read (1 clip per video minute)', () => {
@@ -71,11 +71,11 @@ test('a paid plan counts from the start of the India month, Free counts everythi
 })
 
 const HOUR = 60 * 60_000
-test('readingQuote: inside the plan is free; only the part past it costs credits', () => {
+test('readingQuote: every video costs credits, and says how much of it is past the hours', () => {
   const plan = { uploadsPerMonth: 10, readingMinutes: 180 }
-  assert.deepEqual(readingQuote(plan, { uploads: 0, usedMs: 0 }, HOUR), { uploadsLeft: 10, msLeft: 3 * HOUR, overMs: 0, credits: 0 })
+  assert.deepEqual(readingQuote(plan, { uploads: 0, usedMs: 0 }, HOUR), { uploadsLeft: 10, msLeft: 3 * HOUR, overMs: 0, credits: 90 })
   // 2.5 hours used and a 1-hour video: 30 minutes are past it, 3 × 15 credits
-  assert.deepEqual(readingQuote(plan, { uploads: 4, usedMs: 2.5 * HOUR }, HOUR), { uploadsLeft: 6, msLeft: 0.5 * HOUR, overMs: 0.5 * HOUR, credits: 45 })
+  assert.deepEqual(readingQuote(plan, { uploads: 4, usedMs: 2.5 * HOUR }, HOUR), { uploadsLeft: 6, msLeft: 0.5 * HOUR, overMs: 0.5 * HOUR, credits: 90 })
   // already past it: all of the video
   assert.deepEqual(readingQuote(plan, { uploads: 9, usedMs: 3.2 * HOUR }, HOUR), { uploadsLeft: 1, msLeft: 0, overMs: HOUR, credits: 90 })
 })
@@ -84,24 +84,20 @@ test('readingQuote: a video of unknown length is priced at nothing yet, and the 
   assert.deepEqual(readingQuote(plan, { uploads: 12, usedMs: 0 }, null), { uploadsLeft: 0, msLeft: 3 * HOUR, overMs: 0, credits: 0 })
 })
 
-test('Ask AI counts 1 per started hour of the video, and past the month only the part over costs credits', () => {
+test('Ask AI counts 1 per started hour of the video, and costs 7 credits for each', () => {
   assert.equal(askAiUnits(null), 1)
   assert.equal(askAiUnits(20 * 60_000), 1)
   assert.equal(askAiUnits(60 * 60_000), 1)
   assert.equal(askAiUnits(61 * 60_000), 2)
   assert.equal(askAiUnits(5 * 60 * 60_000), 5)
-  assert.equal(askAiCredits(3, 10, 1), 0)    // within the month
-  assert.equal(askAiCredits(9, 10, 1), 0)    // the last one
-  assert.equal(askAiCredits(10, 10, 1), 7)   // past it
-  assert.equal(askAiCredits(9, 10, 3), 14)   // a 3-hour video with 1 left: 2 are past it
-  assert.equal(askAiCredits(20, 10, 3), 21)  // all of it past
+  assert.equal(askAiCredits(1), 7)
+  assert.equal(askAiCredits(3), 21)
 })
 
 test('the rewrite note says what is left, and what the next one costs', () => {
-  assert.equal(rewriteNote(0, 30), '30 of 30 rewrites left this month')
-  assert.equal(rewriteNote(29, 30), '1 of 30 rewrites left this month')
-  assert.equal(rewriteNote(30, 30), 'Next rewrite: 1 credit, and the 4 after it are covered')
-  assert.equal(rewriteNote(31, 30), '4 more rewrites covered by your last credit')
-  assert.equal(rewriteNote(34, 30), '1 more rewrite covered by your last credit')
-  assert.equal(rewriteNote(35, 30), 'Next rewrite: 1 credit, and the 4 after it are covered')
+  assert.equal(rewriteNote(0, 30), '30 of 30 rewrites left · next: 1 credit, and it covers 5')
+  assert.equal(rewriteNote(1, 30), '29 of 30 rewrites left · 4 more covered by your last credit')
+  assert.equal(rewriteNote(4, 30), '26 of 30 rewrites left · 1 more covered by your last credit')
+  assert.equal(rewriteNote(5, 30), '25 of 30 rewrites left · next: 1 credit, and it covers 5')
+  assert.equal(rewriteNote(30, 30), 'All 30 rewrites used. More next month, or upgrade.')
 })

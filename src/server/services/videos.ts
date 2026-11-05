@@ -3,7 +3,7 @@ import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand } from '@aw
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { aiProvider, askGemini, GEMINI_MODEL, type GeminiUsage } from '@/lib/gemini'
 import { creditsMode } from '@/lib/credits'
-import { clipsAllowed, extraClipCredits, type LimitedBy } from '@/lib/aiLimits'
+import { clipsAllowed, clipCredits, type LimitedBy } from '@/lib/aiLimits'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import sql from '@/lib/db'
 import { findClips, type FoundClip, type Subscores } from './clipFinder'
@@ -254,14 +254,6 @@ function searchCostsError(credits: number) {
 }
 
 /** A run past the month's included AI clips (and maybe a paid search): the page asks first, then sends pay: true */
-function clipsCostError(credits: number, extra: number, searchCredits: number) {
-  const clips = `${extra} of these clips ${extra === 1 ? 'is' : 'are'} past this month's included AI clips`
-  return Object.assign(
-    new Error(`${clips}${searchCredits ? ', and a new search is needed' : ''}. This run costs ${credits} credit${credits === 1 ? '' : 's'}.`),
-    { status: 402, expose: true, code: 'clips_cost', credits },
-  )
-}
-
 /** How many Best moments are shown at a time */
 const BEST_SHOWN = 8
 /** A fresh search keeps up to this many moments for later ("Make more clips", "View more") */
@@ -419,16 +411,14 @@ export async function getVideoSuggestionsByCriteria(
     throw Object.assign(new Error('This video has no transcript yet'), { status: 400 })
   }
 
-  // Counted against the month's allowance (1 per started hour of the video), then credits; refused past the daily cap.
+  // Counted against the month's limit, and paid for, 1 per started hour of the video; refused past the limits.
   // Checked before any AI call, and given back if the AI does not answer.
   const { askAiPrice, beginAiAction } = await import('./aiUsage')
   const units = askAiUnits(durationMs)
-  // Past the month it costs credits: the price is asked about first, as a search and clips are
-  if (!opts.pay) {
-    const price = await askAiPrice(userId, units)
-    if (price > 0) {
-      throw Object.assign(new Error(`This Ask AI search costs ${price} credits${units > 1 ? `: on this video one search counts as ${units}` : ''}.`), { status: 402, expose: true, code: 'ask_costs', credits: price })
-    }
+  // The page shows the price of a search. On a long video it is more, so that is asked about first.
+  const price = await askAiPrice(userId, units)
+  if (price > 0 && units > 1 && !opts.pay) {
+    throw Object.assign(new Error(`This Ask AI search costs ${price} credits: on this video one search counts as ${units}.`), { status: 402, expose: true, code: 'ask_costs', credits: price })
   }
   const action = await beginAiAction(userId, 'ask_ai', videoId, units)
   if (!aiProvider()) { await action.fail(); throw Object.assign(new Error('AI clip detection is not configured'), { status: 500 }) }
@@ -576,8 +566,9 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
   let count = requested
   let limitedBy: LimitedBy | 'saved' = null
   if (mode === 'on') {
-    const r = clipsAllowed({ requested, perRun: allowance.perRun, dayLeft: allowance.dayLeft, videoLeft: allowance.videoLeft })
+    const r = clipsAllowed({ requested, perRun: allowance.perRun, dayLeft: allowance.dayLeft, videoLeft: allowance.videoLeft, monthLeft: allowance.monthLeft })
     if (r.count === 0) {
+      if (r.limitedBy === 'month') throw Object.assign(new Error(`You've used your ${allowance.clipsPerMonth} AI clips. More next month, or upgrade.`), { status: 403, expose: true })
       throw Object.assign(new Error(r.limitedBy === 'day'
         ? `You've made ${allowance.clipsToday} of today's ${allowance.clipsPerDay} AI clips. More tomorrow.`
         : `This video already has ${allowance.videoClips} AI clips, the most for its length (1 per minute of video).`), { status: 429, expose: true })
@@ -588,7 +579,7 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
   const fromSaved = options.search !== 'new' && allowance.savedLeft > 0
   if (fromSaved && count > allowance.savedLeft) { count = allowance.savedLeft; limitedBy = 'saved' }
   const price = !fromSaved && mode === 'on' ? allowance.nextSearchCredits : 0
-  const clipCost = mode === 'on' ? extraClipCredits(count, allowance.monthLeft) : { extra: 0, credits: 0 }
+  const clipCost = mode === 'on' ? clipCredits(count) : 0
 
   const { checkClipQuota, getUserPlanConfig } = await import('./quota')
   await checkClipQuota(userId)
@@ -605,8 +596,7 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
       )
     }
   }
-  // Asked after the plan's own clip limit, so the free plan is told to upgrade, not offered paid clips
-  if (clipCost.credits > 0 && !options.pay) throw clipsCostError(clipCost.credits + price, clipCost.extra, price)
+  // (the clips' price is on the button; a search past the free one is asked about, after the plan's own clip limit)
   if (price > 0 && !options.pay) throw searchCostsError(price)
 
   const [running] = await sql`
@@ -618,7 +608,7 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
   const hold = price > 0 ? await charge(userId, { amount: price, refType: 'search', refId: videoId }) : null
   let clipHold: Awaited<ReturnType<typeof charge>> | null = null
   try {
-    clipHold = clipCost.credits > 0 ? await charge(userId, { amount: clipCost.credits, refType: 'ai_clips', refId: videoId }) : null
+    clipHold = clipCost > 0 ? await charge(userId, { amount: clipCost, refType: 'ai_clips', refId: videoId }) : null
     const [aiJob] = await sql`
       INSERT INTO ai_edit_jobs (video_id, clip_count, status) VALUES (${videoId}, ${count}, 'queued') RETURNING id
     `
@@ -634,13 +624,13 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
       user_id: userId,
     }
     const [job] = await sql`INSERT INTO jobs (type, payload, status) VALUES ('ai_edit', ${sql.json(payload)}, 'queued') RETURNING id`
-    // The search's credits follow the job: a run that fails gives them back (credits.sweep)
+    // The credits follow the job: a run that fails gives them back, and one that makes fewer clips the difference (credits.sweep)
     if (hold) await linkJob(hold.id, job.id)
     if (clipHold) await linkJob(clipHold.id, job.id)
     if (!fromSaved) await aiUsage.recordSearch(userId, videoId, 'make_clips', aiJob.id, hold ? price : 0)
     return {
       ai_edit_job_id: aiJob.id as string, clip_count: count, limited_by: limitedBy, search: fromSaved ? 'saved' as const : 'new' as const,
-      credits: (hold ? price : 0) + (clipHold ? clipCost.credits : 0), extra_clips: clipHold ? clipCost.extra : 0,
+      credits: (hold ? price : 0) + (clipHold ? clipCost : 0),
     }
   } catch (err) {
     if (hold) await release(hold.id).catch(() => {})

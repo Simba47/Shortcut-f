@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  creditsMode, ledgerLabel, subjectsCredits, subjectsNewMs, captionCredits, exportCredits, extraReadingCredits, captionSpan, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS,
+  creditsMode, ledgerLabel, subjectsCredits, subjectsNewMs, captionCredits, exportCredits, readingCredits, captionSpan, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS,
   type SpendableGrant,
 } from './credits'
 import { PLANS } from './plans'
@@ -34,10 +34,10 @@ test('an export costs 1 credit per started clip minute, and is blocked past 5 mi
 
 test('plans carry their monthly credits; the free plan gets a one-time grant instead', () => {
   assert.equal(PLANS.free.monthlyCredits, 0)
-  assert.equal(PLANS.starter.monthlyCredits, 120)
-  assert.equal(PLANS.creator.monthlyCredits, 200)
-  assert.equal(PLANS.agency.monthlyCredits, 500)
-  assert.equal(FREE_SIGNUP_CREDITS, 10)
+  assert.equal(PLANS.starter.monthlyCredits, 599)
+  assert.equal(PLANS.creator.monthlyCredits, 999)
+  assert.equal(PLANS.agency.monthlyCredits, 2599)
+  assert.equal(FREE_SIGNUP_CREDITS, 95)
 })
 
 test('a credit is about ₹1: a pack never gives more than 3,000 credits for ₹2,799', () => {
@@ -49,12 +49,12 @@ test('a credit is about ₹1: a pack never gives more than 3,000 credits for ₹
 })
 
 test('reading past the plan: 15 credits per started 10 minutes, nothing when none is over', () => {
-  assert.equal(extraReadingCredits(0), 0)
-  assert.equal(extraReadingCredits(-5), 0)
-  assert.equal(extraReadingCredits(1), 15)
-  assert.equal(extraReadingCredits(10 * MIN), 15)
-  assert.equal(extraReadingCredits(10 * MIN + 1), 30)
-  assert.equal(extraReadingCredits(60 * MIN), 90)
+  assert.equal(readingCredits(0), 0)
+  assert.equal(readingCredits(-5), 0)
+  assert.equal(readingCredits(1), 15)
+  assert.equal(readingCredits(10 * MIN), 15)
+  assert.equal(readingCredits(10 * MIN + 1), 30)
+  assert.equal(readingCredits(60 * MIN), 90)
 })
 
 const said = (start_ms: number, end_ms: number) => ({ start_ms, end_ms })
@@ -131,4 +131,17 @@ test('credit history says in plain words what each row was', () => {
   assert.equal(ledgerLabel('grant:free', null), 'Free credits')
   assert.equal(ledgerLabel('spend', 'something_new'), 'Credits used')
   assert.equal(ledgerLabel('whatever', null), 'Credits changed')
+})
+
+test('a plan gives credits worth what it costs: 1 credit = ₹1', () => {
+  for (const p of Object.values(PLANS)) if (p.price) assert.equal(p.monthlyCredits, p.price, p.key)
+  assert.equal(FREE_SIGNUP_CREDITS, 95)   // what Free's limits use (30 min, 3 clips, 3 Ask AI, 20 rewrites) and 10 to export
+})
+
+test('a video costs 15 credits per started 10 minutes', () => {
+  assert.equal(readingCredits(0), 0)
+  assert.equal(readingCredits(MIN), 15)
+  assert.equal(readingCredits(10 * MIN), 15)
+  assert.equal(readingCredits(11 * MIN), 30)
+  assert.equal(readingCredits(60 * MIN), 90)
 })

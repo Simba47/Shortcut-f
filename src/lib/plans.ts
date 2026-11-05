@@ -3,12 +3,13 @@ export const PLANS = {
     key: 'free' as const,
     name: 'Free',
     price: 0,
-    // Credits given every billing month (the free plan gets a one-time grant instead: FREE_SIGNUP_CREDITS)
+    // Credits given every billing month: the plan's price (the free plan gets a one-time grant instead: FREE_SIGNUP_CREDITS)
     monthlyCredits: 0,
-    // Video read and uploads: a month on paid plans (past the hours, credits: lib/credits.ts
-    // EXTRA_READING_CREDITS); once only on Free (allowancesOnce, as its AI allowances). Deleting a
-    // video gives none of it back. Reading is what costs most, so these keep each plan's profit at
-    // 60%+ even at full use, with the rules in lib/aiLimits.ts and Subjects' credits (Shortcut-Unit-Economics-Simple-Nov-2026.pdf).
+    // A paid plan gives credits worth its price (1 credit = ₹1), and every action uses them. These
+    // numbers are the most of each thing a plan can do, however many credits are left: past them,
+    // upgrade. That is what keeps each plan's profit at 60%+ even at full use (Shortcut-Unit-Economics-Simple-Nov-2026.pdf).
+    // Video read and uploads: a month on paid plans; once only on Free (allowancesOnce, as its AI
+    // limits). Deleting a video gives none of it back.
     readingMinutes: 30,
     uploadsPerMonth: 3,
     allowancesOnce: true,
@@ -22,17 +23,17 @@ export const PLANS = {
     // Exports go to the front of the worker's line (the top plan's "priority rendering")
     priorityExports: false,
     retentionDays: 30,
-    // AI use (lib/aiLimits.ts): clips per Make my clips run; AI clips included a month (then credits)
+    // AI use (lib/aiLimits.ts): clips per Make my clips run; AI clips a month
     // and a daily safety cap; free moment searches per video (1 on every plan: each one reads the whole
-    // transcript, the biggest cost at full use); Ask AI searches and hook/title rewrites per month (then credits)
+    // transcript, the biggest cost at full use); Ask AI searches and hook/title rewrites per month
     ai: { clipsPerRun: 3, clipsPerDay: 3, clipsPerMonth: 3, searchesPerVideo: 1, askAiPerMonth: 3, askAiPerDay: 3, rewritesPerMonth: 20 },
   },
   starter: {
     key: 'starter' as const,
     name: 'Starter',
     price: 599,
-    // Credits given every billing month (the free plan gets a one-time grant instead: FREE_SIGNUP_CREDITS)
-    monthlyCredits: 120,
+    // Credits given every billing month: the plan's price (the free plan gets a one-time grant instead: FREE_SIGNUP_CREDITS)
+    monthlyCredits: 599,
     readingMinutes: 180,
     uploadsPerMonth: 10,
     allowancesOnce: false,
@@ -50,8 +51,8 @@ export const PLANS = {
     key: 'creator' as const,
     name: 'Creator',
     price: 999,
-    // Credits given every billing month (the free plan gets a one-time grant instead: FREE_SIGNUP_CREDITS)
-    monthlyCredits: 200,
+    // Credits given every billing month: the plan's price (the free plan gets a one-time grant instead: FREE_SIGNUP_CREDITS)
+    monthlyCredits: 999,
     readingMinutes: 300,
     uploadsPerMonth: 20,
     allowancesOnce: false,
@@ -69,8 +70,8 @@ export const PLANS = {
     key: 'agency' as const,
     name: 'Agency',
     price: 2599,
-    // Credits given every billing month (the free plan gets a one-time grant instead: FREE_SIGNUP_CREDITS)
-    monthlyCredits: 500,
+    // Credits given every billing month: the plan's price (the free plan gets a one-time grant instead: FREE_SIGNUP_CREDITS)
+    monthlyCredits: 2599,
     readingMinutes: 840,
     uploadsPerMonth: 50,
     allowancesOnce: false,

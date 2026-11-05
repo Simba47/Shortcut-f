@@ -120,14 +120,14 @@ test('a plan payment gives the plan\'s credits once, and each renewal gives them
   const paid = await mock.mockPay({ subscriptionId: sub.subscriptionId, outcome: 'success' }, collect)
   assert.ok(paid.ok)
   await billing.activateAfterCheckout(u, sub.subscriptionId, paid.razorpay_payment_id)
-  assert.equal((await credits.balance(u)).balance, 200)
+  assert.equal((await credits.balance(u)).balance, 999)
   await deliverAll()   // the webhooks for the same payment
-  assert.equal((await credits.balance(u)).balance, 200)
+  assert.equal((await credits.balance(u)).balance, 999)
   const [row] = await sql<{ plan: string }[]>`SELECT plan FROM users WHERE id = ${u}`
   assert.equal(row.plan, 'creator')
   await mock.mockRenew(sub.subscriptionId, collect)
   await deliverAll()
-  assert.equal((await credits.balance(u)).balance, 400)
+  assert.equal((await credits.balance(u)).balance, 1998)
 })
 
 test('credits are never granted for a subscription that is not the user\'s', opts, async () => {

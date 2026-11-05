@@ -16,8 +16,9 @@ export function creditsMode(env: Record<string, string | undefined> = process.en
   return v === 'shadow' || v === 'on' ? v : 'off'
 }
 
+/** (what Free's limits use: 45 for 30 minutes read, 15 for 3 AI clips, 21 for 3 Ask AI, 4 for 20 rewrites; and 10 to export) */
 /** Given once, when an account is first seen with credits switched on (CREDITS_FREE_SIGNUP changes it; 0 gives none) */
-export const FREE_SIGNUP_CREDITS = 10
+export const FREE_SIGNUP_CREDITS = 95
 export function freeSignupCredits(env: Record<string, string | undefined> = process.env): number {
   const n = Number(env.CREDITS_FREE_SIGNUP)
   return env.CREDITS_FREE_SIGNUP !== undefined && env.CREDITS_FREE_SIGNUP.trim() !== '' && Number.isInteger(n) && n >= 0 ? n : FREE_SIGNUP_CREDITS
@@ -31,9 +32,9 @@ export const HOLD_TTL_HOURS = 6
 const MINUTE = 60_000
 const minutesStarted = (ms: number | null | undefined) => Math.max(1, Math.ceil((ms ?? 0) / MINUTE))
 
-/** Reading past the plan's hours (the first search of that part included): per started 10 minutes. Costs us about ₹4.10 */
-export const EXTRA_READING_CREDITS = 15
-export const extraReadingCredits = (overMs: number) => (overMs > 0 ? EXTRA_READING_CREDITS * Math.ceil(overMs / (10 * MINUTE)) : 0)
+/** Reading a video (its first moment search included): per started 10 minutes. Costs us up to about ₹5 */
+export const READING_CREDITS = 15
+export const readingCredits = (ms: number) => (ms > 0 ? READING_CREDITS * Math.ceil(ms / (10 * MINUTE)) : 0)
 
 /** Manual edit: captions for one clip only, per started clip minute. Costs us about ₹0.59 */
 export const CAPTION_CREDITS_PER_MINUTE = 2

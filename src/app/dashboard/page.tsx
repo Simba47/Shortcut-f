@@ -9,6 +9,7 @@ import { usePolling } from '@/lib/usePolling'
 import { useCredits, type CreditsInfo } from '@/lib/useCredits'
 import { CreditsBadge } from '@/components/ui/credits-badge'
 import { CAPTION_CREDITS_PER_MINUTE, EXPORT_CREDITS_PER_MINUTE } from '@/lib/credits'
+import { ASK_AI_CREDITS, CLIP_CREDITS } from '@/lib/aiLimits'
 import type { Video } from '@chai-cut/shared'
 import { ACCEPTED_VIDEO_EXTENSIONS } from '@chai-cut/shared'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -1014,8 +1015,8 @@ function EditModeDialog({ videoId, title, videoUrl, durationMs, credits, onClose
                 {credits && (o.mode === 'ai' ? (
                   <span className="emd-cost">
                     {reading === 'paid'
-                      ? <>This video is <b>already read</b>. Use your plan&apos;s AI clips, searches and Ask AI on it.</>
-                      : <>Reading is included in your plan&apos;s hours.</>}
+                      ? <>This video is <b>already read</b>. AI clips: <b>{CLIP_CREDITS} credits</b> each. Ask AI: <b>{ASK_AI_CREDITS} credits</b> a search.</>
+                      : <>AI clips: <b>{CLIP_CREDITS} credits</b> each. Ask AI: <b>{ASK_AI_CREDITS} credits</b> a search.</>}
                   </span>
                 ) : (
                   <span className="emd-cost">

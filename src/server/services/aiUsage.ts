@@ -2,7 +2,7 @@ import sql from '@/lib/db'
 import { creditsMode } from '@/lib/credits'
 import {
   aiLimitsFor, allowanceSince, videoClipCap, extraSearchCredits, istDayStart, rewriteCredits,
-  askAiCredits, AI_REQUESTS_PER_MINUTE, EXTRA_CLIP_CREDITS,
+  askAiCredits, AI_REQUESTS_PER_MINUTE, CLIP_CREDITS,
 } from '@/lib/aiLimits'
 import { charge, release, settle, type Hold } from './credits'
 import { getUserPlan } from './quota'
@@ -114,8 +114,8 @@ export interface ClipAllowance {
   durationMs: number | null
   perRun: number
   clipsPerDay: number; clipsToday: number; dayLeft: number
-  /** AI clips included a month; past them each clip costs credits (EXTRA_CLIP_CREDITS) */
-  clipsPerMonth: number; clipsThisMonth: number; monthLeft: number; extraClipCredits: number
+  /** AI clips a month (each costs CLIP_CREDITS); past them a run is refused */
+  clipsPerMonth: number; clipsThisMonth: number; monthLeft: number; clipCredits: number
   videoCap: number; videoClips: number; videoLeft: number
   savedLeft: number
   searchesIncluded: number; searchesUsed: number
@@ -153,7 +153,7 @@ export async function clipAllowance(userId: string, videoId: string): Promise<Cl
     perRun: limits.clipsPerRun,
     clipsPerDay: limits.clipsPerDay, clipsToday, dayLeft: Math.max(0, limits.clipsPerDay - clipsToday),
     clipsPerMonth: limits.clipsPerMonth, clipsThisMonth, monthLeft: Math.max(0, limits.clipsPerMonth - clipsThisMonth),
-    extraClipCredits: EXTRA_CLIP_CREDITS,
+    clipCredits: CLIP_CREDITS,
     videoCap, videoClips, videoLeft: Math.max(0, videoCap - videoClips), durationMs: video.duration_ms,
     savedLeft: (await unusedMoments(videoId)).length,
     searchesIncluded: limits.searchesPerVideo, searchesUsed: searches.n,
@@ -178,14 +178,19 @@ export async function aiActionCounts(userId: string): Promise<{ askAiThisMonth: 
   return { askAiThisMonth: r.am, askAiToday: r.ad, rewritesThisMonth: r.rm, lastMinute: r.lm }
 }
 
-/** The credits one Ask AI search takes now (0 within the month's, and unless credits are on) */
+/** Past the month's limit a search is refused, whatever credits are left. `units`: what it counts as (aiLimits askAiUnits) */
+function refuseAskAi(limits: { askAiPerMonth: number; askAiPerDay: number }, counts: { askAiThisMonth: number; askAiToday: number }, units: number) {
+  if (counts.askAiToday >= limits.askAiPerDay) throw fail(`You've used today's ${limits.askAiPerDay} Ask AI searches. More tomorrow.`, 429)
+  const left = limits.askAiPerMonth - counts.askAiThisMonth
+  if (left <= 0) throw fail(`You've used your ${limits.askAiPerMonth} Ask AI searches. More next month, or upgrade.`, 403)
+  if (units > left) throw fail(`A search on this video counts as ${units}, and you have ${left} left. More next month, or upgrade.`, 403)
+}
+
+/** The credits one Ask AI search takes (0 unless credits are on); refused first if it can't be done at all */
 export async function askAiPrice(userId: string, units: number): Promise<number> {
   if (creditsMode() !== 'on') return 0
-  const limits = aiLimitsFor(await getUserPlan(userId))
-  const counts = await aiActionCounts(userId)
-  // (past today's cap it is refused either way: said before any price is asked about)
-  if (counts.askAiToday >= limits.askAiPerDay) throw fail(`You've used today's ${limits.askAiPerDay} Ask AI searches. More tomorrow.`, 429)
-  return askAiCredits(counts.askAiThisMonth, limits.askAiPerMonth, units)
+  refuseAskAi(aiLimitsFor(await getUserPlan(userId)), await aiActionCounts(userId), units)
+  return askAiCredits(units)
 }
 
 export interface AiActionHandle {
@@ -198,8 +203,8 @@ export interface AiActionHandle {
 }
 
 /**
- * Starts one Ask AI search or rewrite (`units`: what it counts as, aiLimits askAiUnits): checks the speed limit and daily cap, counts it against
- * the month's allowance, and past the allowance takes its credits (402 if there are not enough).
+ * Starts one Ask AI search or rewrite (`units`: what it counts as, aiLimits askAiUnits): checks the speed limit and the
+ * month's and day's limits, counts it, and takes its credits (402 if there are not enough).
  * Call done() when the AI answered, fail() when it did not.
  */
 export async function beginAiAction(userId: string, kind: AiActionKind, videoId: string | null = null, units = 1): Promise<AiActionHandle> {
@@ -211,12 +216,11 @@ export async function beginAiAction(userId: string, kind: AiActionKind, videoId:
   const counts = await aiActionCounts(userId)
   const enforce = mode === 'on'
   if (enforce && counts.lastMinute >= AI_REQUESTS_PER_MINUTE) throw fail('Too many AI requests in a minute. Wait a moment and try again.', 429)
-  if (enforce && kind === 'ask_ai' && counts.askAiToday >= limits.askAiPerDay) {
-    throw fail(`You've used today's ${limits.askAiPerDay} Ask AI searches. More tomorrow.`, 429)
+  if (enforce && kind === 'ask_ai') refuseAskAi(limits, counts, units)
+  if (enforce && kind === 'rewrite' && counts.rewritesThisMonth >= limits.rewritesPerMonth) {
+    throw fail(`You've used your ${limits.rewritesPerMonth} rewrites. More next month, or upgrade.`, 403)
   }
-  let price = 0
-  if (kind === 'ask_ai') price = askAiCredits(counts.askAiThisMonth, limits.askAiPerMonth, units)
-  if (kind === 'rewrite' && counts.rewritesThisMonth >= limits.rewritesPerMonth) price = rewriteCredits(counts.rewritesThisMonth - limits.rewritesPerMonth)
+  const price = kind === 'ask_ai' ? askAiCredits(units) : rewriteCredits(counts.rewritesThisMonth)
 
   let hold: Hold | null = null
   if (enforce && price > 0) hold = await charge(userId, { amount: price, refType: kind, refId: videoId ?? undefined })

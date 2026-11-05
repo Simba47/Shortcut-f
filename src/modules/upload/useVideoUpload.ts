@@ -142,7 +142,7 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
   /** The file's length, read once: sent when the upload starts, so the plan's hours are checked before it runs */
   const durationRef = useRef<number | undefined>(undefined)
   /**
-   * The part of this video past the plan's hours costs credits: asked before anything is uploaded.
+   * Reading a video costs credits: asked before anything is uploaded.
    * (Nothing asked when credits are off, or if the price can't be fetched: the server still checks.)
    */
   async function askReadingPrice(file: File) {
@@ -152,10 +152,10 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ duration_ms: durationRef.current }),
     }).catch(() => null)
     const p = await res?.json().catch(() => null) as { on?: boolean; credits?: number; overMs?: number; balance?: number } | null
-    if (!p?.on || !p.credits || !p.overMs) return
-    // (without enough credits the server refuses the upload and says so)
-    if (p.credits > (p.balance ?? 0)) return
-    const yes = window.confirm(`${Math.ceil(p.overMs / 60_000)} min of this video is past your plan's hours. Reading it costs ${p.credits} credits (₹${p.credits}). You have ${p.balance}. Upload it?`)
+    if (!p?.on || !p.credits) return
+    // (past the hours, or without enough credits, the server refuses the upload and says so)
+    if (p.overMs || p.credits > (p.balance ?? 0)) return
+    const yes = window.confirm(`Reading this ${Math.ceil(durationRef.current / 60_000)} min video costs ${p.credits} credits (₹${p.credits}). You have ${p.balance}. Upload it?`)
     if (!yes) throw userError('Upload stopped. No credits were used.', true)
   }
 

@@ -2,7 +2,8 @@ import type postgres from 'postgres'
 import sql from '@/lib/db'
 import { ensureCreditsSchema } from './creditsSchema'
 import { PLANS, type PlanKey } from '@/lib/plans'
-import { allocate, creditsMode, freeSignupCredits, HOLD_TTL_HOURS, type GrantKind, type SpendableGrant } from '@/lib/credits'
+import { allocate, creditsMode, freeSignupCredits, HOLD_TTL_HOURS, PLAN_CREDIT_DAYS, type GrantKind, type SpendableGrant } from '@/lib/credits'
+import { CLIP_CREDITS } from '@/lib/aiLimits'
 
 export { ensureCreditsSchema }
 
@@ -146,13 +147,31 @@ export async function release(holdId: string, db: Db = sql): Promise<void> {
 export async function sweep(userId?: string): Promise<void> {
   if (creditsMode() === 'off') return
   await ensureCreditsSchema()
-  const open = await sql<{ id: string; status: string | null; stale: boolean }[]>`
-    SELECT h.id, j.status, (h.created_at < now() - make_interval(hours => ${HOLD_TTL_HOURS})) AS stale
+  const open = await sql<{ id: string; user_id: string; amount: number; ref_type: string; status: string | null; stale: boolean; run: string | null; run_status: string | null; made: number; very_stale: boolean }[]>`
+    SELECT h.id, h.user_id, h.amount, h.ref_type, j.status, (h.created_at < now() - make_interval(hours => ${HOLD_TTL_HOURS})) AS stale,
+      (h.created_at < now() - interval '7 days') AS very_stale, a.id AS run, a.status AS run_status,
+      (SELECT count(*)::int FROM clips c WHERE c.ai_edit_job_id = a.id) AS made
     FROM credit_holds h LEFT JOIN jobs j ON j.id = h.job_id
+      LEFT JOIN ai_edit_jobs a ON h.ref_type = 'ai_clips' AND a.id::text = j.payload->>'ai_edit_job_id'
     WHERE h.status = 'held' ${userId ? sql`AND h.user_id = ${userId}` : sql``}`
   for (const h of open) {
+    if (h.run) {
+      // A Make my clips run's clips: paid for what it made. It may wait a long time on "found fewer: make these?", with its first job done
+      if (h.run_status === 'done' || h.run_status === 'failed') {
+        await settle(h.id)
+        const back = h.amount - h.made * CLIP_CREDITS
+        if (back > 0) await grant(h.user_id, { kind: 'refund', amount: back, expiresAt: new Date(Date.now() + PLAN_CREDIT_DAYS * 86_400_000), sourceRef: `clips:${h.id}` })
+      } else if (h.very_stale) await release(h.id)
+      continue
+    }
     if (h.status === 'done') await settle(h.id)
     else if (h.status === 'failed' || h.stale) await release(h.id)
+  }
+  // The reading of videos: lengths the worker has found since are paid for, and a video that failed gives its credits back
+  if (userId) {
+    const { readingUse, refundFailedReadings } = await import('./readingUsage')
+    await refundFailedReadings(userId)
+    await readingUse(userId)
   }
 }
 

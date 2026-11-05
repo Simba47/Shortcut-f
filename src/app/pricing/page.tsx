@@ -156,7 +156,7 @@ export default function PricingPage() {
       <main className="max-w-5xl mx-auto px-6 pt-14 pb-20">
         <h1 className="text-3xl font-bold text-white text-center mb-2">Simple, transparent pricing</h1>
         <p className="text-center mb-3" style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.9rem' }}>
-          Your plan includes hours of video and AI tools. Credits pay for captions, exports and anything past your plan. The editor is always free · Paid plans renew monthly · Cancel anytime
+          Your plan gives you credits worth its price, and every action uses them, up to your plan&apos;s monthly limits. The editor is always free · Paid plans renew monthly · Cancel anytime
         </p>
 
         {mine?.testMode && (
@@ -301,7 +301,7 @@ export default function PricingPage() {
 
         <section className="mt-14">
           <h2 id="topups" className="text-xl font-bold text-white text-center mb-1">Need more credits?</h2>
-          <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>Top-up packs for paid plans, paid once. Top-up credits last 12 months.</p>
+          <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>Top-up packs for paid plans, paid once. Top-up credits last 12 months. Your plan&apos;s monthly limits stay the same: for more of those, upgrade.</p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {TOPUP_PACKS.map(pack => (
               <div key={pack.key} className="rounded-2xl p-4 text-center" style={{ background: '#161616', border: '1px solid rgba(255,255,255,0.08)' }}>

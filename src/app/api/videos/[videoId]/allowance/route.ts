@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 
 /**
  * What the clip board shows next to its AI buttons: clips left today and for this video, saved
- * moments left ("Make more clips · free"), fresh searches left or their price, and the month's Ask AI
+ * moments left, fresh searches left or their price, and the month's Ask AI
  * and rewrites. With credits off it says so and the page shows no counts.
  */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ videoId: string }> }) {
@@ -28,8 +28,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ vid
       mode, clips,
       askAi: {
         usedThisMonth: actions.askAiThisMonth, perMonth: limits.askAiPerMonth, usedToday: actions.askAiToday, perDay: limits.askAiPerDay,
-        // A search on this video: what it counts as, and its credits now
-        countsAs: units, nextCredits: askAiCredits(actions.askAiThisMonth, limits.askAiPerMonth, units),
+        // A search on this video: what it counts as, and its credits
+        countsAs: units, nextCredits: askAiCredits(units),
       },
       rewrites: { usedThisMonth: actions.rewritesThisMonth, perMonth: limits.rewritesPerMonth },
     })

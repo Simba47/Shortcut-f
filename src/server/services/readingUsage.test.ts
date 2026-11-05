@@ -39,92 +39,112 @@ after(async () => {
   await sql.end({ timeout: 2 })
 })
 
-test('Free: 30 minutes in total; a video inside them costs nothing and is counted', opts, async () => {
-  const u = await user('free')
+test('every video costs credits when it is uploaded, and is counted', opts, async () => {
+  const u = await user('free', 95)
   const v = await video(u, 20 * MIN)
   await reading.checkBeforeUpload(u, 20 * MIN)
   await reading.recordReading(u, v, 20 * MIN)
   const a = await reading.readingUse(u)
   assert.equal(a.usedMs, 20 * MIN)
   assert.equal(a.uploads, 1)
+  assert.equal(await left(u), 65, '30 credits for 20 minutes')
 })
 
 test('the same video recorded twice (a repeated request) counts once', opts, async () => {
-  const u = await user('free')
+  const u = await user('free', 95)
   const v = await video(u, 5 * MIN)
   await reading.recordReading(u, v, 5 * MIN)
   await reading.recordReading(u, v, 5 * MIN)
   assert.equal((await reading.readingUse(u)).uploads, 1)
+  assert.equal(await left(u), 80, 'charged once')
 })
 
-test('deleting a video gives no reading back', opts, async () => {
-  const u = await user('free')
+test('deleting a video gives no reading or credits back', opts, async () => {
+  const u = await user('free', 95)
   const v = await video(u, 10 * MIN)
   await reading.recordReading(u, v, 10 * MIN)
   await sql`DELETE FROM videos WHERE id = ${v}`
   const a = await reading.readingUse(u)
   assert.equal(a.usedMs, 10 * MIN)
   assert.equal(a.uploads, 1)
+  assert.equal(await left(u), 80)
 })
 
-test('past the hours: refused without the credits, saying what it needs and what there is', opts, async () => {
-  const u = await user('free')
-  await reading.recordReading(u, await video(u, 30 * MIN), 30 * MIN)
+test('past the hours: refused, even with credits, and told to upgrade', opts, async () => {
+  const u = await user('free', 500)
+  await reading.recordReading(u, await video(u, 25 * MIN), 25 * MIN)
   await assert.rejects(reading.checkBeforeUpload(u, 20 * MIN), (e: { status?: number; message?: string }) =>
-    e.status === 402 && /30 credits/.test(e.message ?? '') && /you have 0/.test(e.message ?? ''))
+    e.status === 403 && /20 min/.test(e.message ?? '') && /only 5 min/.test(e.message ?? '') && /upgrade/i.test(e.message ?? ''))
+  await reading.recordReading(u, await video(u, 5 * MIN), 5 * MIN)
+  await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number }) => e.status === 403)
+  await assert.rejects(reading.checkBeforeUpload(u, null), (e: { status?: number }) => e.status === 403)
 })
 
-test('past the hours with the credits: the part past them is charged, once', opts, async () => {
-  const u = await user('free', 100)
-  await reading.recordReading(u, await video(u, 25 * MIN), 25 * MIN)      // 5 minutes left
-  const v = await video(u, 15 * MIN)                                       // 10 minutes over: 15 credits
-  await reading.checkBeforeUpload(u, 15 * MIN)
-  await reading.recordReading(u, v, 15 * MIN)
-  await reading.recordReading(u, v, 15 * MIN)
-  assert.equal(await left(u), 85)
+test('not enough credits for a video inside the hours: refused, saying what it needs and what there is', opts, async () => {
+  const u = await user('starter', 80)
+  await assert.rejects(reading.checkBeforeUpload(u, 60 * MIN), (e: { status?: number; message?: string }) =>
+    e.status === 402 && /90 credits/.test(e.message ?? '') && /you have 80/.test(e.message ?? '') && /Top up or upgrade/.test(e.message ?? ''))
+  await reading.checkBeforeUpload(u, 50 * MIN)
+})
+
+test('a video that fails gives its credits, hours and upload back, once', opts, async () => {
+  const u = await user('starter', 100)
+  const v = await video(u, 20 * MIN)
+  await reading.recordReading(u, v, 20 * MIN)
+  assert.equal(await left(u), 70)
+  await sql`UPDATE videos SET status = 'failed' WHERE id = ${v}`
+  await credits.sweep(u)
+  await credits.sweep(u)
+  assert.equal(await left(u), 100)
+  const a = await reading.readingUse(u)
+  assert.equal(a.usedMs, 0); assert.equal(a.uploads, 0)
 })
 
 test('the uploads run out, even with short videos', opts, async () => {
-  const u = await user('free', 100)
+  const u = await user('free', 500)
   for (let i = 0; i < 3; i++) await reading.recordReading(u, await video(u, MIN), MIN)
   await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number; message?: string }) => e.status === 403 && /3 uploads/.test(e.message ?? ''))
 })
 
-test('a length found later (a link, an MKV) is counted and charged then; short of credits, the video stays', opts, async () => {
-  const u = await user('free', 20)
-  await reading.recordReading(u, await video(u, 30 * MIN), 30 * MIN)
+test('a length found later (a link, an MKV) is counted and charged then, by the balance check too; short of credits, the video stays', opts, async () => {
+  const u = await user('starter', 20)
   const v = await video(u, null)
   await reading.recordReading(u, v, null)
-  assert.equal((await reading.readingUse(u)).usedMs, 30 * MIN, 'nothing to count until the worker finds the length')
+  assert.equal((await reading.readingUse(u)).usedMs, 0, 'nothing to count until the worker finds the length')
+  assert.equal(await left(u), 20)
   await sql`UPDATE videos SET duration_ms = ${10 * MIN} WHERE id = ${v}`
-  assert.equal((await reading.readingUse(u)).usedMs, 40 * MIN)
-  assert.equal(await left(u), 5, '15 credits for 10 minutes over')
-  await reading.readingUse(u)
+  await credits.sweep(u)
+  assert.equal(await left(u), 5, '15 credits for 10 minutes')
+  assert.equal((await reading.readingUse(u)).usedMs, 10 * MIN)
   assert.equal(await left(u), 5, 'charged once')
   const w = await video(u, null)
   await reading.recordReading(u, w, null)
   await sql`UPDATE videos SET duration_ms = ${60 * MIN} WHERE id = ${w}`
-  assert.equal((await reading.readingUse(u)).usedMs, 100 * MIN)
+  assert.equal((await reading.readingUse(u)).usedMs, 70 * MIN)
   assert.equal(await left(u), 5, 'cannot pay: nothing taken, and it counts against what comes next')
 })
 
-test('a link or unreadable file with no hours left needs at least one 10-minute price in credits', opts, async () => {
-  const u = await user('free', 5)
-  await reading.recordReading(u, await video(u, 30 * MIN), 30 * MIN)
-  await assert.rejects(reading.checkBeforeUpload(u, null), (e: { status?: number; message?: string }) => e.status === 402 && /15 per 10 minutes/.test(e.message ?? ''))
+test('a link or unreadable file needs at least one 10-minute price in credits', opts, async () => {
+  const u = await user('starter', 5)
+  await assert.rejects(reading.checkBeforeUpload(u, null), (e: { status?: number; message?: string }) => e.status === 402 && /15 credits/.test(e.message ?? ''))
 })
 
-test('a length not known yet: what is left is written on the video, for the worker to check', opts, async () => {
-  const u = await user('free', 40)                                         // 40 credits buy 2 × 10 minutes
-  await reading.recordReading(u, await video(u, 25 * MIN), 25 * MIN)       // 5 minutes left
-  const v = await video(u, null)
-  await reading.recordReading(u, v, null)
+test('a length not known yet: the lower of the hours and what the credits buy is written on the video, for the worker to check', opts, async () => {
+  const a = await user('starter', 40)                                      // 40 credits buy 2 × 10 minutes; 3 hours left
+  const v = await video(a, null)
+  await reading.recordReading(a, v, null)
   const [row] = await sql<{ reading_limit_ms: string }[]>`SELECT reading_limit_ms FROM videos WHERE id = ${v}`
-  assert.equal(Number(row.reading_limit_ms), 25 * MIN)
+  assert.equal(Number(row.reading_limit_ms), 20 * MIN)
+  const b = await user('free', 500)                                        // plenty of credits, 5 minutes left
+  await reading.recordReading(b, await video(b, 25 * MIN), 25 * MIN)
+  const w = await video(b, null)
+  await reading.recordReading(b, w, null)
+  const [row2] = await sql<{ reading_limit_ms: string }[]>`SELECT reading_limit_ms FROM videos WHERE id = ${w}`
+  assert.equal(Number(row2.reading_limit_ms), 5 * MIN)
 })
 
 test('a length known at upload needs no limit on the video', opts, async () => {
-  const u = await user('free')
+  const u = await user('free', 95)
   const v = await video(u, 5 * MIN)
   await reading.recordReading(u, v, 5 * MIN)
   const [row] = await sql<{ reading_limit_ms: string | null }[]>`SELECT reading_limit_ms FROM videos WHERE id = ${v}`
