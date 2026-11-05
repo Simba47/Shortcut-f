@@ -79,11 +79,14 @@ import { viewChanges } from '@/modules/editor/views'
 import { subjectBoxAt, seenShare, followChanges, autoDirectChanges, type SubjectPoint } from '@/modules/editor/subjects'
 import { buildKeyframes } from '@/modules/editor/views'
 import { frameSlotSize } from '@/modules/editor/frames'
+import { edgeDragPath } from '@/modules/editor/edgeDrag'
 import { getBoxPositionAtLerp, type BoxPosition } from '@/lib/interpolation'
 import { SubjectsPanel, type SubjectItem, type AnglesView } from '@/components/editor/SubjectsPanel'
 import { angleRows, angleAt, placePeople, type Angle, type AngleRow } from '@/modules/editor/angles'
 import { briefView, withWide, WIDEN_MIN_MS } from '@/modules/editor/briefWiden'
-import { decideFormat, decideVertical, AUTO_FORMAT, keepsAll, viewsOverlap } from '@/modules/editor/autoFormat'
+import { decideFormat, decideVertical, AUTO_FORMAT, SOURCE_PX_H, WHOLE_PICTURE, keepsAll, viewsOverlap } from '@/modules/editor/autoFormat'
+import { pictureOrWhole, toPicture, fromPicture, pictureAR } from '@/modules/editor/pictureBox'
+import { setFramePicture, framePicture, inFramePicture } from '@/modules/editor/framePicture'
 import type { SegmentLocal, CropBoxLocal, FrameLayout, FrameLane, FrameItem, TransitionType } from '@chai-cut/shared'
 import { SPEED_MIN, SPEED_MAX } from '@chai-cut/shared'
 import { TransitionsPanel, TRANSITION_DEFAULT_MS, TRANSITION_KINDS, playedTransitionMs, type TransitionJoin } from '@/components/editor/TransitionsPanel'
@@ -233,6 +236,8 @@ export function EditorShell({
   initialCaptionStyles, initialTextOverlays, initialAudioTracks, initialTransitions, initialOverlays,
   initialMusicUrls, initialOriginalSound, initialProgressBar, initialBrand, backStart,
 }: Props) {
+  // The picture inside the video's black bars (none: the whole frame): the views the editor makes keep inside it
+  setFramePicture(pictureOrWhole((savedClip as { picture_box?: Parameters<typeof pictureOrWhole>[0] }).picture_box))
   // (compiled by React's compiler: next.config.ts reactCompiler, annotation mode)
   'use memo'
   // ── Removed parts of the video (lib/trims.ts, modules/editor/trimState.ts) ───
@@ -312,6 +317,13 @@ export function EditorShell({
   const { videoRef, seekToMs, togglePlay, pause } = useVideoSync(rawClip.start_ms, rawClip.end_ms, pieces, trimmed ? trim.kept : undefined,
     piecesOn ? p => (p.id ? heldPlayedRef.current(p.id) : null) : undefined)
   const { currentTimeMs, durationMs, playing } = usePlayerStore()
+  // The preview-vs-export check (scripts/export-parity) moves the preview to exact moments; in
+  // development only, never in a built site
+  if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
+    (window as unknown as { __exportParity: unknown }).__exportParity = {
+      seek: seekToMs, pause, now: () => usePlayerStore.getState().currentTimeMs, len: () => usePlayerStore.getState().durationMs,
+    }
+  }
   // Append media fragment so browser seeks to clip start at network level,
   // preventing a flash of the video's frame 0 on page load / cache hit.
   const clipVideoUrl = videoUrl && savedClip.start_ms > 0
@@ -389,7 +401,7 @@ export function EditorShell({
     const initialKeyframeMap: KeyframeMap = {}
     for (const seg of localSegments) {
       for (const box of seg.crop_boxes) {
-        const kfs = box.keyframes?.length ? box.keyframes : [{ t_ms: seg.start_ms, ...defaultCropForSlot(seg.layout as LayoutType, box.slot_index) }]
+        const kfs = box.keyframes?.length ? box.keyframes : [{ t_ms: seg.start_ms, ...inFramePicture(defaultCropForSlot(seg.layout as LayoutType, box.slot_index)) }]
         initialKeyframeMap[box.id] = kfs.map(k => ({ id: (k as { id?: string }).id ?? crypto.randomUUID(), box_id: box.id, t_ms: k.t_ms, x: k.x, y: k.y, w: k.w, h: k.h })) as typeof initialKeyframeMap[string]
       }
     }
@@ -1325,7 +1337,7 @@ export function EditorShell({
     }
   }, [playParts, uncovered, mainVideoId, clipLengthMs]) // eslint-disable-line react-hooks/exhaustive-deps
   const viewGetPositionAt = useMemo(
-    () => (boxId: string, t: number) => boxId === DEFAULT_BOX_ID || boxId.endsWith(STAND_IN_SUFFIX) ? defaultCropForSlot('vertical', 0, getVideoAR()) : getPositionAt(boxId, t),
+    () => (boxId: string, t: number) => boxId === DEFAULT_BOX_ID || boxId.endsWith(STAND_IN_SUFFIX) ? inFramePicture(defaultCropForSlot('vertical', 0, getVideoAR())) : getPositionAt(boxId, t),
     [getPositionAt], // eslint-disable-line react-hooks/exhaustive-deps
   )
 
@@ -1621,9 +1633,27 @@ export function EditorShell({
     }
   }
 
-  async function handleResetStuckRender() {
-    await fetch(`/api/clips/${clip.id}/reedit`, { method: 'POST' })
-    setClipStatus('draft'); setOutputUrl(null); setRenderStuckSince(null); setRenderElapsed(0)
+  /**
+   * Cancel while exporting: the export stops (the worker stops it within a couple of seconds) and the
+   * clip is as it was before — its last export, if it had one. (It used to be only "Taking too long?
+   * Cancel render" after 3 minutes, which set the clip back but left the render running: its video
+   * came back anyway when it finished.)
+   */
+  const [cancelling, setCancelling] = useState(false)
+  async function cancelExport() {
+    if (cancelling) return
+    setCancelling(true); setExportError(null)
+    try {
+      const res = await fetch(`/api/clips/${clip.id}/cancel-export`, { method: 'POST' })
+      const d = await res.json().catch(() => null) as { status?: string; output_url?: string | null; error?: string } | null
+      if (!res.ok || !d?.status) throw new Error(d?.error ?? 'Couldn’t cancel the export. Try again.')
+      refreshWordsOnDoneRef.current = false
+      setClipStatus(d.status); setOutputUrl(d.output_url ?? null); setRenderStuckSince(null); setRenderElapsed(0)
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Couldn’t cancel the export. Try again.')
+    } finally {
+      setCancelling(false)
+    }
   }
 
   /**
@@ -1638,6 +1668,18 @@ export function EditorShell({
     const inside = sourceWords.filter(w => kept.some(([a, b]) => w.start_ms >= a && w.start_ms < b)).sort((a, b) => a.start_ms - b.start_ms)
     if (!inside.length) return true
     return inside[0].start_ms - kept[0][0] > CAPTION_GAP_MS || kept[kept.length - 1][1] - inside[inside.length - 1].end_ms > CAPTION_GAP_MS
+  }
+  /**
+   * A caption word corrected in the Captions panel: shown at once and saved on the transcript, so it
+   * is there when the clip opens again and the export writes it (before 2026-11-04 it stayed in this
+   * editor only: gone on reload, never exported)
+   */
+  function changeWord(id: string, text: string) {
+    const field = romanize ? 'word_roman' : 'word'
+    updateWord(id, text, field)
+    fetch('/api/transcribe/words', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, field, text }) })
+      .then(r => { if (!r.ok) throw new Error(String(r.status)) })
+      .catch(() => notifyLocked('That caption correction wasn’t saved. Check your connection and type it again.'))
   }
   /** Make captions for the clip as it is now: save first, so the job reads its current start and end */
   async function makeCaptions() {
@@ -1755,12 +1797,18 @@ export function EditorShell({
     // (user, 2026-11-01: a short part picked, the playhead resting on its last moment — the line into the
     // next part — and Vertical went to the next part, or seemed to do nothing)
     const t = liveTime.get()
-    const picked = pickedSegId ? sections.find(x => x.id === pickedSegId) : undefined
-    if (picked && !isGapPart(picked, mainVideoId) && t >= picked.start_ms - LAYOUT_SNAP_MS && t <= picked.end_ms + LAYOUT_SNAP_MS) {
+    const picked = pickedPartAt(t)
+    if (picked) {
       formatWholePart(picked, id, t)
       return
     }
     handleLayoutChange(id, 'fromPlayhead')
+  }
+  /** The part picked on the timeline, when the playhead is in it or on its edge: a format or frame picked
+   *  now goes on all of it */
+  function pickedPartAt(t: number): SegmentLocal | undefined {
+    const picked = pickedSegId ? sections.find(x => x.id === pickedSegId) : undefined
+    return picked && !isGapPart(picked, mainVideoId) && t >= picked.start_ms - LAYOUT_SNAP_MS && t <= picked.end_ms + LAYOUT_SNAP_MS ? picked : undefined
   }
   /** `seg` all of it in `layout` (joined to a neighbour in the same one); the playhead is put inside it, so
    *  the switch, the preview and the outline all show it (on its edge they read the part beside it) */
@@ -2465,7 +2513,8 @@ export function EditorShell({
           const wide = h * (c.w / c.h)
           return { ...c, x: Math.max(sl, Math.min(l, sr - wide)), w: wide, h, y: Math.max(0, Math.min(c.y - (h - c.h) * 0.4, 1 - h)) }
         })
-        next[box.id] = buildKeyframes(changes.map((c, k) => (k === 0 ? { ...c, t_ms: seg.start_ms } : c)))
+        // (inside the video's picture: never into its black bars)
+        next[box.id] = buildKeyframes(changes.map((c, k) => (k === 0 ? { ...c, t_ms: seg.start_ms } : c))).map(inFramePicture)
           .map(k => ({ id: crypto.randomUUID(), box_id: box.id, t_ms: k.t_ms, x: k.x, y: k.y, w: k.w, h: k.h }))
         framed++
       })
@@ -2626,7 +2675,7 @@ export function EditorShell({
     const found = row.faces.filter(f => !f.pending)
     if (layout !== 'vertical' || found.length !== 1) return undefined
     const f = found[0].box
-    return [defaultCropForSlot('vertical', 0, getVideoAR(), f.x + f.w / 2)]
+    return [inFramePicture(defaultCropForSlot('vertical', 0, getVideoAR(), f.x + f.w / 2))]
   }
   /**
    * In the Subjects tool a format picked is the scene's (user, 2026-10-20): the whole camera shot, cut
@@ -2804,7 +2853,13 @@ export function EditorShell({
         // (the people seen in this place — a scene's places can show fewer of them; people marked by hand and
         // found count too; marks not found yet don't: angles.ts placePeople)
         const { boxes: faces, talk } = placePeople(row, pl)
-        const plan = mode === 'vertical' ? decideVertical(faces, talk, ar) : decideFormat(faces, talk, ar)
+        // Decided in the picture inside the video's black bars (its own shape and height, the faces moved
+        // into it), the views moved back — as Make my clips does (worker clip_formats.ts)
+        const pic = framePicture()
+        const inPic = faces.map(f => toPicture(f, pic))
+        const picAR = pictureAR(ar ?? 16 / 9, pic)
+        const decided = mode === 'vertical' ? decideVertical(inPic, talk, picAR) : decideFormat(inPic, talk, picAR, SOURCE_PX_H * pic.h)
+        const plan = decided && { ...decided, framing: decided.layout === WHOLE_PICTURE ? [] : decided.framing.map(v => fromPicture(v, pic)) }
         return plan ? [{ row, shown: pl.shown, plan, faces }] : []
       })).sort((p, q) => p.shown[0] - q.shown[0])
       // A very short place (under SHORT_PLACE) takes the format of the place right before it, so fast
@@ -2965,13 +3020,20 @@ export function EditorShell({
   // A Branded card picked: it's filled from the brand kit once it's there (see below)
   const brandFillRef = useRef<{ t: number; until: number } | null>(null)
   function handleApplyFrame(layout: FrameLayout) {
+    // A part picked on the timeline (the playhead in it or on its edge): the frame goes on all of it, no
+    // cut at the playhead — as a format does (user, 2026-11-04: a part picked, Single cut it in two, or
+    // went on the next part when the playhead was on its end)
+    const picked = pickedPartAt(liveTime.get())
     // (with the brand kit on, the brand-on watcher below dresses it, from the kit that's on)
-    brandFillRef.current = layout === 'frame_brand_card' && !useBrandStore.getState().on ? { t: currentTimeMs, until: Date.now() + 4000 } : null
+    brandFillRef.current = layout === 'frame_brand_card' && !useBrandStore.getState().on ? { t: picked ? picked.start_ms : currentTimeMs, until: Date.now() + 4000 } : null
+    if (picked) { formatWholePart(picked, layout, liveTime.get()); return }
     handleLayoutChange(layout, 'fromPlayhead')
   }
   // What a layout or frame picked now will cover (see handleLayoutChange)
   const frameTarget = (() => {
     const t = currentTimeMs
+    const picked = pickedPartAt(t)
+    if (picked) return `${msToLabel(picked.start_ms)}–${msToLabel(picked.end_ms)}`
     if (activeSegment) {
       const whole = t - activeSegment.start_ms <= LAYOUT_SNAP_MS || activeSegment.end_ms - t <= LAYOUT_SNAP_MS
       return `${msToLabel(whole ? activeSegment.start_ms : t)}–${msToLabel(activeSegment.end_ms)}`
@@ -3513,7 +3575,7 @@ export function EditorShell({
    * of the video is removed, what was only in it goes with it, what comes after moves up. One
    * undo step. Saved as a removed part of the source video; the export cuts it out.
    */
-  function removePart(a: number, b: number) {
+  function removePart(a: number, b: number, pieces = piecesOn) {
     pause()
     const editor = useEditorStore.getState(), media = useMediaStore.getState()
     const state: TimedState = {
@@ -3522,9 +3584,9 @@ export function EditorShell({
     }
     const locked = lockedInRange(state, a, b)
     if (locked.length) { notifyLocked(`${locked[0][0].toUpperCase()}${locked[0].slice(1)} in this part is locked — unlock it first`); return }
-    if (piecesOn) {
+    if (pieces) {
       // A clip of pieces: the parts keep their moments of the video, what follows moves up
-      if (segments.some(s => isInsert(s, mainVideoId) && s.start_ms < b && s.end_ms > a && !(s.start_ms >= a && s.end_ms <= b))) {
+      if (editor.segments.some(s => isInsert(s, mainVideoId) && s.start_ms < b && s.end_ms > a && !(s.start_ms >= a && s.end_ms <= b))) {
         notifyLocked('Part of an inserted video is in the way: delete the inserted video itself instead'); return
       }
       const next = rippleCut(state, Math.round(a), Math.round(b), rippleDelete)
@@ -4182,7 +4244,9 @@ export function EditorShell({
    * as it was when the drag began, so the cut (or what comes back) follows the pointer both ways;
    * the whole drag is one undo step (history.ts counts a drag once). Problems are only told on release.
    */
-  const liveEdgeRef = useRef<{ editor: Pick<ReturnType<typeof useEditorStore.getState>, 'segments' | 'keyframes' | 'trims' | 'clipRange'>; media: Pick<ReturnType<typeof useMediaStore.getState>, 'overlays' | 'textOverlays' | 'audioTracks' | 'transitions'> } | null>(null)
+  /** The clip as an edge drag found it: its length and whether it is a clip of pieces */
+  type EdgeAt = { len: number; pieces: boolean; clip?: { start: number; end: number; map: typeof trim; limits: typeof clipEdgeLimits } }
+  const liveEdgeRef = useRef<{ editor: Pick<ReturnType<typeof useEditorStore.getState>, 'segments' | 'keyframes' | 'trims' | 'clipRange'>; media: Pick<ReturnType<typeof useMediaStore.getState>, 'overlays' | 'textOverlays' | 'audioTracks' | 'transitions'>; at: EdgeAt } | null>(null)
   const quietRef = useRef(false)
   function trimByEdgeLive(segId: string, edge: 'start' | 'end', from: number, to: number, done: boolean) {
     const e = useEditorStore.getState(), m = useMediaStore.getState()
@@ -4190,14 +4254,19 @@ export function EditorShell({
       liveEdgeRef.current = {
         editor: { segments: e.segments, keyframes: e.keyframes, trims: e.trims, clipRange: e.clipRange },
         media: { overlays: m.overlays, textOverlays: m.textOverlays, audioTracks: m.audioTracks, transitions: m.transitions },
+        at: { len: clipLengthMs, pieces: piecesOn, clip: { start: rawClip.start_ms, end: rawClip.end_ms, map: trim, limits: clipEdgeLimits } },
       }
     } else {
       useEditorStore.setState(liveEdgeRef.current.editor)
       useMediaStore.setState(liveEdgeRef.current.media)
     }
+    // (every step reads the clip as it was when the drag began — the render's own values are the last
+    // step's: its end had already moved, so the clip's end no longer looked like its end, and the drag
+    // flipped between growing and "Nothing was cut here" — user, 2026-11-04)
+    const at = liveEdgeRef.current.at
     if (done) liveEdgeRef.current = null
     quietRef.current = !done
-    try { if (Math.abs(to - from) >= 50) trimByEdge(segId, edge, from, to, done) }
+    try { if (Math.abs(to - from) >= 50) trimByEdge(segId, edge, from, to, done, at) }
     finally {
       quietRef.current = false
       // (a drag that went outwards at the clip's start or end and came back: its own base goes too)
@@ -4210,30 +4279,32 @@ export function EditorShell({
    * that join before comes back, as much as it was dragged (restoreAtJoin), and what follows moves
    * later. At the clip's own start or end, outwards brings in more of the video (moveClipEdge).
    */
-  function trimByEdge(segId: string, edge: 'start' | 'end', from: number, to: number, done = true) {
+  function trimByEdge(segId: string, edge: 'start' | 'end', from: number, to: number, done = true, at: EdgeAt = { len: clipLengthMs, pieces: piecesOn }) {
     if (blocked({ kind: 'section', id: segId })) return
     const inward = edge === 'start' ? to > from : to < from
     // An inserted video's own edges trim it (what plays of it), the same way
     const ins = useEditorStore.getState().segments.find(s => s.id === segId)
-    if (ins && isInsert(ins, mainVideoId)) { trimInsert(ins, edge, from, to, inward); return }
-    if (inward) {
-      const [a, b] = edge === 'start' ? [from, to] : [to, from]
-      if (clipLengthMs - (b - a) < MIN_CLIP_LEFT_MS) { notifyLocked('A clip must stay at least a second long'); return }
-      removePart(a, b)
-      return
-    }
+    if (ins && isInsert(ins, mainVideoId)) { trimInsert(ins, edge, from, to, inward, at.len); return }
     const d = Math.abs(to - from)
-    if (piecesOn) { restorePiece(segId, edge, from, d); return }
-    if (edge === 'start' && from <= 1) { moveClipEdge('start', -d, done); return }
-    if (edge === 'end' && from >= clipLengthMs - 1) { moveClipEdge('end', d, done); return }
-    restoreAtJoin(segId, edge, from, d)
+    switch (edgeDragPath(edge, from, to, at)) {
+      case 'cut': {
+        const [a, b] = edge === 'start' ? [from, to] : [to, from]
+        if (at.len - (b - a) < MIN_CLIP_LEFT_MS) { notifyLocked('A clip must stay at least a second long'); return }
+        removePart(a, b, at.pieces)
+        return
+      }
+      case 'pieces': restorePiece(segId, edge, from, d, at.len); return
+      case 'clipStart': moveClipEdge('start', -d, done, at.clip); return
+      case 'clipEnd': moveClipEdge('end', d, done, at.clip); return
+      case 'join': restoreAtJoin(segId, edge, from, d, at.len)
+    }
   }
   /**
    * An inserted video's edge dragged: inwards, less of it plays (its start or end cut; what follows
    * moves up); outwards, more of it again — as far as the video itself goes. The main video still
    * waits where it went in.
    */
-  function trimInsert(ins: SegmentLocal, edge: 'start' | 'end', from: number, to: number, inward: boolean) {
+  function trimInsert(ins: SegmentLocal, edge: 'start' | 'end', from: number, to: number, inward: boolean, lenMs = clipLengthMs) {
     pause()
     const editor = useEditorStore.getState(), media = useMediaStore.getState()
     const state: TimedState = {
@@ -4254,7 +4325,7 @@ export function EditorShell({
     const own = videoLibraryRef.current[box?.source_video_id ?? '']?.duration_ms ?? null
     const offset = box?.source_offset_ms ?? 0
     const room = edge === 'start' ? offset : own != null ? own - (offset + (ins.end_ms - ins.start_ms)) : 0
-    const amount = Math.round(Math.min(Math.abs(to - from), Math.max(0, room), MAX_CLIP_MS - clipLengthMs))
+    const amount = Math.round(Math.min(Math.abs(to - from), Math.max(0, room), MAX_CLIP_MS - lenMs))
     if (amount < 50) { notifyLocked(room > 0 ? 'The clip is as long as a clip can be (5 minutes)' : edge === 'start' ? 'This is where the video starts' : 'This is where the video ends'); return }
     const t = edge === 'start' ? ins.start_ms : ins.end_ms
     const next = rippleInsert(state, t, amount)
@@ -4276,7 +4347,7 @@ export function EditorShell({
    * ('end': it plays on that much further). Only video the clip had skipped (or before its first
    * part, within the clip's stretch of the video). Everything after moves later.
    */
-  function restorePiece(segId: string, edge: 'start' | 'end', t: number, d: number) {
+  function restorePiece(segId: string, edge: 'start' | 'end', t: number, d: number, lenMs = clipLengthMs) {
     pause()
     const editor = useEditorStore.getState(), media = useMediaStore.getState()
     const seg = editor.segments.find(s => s.id === segId)
@@ -4293,7 +4364,7 @@ export function EditorShell({
       : (i + 1 < mains.length ? mains[i + 1].from! : lenSrc) - (me.from + pieceVideoMs(me))
     // (room is video; at this part's speed it is room ÷ speed of timeline)
     const sp = me.speed ?? 1
-    const amount = Math.round(Math.min(d, Math.max(0, room) / sp, MAX_CLIP_MS - clipLengthMs))
+    const amount = Math.round(Math.min(d, Math.max(0, room) / sp, MAX_CLIP_MS - lenMs))
     if (amount < 50) { notifyLocked(room > 0 ? 'The clip is as long as a clip can be (5 minutes)' : 'Nothing was cut here: drag the edge inwards to cut, outwards brings back what was cut'); return }
     const state: TimedState = {
       segments: editor.segments, keyframes: editor.keyframes,
@@ -4324,7 +4395,7 @@ export function EditorShell({
    * (edge 'start': it grows back towards the start) or after it ends ('end'). Everything after the
    * join moves later by as much.
    */
-  function restoreAtJoin(segId: string, edge: 'start' | 'end', t: number, d: number) {
+  function restoreAtJoin(segId: string, edge: 'start' | 'end', t: number, d: number, lenMs = clipLengthMs) {
     pause()
     const editor = useEditorStore.getState(), media = useMediaStore.getState()
     const map = trimMap(editor.trims, rawClip.start_ms, rawClip.end_ms)
@@ -4332,7 +4403,7 @@ export function EditorShell({
     const at = edge === 'start' ? map.toSource(t) : map.toSourceEnd(t)
     const cut = editor.trims.find(([a, b]) => (edge === 'start' ? Math.abs(b - at) <= 2 : Math.abs(a - at) <= 2))
     if (!cut) { notifyLocked('Nothing was cut here: drag the edge inwards to cut, outwards brings back what was cut'); return }
-    const room = Math.max(0, Math.min(MAX_CLIP_MS - clipLengthMs, cut[1] - cut[0]))
+    const room = Math.max(0, Math.min(MAX_CLIP_MS - lenMs, cut[1] - cut[0]))
     const amount = Math.round(Math.min(d, room))
     if (amount < 50) { if (!room) notifyLocked('The clip is as long as a clip can be (5 minutes)'); return }
     const nextTrims = cleanTrims(editor.trims.flatMap(r => (r !== cut ? [r]
@@ -4421,13 +4492,14 @@ export function EditorShell({
    */
   type EdgeBase = { state: TimedState; trims: typeof trims; clipRange: typeof clipRange; start: number; end: number; map: typeof trim; limits: typeof clipEdgeLimits }
   const edgeBaseRef = useRef<EdgeBase | null>(null)
-  function moveClipEdge(edge: 'start' | 'end', delta: number, done = true) {
+  function moveClipEdge(edge: 'start' | 'end', delta: number, done = true, orig?: EdgeAt['clip']) {
     let base = edgeBaseRef.current
     if (!base) {
       const editor = useEditorStore.getState(), media = useMediaStore.getState()
       base = {
         state: { segments: editor.segments, keyframes: editor.keyframes, overlays: media.overlays, textOverlays: media.textOverlays, audioTracks: media.audioTracks, transitions: media.transitions },
-        trims: editor.trims, clipRange: editor.clipRange, start: rawClip.start_ms, end: rawClip.end_ms, map: trim, limits: clipEdgeLimits,
+        // (a part's edge dragged: the clip as the drag found it — trimByEdgeLive — not as its last step left it)
+        trims: editor.trims, clipRange: editor.clipRange, start: orig?.start ?? rawClip.start_ms, end: orig?.end ?? rawClip.end_ms, map: orig?.map ?? trim, limits: orig?.limits ?? clipEdgeLimits,
       }
       edgeBaseRef.current = base
       pause()
@@ -6689,7 +6761,7 @@ export function EditorShell({
                   <a href="/pricing" className="px-4 py-2 rounded-lg text-xs font-bold" style={{ background: ACCENT, color: '#000' }}>See plans</a>
                 </div>
               ) : editingTranscript ? (
-                <TranscriptPanel words={displayWords} clipStartMs={clip.start_ms} clipEndMs={clip.end_ms} currentTimeMs={currentTimeMs} onSeek={seekToMs} onWordChange={(id, text) => updateWord(id, text, romanize ? 'word_roman' : 'word')} />
+                <TranscriptPanel words={displayWords} clipStartMs={clip.start_ms} clipEndMs={clip.end_ms} currentTimeMs={currentTimeMs} onSeek={seekToMs} onWordChange={changeWord} />
               ) : (
                 <div className="flex flex-col">
                   {/* ── Captions: on/off with its status, the language, and editing the words ── */}
@@ -7109,7 +7181,9 @@ export function EditorShell({
             <div className="flex items-center gap-1.5 shrink-0">
               {rendering ? (
                 // While the reel renders, the Export button stays and keeps playing its download
-                // animation on a loop (.ed-export[data-busy] in globals.css) until it's done
+                // animation on a loop (.ed-export[data-busy] in globals.css) until it's done; beside
+                // it, Cancel stops the export
+                <>
                 <span className="sbb ed-export" data-busy role="status"
                   aria-label={exporting ? 'Starting the export' : `Exporting, ${formatElapsed(renderElapsed)} so far`}
                   title={exporting ? 'Starting…' : `Exporting · ${formatElapsed(renderElapsed)}`}>
@@ -7118,10 +7192,22 @@ export function EditorShell({
                     <ExportIcon /> Exporting
                   </span>
                 </span>
+                {/* (once the export is on its way: while it starts there is nothing to stop yet) */}
+                {clipStatus === 'rendering' && (
+                  <button onClick={cancelExport} disabled={cancelling} aria-label="Cancel the export" title="Cancel the export"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-60"
+                    style={{ color: '#f87171', background: 'rgba(239,68,68,0.12)', boxShadow: 'inset 0 0 0 1px rgba(239,68,68,0.25)' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                  </button>
+                )}
+                </>
               ) : hasOutput ? (
                 <>
-                  <button onClick={() => requestExport(true)} aria-label="Re-render"
-                    title="Render again with your latest edits. Captions are regenerated too."
+                  {/* (with the captions as they are: read again only where part of the clip has none — it was
+                      made longer. Reading the whole clip again every time changed its words from the ones
+                      in the preview and threw corrections away: user, 2026-11-04) */}
+                  <button onClick={() => requestExport(needsCaptions())} aria-label="Re-render"
+                    title="Render again with your latest edits"
                     className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
                     style={{ color: 'rgb(var(--ed-fg) / 0.75)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -7171,11 +7257,11 @@ export function EditorShell({
                     <p className="text-xs" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>Usually takes a minute or two. You can keep editing.</p>
                     {renderElapsed > 0 && <p className="text-xs tabular-nums mt-1" style={{ color: 'rgba(200,255,0,0.75)' }}>{formatElapsed(renderElapsed)}</p>}
                   </div>
-                  {clipStatus === 'rendering' && renderElapsed > 180 && (
-                    <button onClick={handleResetStuckRender}
-                      className="text-xs px-4 py-1.5 rounded-lg"
+                  {clipStatus === 'rendering' && (
+                    <button onClick={cancelExport} disabled={cancelling}
+                      className="text-xs px-4 py-1.5 rounded-lg disabled:opacity-60"
                       style={{ color: '#f87171', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)' }}>
-                      Taking too long? Cancel render
+                      {cancelling ? 'Stopping…' : 'Cancel export'}
                     </button>
                   )}
                 </div>
@@ -7451,6 +7537,8 @@ export function EditorShell({
           videoUrls={videoUrls} mediaLengths={videoLengths}
           // (parts can be cut: an edge trims the video itself, as in InShot)
           onEdgeTrim={cutOk ? trimByEdgeLive : undefined}
+          // (the clip's end dragged out goes as far as the video goes on; a clip of pieces stops it itself)
+          clipEndRoomMs={piecesOn ? undefined : clipEdgeLimits.endLater}
           pickedSegmentId={pickedSegId}
           groupSel={groupLive} onGroupSel={setGroupPick}
           groups={groups} onGroup={groupPicked} onUngroup={ungroupPicked} onGroupRows={moveGroupRows} onGroupParts={moveGroupParts} onGroupPartsToRow={liftParts}

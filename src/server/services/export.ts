@@ -77,3 +77,33 @@ async function startRender(
   import('./suggestionEvents').then(m => m.logClipEvents(userId, [clipId], 'exported')).catch(() => {})
   return { job_id: job.id }
 }
+
+/** Why a cancelled export's job stopped (jobs.error) */
+export const RENDER_CANCELLED = 'Cancelled by the user'
+
+/**
+ * Stop an export (the editor's Cancel): its job — waiting, or running: the worker sees it within a
+ * couple of seconds and stops (queue.ts) — is cancelled, and the clip goes back to how it was before:
+ * its last export if it has one, else a draft. Both in one go, so the worker never sees one without
+ * the other. A render still to come after its captions (render_after) isn't queued (transcribe.ts).
+ */
+export async function cancelRender(userId: string, clipId: string): Promise<{ status: string; output_storage_path: string | null }> {
+  const [row] = await sql`
+    SELECT c.status, c.output_storage_path, v.user_id FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.id = ${clipId}
+  `
+  if (!row) throw Object.assign(new Error('Clip not found'), { status: 404 })
+  if (row.user_id !== userId) throw Object.assign(new Error('Forbidden'), { status: 403 })
+  const done = await sql.begin(async tx => {
+    const [clip] = await tx`
+      UPDATE clips SET status = CASE WHEN output_storage_path IS NOT NULL THEN 'done' ELSE 'draft' END
+      WHERE id = ${clipId} AND status = 'rendering' RETURNING status, output_storage_path
+    `
+    await tx`
+      UPDATE jobs SET status = 'failed', error = ${RENDER_CANCELLED}
+      WHERE type = 'render' AND payload->>'clip_id' = ${clipId} AND status IN ('queued', 'processing')
+    `
+    return clip
+  })
+  // (not exporting any more: finished or failed meanwhile — as it is now)
+  return done ? { status: done.status, output_storage_path: done.output_storage_path } : { status: row.status, output_storage_path: row.output_storage_path }
+}

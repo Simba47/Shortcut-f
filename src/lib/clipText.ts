@@ -19,7 +19,11 @@ const NATIVE_RULE = `Write the text in the speaker's own language and in that la
 /** What the hook, title and post caption are written in: English letters (Tenglish, Hinglish…), English, or the speaker's own script */
 export type ClipTextLanguage = 'roman' | 'english' | 'native'
 
-export interface ClipText { hook: string; title: string; post_caption: string; hashtags: string[] }
+export interface ClipText {
+  hook: string; title: string; post_caption: string; hashtags: string[]
+  /** The hook is the question the clip answers (asked before it starts): shown a little longer */
+  asks?: boolean
+}
 
 /**
  * A brand kit's voice (the editor's Brand kit tool): how the text should sound, words it never
@@ -77,28 +81,22 @@ const clean = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/\
 /** Sends one prompt to the model and returns its raw text answer */
 export type AskText = (prompt: string) => Promise<string>
 
-/** Hook, title, post caption and hashtags for a clip; throws if Gemini fails or answers badly */
-export async function generateClipText(words: TextWord[], videoTitle: string | null, ask: AskText, language: ClipTextLanguage = 'roman', voice: BrandVoice | null = null): Promise<ClipText> {
-  if (!words.length) throw new Error('This clip has no transcript yet')
-
-  const prompt = `You write the text that goes with a short vertical video clip (Reels / Shorts) for an Indian creator. The speech can be Telugu, Hindi, Tamil or another Indian language, often mixed with English. Judge meaning in the original language.
-
-${videoTitle ? `Full video title: ${videoTitle}\n` : ''}What is said in the clip:
-${clipLines(words)}
-
-Return ONLY JSON, keys in English:
-{"hook": "...", "title": "...", "post_caption": "...", "hashtags": ["...", ...]}
-${language === 'english' ? ENGLISH_RULE : language === 'native' ? NATIVE_RULE : ROMAN_RULE} This applies to the hook, title and post caption.
-- hook: 3-7 words shown over the first 3 seconds that make someone stop scrolling. No clickbait lies: it must match what is actually said. No emoji, no hashtags.
+/** The rules every clip's text follows (one clip or a batch): language, hook, title, caption, hashtags, brand voice */
+function textRules(language: ClipTextLanguage, voice: BrandVoice | null, question: string | null = null): string {
+  return `${language === 'english' ? ENGLISH_RULE : language === 'native' ? NATIVE_RULE : ROMAN_RULE} This applies to the hook, title and post caption.
+${question
+    ? `- hook: the clip starts right after this question was asked, which the viewer does not hear: "${question.replace(/"/g, "'")}". The hook IS that question, shown over the first seconds so the viewer knows what is being answered: keep exactly what is asked — only translate and shorten it, never swap in words or ideas from the answer — at most 10 words, ending with "?". No emoji, no hashtags.`
+    : '- hook: 3-7 words shown over the first 3 seconds that make someone stop scrolling. No clickbait lies: it must match what is actually said. No emoji, no hashtags.'}
 - title: at most 60 characters, about this clip's moment (never just the video's title).
 - post_caption: 1-2 sentences for the post.
 - hashtags: exactly 5, no # sign needed, no spaces inside a tag, a mix of language-specific and English tags.${voiceRules(voice)}`
+}
 
-  const text = await ask(prompt)
-  const match = text.match(/\{[\s\S]*\}/)
-  if (!match) throw new Error('Gemini did not return JSON')
-  const raw = JSON.parse(match[0]) as Record<string, unknown>
-  const hook = clean(raw.hook, 80).split(' ').slice(0, 7).join(' ')
+const INTRO = 'You write the text that goes with a short vertical video clip (Reels / Shorts) for an Indian creator. The speech can be Telugu, Hindi, Tamil or another Indian language, often mixed with English. Judge meaning in the original language.'
+
+/** One clip's answer, checked and tidied; throws when the hook or title is missing */
+function toClipText(raw: Record<string, unknown>, videoTitle: string | null, voice: BrandVoice | null, question: string | null = null): ClipText {
+  const hook = clean(raw.hook, 100).split(' ').slice(0, question ? 10 : 7).join(' ')
   const title = clean(raw.title, 60)
   const written = clean(raw.post_caption, 400)
   // The brand's closing line, added as it is (a prompt alone doesn't keep it word for word)
@@ -111,6 +109,62 @@ ${language === 'english' ? ENGLISH_RULE : language === 'native' ? NATIVE_RULE : 
   if (!hook || !title) throw new Error('Gemini left out the hook or title')
   // A title that is only the video's name says nothing about the clip: use the hook instead
   const sameAsVideo = !!videoTitle && title.toLowerCase().replace(/\W/g, '') === videoTitle.toLowerCase().replace(/\W/g, '')
-  if (sameAsVideo) return { hook, title: hook.slice(0, 60), post_caption, hashtags }
-  return { hook, title, post_caption, hashtags }
+  const asks = question ? { asks: true } : {}
+  if (sameAsVideo) return { hook, title: hook.slice(0, 60), post_caption, hashtags, ...asks }
+  return { hook, title, post_caption, hashtags, ...asks }
+}
+
+/** Hook, title, post caption and hashtags for a clip; throws if Gemini fails or answers badly */
+export async function generateClipText(
+  words: TextWord[], videoTitle: string | null, ask: AskText, language: ClipTextLanguage = 'roman', voice: BrandVoice | null = null,
+  /** The question the clip answers, asked before it starts and not heard in it (clipFinder FoundClip.question): it becomes the hook */
+  question: string | null = null,
+): Promise<ClipText> {
+  if (!words.length) throw new Error('This clip has no transcript yet')
+
+  const prompt = `${INTRO}
+
+${videoTitle ? `Full video title: ${videoTitle}\n` : ''}What is said in the clip:
+${clipLines(words)}
+
+Return ONLY JSON, keys in English:
+{"hook": "...", "title": "...", "post_caption": "...", "hashtags": ["...", ...]}
+${textRules(language, voice, question)}`
+
+  const text = await ask(prompt)
+  const match = text.match(/\{[\s\S]*\}/)
+  if (!match) throw new Error('Gemini did not return JSON')
+  return toClipText(JSON.parse(match[0]) as Record<string, unknown>, videoTitle, voice, question)
+}
+
+/**
+ * The same text for several clips of one video in ONE call: the clips share the request's
+ * instructions, so a batch costs much less than a call per clip. Answers are matched by clip
+ * number. A clip the answer left out or got wrong is null (the caller writes it on its own); an
+ * answer that is not JSON gives all nulls. Never throws for a bad answer.
+ */
+export async function generateClipTexts(clips: TextWord[][], videoTitle: string | null, ask: AskText, language: ClipTextLanguage = 'roman', voice: BrandVoice | null = null): Promise<Array<ClipText | null>> {
+  const out: Array<ClipText | null> = clips.map(() => null)
+  if (!clips.length) return out
+  const prompt = `${INTRO} There are ${clips.length} clips from the same video below; write the text for each one, about that clip's own moment.
+
+${videoTitle ? `Full video title: ${videoTitle}\n` : ''}${clips.map((words, i) => `Clip ${i + 1}:\n${clipLines(words)}`).join('\n\n')}
+
+Return ONLY a JSON array with one object per clip, keys in English:
+[{"clip": 1, "hook": "...", "title": "...", "post_caption": "...", "hashtags": ["...", ...]}, ...]
+${textRules(language, voice)}`
+
+  let raw: unknown
+  try {
+    const text = await ask(prompt)
+    const match = text.match(/\[[\s\S]*\]/)
+    raw = match ? JSON.parse(match[0]) : null
+  } catch { return out }
+  if (!Array.isArray(raw)) return out
+  for (const entry of raw) {
+    const n = Number((entry as { clip?: unknown })?.clip)
+    if (!Number.isInteger(n) || n < 1 || n > clips.length || out[n - 1]) continue
+    try { out[n - 1] = toClipText(entry as Record<string, unknown>, videoTitle, voice) } catch { /* left for a call of its own */ }
+  }
+  return out
 }

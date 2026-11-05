@@ -1,3 +1,4 @@
+import { withSavedStyle } from '@/modules/editor/textStyle'
 import { redirect, notFound } from 'next/navigation'
 import { headers } from 'next/headers'
 import { requireUser } from '@/server/auth'
@@ -35,7 +36,9 @@ export default async function EditorPage({
 
   const [clip] = await sql`
     SELECT c.*, v.storage_path, v.status AS video_status, v.user_id, v.title AS video_title, v.duration_ms AS video_duration_ms,
-      to_jsonb(v)->>'proxy_path' AS proxy_path
+      to_jsonb(v)->>'proxy_path' AS proxy_path,
+      -- (the picture inside the video's black bars, once the worker has found it: jobs/picture.ts)
+      to_jsonb(v)->'picture_box' AS picture_box
     FROM clips c JOIN videos v ON v.id = c.video_id
     WHERE c.id = ${clipId}
   `
@@ -106,7 +109,8 @@ export default async function EditorPage({
     SELECT 1 FROM jobs WHERE type = 'transcribe' AND payload->>'video_id' = ${clip.video_id}
       AND payload->>'clip_id' = ${clipId} AND status IN ('queued', 'processing') LIMIT 1`
   const captionStyles = captionStylesRaw as unknown as CaptionStyle[]
-  const textOverlays = textOverlaysRaw as unknown as TextOverlay[]
+  // (each with its Text-tool look, saved as one field)
+  const textOverlays = (textOverlaysRaw as unknown as TextOverlay[]).map(withSavedStyle)
   const audioTracks = audioTracksRaw as unknown as AudioTrack[]
   // Stored songs play from storage (they survive a reload); old name-only entries have none
   const { musicUrls } = await import('@/server/services/music')

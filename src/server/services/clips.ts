@@ -1,3 +1,5 @@
+import { TRANSITION_KINDS } from '@/lib/shared/transitionKinds'
+import { savedTextStyle } from '@/modules/editor/textStyle'
 import sql from '@/lib/db'
 import { cleanTrims, trimMap, MAX_CLIP_MS, MIN_CLIP_MS } from '@/lib/trims'
 import { cleanProgressBar } from '@/lib/shared/brandKit'
@@ -213,6 +215,8 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
   const hasTextH = await hasColumn('text_overlays', 'h')
   // How far a text / photo is turned (its rotate handle on the preview), once the worker has added the field
   const hasTextRot = await hasColumn('text_overlays', 'rotation')
+  // The Text-tool look, once the worker has added its field
+  const hasTextStyle = await hasColumn('text_overlays', 'style')
   const hasPhotoRot = await hasColumn('overlays', 'rotation')
   // How see-through a photo is (a brand kit's logo), once the worker has added the field
   const hasPhotoOpacity = await hasColumn('overlays', 'opacity')
@@ -357,7 +361,7 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
 
     q.push(tx`DELETE FROM text_overlays WHERE clip_id = ${clipId}`)
     if (textOverlays.length > 0) {
-      q.push(tx`INSERT INTO text_overlays ${tx(textOverlays.map(({ id, text, start_ms, end_ms, x, y, font, size, color, hidden, locked, w, h, rotation }) => ({
+      q.push(tx`INSERT INTO text_overlays ${tx(textOverlays.map(({ id, text, start_ms, end_ms, x, y, font, size, color, hidden, locked, w, h, rotation, ...look }) => ({
         id, clip_id: clipId, text, start_ms: ms(start_ms), end_ms: ms(end_ms), x, y, font, size, color,
         // Box width (the text wraps inside it): a share of the frame's width, or none
         ...(hasTextW ? { w: typeof w === 'number' && w > 0 ? Math.min(1, w) : null } : {}),
@@ -365,6 +369,7 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
         ...(hasTextH ? { h: typeof h === 'number' && h > 0 ? Math.min(1, h) : null } : {}),
         ...(hasTextRot ? { rotation: turn(rotation) } : {}),
         ...(hasControls ? { hidden: !!hidden, locked: !!locked } : {}),
+        ...(hasTextStyle ? { style: (st => (st ? sql.json(st as never) : null))(savedTextStyle(look)) } : {}),
       })))}`)
     }
 
@@ -529,7 +534,8 @@ export async function hasColumn(table: string, column: string): Promise<boolean>
  * minute until every kind is allowed.
  */
 let transitionCheck: { def: string | null; at: number } | null = null
-const ALL_TRANSITION_KINDS = ['pixelize', 'velocity', 'zoomout', 'swipeup', 'shake', 'glitch', 'flare', 'spin', 'warp']
+// (every kind there is: once the database takes them all, it isn't looked up again)
+const ALL_TRANSITION_KINDS: readonly string[] = TRANSITION_KINDS
 export async function transitionKindsAllowed(): Promise<(type: string) => boolean> {
   const fresh = transitionCheck && (Date.now() - transitionCheck.at < 60_000
     || (transitionCheck.def !== null && ALL_TRANSITION_KINDS.every(k => transitionCheck!.def!.includes(`'${k}'`))))

@@ -84,7 +84,7 @@ export interface FrameTemplate {
 
 export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
   frame_single: {
-    name: 'Single', description: 'One video with a top letterbox for text.',
+    name: 'Title', description: 'One video with a top letterbox for text.',
     rows: [{ kind: 'band', h: 0.2 }, { kind: 'slot', slot: 0, h: 0.8 }],
     defaults: ['video'],
   },
@@ -98,9 +98,12 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
     startOrder: [2, 1, 0],
   },
   frame_dual: {
-    name: 'Dual Video', description: 'Two videos in one frame.',
-    rows: [{ kind: 'slot', slot: 0, h: 0.5 }, { kind: 'slot', slot: 1, h: 0.5 }],
-    defaults: ['video', 'video'],
+    // Your video and one spot for a photo or a video you add (user, 2026-11-04: one frame instead of
+    // Two videos and Pic + Video — the second spot already took either)
+    name: 'Video + Media', description: 'Your video on top, and a photo or video you add below.',
+    rows: [{ kind: 'slot', slot: 0, h: 0.5, label: 'Video' }, { kind: 'slot', slot: 1, h: 0.5, label: 'Media' }],
+    // (your video always starts in the Video spot, whatever frame it comes from)
+    defaults: ['video', 'video'], mainSlots: [0],
   },
   frame_dual_letterbox: {
     name: 'Dual + Letterbox', description: 'Two videos with a letterbox in the middle for text.',
@@ -109,7 +112,7 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
   },
   frame_triple: {
     // In the gallery as Trio (user, 2026-10-17): three videos stacked — three slots for video (a photo goes in any of them too)
-    name: 'Trio', description: 'Three videos stacked — three speakers, or a mix of videos and photos.',
+    name: 'Three videos', description: 'Three videos stacked — three speakers, or a mix of videos and photos.',
     rows: [{ kind: 'slot', slot: 0, h: 1 / 3 }, { kind: 'slot', slot: 1, h: 1 / 3 }, { kind: 'slot', slot: 2, h: 1 / 3 }],
     defaults: ['video', 'video', 'video'],
   },
@@ -117,7 +120,7 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
     // Trio with main (user, 2026-10-17): the main video over half the frame, two parts side by side
     // in the other half. A bar between the Main and the pair (its swap: the Main below, the pair on
     // top) and one between Left and Right (its swap: they trade places)
-    name: 'Trio with main', description: 'The main video on half the frame, two videos or photos side by side in the other half.',
+    name: '1 big + 2 small', description: 'The main video on half the frame, two videos or photos side by side in the other half.',
     areas: [
       { kind: 'slot', slot: 0, x: 0, y: 0, w: 1, h: 0.5, label: 'Main' },
       { kind: 'slot', slot: 1, x: 0, y: 0.5, w: 0.5, h: 0.5, label: 'Left' },
@@ -172,7 +175,7 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
     offers: [{ video: true, photo: true }, { video: true, photo: true }],
   },
   frame_screenshot: {
-    name: 'Pic + Vid', description: 'A picture on top (shown whole: a photo, tweet, headline or article), the video below.',
+    name: 'Pic + Video', description: 'A picture on top (shown whole: a photo, tweet, headline or article), the video below.',
     rows: [
       { kind: 'slot', slot: 0, h: 0.42, fit: 'contain', fill: '#111111', label: 'Pic' },
       { kind: 'slot', slot: 1, h: 0.58, label: 'Video' },
@@ -297,11 +300,12 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
  * Dual + Letterbox, Video + Photo, News, Audiogram, Photo Story, 2×2 grid) stay defined above so
  * clips that already use them still show, edit and export as before; they just aren't offered for
  * new frames. Branded card is back with the brand kit (user, 2026-10-17): picked, it starts with the
- * kit's colour, title and @handle (EditorShell fillBrandCard).
+ * kit's colour, title and @handle (EditorShell fillBrandCard). Side by side taken out the same way, and
+ * Pic + Video, which Video + Media covers (user, 2026-11-04).
  */
 export const FRAME_LAYOUTS: FrameLayout[] = [
-  'frame_single', 'frame_title_caption', 'frame_blur_fill', 'frame_dual', 'frame_screenshot', 'frame_video_photo', 'frame_triple',
-  'frame_trio_main', 'frame_side_by_side', 'frame_screen_face', 'frame_brand_card',
+  'frame_single', 'frame_title_caption', 'frame_blur_fill', 'frame_dual', 'frame_video_photo', 'frame_triple',
+  'frame_trio_main', 'frame_screen_face', 'frame_brand_card',
 ]
 /** How a new frame of this template is laid out (its starting row order), for the gallery's picture */
 export const startLayout = (layout: FrameLayout): RowLayout => {

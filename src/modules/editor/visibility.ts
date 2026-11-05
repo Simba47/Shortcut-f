@@ -1,6 +1,7 @@
 import type { SegmentLocal, CropBoxLocal } from '@chai-cut/shared'
 import { isFrameLayout } from './frames'
 import { defaultCropForSlot } from './utils'
+import { inFramePicture } from './framePicture'
 
 /**
  * A part of the main video moved off the main row onto a row above or below it (as in Resolve):
@@ -53,7 +54,7 @@ export function shownSegment(seg: SegmentLocal, mainVideoId: string | null | und
         ? { sound_only: { video_id: box.source_video_id, offset_ms: box.source_offset_ms ?? 0, volume: box.volume } } : {}),
       crop_boxes: [{
         ...box, id: `${box.id}${STAND_IN_SUFFIX}`, source_video_id: null, source_offset_ms: seg.start_ms, muted: false, hidden: false,
-        keyframes: [{ t_ms: seg.start_ms, ...defaultCropForSlot('vertical', 0, videoAR) }],
+        keyframes: [{ t_ms: seg.start_ms, ...inFramePicture(defaultCropForSlot('vertical', 0, videoAR)) }],
       }],
     }
   }
