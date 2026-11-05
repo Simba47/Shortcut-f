@@ -53,6 +53,14 @@ if (clips.length) {
   const trs = await ids(qa`SELECT id FROM transcripts WHERE video_id = ANY(${videos})`)
   const kits = await ids(qa`SELECT id FROM brand_kits WHERE user_id = ANY(${users}) UNION SELECT kit_id FROM brand_kit_shares WHERE user_id = ANY(${users})`)
   const jobs = await ids(qa`SELECT ai_edit_job_id id FROM clips WHERE id = ANY(${clips})`)
+  // A clip copied before keeps the parts it had then unless they go first (the copy below only
+  // replaces the parts QA has now: a part since deleted on QA stayed, and the export here differed)
+  const oldSegs = (await loc`SELECT id FROM segments WHERE clip_id::text = ANY(${clips})`).map(r => String(r.id))
+  if (oldSegs.length) {
+    await loc`DELETE FROM box_keyframes WHERE box_id IN (SELECT id FROM crop_boxes WHERE segment_id::text = ANY(${oldSegs}))`
+    await loc`DELETE FROM crop_boxes WHERE segment_id::text = ANY(${oldSegs})`
+    await loc`DELETE FROM segments WHERE id::text = ANY(${oldSegs})`
+  }
   const plan = [
     ['users', 'id', users], ['accounts', '"userId"', users], ['subscriptions', 'user_id', users],
     ['brand_kits', 'id', kits], ['brand_kit_shares', 'kit_id', kits],
