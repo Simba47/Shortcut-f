@@ -424,6 +424,23 @@ export function EditorShellMobile({
     setClipStatus('draft'); setOutputUrl(null)
   }
 
+  /** Cancel while exporting: the export stops and the clip is as it was before (as the desktop editor's Cancel) */
+  const [cancelling, setCancelling] = useState(false)
+  async function cancelExport() {
+    if (cancelling) return
+    setCancelling(true); setExportError(null)
+    try {
+      const res = await fetch(`/api/clips/${clip.id}/cancel-export`, { method: 'POST' })
+      const d = await res.json().catch(() => null) as { status?: string; output_url?: string | null; error?: string } | null
+      if (!res.ok || !d?.status) throw new Error(d?.error ?? 'Couldn’t cancel the export. Try again.')
+      setClipStatus(d.status); setOutputUrl(d.output_url ?? null)
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Couldn’t cancel the export. Try again.')
+    } finally {
+      setCancelling(false)
+    }
+  }
+
   /** Captions on: made now for this clip if it has none yet (nothing is captioned until asked) */
   function turnCaptions(on: boolean) {
     setShowCaptions(on)
@@ -713,8 +730,8 @@ export function EditorShellMobile({
             </>
           ) : clipStatus !== 'rendering' && !exporting ? (
             <button onClick={() => handleExport()} style={{ padding: '11px 0', borderRadius: 10, background: '#c8ff00', color: '#000', fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer' }}>Process video</button>
-          ) : clipStatus === 'rendering' && renderElapsed > 180 ? (
-            <button onClick={handleReEdit} style={{ fontSize: 11, padding: '8px 0', borderRadius: 8, background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)', cursor: 'pointer' }}>Stuck? Reset</button>
+          ) : clipStatus === 'rendering' ? (
+            <button onClick={cancelExport} disabled={cancelling} style={{ fontSize: 11, padding: '8px 0', borderRadius: 8, background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)', cursor: 'pointer' }}>{cancelling ? 'Stopping…' : 'Cancel export'}</button>
           ) : null}
         </div>
       </div>
@@ -1027,7 +1044,7 @@ export function EditorShellMobile({
                       <span style={{ width: 40, height: 40, borderRadius: 20, border: '2px solid #c8ff00', borderTopColor: 'transparent', display: 'block', animation: 'spin 1s linear infinite' }} />
                       <p style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>Processing video…</p>
                       {renderElapsed > 0 && <p style={{ fontSize: 12, color: 'rgba(200,255,0,0.7)', fontVariantNumeric: 'tabular-nums' }}>{Math.floor(renderElapsed / 60)}m {renderElapsed % 60}s</p>}
-                      {clipStatus === 'rendering' && renderElapsed > 180 && <button onClick={handleReEdit} style={{ fontSize: 12, padding: '8px 16px', borderRadius: 8, background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)', cursor: 'pointer' }}>Stuck? Reset</button>}
+                      {clipStatus === 'rendering' && <button onClick={cancelExport} disabled={cancelling} style={{ fontSize: 12, padding: '8px 16px', borderRadius: 8, background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)', cursor: 'pointer' }}>{cancelling ? 'Stopping…' : 'Cancel export'}</button>}
                     </div>
                   ) : (
                     <OutputCanvas watermark={showWatermark}

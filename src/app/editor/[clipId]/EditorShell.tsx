@@ -1600,9 +1600,27 @@ export function EditorShell({
     }
   }
 
-  async function handleResetStuckRender() {
-    await fetch(`/api/clips/${clip.id}/reedit`, { method: 'POST' })
-    setClipStatus('draft'); setOutputUrl(null); setRenderStuckSince(null); setRenderElapsed(0)
+  /**
+   * Cancel while exporting: the export stops (the worker stops it within a couple of seconds) and the
+   * clip is as it was before — its last export, if it had one. (It used to be only "Taking too long?
+   * Cancel render" after 3 minutes, which set the clip back but left the render running: its video
+   * came back anyway when it finished.)
+   */
+  const [cancelling, setCancelling] = useState(false)
+  async function cancelExport() {
+    if (cancelling) return
+    setCancelling(true); setExportError(null)
+    try {
+      const res = await fetch(`/api/clips/${clip.id}/cancel-export`, { method: 'POST' })
+      const d = await res.json().catch(() => null) as { status?: string; output_url?: string | null; error?: string } | null
+      if (!res.ok || !d?.status) throw new Error(d?.error ?? 'Couldn’t cancel the export. Try again.')
+      refreshWordsOnDoneRef.current = false
+      setClipStatus(d.status); setOutputUrl(d.output_url ?? null); setRenderStuckSince(null); setRenderElapsed(0)
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Couldn’t cancel the export. Try again.')
+    } finally {
+      setCancelling(false)
+    }
   }
 
   /**
@@ -6992,7 +7010,9 @@ export function EditorShell({
             <div className="flex items-center gap-1.5 shrink-0">
               {rendering ? (
                 // While the reel renders, the Export button stays and keeps playing its download
-                // animation on a loop (.ed-export[data-busy] in globals.css) until it's done
+                // animation on a loop (.ed-export[data-busy] in globals.css) until it's done; beside
+                // it, Cancel stops the export
+                <>
                 <span className="sbb ed-export" data-busy role="status"
                   aria-label={exporting ? 'Starting the export' : `Exporting, ${formatElapsed(renderElapsed)} so far`}
                   title={exporting ? 'Starting…' : `Exporting · ${formatElapsed(renderElapsed)}`}>
@@ -7001,6 +7021,15 @@ export function EditorShell({
                     <ExportIcon /> Exporting
                   </span>
                 </span>
+                {/* (once the export is on its way: while it starts there is nothing to stop yet) */}
+                {clipStatus === 'rendering' && (
+                  <button onClick={cancelExport} disabled={cancelling} aria-label="Cancel the export" title="Cancel the export"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-60"
+                    style={{ color: '#f87171', background: 'rgba(239,68,68,0.12)', boxShadow: 'inset 0 0 0 1px rgba(239,68,68,0.25)' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                  </button>
+                )}
+                </>
               ) : hasOutput ? (
                 <>
                   <button onClick={() => requestExport(true)} aria-label="Re-render"
@@ -7054,11 +7083,11 @@ export function EditorShell({
                     <p className="text-xs" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>Usually takes a minute or two. You can keep editing.</p>
                     {renderElapsed > 0 && <p className="text-xs tabular-nums mt-1" style={{ color: 'rgba(200,255,0,0.75)' }}>{formatElapsed(renderElapsed)}</p>}
                   </div>
-                  {clipStatus === 'rendering' && renderElapsed > 180 && (
-                    <button onClick={handleResetStuckRender}
-                      className="text-xs px-4 py-1.5 rounded-lg"
+                  {clipStatus === 'rendering' && (
+                    <button onClick={cancelExport} disabled={cancelling}
+                      className="text-xs px-4 py-1.5 rounded-lg disabled:opacity-60"
                       style={{ color: '#f87171', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)' }}>
-                      Taking too long? Cancel render
+                      {cancelling ? 'Stopping…' : 'Cancel export'}
                     </button>
                   )}
                 </div>
