@@ -15,6 +15,7 @@ import { useRouter } from 'next/navigation'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { AccountMenu } from '@/components/ui/account-menu'
 import { CreditsBadge, TopUpLink } from '@/components/ui/credits-badge'
+import { useConfirm } from '@/components/editor/ConfirmDialog'
 import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { openBrandKits } from '@/components/brand/brandKitsEvents'
 import { BrandLoader, BrandLoaderScreen } from '@/components/ui/brand-loader'
@@ -588,6 +589,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const { credits, refresh: refreshCredits } = useCredits()
   // (the allowance is read again after every run and search: so is the balance in the header)
   useEffect(() => { if (allowance) refreshCredits() }, [allowance, refreshCredits])
+  // A price asked about in the site's own dialog
+  const { confirm, dialog: confirmDialog } = useConfirm()
+  function askPrice(title: string, body: string | undefined, confirmLabel: string): Promise<boolean> {
+    const have = credits ? ` You have ${credits.balance} credits.` : ''
+    return new Promise(resolve => confirm({
+      title, body: `${body ?? ''}${have}`.trim(), confirmLabel, cancelLabel: 'Not now', tone: 'warning', onCancel: () => resolve(false),
+    }, () => resolve(true)))
+  }
   /** What was asked for while the video was being read (runs when it's done), and its name */
   const afterReading = useRef<(() => void) | null>(null)
   // (the one line under the lock says what is being done; what waits for it runs by itself)
@@ -772,7 +781,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       if (res.status === 402) {
         const d = await res.json().catch(() => ({}))
         if (d.code === 'search_costs') {
-          if (window.confirm(`${d.error} Use ${d.credits} credit${d.credits === 1 ? '' : 's'} to look again?`)) return await makeClips('new', true)
+          if (await askPrice(`Find new moments for ${d.credits} credits?`, `This video's free search is used. The clips cost ${count * (allowance?.clips.clipCredits ?? 0)} credits on top.`, 'Continue')) return await makeClips('new', true)
           return
         }
         throw new Error(d.error ?? 'Not enough credits')
@@ -855,7 +864,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       // Every saved moment is listed and the included searches are used: a new one costs credits, asked first
       if (res.status === 402) {
         const d = await res.json().catch(() => ({}))
-        if (d.code === 'search_costs' && window.confirm(`${d.error} Use ${d.credits} credit${d.credits === 1 ? '' : 's'} to look again?`)) {
+        if (d.code === 'search_costs' && await askPrice(`Find new moments for ${d.credits} credits?`, `This video's free search is used.`, 'Continue')) {
           setLoadingSuggestions(false)
           return await findMoments(true)
         }
@@ -944,7 +953,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       if (res.status === 402) {
         const d = await res.json() as { error?: string; code?: string; credits?: number }
         if (d.code !== 'ask_costs') throw new Error(d.error ?? 'Not enough credits')
-        if (window.confirm(`${d.error} Use ${d.credits} credits?`)) await findByCriteria(q, true, true)
+        if (await askPrice(`Ask AI for ${d.credits} credits?`, allowance ? `On this video one search counts as ${allowance.askAi.countsAs}.` : undefined, 'Continue')) await findByCriteria(q, true, true)
         return
       }
       if (!res.ok) throw new Error((await res.json()).error ?? 'Could not find clips')
@@ -1719,6 +1728,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   return (
     <div className="cb-page h-screen flex flex-col overflow-hidden">
       {/* Opening a clip: covers the page while the clip is created and the editor loads */}
+      {confirmDialog}
       {busy && <BrandLoaderScreen mascot overlay label="Getting your clip ready, please wait…" />}
       {/* Nav */}
       <nav className="cb-nav app-nav relative z-10 flex items-center gap-3 px-4 shrink-0" style={{ height: 56 }}>

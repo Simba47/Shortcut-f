@@ -4705,6 +4705,7 @@ export function EditorShell({
       body: `${lines.join('\n')}\n\nIf you export anyway, these parts become plain Vertical (just the main video). You can undo this afterwards.`,
       confirmLabel: 'Convert to Vertical & export',
       cancelLabel: 'Go to it',
+      cancelIsAction: true,
       tone: 'warning',
       onCancel: () => { seekToMs(found[0].start_ms); setTool('frames'); toggleOptions(true) },
     }, () => {
