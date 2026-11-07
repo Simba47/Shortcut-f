@@ -2,13 +2,12 @@
 
 import { useBrandPalette, useBrandLock } from './brandPalette'
 import { useBrandFonts, ensureBrandFont } from './brandFonts'
-import { CAPTION_TEMPLATE_LIST, TEMPLATE_FONTS, TEMPLATE_GROUPS, applyTemplate, templateFontFamily, templateOf, type CaptionTemplate } from '@/modules/captions/templates'
+import { CAPTION_TEMPLATE_LIST, TEMPLATE_FONTS, TEMPLATE_GROUPS, applyTemplate, templateFontFamily, templateOf, usesKeyWords, type CaptionTemplate } from '@/modules/captions/templates'
 import { CaptionKeyWords } from './CaptionKeyWords'
 import { useEffect, useRef, useState } from 'react'
 import type { AnimationType, CaptionStyle } from '@chai-cut/shared'
 import { SARVAM_LANGUAGES, DEFAULT_CAPTION_STYLE } from '@chai-cut/shared'
 import { VIDEO_FONTS } from '@/lib/shared/videoFonts'
-import { inLineText } from '@/lib/inLine'
 
 export type TextCase = 'title' | 'upper' | 'lower'
 
@@ -140,6 +139,7 @@ interface Props {
   onEditCaptions: () => void
   onRetranscribe: (languageCode: string) => void
   retranscribing: boolean
+  /** (no longer shown here: regenerating is the refresh icon on the editor's Show captions card, user 2026-11-06) */
   retranscribeElapsed?: number
   /** Waiting its turn: the place in line (1 = next) */
   retranscribePlace?: number | null
@@ -149,6 +149,8 @@ interface Props {
   romanize?: boolean
   romanizeLabel?: string
   onRomanizeChange?: (v: boolean) => void
+  /** One part of the panel only (the editor's Captions sub-tabs); none: all of it, as on mobile */
+  section?: 'style' | 'look' | 'keywords'
 }
 
 const PRESET_COLORS = [
@@ -319,10 +321,6 @@ function CreatorDemo({ t }: { t: CaptionTemplate }) {
   }
 }
 
-function formatElapsed(sec: number) {
-  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
-}
-
 function PresetDemo({ id, hl }: { id: AnimationType; hl: string }) {
   const words = ['Hey', 'there', 'friend']
   const d = '2.4s'
@@ -400,19 +398,21 @@ function hexToHue(hex: string): number {
   return Math.round(((h * 60) + 360) % 360)
 }
 
-function ColourChooser({ text, highlight, showHighlight, highlightLabel, onText, onHighlight }: {
+function ColourChooser({ text, highlight, showHighlight, highlightLabel, onText, onHighlight, sample = true }: {
   text: string; highlight: string; showHighlight: boolean; highlightLabel: string
   onText: (c: string) => void; onHighlight: (c: string) => void
+  /** The two colours on a sample line (false: the editor's Captions preview over the panel shows them) */
+  sample?: boolean
 }) {
   const [open, setOpen] = useState<'text' | 'highlight' | null>(null)
   const theme = COLOUR_THEMES.find(t => sameHex(t.text, text) && (!showHighlight || sameHex(t.highlight, highlight)))?.name
   return (
     <div className="flex flex-col gap-3">
       {/* Live sample of the two colours together */}
-      <div className="cp-sample" aria-hidden="true">
+      {sample && <div className="cp-sample" aria-hidden="true">
         <span style={{ color: text }}>Hey there </span>
         <span style={{ color: showHighlight ? highlight : text }}>friend</span>
-      </div>
+      </div>}
 
       {/* Themes: both colours in one click */}
       <div className="flex flex-col gap-2">
@@ -509,10 +509,12 @@ function applyCase(text: string, tc: TextCase): string {
 
 export function CaptionStyler({
   style, textCase,
-  onChange, onTextCaseChange, onEditCaptions, onRetranscribe, retranscribing, retranscribeElapsed = 0,
-  retranscribePlace = null, retranscribeError = null,
+  onChange, onTextCaseChange, onEditCaptions, onRetranscribe, retranscribing,
+  retranscribeError = null,
   hasWords = false, hasRoman = false, romanize = false, romanizeLabel = 'Romanize', onRomanizeChange,
+  section,
 }: Props) {
+  const shows = (s: NonNullable<Props['section']>) => !section || section === s
   const color = style.color ?? DEFAULT_CAPTION_STYLE.color
   const animation = style.animation ?? DEFAULT_CAPTION_STYLE.animation
   const hl = style.highlight_color ?? '#FFE700'
@@ -534,9 +536,10 @@ export function CaptionStyler({
   }
 
   return (
-    <div className="flex flex-col gap-5 px-4 pb-5 pt-1">
-      {/* Making captions failed (e.g. Google's service down): say why, and offer to try again */}
-      {retranscribeError && !retranscribing && (
+    <div className={`flex flex-col gap-5 px-4 pb-5 ${section ? 'pt-2' : 'pt-1'}`}>
+      {/* Making captions failed (e.g. Google's service down): say why, and offer to try again
+          (in the editor's sub-tabs it is on the Captions tab) */}
+      {!section && retranscribeError && !retranscribing && (
         <div role="alert" className="flex flex-col gap-2 rounded-xl px-3 py-2.5 text-[12px] leading-snug"
           style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', color: '#fca5a5' }}>
           <span>{retranscribeError}</span>
@@ -549,30 +552,9 @@ export function CaptionStyler({
       )}
       <style>{PRESET_CSS}</style>
 
-      {/* ── Rerender: re-run AI transcription on this clip's audio, keeping style/edits as-is ── */}
-      {hasWords && (
-        <section className="flex flex-col gap-1.5">
-          <button onClick={() => onRetranscribe('unknown')} disabled={retranscribing}
-            className="cap-link" aria-busy={retranscribing || undefined}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-              style={retranscribing ? { animation: 'cc-spin 1s linear infinite' } : undefined}>
-              <path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7" />
-            </svg>
-            <span className="flex-1 text-left">
-              {retranscribing
-                ? `Regenerating captions… ${formatElapsed(retranscribeElapsed)}${retranscribePlace ? ` · ${inLineText(retranscribePlace)}` : ''}`
-                : 'Regenerate captions'}
-            </span>
-          </button>
-          {retranscribeError && (
-            <p className="text-[11px]" style={{ color: '#f87171' }}>{retranscribeError}</p>
-          )}
-        </section>
-      )}
-
       {/* ── Style: each tile is a little dark "screen" playing the animation, its name below ── */}
-      <section className="flex flex-col gap-2.5">
-        <h3 className="cap-heading">Style</h3>
+      {shows('style') && <section className="flex flex-col gap-2.5">
+        {!section && <h3 className="cap-heading">Style</h3>}
         {/* The kinds of style; "All" every one of them, "Classic" the plain animations */}
         <div role="tablist" aria-label="Kinds of caption style" className="flex flex-wrap gap-1.5">
           {[ALL_STYLES, CLASSIC, ...TEMPLATE_GROUPS].map(g => (
@@ -610,14 +592,15 @@ export function CaptionStyler({
             {CAPTION_TEMPLATE_LIST.filter(t => t.group === group).map(t => templateTile(t))}
           </div>
         )}
-      </section>
+      </section>}
 
       {/* ── Key words: what a Creator style makes stand out (AI picks them; tap to change) ── */}
-      {tpl?.look && <CaptionKeyWords style={style} tpl={tpl} onChange={onChange} />}
+      {/* (every style that draws them: a Creator one, any caption style, an animated preset) */}
+      {shows('keywords') && usesKeyWords(style) && <CaptionKeyWords style={style} tpl={tpl} onChange={onChange} />}
 
       {/* ── Look: colours, font, size and capitals ── */}
-      <section className="flex flex-col gap-4">
-        <h3 className="cap-heading">Look</h3>
+      {shows('look') && <section className="flex flex-col gap-4">
+        {!section && <h3 className="cap-heading">Look</h3>}
 
       {/* Colours: a live sample, one-click themes, then a field per colour that opens a palette */}
       <ColourChooser
@@ -626,6 +609,7 @@ export function CaptionStyler({
         highlightLabel={(tpl ? tpl.base === 'highlight' || tpl.box === 'hl' : animation === 'highlight') ? 'Box' : tpl?.base === 'glow' ? 'Glow' : 'Highlight'}
         onText={c => onChange({ color: c })}
         onHighlight={c => onChange({ highlight_color: c })}
+        sample={!section}
       />
 
       {/* Font */}
@@ -657,7 +641,7 @@ export function CaptionStyler({
           ))}
         </div>
       </div>
-      </section>
+      </section>}
 
     </div>
   )

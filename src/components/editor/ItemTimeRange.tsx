@@ -51,7 +51,7 @@ export function TimeRange({ startMs, endMs, currentTimeMs, onStart, onEnd }: {
   )
 }
 
-function TimeField({ label, ms, onCommit, onNow }: { label: string; ms: number; onCommit: (ms: number) => void; onNow: () => void }) {
+export function TimeField({ label, ms, onCommit, onNow }: { label: string; ms: number; onCommit: (ms: number) => void; onNow: () => void }) {
   const [draft, setDraft] = useState(format(ms))
   useEffect(() => { setDraft(format(ms)) }, [ms])
   function commit() {

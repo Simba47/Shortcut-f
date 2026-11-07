@@ -28,7 +28,7 @@ const frame = (id: string): SegmentLocal => ({
 function clip(over: Partial<BrandTarget> = {}): BrandTarget {
   return {
     clipId: 'c1', lengthMs: LEN, mainVideoId: 'v1', overlays: [], texts: [text('t1'), text('t2')],
-    caption: { template: 'plain', color: '#eeeeee', size: 52, animation: 'karaoke' }, textCase: 'title', segments: [frame('f1')], progressBar: null, keyframes: {}, transitions: [], timelineEdits: true, audioTracks: [], canInsert: true, ...over,
+    caption: { template: 'plain', color: '#eeeeee', size: 52, animation: 'karaoke' }, textCase: 'title', segments: [frame('f1')], keyframes: {}, transitions: [], timelineEdits: true, audioTracks: [], canInsert: true, ...over,
   }
 }
 /** The kit changed: the clip as it follows (the record of what the brand changed left aside) */
@@ -229,38 +229,10 @@ test('watermark: small, faint, the whole clip', () => {
 
 function pick(o: { x: number; y: number; w: number; h: number }) { return { x: o.x, y: o.y, w: o.w, h: o.h } }
 
-// ── Brand kit Phase 4: the kit's progress bar ─────────
-import { brandProgressBar } from '@/lib/shared/brandKit'
-
-const BAR_ON = { on: true, color: 'accent', height: 10, position: 'bottom' as const }
-const mineBar = { color: '#123456', height: 20, position: 'top' as const }
-
-test("progress bar: on in the kit's accent; off puts the clip's own back", () => {
-  const k = kit({ progress_bar: BAR_ON })
-  const on = putBrandOn(clip({ progressBar: mineBar }), k)
-  assert.deepEqual(on.target.progressBar, { color: '#ff5500', height: 10, position: 'bottom' })
-  assert.deepEqual(takeBrandOff(on.target, k.data, on.before).progressBar, mineBar)
-  // (a bar the user changed while it was on stays)
-  const changed = { ...on.target, progressBar: { ...on.target.progressBar!, height: 30 } }
-  assert.equal(takeBrandOff(changed, k.data, on.before).progressBar!.height, 30)
-})
-
-test("progress bar: a kit without one leaves the clip's own alone, on and off", () => {
-  const k = kit(), on = putBrandOn(clip({ progressBar: mineBar }), k)
-  assert.deepEqual(on.target.progressBar, mineBar)
-  assert.deepEqual(takeBrandOff(on.target, k.data, on.before).progressBar, mineBar)
-})
-
-test("progress bar live: a new colour reaches it; switched on later it goes on; switched off it comes off; the user's own stays", () => {
-  const k1 = kit({ progress_bar: BAR_ON }), on = putBrandOn(clip(), k1)
-  const k2 = kit({ progress_bar: BAR_ON, colors: { main: '#112233', accent: '#00ff00', extra: [] } })
-  assert.equal(upd(on.target, k1.data, k2).progressBar!.color, '#00ff00')
-  assert.equal(upd(on.target, k1.data, kit()).progressBar, null)
-  const k0 = kit(), plain = putBrandOn(clip(), k0)
-  assert.deepEqual(upd(plain.target, k0.data, k1).progressBar, brandProgressBar(k1.data))
-  assert.deepEqual(upd({ ...plain.target, progressBar: mineBar }, k0.data, k1).progressBar, mineBar)
-})
-
-test("a kit's old `progress` (hidden since 2026-10-20) doesn't come back on", () => {
-  assert.equal(cleanBrandKitData({ progress: { on: true, color: '#ff0000' } }).progress_bar.on, false)
+// ── The progress bar, taken out 2026-11-05 (user) ─────────
+test("a kit saved with a progress bar loses it; putting the kit on adds none", () => {
+  const d = cleanBrandKitData({ progress_bar: { on: true, color: 'accent', height: 10, position: 'bottom' }, progress: { on: true } })
+  assert.equal('progress_bar' in d || 'progress' in d, false)
+  const on = putBrandOn(clip(), kit({ progress_bar: { on: true } } as never))
+  assert.equal('progressBar' in on.target || 'progress_bar' in on.before, false)
 })

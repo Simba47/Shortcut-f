@@ -3,10 +3,11 @@
 import { InfoTip } from '@/components/ui/info-tip'
 import { useEffect, useState } from 'react'
 import type { SegmentLocal, FrameLayout, FrameItem, FrameSettings, SlotMotion, CornerStyle, BrollPick } from '@chai-cut/shared'
-import { FRAME_TEMPLATES, FRAME_LAYOUTS, isFrameLayout, frameLanes, frameOf, cornerGeometry, CORNER_MAX, mainSlotSound, frameAreas, frameBase, isTextLane, startLayout, defaultFrame, frameSlotCount } from '@/modules/editor/frames'
+import { FRAME_TEMPLATES, FRAME_LAYOUTS, isFrameLayout, frameLanes, frameOf, cornerGeometry, CORNER_MAX, mainSlotSound, frameAreas, frameBase, isTextLane, startLayout, defaultFrame, frameSlotCount, MIN_ITEM_MS } from '@/modules/editor/frames'
 import { frameItemColor, FRAME_ITEM_COLORS } from './SegmentTimeline'
-import { ItemTimeRange } from './ItemTimeRange'
+import { ItemTimeRange, TimeField } from './ItemTimeRange'
 import { FrameBackgroundFields } from './FrameBackgroundFields'
+import { Switch } from './BrandKit'
 
 const ACCENT = '#c8ff00'
 
@@ -35,6 +36,11 @@ interface Props {
   onUpdateFrame: (segId: string, patch: FramePatch) => void
   /** Swap an item's video or photo through the media picker */
   onReplaceMedia: (segId: string, id: string, kind: 'video' | 'photo') => void
+  /** "Change part": pick another part of a slot's video */
+  onChangePart?: (segId: string, id: string) => void
+  /** Freeze a slot's video (a still picture) or let it play; or freeze just a stretch of it */
+  onFreeze?: (segId: string, id: string, on: boolean) => void
+  onFreezeRange?: (segId: string, id: string, from: number, to: number) => void
   /** B-roll Make my clips laid: show another of the stock videos it chose from (`index` into its broll.alts) */
   onSwapBroll?: (segId: string, id: string, index: number) => void
   /** The item whose B-roll is being swapped (its stock video is being added to the user's videos) */
@@ -198,7 +204,7 @@ function Chevron({ open }: { open: boolean }) {
 
 export function FramesPanel({
   frames, segment, targetLabel, currentTimeMs, videoTitles, selected, onToggleLock,
-  onApply, onOpenFrame, onSelectItem, onUpdateItem, onRemoveItem, onUpdateFrame, onReplaceMedia, onRemoveFrame, onRemoveMain, brandFrames = [],
+  onApply, onOpenFrame, onSelectItem, onUpdateItem, onRemoveItem, onUpdateFrame, onReplaceMedia, onChangePart, onFreeze, onFreezeRange, onRemoveFrame, onRemoveMain, brandFrames = [],
   onSwapBroll, swappingBroll = null,
 }: Props) {
   const current = segment && isFrameLayout(segment.layout) ? segment.layout : null
@@ -332,6 +338,9 @@ ${mediaTip(id)}`}
                     onUpdateFrame={patch => onUpdateFrame(seg.id, patch)}
                     onRemoveMain={slot => onRemoveMain(seg.id, slot)}
                     onReplaceMedia={(id, kind) => onReplaceMedia(seg.id, id, kind)}
+                    onChangePart={onChangePart && (id => onChangePart(seg.id, id))}
+                    onFreeze={onFreeze && ((id, on) => onFreeze(seg.id, id, on))}
+                    onFreezeRange={onFreezeRange && ((id, from, to) => onFreezeRange(seg.id, id, from, to))}
                     onSwapBroll={onSwapBroll && ((id, index) => onSwapBroll(seg.id, id, index))} swappingBroll={swappingBroll} />
                 </div>
               )}
@@ -343,8 +352,66 @@ ${mediaTip(id)}`}
   )
 }
 
+/**
+ * Freeze (user, 2026-11-06, as in news and facts shorts): a slot's video held on one still picture,
+ * with no sound, while the other plays. "Freeze until playhead" holds it until the playhead, then
+ * plays it from that same picture; Dim shows it darker while it's frozen.
+ */
+function FreezeFields({ item, segment, currentTimeMs, onFreeze, onDim, onRange }: {
+  item: FrameItem
+  segment: SegmentLocal
+  currentTimeMs: number
+  onFreeze: (on: boolean) => void
+  onDim: (dim: boolean) => void
+  onRange?: (from: number, to: number) => void
+}) {
+  // The part of it shown in this frame; the stretch to freeze starts at the playhead when it's in it
+  const lo = Math.max(item.start_ms, segment.start_ms), hi = Math.min(item.end_ms, segment.end_ms)
+  const clamp = (t: number) => Math.max(lo, Math.min(hi, Math.round(t)))
+  const startAt = () => currentTimeMs > lo && currentTimeMs < hi ? currentTimeMs : lo
+  const [range, setRange] = useState(() => ({ from: clamp(startAt()), to: clamp(startAt() + 3000) }))
+  // (another video picked: start over from it)
+  useEffect(() => { setRange({ from: clamp(startAt()), to: clamp(startAt() + 3000) }) }, [item.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const from = clamp(range.from), to = clamp(range.to)
+  const ok = to - from >= MIN_ITEM_MS
+  const row = 'flex items-center justify-between gap-2 text-[11px]'
+  return (
+    <div className="flex flex-col gap-2 p-2 rounded-md" style={{ background: 'rgb(var(--ed-fg) / 0.03)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.06)' }}>
+      <div className={row} style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>
+        <span className="flex items-center gap-1.5 font-semibold">
+          Freeze
+          <InfoTip label="About freeze" size={12}>A still picture while the other video plays, with no sound. It holds the picture where this video starts playing.</InfoTip>
+        </span>
+        <Switch on={!!item.freeze} label={item.freeze ? 'Let it play' : 'Freeze it on one picture'} onChange={onFreeze} />
+      </div>
+      {item.freeze && (
+        <div className={row} style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>
+          <span>Dim while frozen</span>
+          <Switch on={!!item.dim} label={item.dim ? 'Show it at full brightness' : 'Show it darker while frozen'} onChange={onDim} />
+        </div>
+      )}
+      {!item.freeze && onRange && (
+        <>
+          <p className="text-[10.5px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>
+            Or freeze just a stretch: it stops on the picture at the first time, stays still until the second, then plays on from there.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <TimeField label="Freeze from" ms={from} onCommit={t => setRange(r => ({ ...r, from: clamp(t) }))} onNow={() => setRange(r => ({ ...r, from: clamp(currentTimeMs) }))} />
+            <TimeField label="Until" ms={to} onCommit={t => setRange(r => ({ ...r, to: clamp(t) }))} onNow={() => setRange(r => ({ ...r, to: clamp(currentTimeMs) }))} />
+          </div>
+          <button onClick={() => onRange(from, to)} disabled={!ok}
+            title={ok ? `Still from ${msToLabel(from)} to ${msToLabel(to)}` : '"Until" has to be after "Freeze from"'}
+            className="self-start h-7 px-3 rounded-md text-[11px] font-bold disabled:opacity-40" style={{ background: 'rgba(125,211,252,0.16)', color: '#7dd3fc', boxShadow: 'inset 0 0 0 1px rgba(125,211,252,0.35)' }}>
+            ❄ Freeze {msToLabel(from)} – {msToLabel(to)}
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
 /** Everything in one frame — main video, videos, photos and text — each with its time, opening into its settings */
-function FrameContents({ seg, currentTimeMs, videoTitles, selected, onSelectItem, onUpdateItem, onRemoveItem, onUpdateFrame, onRemoveMain, onReplaceMedia, onSwapBroll, swappingBroll }: {
+function FrameContents({ seg, currentTimeMs, videoTitles, selected, onSelectItem, onUpdateItem, onRemoveItem, onUpdateFrame, onRemoveMain, onReplaceMedia, onChangePart, onFreeze, onFreezeRange, onSwapBroll, swappingBroll }: {
   seg: SegmentLocal
   currentTimeMs: number
   videoTitles: Record<string, string>
@@ -355,6 +422,9 @@ function FrameContents({ seg, currentTimeMs, videoTitles, selected, onSelectItem
   onUpdateFrame: (patch: FramePatch) => void
   onRemoveMain: (slot: number) => void
   onReplaceMedia: (id: string, kind: 'video' | 'photo') => void
+  onChangePart?: (id: string) => void
+  onFreeze?: (id: string, on: boolean) => void
+  onFreezeRange?: (id: string, from: number, to: number) => void
   onSwapBroll?: (id: string, index: number) => void
   swappingBroll?: string | null
 }) {
@@ -399,6 +469,7 @@ function FrameContents({ seg, currentTimeMs, videoTitles, selected, onSelectItem
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={r.color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{KIND_ICON[r.icon]}</svg>
               </span>
               <span className="text-[11.5px] font-medium truncate flex-1 text-[var(--ed-text)]">{r.name}</span>
+              {r.item?.freeze && <span className="text-[9.5px] font-semibold shrink-0 px-1.5 rounded" style={{ background: 'rgba(125,211,252,0.14)', color: '#7dd3fc' }} title="Frozen: a still picture">❄ Frozen</span>}
               <span className="text-[10px] shrink-0" style={{ color: 'rgb(var(--ed-fg) / 0.42)' }}>{laneName(r.lane)}</span>
             </button>
               {/* Quick switches, as on the Format cards: show / hide, sound */}
@@ -406,7 +477,7 @@ function FrameContents({ seg, currentTimeMs, videoTitles, selected, onSelectItem
                 <RowSwitch kind="eye" on={!!r.item.hidden} onClick={() => onUpdateItem(r.id, { hidden: !r.item!.hidden })}
                   label={r.item.hidden ? 'Show it again' : 'Hide it (not shown or exported)'} />
               )}
-              {r.item?.kind === 'video' && (
+              {r.item?.kind === 'video' && !r.item.freeze && (
                 <RowSwitch kind="sound" on={!!r.item.muted} onClick={() => onUpdateItem(r.id, { muted: !r.item!.muted })}
                   label={r.item.muted ? 'Turn its sound back on' : 'Mute it'} />
               )}
@@ -434,6 +505,10 @@ function FrameContents({ seg, currentTimeMs, videoTitles, selected, onSelectItem
                       <>
                         <div className="flex items-center gap-3">
                           <button onClick={() => onReplaceMedia(r.id, 'video')} className="text-[11px] font-medium hover:underline" style={{ color: 'var(--ed-accent-text)' }}>Change video</button>
+                          {onChangePart && r.item.source_video_id && (
+                            <button onClick={() => onChangePart(r.id)} title="Play the video and pick which part of it plays here"
+                              className="text-[11px] font-medium hover:underline" style={{ color: 'var(--ed-accent-text)' }}>Change part</button>
+                          )}
                           <label className="ml-auto flex items-center gap-1.5 text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
                             From
                             <input type="number" min={0} step={0.5} aria-label="Where in the video it starts, in seconds"
@@ -444,8 +519,15 @@ function FrameContents({ seg, currentTimeMs, videoTitles, selected, onSelectItem
                             s
                           </label>
                         </div>
-                        <Volume volume={r.item.volume ?? 1} muted={!!r.item.muted}
-                          onVolume={volume => onUpdateItem(r.id, { volume })} onMuted={muted => onUpdateItem(r.id, { muted })} />
+                        {!r.item.freeze && (
+                          <Volume volume={r.item.volume ?? 1} muted={!!r.item.muted}
+                            onVolume={volume => onUpdateItem(r.id, { volume })} onMuted={muted => onUpdateItem(r.id, { muted })} />
+                        )}
+                        {onFreeze && (
+                          <FreezeFields item={r.item} segment={seg} currentTimeMs={currentTimeMs}
+                            onFreeze={on => onFreeze(r.id, on)} onDim={dim => onUpdateItem(r.id, { dim })}
+                            onRange={onFreezeRange && ((from, to) => onFreezeRange(r.id, from, to))} />
+                        )}
                         {r.item.broll && r.item.broll.alts.length > 1 && onSwapBroll && (
                           <BrollSwap pick={r.item.broll} busy={swappingBroll === r.id} onPick={index => onSwapBroll(r.id, index)} />
                         )}

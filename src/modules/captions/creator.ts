@@ -10,7 +10,8 @@ import { TEMPLATE_FONTS, templateFontFamily, type CaptionTemplate, type CreatorL
  * Words appear when they are spoken (a short fade). See creator_captions.py for what each look is.
  *
  * The key word of a line is the first emphasised one (caption_styles.emphasis: picked by AI,
- * changed in the Captions panel), else its longest word ("build": its middle one).
+ * changed in the Captions panel), else its line word (caption_styles.line_keys: the word AI says
+ * carries it, changed there too), else its longest word ("build": its middle one).
  */
 
 export type CaptionWord = { word: string; start_ms: number; end_ms: number }
@@ -79,21 +80,26 @@ function font(key: string, script: string | null = null) {
 
 const letters = (t: string) => (t.match(/[\p{L}\p{N}]/gu) ?? []).length
 
-/** The line's key word: the first emphasised, else the longest (build: the middle one) — creator_captions.key_index */
-export function creatorKeyIndex(texts: string[], emph: boolean[], look: CreatorLook): number {
+/**
+ * The line's key word: the first emphasised, else its line word (`line`: the longest if AI marked
+ * more than one), else the longest (build: the middle one) — creator_captions.key_index
+ */
+export function creatorKeyIndex(texts: string[], emph: boolean[], look: CreatorLook, line: boolean[] = []): number {
   const e = emph.indexOf(true)
   if (e >= 0) return e
+  const marked = line.flatMap((on, j) => (on && j < texts.length ? [j] : []))
+  if (marked.length) return marked.reduce((b, j) => (letters(texts[j]) > letters(texts[b]) ? j : b))
   if (look === 'build') return Math.min(1, texts.length - 1)
   let best = 0
   texts.forEach((t, j) => { if (letters(t) > letters(texts[best])) best = j })
   return best
 }
 
-/** The words a line marks: scribble every emphasised one (none picked at all: the longest), the others their key word */
-export function creatorKeys(texts: string[], emph: boolean[], look: CreatorLook, anyEmphasis: boolean): Set<number> {
-  if (look !== 'scribble') return new Set([creatorKeyIndex(texts, emph, look)])
+/** The words a line marks: scribble every emphasised one (none picked at all: its key word), the others their key word */
+export function creatorKeys(texts: string[], emph: boolean[], look: CreatorLook, anyEmphasis: boolean, line: boolean[] = []): Set<number> {
+  if (look !== 'scribble') return new Set([creatorKeyIndex(texts, emph, look, line)])
   if (emph.some(Boolean)) return new Set(emph.flatMap((e, j) => (e ? [j] : [])))
-  return anyEmphasis ? new Set() : new Set([creatorKeyIndex(texts, emph, look)])
+  return anyEmphasis ? new Set() : new Set([creatorKeyIndex(texts, emph, look, line)])
 }
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
@@ -148,9 +154,11 @@ export function drawCreatorCaptions(
   const t = tMs - a
   const texts = line.map(w => (upper ? w.word.toUpperCase() : w.word))
   const emph = line.map(w => !!emphasis[String(w.start_ms)])
+  const lineKeys = style.line_keys ?? {}
+  const lineWord = line.map(w => !!lineKeys[String(w.start_ms)])
   const ons = line.map(w => w.start_ms - a)
   const offs = line.map((_, j) => (line[j + 1]?.start_ms ?? lineEnd) - a)
-  const kk = creatorKeyIndex(texts, emph, look)
+  const kk = creatorKeyIndex(texts, emph, look, lineWord)
   const reveal = (on: number) => (on <= 0 ? 1 : clamp01((t - on) / FADE_MS))
 
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
@@ -307,7 +315,7 @@ export function drawCreatorCaptions(
     const baseY = centredBase(base, n, cy)
     if (look === 'scribble') {
       // The underlines first (under the text), each drawn left to right when its word is spoken
-      const keys = creatorKeys(texts, emph, look, anyEmphasis)
+      const keys = creatorKeys(texts, emph, look, anyEmphasis, lineWord)
       const space = width(base, n, ' ')
       const amp = n * 0.06, lam = n * 0.42, th = Math.max(2, n * 0.07)
       let x = left

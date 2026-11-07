@@ -22,6 +22,8 @@ interface CaptionState {
   captionParts: CaptionPart[]
   /** The caption part picked (on the timeline's Captions row): the Captions panel styles it. null: the first part; 'all': every part */
   pickedCaptionPart: string | null
+  /** AI is picking the clip's key words (CaptionKeyWords useKeyWordsPick) */
+  keyWordsAsking: boolean
 }
 
 interface CaptionActions {
@@ -39,6 +41,7 @@ interface CaptionActions {
   setLiveLine: (line: CaptionState['liveLine']) => void
   setCaptionParts: (parts: CaptionPart[]) => void
   pickCaptionPart: (id: string | null) => void
+  setKeyWordsAsking: (v: boolean) => void
 }
 
 export const useCaptionStore = create<CaptionState & CaptionActions>()(set => ({
@@ -54,6 +57,7 @@ export const useCaptionStore = create<CaptionState & CaptionActions>()(set => ({
   liveLine: null,
   captionParts: [],
   pickedCaptionPart: null,
+  keyWordsAsking: false,
 
   // Which letters captions use is saved with the caption style (language: 'roman' = English letters),
   // and so is their case (text_case; a style saved before that field: UPPER when uppercase, else Title)
@@ -76,6 +80,7 @@ export const useCaptionStore = create<CaptionState & CaptionActions>()(set => ({
   setLiveLine: (line) => set({ liveLine: line }),
   setCaptionParts: (parts) => set(s => ({ captionParts: parts, pickedCaptionPart: s.pickedCaptionPart && s.pickedCaptionPart !== 'all' && !parts.some(p => p.id === s.pickedCaptionPart) ? null : s.pickedCaptionPart })),
   pickCaptionPart: (id) => set({ pickedCaptionPart: id }),
+  setKeyWordsAsking: (v) => set({ keyWordsAsking: v }),
 }))
 
 /**

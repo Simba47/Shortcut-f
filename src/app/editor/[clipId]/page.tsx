@@ -6,7 +6,6 @@ import { EditorShell } from './EditorShell'
 import { EditorShellMobile } from './EditorShellMobile'
 import sql from '@/lib/db'
 import { cleanBrandOn } from '@/lib/shared/brandOn'
-import { cleanProgressBar } from '@/lib/shared/brandKit'
 import { brandCaptionWords } from '@/lib/brandWords'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import { GetObjectCommand } from '@aws-sdk/client-s3'
@@ -202,8 +201,6 @@ export default async function EditorPage({
       volume: clip.original_volume == null ? 1 : Number(clip.original_volume),
       muted: clip.original_muted === true,
     },
-    // The clip's progress bar (a brand kit's), before the backend adds the column too
-    initialProgressBar: cleanProgressBar((clip as { progress_bar?: unknown }).progress_bar),
     initialBrand: cleanBrandOn((clip as { brand?: unknown }).brand),
     initialTransitions: transitions ?? [],
     initialOverlays: overlays ?? [],
