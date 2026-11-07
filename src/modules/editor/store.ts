@@ -6,7 +6,7 @@ import { LAYOUT_SLOT_COUNT } from '@chai-cut/shared'
 import { getBoxPositionAtLerp, type BoxPosition } from '@/lib/interpolation'
 import { makeBox, defaultCropForSlot } from './utils'
 import { inFramePicture } from './framePicture'
-import { isFrameLayout, DEFAULT_BAND, defaultFrame, frameOf, placeNewItem } from './frames'
+import { isFrameLayout, DEFAULT_BAND, defaultFrame, frameOf, placeNewItem, MIN_ITEM_MS } from './frames'
 import { setViewAt, recordMotionAt, removeViewChangeAt, moveViewChange, duplicateViewChange, type ViewKeyframe } from './views'
 import { isShot } from './shots'
 import { useMediaStore } from '@/modules/media/store'
@@ -89,11 +89,23 @@ interface EditorActions {
   /** Frame layouts: main video's slots and sound */
   updateFrame: (segId: string, patch: Partial<Pick<FrameSettings, 'main_slots' | 'main_volume' | 'main_muted' | 'main_volumes' | 'main_mutes' | 'main_hidden' | 'main_locked' | 'main_corners' | 'row_h' | 'row_order' | 'split' | 'split2' | 'flip' | 'flip2' | 'face_box' | 'main_rects' | 'bg'>>) => void
   /** Put something on a frame lane at time t (see placeNewItem). Returns its id, or null if there's no room. */
-  addFrameItem: (segId: string, lane: FrameLane, t: number, item: Omit<FrameItem, 'id' | 'lane' | 'start_ms' | 'end_ms'>) => string | null
+  /** `maxLenMs`: it plays no longer than this (a part of a video); what it lands on goes on after it */
+  addFrameItem: (segId: string, lane: FrameLane, t: number, item: Omit<FrameItem, 'id' | 'lane' | 'start_ms' | 'end_ms'>, maxLenMs?: number) => string | null
   updateFrameItem: (segId: string, itemId: string, patch: Partial<Omit<FrameItem, 'id'>>) => void
   removeFrameItem: (segId: string, itemId: string) => void
   /** Cut a frame item in two at `t` (a video's right part plays on from the same moment) */
   splitFrameItem: (segId: string, itemId: string, t: number) => void
+  /**
+   * Freeze a video item (one still picture, no sound) or let it play again. The picture is the one
+   * where it starts playing: the same video's piece right after it starts from that picture
+   */
+  setFrameItemFreeze: (segId: string, itemId: string, on: boolean) => void
+  /**
+   * Freeze a video item from `from` to `to` (clip time): it plays up to `from`, holds that picture
+   * until `to` (silent), then plays on from that same picture — as if paused there. Ends closer
+   * than MIN_ITEM_MS to its own edges snap to them
+   */
+  freezeFrameItemRange: (segId: string, itemId: string, from: number, to: number) => void
   /** Move one edge of a format. Formats are independent: the neighbour never moves, the edge
    *  just stops at it (no overlap). Uncovered time uses the default framing. */
   setSegmentEdge: (segId: string, edge: 'start' | 'end', tMs: number, durationMs: number) => void
@@ -105,7 +117,8 @@ interface EditorActions {
   addFormat: (startMs: number, endMs: number, layout: LayoutType, videoAR?: number, pos?: BoxPosition | (BoxPosition | undefined)[]) => string
   updateBoxSource: (segId: string, boxId: string, source_video_id: string | null, source_offset_ms: number) => void
   /** A muted video on top (B-roll) over [startMs, endMs): a layer of its own. The sections under it are not touched. */
-  placeBroll: (videoId: string, startMs: number, endMs: number, lane?: 'broll', track?: number) => string
+  /** `offsetMs`: where in the video it starts (a part of it picked) */
+  placeBroll: (videoId: string, startMs: number, endMs: number, lane?: 'broll', track?: number, offsetMs?: number) => string
   /**
    * A video on top at a new time. `moved`: dragged as a whole (it shows the same pictures, its
    * views move with it); otherwise an end was trimmed (trimmed at its start, it carries on from
@@ -494,17 +507,24 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     segments: s.segments.map(seg => seg.id !== segId ? seg : { ...seg, frame: { ...frameOf(seg), ...patch } }),
   })),
 
-  addFrameItem: (segId, lane, t, item) => {
+  addFrameItem: (segId, lane, t, item, maxLenMs) => {
     const seg = get().segments.find(x => x.id === segId)
     if (!seg || !isFrameLayout(seg.layout)) return null
     const frame = frameOf(seg)
     const spot = placeNewItem(frame, lane, t, seg)
     if (!spot) return null
     const id = crypto.randomUUID()
+    const end = maxLenMs ? Math.min(spot.end_ms, spot.start_ms + Math.max(MIN_ITEM_MS, maxLenMs)) : spot.end_ms
+    // Shorter than the item it lands on: that item goes on after it (from where it would be by then)
+    const under = (frame.items ?? []).find(it => it.id === (spot.replace ?? spot.trim?.id))
+    const rest: FrameItem | null = under && under.end_ms - end >= MIN_ITEM_MS
+      ? { ...under, id: crypto.randomUUID(), start_ms: end, ...(under.kind === 'video' ? { source_offset_ms: (under.source_offset_ms ?? 0) + (end - under.start_ms) } : {}) }
+      : null
     const items = (frame.items ?? [])
       .filter(it => it.id !== spot.replace)
       .map(it => it.id === spot.trim?.id ? { ...it, end_ms: spot.trim.end_ms } : it)
-    items.push({ ...item, id, lane, start_ms: spot.start_ms, end_ms: spot.end_ms })
+    items.push({ ...item, id, lane, start_ms: spot.start_ms, end_ms: end })
+    if (rest) items.push(rest)
     set(s => ({ segments: s.segments.map(x => x.id === segId ? { ...x, frame: { ...frame, items } } : x) }))
     return id
   },
@@ -524,8 +544,50 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
       return { ...seg, frame: { ...frame, items: (frame.items ?? []).flatMap(it => {
         if (it.id !== itemId || t <= it.start_ms || t >= it.end_ms) return [it]
         const right: FrameItem = { ...it, id: crypto.randomUUID(), start_ms: t }
-        if (it.kind === 'video') right.source_offset_ms = (it.source_offset_ms ?? 0) + (t - it.start_ms)
+        // (a frozen video's right part holds the same picture)
+        if (it.kind === 'video' && !it.freeze) right.source_offset_ms = (it.source_offset_ms ?? 0) + (t - it.start_ms)
         return [{ ...it, end_ms: t }, right]
+      }) } }
+    }),
+  })),
+
+  setFrameItemFreeze: (segId, itemId, on) => set(s => ({
+    segments: s.segments.map(seg => {
+      if (seg.id !== segId) return seg
+      const frame = frameOf(seg)
+      const items = frame.items ?? []
+      const it = items.find(x => x.id === itemId)
+      if (!it || it.kind !== 'video') return seg
+      // The same video playing on right after it: it starts from the frozen picture (frozen), or
+      // carries on from where this piece ends again (playing)
+      const next = items.find(x => x.lane === it.lane && x.kind === 'video' && !x.freeze && x.source_video_id === it.source_video_id && Math.abs(x.start_ms - it.end_ms) <= 1)
+      const off = it.source_offset_ms ?? 0
+      return { ...seg, frame: { ...frame, items: items.map(x => {
+        if (x.id === itemId) return on ? { ...x, freeze: true } : { ...x, freeze: false, dim: false }
+        if (x === next && on) return { ...x, source_offset_ms: off }
+        if (x === next && !on && (x.source_offset_ms ?? 0) === off) return { ...x, source_offset_ms: off + (it.end_ms - it.start_ms) }
+        return x
+      }) } }
+    }),
+  })),
+
+  freezeFrameItemRange: (segId, itemId, from, to) => set(s => ({
+    segments: s.segments.map(seg => {
+      if (seg.id !== segId) return seg
+      const frame = frameOf(seg)
+      return { ...seg, frame: { ...frame, items: (frame.items ?? []).flatMap((it): FrameItem[] => {
+        if (it.id !== itemId || it.kind !== 'video' || it.freeze) return [it]
+        let a = Math.max(it.start_ms, Math.round(from)), b = Math.min(it.end_ms, Math.round(to))
+        if (a - it.start_ms < MIN_ITEM_MS) a = it.start_ms
+        if (it.end_ms - b < MIN_ITEM_MS) b = it.end_ms
+        if (b - a < MIN_ITEM_MS) return [it]
+        // The picture at `from`: held, then where it plays on from
+        const off = (it.source_offset_ms ?? 0) + (a - it.start_ms)
+        const out: FrameItem[] = []
+        if (a > it.start_ms) out.push({ ...it, end_ms: a })
+        out.push({ ...it, id: a > it.start_ms ? crypto.randomUUID() : it.id, start_ms: a, end_ms: b, source_offset_ms: off, freeze: true })
+        if (b < it.end_ms) out.push({ ...it, id: crypto.randomUUID(), start_ms: b, source_offset_ms: off, freeze: false, dim: false })
+        return out
       }) } }
     }),
   })),
@@ -545,10 +607,10 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     }),
   })),
 
-  placeBroll: (videoId, startMs, endMs, lane, track) => {
+  placeBroll: (videoId, startMs, endMs, lane, track, offsetMs = 0) => {
     const id = crypto.randomUUID()
     const box = {
-      id: crypto.randomUUID(), slot_index: 0, source_video_id: videoId, source_offset_ms: 0,
+      id: crypto.randomUUID(), slot_index: 0, source_video_id: videoId, source_offset_ms: offsetMs,
       image_path: null, image_motion: null, volume: 1, muted: true,
       keyframes: [{ t_ms: startMs, x: 0, y: 0, w: 1, h: 1 }],
     } as CropBoxLocal

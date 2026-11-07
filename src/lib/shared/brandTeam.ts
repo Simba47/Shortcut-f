@@ -11,7 +11,7 @@
  * Pure: no database, no React.
  */
 import type { CaptionStyle, FrameItem, SegmentLocal, TextOverlay } from './types'
-import { brandCaptionLooks, brandLockOf, brandProgressBar, brandTextStyle, type BrandKitData } from './brandKit'
+import { brandCaptionLooks, brandLockOf, brandTextStyle, type BrandKitData } from './brandKit'
 
 export type KitRole = 'use' | 'edit'
 export const cleanRole = (v: unknown): KitRole => (v === 'edit' ? 'edit' : 'use')
@@ -41,7 +41,7 @@ export function lockSetOf(d: BrandKitData): LockSet {
   const colors = [
     ...base.colors, d.card.bg.color, d.card.bg.color2, d.card.title.color, d.card.handle.color,
     ...styles.flatMap(s => [s.color, s.bg]), ...looks.flatMap(l => [l.captions.color, l.captions.highlight_color]),
-    brandProgressBar(d)?.color, '#ffffff', '#000000',
+    '#ffffff', '#000000',
   ].filter((c): c is string => typeof c === 'string' && HEX.test(c)).map(c => c.toLowerCase())
   const fonts = base.fonts.length
     ? [...new Set([...base.fonts, ...styles.map(s => s.font), ...looks.map(l => l.captions.font), d.title.font ?? 'sans-serif']

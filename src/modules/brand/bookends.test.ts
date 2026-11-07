@@ -29,7 +29,7 @@ function clip(over: Partial<BrandTarget> = {}): BrandTarget {
   return {
     clipId: 'c1', lengthMs: LEN, mainVideoId: MAIN, overlays: [], texts: [text], caption: {}, textCase: 'title',
     segments: [p1], keyframes: { 'p1-b': [{ id: 'k1', box_id: 'p1-b', t_ms: 0, x: 0.3, y: 0, w: 0.32, h: 1 }] }, transitions: [],
-    progressBar: null, timelineEdits: true, audioTracks: [], canInsert: true, ...over,
+    timelineEdits: true, audioTracks: [], canInsert: true, ...over,
   }
 }
 const row = (t: BrandTarget) => [...t.segments].sort((a, b) => a.start_ms - b.start_ms).map(s =>

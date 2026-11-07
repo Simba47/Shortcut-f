@@ -14,6 +14,7 @@ import { insertsOf, insertedMs, rippleInsert, isInsert, goesAfterMain, piecesOf,
 import { PostText, type PostTextValue } from '@/components/clips/PostText'
 import { BrollPanel, type StockResult } from '@/components/editor/BrollPanel'
 import { VideoPanel, type PanelVideo } from '@/components/editor/VideoPanel'
+import { VideoPartModal, type VideoPart } from '@/components/editor/VideoPartChooser'
 import { MediaLibrary, type LibraryItem, type MediaSection } from '@/components/editor/MediaLibrary'
 import { PhotoSearch } from '@/components/editor/PhotoSearch'
 import { MemesPanel } from '@/components/editor/MemesPanel'
@@ -26,6 +27,8 @@ import { LAYOUT_COLORS, MAX_ZOOM, zoomStep, zoomLabel, STOCK_DRAG_TYPE, type Lan
 import { useVideoUpload } from '@/modules/upload/useVideoUpload'
 import { TranscriptPanel } from '@/components/editor/TranscriptPanel'
 import { CaptionStyler } from '@/components/editor/CaptionStyler'
+import { useKeyWordsPick } from '@/components/editor/CaptionKeyWords'
+import { CaptionPreview } from '@/components/editor/CaptionPreview'
 import { TextOverlayPanel } from '@/components/editor/TextOverlayPanel'
 import { AudioMixerPanel } from '@/components/editor/AudioMixerPanel'
 import { MediaPickerModal } from '@/components/editor/MediaPickerModal'
@@ -46,7 +49,7 @@ import { putBrandOn, takeBrandOff, brandNewFrames, updateBrand, brandChanged, fi
 import { EditorBrandMenu } from '@/components/brand/EditorBrandMenu'
 import { CleanupPanel, type CleanupRow } from '@/components/editor/CleanupPanel'
 import { cleanupCards, isDeleted } from '@/modules/editor/cleanup'
-import { brandPalette, brandLockOf, brandTextStyle, brandCaptionLooks, brandCaptionStyle, captionBand, sameEndVideo, type FrameRect, type BrandKit, type BrandTextKind, type ProgressBar } from '@/lib/shared/brandKit'
+import { brandPalette, brandLockOf, brandTextStyle, brandCaptionLooks, brandCaptionStyle, captionBand, sameEndVideo, type FrameRect, type BrandKit, type BrandTextKind } from '@/lib/shared/brandKit'
 import { brandTextLook } from '@/modules/editor/textStyle'
 import { brandCaptionWords, type BrandWords } from '@/lib/brandWords'
 import { lockClipLook, lockHolds, lockSetOf, type LockSet } from '@/lib/shared/brandTeam'
@@ -68,7 +71,7 @@ import { trackPresentedFrame } from '@/modules/player/presentedFrame'
 import { useVideoSync } from '@/modules/player/useSync'
 import { useCaptionStore } from '@/modules/captions/store'
 import { cleanParts, playedParts, playedPartAt, applyLook, lookOf, isLookChange, LOOK_KEYS, type CaptionPart } from '@/modules/captions/parts'
-import { CAPTION_TEMPLATES } from '@/modules/captions/templates'
+import { CAPTION_TEMPLATES, usesKeyWords } from '@/modules/captions/templates'
 import { useMediaStore } from '@/modules/media/store'
 import { rowsToLocal, normalizeCoverage, uncoveredRanges, defaultCropForSlot, msToLabel } from '@/modules/editor/utils'
 import { isShot, flattenShots, toSaved, restoreLayers, asMainPart } from '@/modules/editor/shots'
@@ -78,7 +81,7 @@ import { fitsOn, freeTrackIn, settleTracks, savedLanes, type TrackItem, type Tra
 import { viewChanges } from '@/modules/editor/views'
 import { subjectBoxAt, seenShare, followChanges, autoDirectChanges, type SubjectPoint } from '@/modules/editor/subjects'
 import { buildKeyframes } from '@/modules/editor/views'
-import { frameSlotSize } from '@/modules/editor/frames'
+import { frameSlotSize, placeNewItem, itemBounds, MIN_ITEM_MS, oldTitleAsTitle } from '@/modules/editor/frames'
 import { edgeDragPath } from '@/modules/editor/edgeDrag'
 import { getBoxPositionAtLerp, type BoxPosition } from '@/lib/interpolation'
 import { SubjectsPanel, type SubjectItem, type AnglesView } from '@/components/editor/SubjectsPanel'
@@ -113,8 +116,6 @@ interface Props {
   initialMusicUrls?: Record<string, string>
   /** The clip's own sound as saved (top of the Music panel) */
   initialOriginalSound?: { volume: number; muted: boolean }
-  /** The clip's progress bar as saved (null = none) */
-  initialProgressBar?: ProgressBar | null
   /** The brand kit switched on for this clip, and what it changed (clips.brand); null = off */
   initialBrand?: BrandOn | null
   initialTransitions: Transition[]
@@ -234,7 +235,7 @@ type AutoRecord = { mode: AutoMode; places: Array<[number, number, string]>; gro
 export function EditorShell({
   clip: savedClip, videoUrl, words: initialWords, initialSegments,
   initialCaptionStyles, initialTextOverlays, initialAudioTracks, initialTransitions, initialOverlays,
-  initialMusicUrls, initialOriginalSound, initialProgressBar, initialBrand, backStart,
+  initialMusicUrls, initialOriginalSound, initialBrand, backStart,
 }: Props) {
   // The picture inside the video's black bars (none: the whole frame): the views the editor makes keep inside it
   setFramePicture(pictureOrWhole((savedClip as { picture_box?: Parameters<typeof pictureOrWhole>[0] }).picture_box))
@@ -682,6 +683,8 @@ export function EditorShell({
   const [laneHighlight, setLaneHighlight] = useState<{ lane: FrameLane; n: number; focusPlus?: boolean; openMenu?: boolean } | null>(null)
   const [addMenu, setAddMenu] = useState<{ segId: string; lane: FrameLane; t: number; anchor: DOMRect } | null>(null)
   const [framePicker, setFramePicker] = useState<{ segId: string; kind: 'video' | 'photo'; lane?: FrameLane; t?: number; replaceId?: string } | null>(null)
+  // A video about to go into a frame's slot or the Videos lane: which part of it (choosePart)
+  const [partAsk, setPartAsk] = useState<{ url: string; durationMs: number | null; roomMs: number | null; initial?: VideoPart; change?: boolean; resolve: (p: VideoPart | 'whole' | null) => void } | null>(null)
   const [videoLibrary, setVideoLibrary] = useState<Record<string, { url: string; title: string; duration_ms?: number | null; stock?: boolean }>>({})
   const videoLibraryRef = useRef(videoLibrary)
   videoLibraryRef.current = videoLibrary
@@ -927,21 +930,8 @@ export function EditorShell({
     editVersionRef.current++
     autoSaveTimerRef.current = setTimeout(() => latestHandleSaveRef.current(), 2500)
   }, [originalVolume, originalMuted]) // eslint-disable-line react-hooks/exhaustive-deps
-  // The clip's progress bar (Brand kit panel; a kit with one puts it on: modules/brand/engine.ts): drawn on the preview,
-  // saved with the clip, drawn by the export (render.py)
-  const [progressBar, setProgressBar] = useState<ProgressBar | null>(initialProgressBar ?? null)
   // The brand kit switched on for this clip (modules/editor/brandState.ts)
   const brandOn = useBrandStore(st => st.on)
-  const progressBarRef = useRef(progressBar)
-  const progressLoadedRef = useRef(true)
-  useEffect(() => {
-    progressBarRef.current = progressBar
-    if (progressLoadedRef.current) { progressLoadedRef.current = false; return }
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
-    unsavedRef.current = true
-    editVersionRef.current++
-    autoSaveTimerRef.current = setTimeout(() => latestHandleSaveRef.current(), 2500)
-  }, [progressBar]) // eslint-disable-line react-hooks/exhaustive-deps
   // A muted section (its own sound off): the video is silent while the playhead is in it
   const [sectionMuted, setSectionMuted] = useState(false)
   // The frame sound sync sets the main video's volume every frame, so the level goes through it
@@ -1545,7 +1535,6 @@ export function EditorShell({
           ...(canTrim ? { range } : {}),
           removeFillers: removeFillersRef.current,
           originalSound: originalSoundRef.current,
-          progressBar: progressBarRef.current,
           brand: sentBrand,
         }),
       })
@@ -1702,7 +1691,28 @@ export function EditorShell({
     if (showCaptions && needsCaptions()) makeCaptions()
   }, [edgeDragsDone]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleRetranscribe(languageCode: string) {
+  // (`fresh`: Regenerate — read the clip again even where it has words; else only parts with none.
+  // Try again repeats what failed)
+  const lastFreshRef = useRef(false)
+  // The caption job being waited for, and which wait is current: Stop ends the wait and stops the job
+  // (user, 2026-11-06) — the worker writes nothing, the clip keeps its words
+  const retranscribeJobRef = useRef<string | null>(null)
+  const retranscribeRunRef = useRef(0)
+  const stopCaptionJob = (jobId: string) => {
+    fetch('/api/transcribe/retranscribe/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_id: jobId }) }).catch(() => {})
+  }
+  function stopRegenerate() {
+    const jobId = retranscribeJobRef.current
+    retranscribeRunRef.current++
+    retranscribeJobRef.current = null
+    if (retranscribeTimerRef.current) { clearInterval(retranscribeTimerRef.current); retranscribeTimerRef.current = null }
+    setRetranscribePlace(null); setRetranscribing(false); setRetranscribeError(null)
+    if (jobId) stopCaptionJob(jobId)
+  }
+  async function handleRetranscribe(languageCode: string, fresh = false) {
+    lastFreshRef.current = fresh
+    const run = ++retranscribeRunRef.current
+    retranscribeJobRef.current = null
     setRetranscribing(true); setRetranscribeElapsed(0); setRetranscribeError(null); setRetranscribePlace(null)
     if (retranscribeTimerRef.current) clearInterval(retranscribeTimerRef.current)
     const startedAt = Date.now()
@@ -1716,7 +1726,7 @@ export function EditorShell({
     try {
       const res = await fetch('/api/transcribe/retranscribe', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clip_id: clip.id, language_code: languageCode }),
+        body: JSON.stringify({ clip_id: clip.id, language_code: languageCode, ...(fresh ? { fresh: true } : {}) }),
       })
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}))
@@ -1725,10 +1735,14 @@ export function EditorShell({
       const videoId = (clip as unknown as { video_id: string }).video_id
       const queuedAt = new Date().toISOString()
       const { job_id: jobId } = await res.json().catch(() => ({})) as { job_id?: string | null }
+      // (stopped before the job was made: it's stopped now)
+      if (retranscribeRunRef.current !== run) { if (jobId) stopCaptionJob(jobId); return }
+      retranscribeJobRef.current = jobId ?? null
       const poll = async () => {
         const deadline = Date.now() + 5 * 60 * 1000
         while (Date.now() < deadline) {
           await new Promise(r => setTimeout(r, 3000))
+          if (retranscribeRunRef.current !== run) return
           const res = await fetch(`/api/transcribe/words?video_id=${videoId}&since=${encodeURIComponent(queuedAt)}${jobId ? `&job=${jobId}` : ''}`)
           if (res.ok) {
             const { words: newWords, failed, place } = await res.json()
@@ -1751,6 +1765,7 @@ export function EditorShell({
       }
       poll()
     } catch (err) {
+      if (retranscribeRunRef.current !== run) return
       stopTimer(); setRetranscribing(false)
       setRetranscribeError(err instanceof Error ? err.message : 'Retranscription failed')
     }
@@ -3065,8 +3080,8 @@ export function EditorShell({
     toggleOptions(true)
   }
 
-  function addToLane(segId: string, lane: FrameLane, t: number, item: Omit<FrameItem, 'id' | 'lane' | 'start_ms' | 'end_ms'>) {
-    const id = addFrameItem(segId, lane, t, item)
+  function addToLane(segId: string, lane: FrameLane, t: number, item: Omit<FrameItem, 'id' | 'lane' | 'start_ms' | 'end_ms'>, maxLenMs?: number) {
+    const id = addFrameItem(segId, lane, t, item, maxLenMs)
     if (id) {
       setActiveFrameItemId(id)
       setTool(item.kind === 'text' ? 'text' : 'frames')
@@ -3113,13 +3128,58 @@ export function EditorShell({
     }
   }
 
-  function handlePickedVideo(videoId: string) {
+  function handlePickedVideo(videoId: string, part?: VideoPart) {
     const p = framePicker
     setFramePicker(null)
     if (!videoLibraryRef.current[videoId]) loadVideoLibrary()
     if (!p) return
-    if (p.replaceId) { updateFrameItem(p.segId, p.replaceId, { kind: 'video', source_video_id: videoId, source_offset_ms: 0, image_path: null, image_url: null }); return }
-    if (p.lane !== undefined) addToLane(p.segId, p.lane, p.t ?? currentTimeMs, { kind: 'video', source_video_id: videoId, source_offset_ms: 0, volume: 1, muted: false, corners: cornersFor(p.segId, p.lane) })
+    if (p.replaceId) {
+      updateFrameItem(p.segId, p.replaceId, { kind: 'video', source_video_id: videoId, source_offset_ms: part?.from_ms ?? 0, image_path: null, image_url: null, ...partEnd(p.segId, p.replaceId, part) })
+      return
+    }
+    if (p.lane !== undefined) addToLane(p.segId, p.lane, p.t ?? currentTimeMs, { kind: 'video', source_video_id: videoId, source_offset_ms: part?.from_ms ?? 0, volume: 1, muted: false, corners: cornersFor(p.segId, p.lane) }, part && part.to_ms - part.from_ms)
+  }
+  /** How long a video can play in a frame's slot from `t` (null: there's no room there) */
+  function slotRoomMs(segId: string, lane: FrameLane, t: number): number | null {
+    const seg = segments.find(x => x.id === segId)
+    const spot = seg && isFrameLayout(seg.layout) ? placeNewItem(frameOf(seg), lane, t, seg) : null
+    return spot ? spot.end_ms - spot.start_ms : null
+  }
+  /** How long a slot's item can play from where it starts (up to the next item, the frame's end) */
+  function itemRoomMs(segId: string, itemId: string): number | null {
+    const seg = segments.find(x => x.id === segId)
+    const it = seg ? frameOf(seg).items?.find(x => x.id === itemId) : undefined
+    return seg && it ? itemBounds(frameOf(seg), it, seg).max - it.start_ms : null
+  }
+  /** A slot's item given a part of a video: as long as the part, cut where the room ends */
+  function partEnd(segId: string, itemId: string, part?: VideoPart): { end_ms?: number } {
+    const seg = segments.find(x => x.id === segId)
+    const it = seg ? frameOf(seg).items?.find(x => x.id === itemId) : undefined
+    const room = itemRoomMs(segId, itemId)
+    if (!part || !it || room == null) return {}
+    return { end_ms: it.start_ms + Math.max(MIN_ITEM_MS, Math.min(part.to_ms - part.from_ms, room)) }
+  }
+  /**
+   * Which part of a video goes in (user, 2026-11-05): the chooser opens on it; resolves with the
+   * part, 'whole' (Use whole video, or it can't be played here) or null (closed: nothing goes in)
+   */
+  async function choosePart(videoId: string, roomMs: number | null, opts: { initial?: VideoPart; change?: boolean } = {}): Promise<VideoPart | 'whole' | null> {
+    let lib = videoLibraryRef.current[videoId]
+    if (!lib?.url) lib = (await loadVideoLibrary())[videoId]
+    if (!lib?.url) return 'whole'
+    const { url, duration_ms } = lib
+    pause()
+    return new Promise(resolve => setPartAsk({ url, durationMs: duration_ms ?? null, roomMs, ...opts, resolve }))
+  }
+  /** "Change part" on a video in a frame's slot: pick another part of it; it's as long as that part */
+  async function changeItemPart(segId: string, itemId: string) {
+    const seg = segments.find(x => x.id === segId)
+    const it = seg ? frameOf(seg).items?.find(x => x.id === itemId) : undefined
+    if (!it?.source_video_id || frameItemBlocked(segId, itemId)) return
+    const from = it.source_offset_ms ?? 0
+    const part = await choosePart(it.source_video_id, itemRoomMs(segId, itemId), { initial: { from_ms: from, to_ms: from + (it.end_ms - it.start_ms) }, change: true })
+    if (!part || part === 'whole') return
+    updateFrameItem(segId, itemId, { source_offset_ms: part.from_ms, ...partEnd(segId, itemId, part) })
   }
 
   function handlePickedPhoto(storagePath: string, url: string) {
@@ -3168,10 +3228,15 @@ export function EditorShell({
     return null
   }
   /** A video from the user's library put in a frame's slot at `atMs` */
-  function videoIntoSlot(target: { segId: string; slot: number }, videoId: string, atMs: number) {
+  async function videoIntoSlot(target: { segId: string; slot: number }, videoId: string, atMs: number) {
     pause()
     seekToMs(atMs)
-    addToLane(target.segId, target.slot, atMs, { kind: 'video', source_video_id: videoId, source_offset_ms: 0, volume: 1, muted: false, corners: cornersFor(target.segId, target.slot) })
+    // Which part of it goes in (when there's room for it there at all)
+    const room = slotRoomMs(target.segId, target.slot, atMs)
+    const part = room == null ? 'whole' : await choosePart(videoId, room)
+    if (!part) return
+    const p = part === 'whole' ? undefined : part
+    addToLane(target.segId, target.slot, atMs, { kind: 'video', source_video_id: videoId, source_offset_ms: p?.from_ms ?? 0, volume: 1, muted: false, corners: cornersFor(target.segId, target.slot) }, p && p.to_ms - p.from_ms)
   }
   /** A stored photo put in a frame's slot at `atMs` */
   function photoIntoSlot(target: { segId: string; slot: number }, storagePath: string, url: string | null, atMs: number) {
@@ -3301,6 +3366,13 @@ export function EditorShell({
 
   // ── Every delete asks first ─────────────────────────────────────────────────
   const { confirm, dialog: confirmDialog } = useConfirm()
+  /** The refresh icon on Show captions: this clip's speech read again (its word edits go), once confirmed */
+  function askRegenerate() {
+    confirm({
+      title: 'Regenerate this clip’s captions?', body: 'Its speech is read again. Your word edits in this clip will be replaced.',
+      confirmLabel: 'Regenerate', tone: 'warning',
+    }, () => handleRetranscribe('unknown', true))
+  }
   const UNDO_NOTE = 'You can undo this.'
 
   // ── Brand kit (user, 2026-10-17) ──────────────────────────────────────────────
@@ -3396,7 +3468,7 @@ export function EditorShell({
     return {
       clipId: clip.id, lengthMs: clipLengthMs, mainVideoId: mainVideoId ?? null,
       overlays: m.overlays, texts: m.textOverlays, caption: c.captionStyle, textCase: c.captionTextCase,
-      segments: useEditorStore.getState().segments, progressBar: progressBarRef.current, avoid: brandAvoid(),
+      segments: useEditorStore.getState().segments, avoid: brandAvoid(),
       keyframes: useEditorStore.getState().keyframes, transitions: m.transitions, timelineEdits: true,
       // (removed parts the older way: the clip first becomes pieces — brandNeedsPieces — then the intro and outro go in)
       audioTracks: m.audioTracks, canInsert: !trimmed, videoAt: t => videoAtPieces(allPieces, t),
@@ -3456,8 +3528,6 @@ export function EditorShell({
     } else if (!same(t.segments, was.segments)) useEditorStore.setState({ segments: t.segments })
     if (t.transitions !== was.transitions) useMediaStore.getState().setTransitions(t.transitions)
     if (t.audioTracks !== was.audioTracks) useMediaStore.setState({ audioTracks: t.audioTracks })
-    // (the bar isn't in Undo: it's changed back in the Brand kit panel)
-    if (!same(t.progressBar, was.progressBar)) { progressBarRef.current = t.progressBar; setProgressBar(t.progressBar) }
   }
 
   /** A locked team kit is on this clip (Phase 6): it stays — said why */
@@ -3934,6 +4004,14 @@ export function EditorShell({
     if (!parts.length) return
     for (const sp of parts) setPartSpeed(sp.id, 1)
     notifyLocked(`${parts.length === 1 ? 'A part' : `${parts.length} parts`} of this clip played faster or slower — back at normal speed now`, 8000)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // The old Title frame is gone (user, 2026-11-06: Title and Title + Caption merged): a part that
+  // still has it becomes the merged Title with its caption strip closed — the same picture
+  useEffect(() => {
+    for (const s of useEditorStore.getState().segments) {
+      const patch = oldTitleAsTitle(s)
+      if (patch) updateSegment(s.id, patch)
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   /** An inserted video taken out: what came after it moves back, and the parts it had cut in two join again */
   function removeInsert(segId: string) {
@@ -4961,14 +5039,17 @@ export function EditorShell({
   /** B-roll uploaded from the device (B-roll panel, Upload): at the playhead, 5 s or the video's own length if shorter */
   async function addUploadedBroll(videoId: string) { await addUploadedVideo(videoId, currentTimeMs, 'broll') }
   /** An uploaded video put in at `atMs`: as B-roll, or as one of the user's videos (its panel opens) */
-  async function addUploadedVideo(videoId: string, atMs: number, lane: 'broll' | 'video'): Promise<number | null> {
+  async function addUploadedVideo(videoId: string, atMs: number, lane: 'broll' | 'video', askPart = true): Promise<number | null> {
     const at = Math.max(0, Math.min(atMs, clipLengthMs - 500))
-    // The whole video goes in (its handles trim it), past the main video's end too: the timeline
-    // goes on for it, the main video staying as long as it is
-    const own = await videoLengthMs(videoId)
+    // The Videos lane: the part of it picked first (user, 2026-11-05), as long as that part
+    const part = lane === 'video' && askPart ? await choosePart(videoId, null) : 'whole'
+    if (!part) return null
+    // Otherwise the whole video goes in (its handles trim it), past the main video's end too: the
+    // timeline goes on for it, the main video staying as long as it is
+    const own = part === 'whole' ? await videoLengthMs(videoId) : part.to_ms - part.from_ms
     const len = Math.min(own ?? clipLengthMs - at, MAX_CLIP_MS - at)
     if (rangeBlocked(at, at + len)) return null
-    const id = placeBroll(videoId, at, at + len, lane === 'broll' ? 'broll' : undefined, freeTrack(at, at + len))
+    const id = placeBroll(videoId, at, at + len, lane === 'broll' ? 'broll' : undefined, freeTrack(at, at + len), part === 'whole' ? 0 : part.from_ms)
     pickShot(id, lane === 'video')
     seekToMs(at)
     seekAfterInsertRef.current = at
@@ -4978,7 +5059,8 @@ export function EditorShell({
 
   // ── Drag and drop: files from the computer (on the timeline or the sidebar), stock footage
   //    from the B-roll search (on the timeline) ──
-  const dropTargetRef = useRef<{ atMs: number; lane: 'broll' | 'video' | 'insert'; frame?: { segId: string; slot: number } } | null>(null)
+  // (`many`: one of several files dropped together — they go in whole, one after another)
+  const dropTargetRef = useRef<{ atMs: number; lane: 'broll' | 'video' | 'insert'; frame?: { segId: string; slot: number }; many?: boolean } | null>(null)
   /** Several files dropped together (dropSeveral): told where the video just uploaded ends (null: it didn't go in) */
   const dropNextRef = useRef<((endMs: number | null) => void) | null>(null)
   const dropNext = (endMs: number | null) => { const go = dropNextRef.current; dropNextRef.current = null; go?.(endMs) }
@@ -4991,7 +5073,7 @@ export function EditorShell({
       // Into the main strip, in between (inserts.ts)
       loadVideoLibrary().then(() => videoLengthMs(videoId)).then(len => { insertVideo(videoId, t.atMs, len); dropNext(len != null ? t.atMs + len : null) })
         .catch(e => { notifyLocked(e instanceof Error ? e.message : 'Could not put the video in'); dropNext(null) })
-    } else if (t) addUploadedVideo(videoId, t.atMs, t.lane).then(dropNext, e => { notifyLocked(e instanceof Error ? e.message : 'Could not add the video'); dropNext(null) })
+    } else if (t) addUploadedVideo(videoId, t.atMs, t.lane, !t.many).then(dropNext, e => { notifyLocked(e instanceof Error ? e.message : 'Could not add the video'); dropNext(null) })
     else dropNext(null)
     loadLibrary()
   }, { asset: true })
@@ -5269,7 +5351,7 @@ export function EditorShell({
           if (!opened) { opened = true; openMedia(lane === 'broll' ? 'library' : 'media') }
           end = await new Promise<number | null>(resolve => {
             dropNextRef.current = resolve
-            dropTargetRef.current = { atMs: toEnd ? mainEndMs() : at, lane: lane === 'main' || toEnd ? 'insert' : lane === 'broll' ? 'broll' : 'video' }
+            dropTargetRef.current = { atMs: toEnd ? mainEndMs() : at, lane: lane === 'main' || toEnd ? 'insert' : lane === 'broll' ? 'broll' : 'video', many: files.length > 1 }
             dropUpload.start(f)
           })
         }
@@ -5926,6 +6008,11 @@ export function EditorShell({
         text: ch.map(w => w.word).join(' '), color: captionLookColor(p.style), name: captionLookName(p.style),
       }))
     })
+      // Only the clip's own: the lines are made from the whole video's words (as the preview groups
+      // them), so lines before 0:00 and after the end were drawn past the row's edges (user,
+      // 2026-11-06); a line across an edge is cut there
+      .filter(l => l.end > 0 && l.start < clipLengthMs)
+      .map(l => (l.start < 0 || l.end > clipLengthMs ? { ...l, start: Math.max(0, l.start), end: Math.min(clipLengthMs, l.end) } : l))
   }, [playedCaptionParts, captionStyle, clipLengthMs, displayWords, clip.start_ms]) // eslint-disable-line react-hooks/exhaustive-deps
   /** The caption lines selected on the Captions row, as stretches of the clip (clip ms); none: every caption */
   const [captionSel, setCaptionSel] = useState<[number, number][]>([])
@@ -5941,13 +6028,19 @@ export function EditorShell({
     if (add) setCaptionSel(sel => (on ? sel.filter(([a, b]) => !((l.start + l.end) / 2 >= a && (l.start + l.end) / 2 < b)) : [...sel, range]))
     else setCaptionSel(on && selectedLines.length === 1 ? [] : [range])
     openSettings('captions')
+    toStyleTab()
   }
   /** A stretch dragged across on the Captions row: the lines in it (Shift / Ctrl: added) */
   function selectCaptionRange(r: [number, number], add: boolean) {
     clearPicksRef.current()
     setCaptionSel(sel => (add ? [...sel, r] : [r]))
     openSettings('captions')
+    toStyleTab()
   }
+  /** The Captions panel's sub-tab picked (captionTab below: the one shown) */
+  const [captionTabPicked, setCaptionTab] = useState<CaptionTab>('captions')
+  /** Lines picked to style: from the Captions tab to Style (another styling tab stays) */
+  const toStyleTab = () => setCaptionTab(t => (t === 'captions' ? 'style' : t))
   /**
    * The Captions row is on the timeline only while the Captions panel is open (as a tool's own
    * row): it never sits among the media rows otherwise. Closed: no caption lines stay selected.
@@ -5962,6 +6055,13 @@ export function EditorShell({
   const panelCaptionStyle = playedCaptionParts && selectedLines.length
     ? playedPartAt(playedCaptionParts, selectedLines[0].start + 1).style
     : captionStyle
+  /** The style in the panel draws key words (a Creator one, any caption style, an animated preset): their tab */
+  const keyWordsOn = usesKeyWords(panelCaptionStyle)
+  /** The sub-tab shown: captions off, only Captions; Key words only with a style that draws them */
+  const captionTab: CaptionTab = !showCaptions ? 'captions' : captionTabPicked === 'keywords' && !keyWordsOn ? 'style' : captionTabPicked
+  // (AI picks the key words as soon as such a style is on, whichever tab is open — so the preview
+  // shows them before the first export, which picks them for the same styles: render.ts pickEmphasis)
+  useKeyWordsPick(clip.id, panelCaptionStyle, captionsPanelOpen && showCaptions && keyWordsOn, changeCaptionStyle)
   /** A change in the Captions panel: a look change goes to the selected lines (none selected: every caption); anything else is the whole clip's */
   function changeCaptionStyle(updates: Partial<CaptionStyle>) {
     const st = useCaptionStore.getState()
@@ -6739,6 +6839,11 @@ export function EditorShell({
                 onRemoveItem={askRemoveFrameItem}
                 onUpdateFrame={(segId, patch) => { if (!sectionBlocked(segId)) updateFrame(segId, patch) }}
                 onReplaceMedia={(segId, id, kind) => { if (sectionBlocked(segId)) return; pause(); setFramePicker({ segId, kind, replaceId: id }) }}
+                onChangePart={(segId, id) => { void changeItemPart(segId, id) }}
+                // Freeze — parked (user, 2026-11-06: "we will work on it later"). Without these two the
+                // Frames panel shows no Freeze box; the rest (store, preview, export) stays in and is inert
+                // onFreeze={(segId, id, on) => { if (!frameItemBlocked(segId, id)) useEditorStore.getState().setFrameItemFreeze(segId, id, on) }}
+                // onFreezeRange={(segId, id, from, to) => { if (!frameItemBlocked(segId, id)) { pause(); useEditorStore.getState().freezeFrameItemRange(segId, id, from, to) } }}
                 onSwapBroll={(segId, id, index) => { if (!frameItemBlocked(segId, id)) void swapBroll(segId, id, index) }}
                 swappingBroll={swappingBroll}
                 onRemoveFrame={askRemoveFrame}
@@ -6764,8 +6869,31 @@ export function EditorShell({
                 <TranscriptPanel words={displayWords} clipStartMs={clip.start_ms} clipEndMs={clip.end_ms} currentTimeMs={currentTimeMs} onSeek={seekToMs} onWordChange={changeWord} />
               ) : (
                 <div className="flex flex-col">
+                  {/* Pinned at the top while the panel scrolls (user, 2026-11-06): the preview and the sub-bar */}
+                  <div className="sticky top-0 z-10 shrink-0 px-3 pt-2 pb-2" style={{ background: 'var(--ed-panel)' }}>
+                  {/* The captions' style on a sample line, over every sub-tab (the selected lines' style, as the panel shows); dimmed while off */}
+                  <CaptionPreview style={panelCaptionStyle} textCase={captionTextCase} dim={!showCaptions} />
+                  {/* Sub-bar: the Captions tool one kind of setting at a time (user, 2026-11-06; one long
+                      scroll before). Captions off: only Captions; Key words only with a style that draws them */}
+                  <div role="tablist" aria-label="Caption settings" className="grid gap-0.5 p-0.5 mt-2 rounded-lg"
+                    style={{ gridTemplateColumns: `repeat(${keyWordsOn ? 4 : 3}, minmax(0, 1fr))`, background: 'rgb(var(--ed-fg) / 0.06)', border: '1px solid rgb(var(--ed-fg) / 0.07)' }}>
+                    {CAPTION_TABS.filter(t => t.id !== 'keywords' || keyWordsOn).map(t => {
+                      const on = captionTab === t.id
+                      const off = t.id !== 'captions' && !showCaptions
+                      return (
+                        <button key={t.id} type="button" role="tab" aria-selected={on} disabled={off} onClick={() => setCaptionTab(t.id)}
+                          title={off ? 'Turn on Show captions first' : t.tip}
+                          className="h-7 px-1 rounded-md text-[11.5px] font-semibold whitespace-nowrap transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          style={on ? { background: 'rgb(var(--ed-fg) / 0.12)', color: 'var(--ed-accent-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.08)' } : { color: 'rgb(var(--ed-fg) / 0.6)' }}>
+                          {t.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  </div>
+
                   {/* ── Captions: on/off with its status, the language, and editing the words ── */}
-                  <div className="p-4 flex flex-col gap-3">
+                  {captionTab === 'captions' && <div role="tabpanel" aria-label="Captions" className="p-4 flex flex-col gap-3">
                     <div className="cap-card">
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0 flex items-center gap-2.5">
@@ -6779,7 +6907,8 @@ export function EditorShell({
                             {(transcribing || retranscribing) ? (
                               <p className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--ed-accent-text)' }}>
                                 <span className="w-2.5 h-2.5 rounded-full border-[1.5px] border-t-transparent animate-spin shrink-0" style={{ borderColor: ACCENT, borderTopColor: 'transparent' }} />
-                                {retranscribePlace ? `Waiting its turn: ${inLineText(retranscribePlace)}` : 'Generating… this can take a minute'}
+                                {retranscribePlace ? `Waiting its turn: ${inLineText(retranscribePlace)}`
+                                  : retranscribing ? `Regenerating… ${formatElapsed(retranscribeElapsed)}` : 'Generating… this can take a minute'}
                               </p>
                             ) : words.length > 0 ? (
                               <p className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>
@@ -6790,12 +6919,33 @@ export function EditorShell({
                             )}
                           </div>
                         </div>
+                        <div className="shrink-0 flex items-center gap-2">
+                        {/* Regenerate: read this clip's speech again (it was a link in the panel below until 2026-11-06, user) */}
+                        {/* (while it runs: Stop in its place — the request stops, the words stay as they were) */}
+                        {retranscribing ? (
+                          <button type="button" onClick={stopRegenerate}
+                            aria-label="Stop making captions" title="Stop: the captions stay as they were"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors hover:bg-[rgba(239,68,68,0.15)]"
+                            style={{ color: '#f87171', boxShadow: 'inset 0 0 0 1px rgba(239,68,68,0.35)' }}>
+                            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor" /></svg>
+                          </button>
+                        ) : words.length > 0 && (
+                          <button type="button" onClick={askRegenerate} disabled={transcribing}
+                            aria-label="Regenerate captions" title="Regenerate captions: read the clip's speech again"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)] disabled:opacity-50"
+                            style={{ color: 'rgb(var(--ed-fg) / 0.7)' }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7" />
+                            </svg>
+                          </button>
+                        )}
                         <button role="switch" aria-checked={showCaptions} aria-label="Show captions" onClick={() => turnCaptions(!showCaptions)}
                           className="relative shrink-0 rounded-full transition-colors"
                           style={{ width: 40, height: 22, background: showCaptions ? ACCENT : 'rgb(var(--ed-fg) / 0.15)' }}>
                           <span className="absolute rounded-full transition-all"
                             style={{ top: 3, left: showCaptions ? 21 : 3, width: 16, height: 16, background: showCaptions ? '#0a0a0a' : '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
                         </button>
+                        </div>
                       </div>
                     </div>
 
@@ -6804,7 +6954,8 @@ export function EditorShell({
                         <div className="cap-row">
                           <span className="cap-label">Language</span>
                           <div role="radiogroup" aria-label="Caption language" className="cap-seg">
-                            {([[false, 'Original', 'As spoken, in its own script'], [true, 'English letters', hasRoman ? `In English letters (${scriptLabel})` : "English letters aren't available for these captions"]] as const).map(([v, label, title]) => {
+                            {/* (named Native / English hybrid since 2026-11-06, user; were Original / English letters) */}
+                            {([[false, 'Native', 'As spoken, in its own script'], [true, 'English hybrid', hasRoman ? `In English letters (${scriptLabel})` : "English letters aren't available for these captions"]] as const).map(([v, label, title]) => {
                               const on = romanize === v
                               const disabled = v && !hasRoman
                               return (
@@ -6823,30 +6974,50 @@ export function EditorShell({
                         </button>
                       </>
                     )}
-                  </div>
-                  {showCaptions && words.length > 0 && (
-                    <CaptionSelectBar lines={selectedLines} styles={playedCaptionParts?.length ?? 1}
-                      onClear={() => setCaptionSel([])} onFromHere={selectCaptionsFromHere} onAll={() => setCaptionSel([[0, clipLengthMs + 1]])}
-                      onOneStyle={oneCaptionStyle} />
+
+                    {/* Making captions failed (e.g. Google's service down): say why, and offer to try again */}
+                    {showCaptions && retranscribeError && !retranscribing && (
+                      <div role="alert" className="flex flex-col gap-2 rounded-xl px-3 py-2.5 text-[12px] leading-snug"
+                        style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', color: '#fca5a5' }}>
+                        <span>{retranscribeError}</span>
+                        <button type="button" onClick={() => handleRetranscribe('unknown', lastFreshRef.current)}
+                          className="self-start rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors hover:bg-[rgba(239,68,68,0.2)]"
+                          style={{ border: '1px solid rgba(239,68,68,0.45)', color: '#fecaca' }}>
+                          Try again
+                        </button>
+                      </div>
+                    )}
+                  </div>}
+
+                  {/* Style and Look: which caption lines they change (selected on the timeline's Captions row, else all) */}
+                  {(captionTab === 'style' || captionTab === 'look') && words.length > 0 && (
+                    <div className="pt-3">
+                      <CaptionSelectBar lines={selectedLines} styles={playedCaptionParts?.length ?? 1}
+                        onClear={() => setCaptionSel([])} onFromHere={selectCaptionsFromHere} onAll={() => setCaptionSel([[0, clipLengthMs + 1]])}
+                        onOneStyle={oneCaptionStyle} />
+                    </div>
                   )}
                   {/* (brand kit Phase 3) the kit's caption looks, one tap each */}
-                  {showCaptions && styleKit && (
+                  {captionTab === 'style' && styleKit && (
                     <BrandCaptionLooks kitName={styleKit.name} current={panelCaptionStyle}
                       looks={brandCaptionLooks(styleKit.data).filter(l => l.id !== 'main' || styleKit.data.captions.on)}
                       onPick={l => { changeCaptionStyle(brandCaptionStyle(l.captions)); setCaptionTextCase(l.captions.uppercase ? 'upper' : 'title') }} />
                   )}
-                  {showCaptions && (
-                    <CaptionStyler
-                      style={panelCaptionStyle} textCase={captionTextCase}
-                      onChange={changeCaptionStyle}
-                      onTextCaseChange={setCaptionTextCase}
-                      onEditCaptions={() => setEditingTranscript(true)}
-                      onRetranscribe={handleRetranscribe}
-                      retranscribing={retranscribing} retranscribeElapsed={retranscribeElapsed} retranscribePlace={retranscribePlace}
-                      retranscribeError={retranscribeError} hasWords={words.length > 0}
-                      hasRoman={hasRoman} romanize={romanize} romanizeLabel={scriptLabel}
-                      onRomanizeChange={setRomanize}
-                    />
+                  {captionTab !== 'captions' && (
+                    <div role="tabpanel" aria-label={CAPTION_TABS.find(t => t.id === captionTab)?.label}>
+                      <CaptionStyler
+                        section={captionTab}
+                        style={panelCaptionStyle} textCase={captionTextCase}
+                        onChange={changeCaptionStyle}
+                        onTextCaseChange={setCaptionTextCase}
+                        onEditCaptions={() => setEditingTranscript(true)}
+                        onRetranscribe={l => handleRetranscribe(l, lastFreshRef.current)}
+                        retranscribing={retranscribing} retranscribeElapsed={retranscribeElapsed} retranscribePlace={retranscribePlace}
+                        retranscribeError={retranscribeError} hasWords={words.length > 0}
+                        hasRoman={hasRoman} romanize={romanize} romanizeLabel={scriptLabel}
+                        onRomanizeChange={setRomanize}
+                      />
+                    </div>
                   )}
                 </div>
               )
@@ -6860,7 +7031,7 @@ export function EditorShell({
                 onUndo={undo} />
             )}
             {tool === 'brand' && (
-              <BrandKitPanel brand={brand} onKitId={brandOn?.kit_id ?? null} onTurnOn={turnBrandOn} onTurnOff={turnBrandOff} onDelete={askDeleteBrandKit} progressBar={progressBar} onProgressBarChange={setProgressBar}
+              <BrandKitPanel brand={brand} onKitId={brandOn?.kit_id ?? null} onTurnOn={turnBrandOn} onTurnOff={turnBrandOff} onDelete={askDeleteBrandKit}
                 editing={kitStudio} onEdit={() => setKitStudio(true)} />
             )}
 
@@ -7246,7 +7417,8 @@ export function EditorShell({
             {/* Not in full view: the 9:16 video on a card — rounded, a fine lime-to-white edge and a soft glow
                 under it (user, 2026-10-31: "remove the mobile completely, a normal preview, a little creative";
                 styles: .ed-pv-card). As big as the panel lets the full 9:16 be */}
-            <div className={fullView ? undefined : 'ed-pv-card'} style={{ width: 'min(100cqw, calc(100cqh * 9 / 16))' }}>
+            {/* (room kept either side for the full-view button beside it, so the video stays in the middle) */}
+            <div className={fullView ? undefined : 'ed-pv-card'} style={{ width: fullView ? 'min(100cqw, calc(100cqh * 9 / 16))' : 'min(calc(100cqw - 88px), calc(100cqh * 9 / 16))' }}>
               <div className={fullView ? undefined : 'ed-pv-card-in'}>
               <div className="relative">
               {rendering ? (
@@ -7266,7 +7438,7 @@ export function EditorShell({
                   )}
                 </div>
               ) : (
-                <OutputCanvas live segmentAt={viewAt} transitionCuts={transitionCuts} watermark={showWatermark} progressBar={progressBar && { ...progressBar, lengthMs: clipLengthMs }} timelineToVideo={timelineToVideo} clock={hasInserts ? liveTime.get : undefined}
+                <OutputCanvas live segmentAt={viewAt} transitionCuts={transitionCuts} watermark={showWatermark} timelineToVideo={timelineToVideo} clock={hasInserts ? liveTime.get : undefined}
                   videoRef={videoRef} currentTimeMs={currentTimeMs} clipStartMs={clip.start_ms} videoToTimeline={videoToTimeline}
                   activeSegment={viewSegment} getPositionAt={viewGetPositionAt} sourceFor={brollSource} slotSourceFor={borrowed.slotSourceFor}
                   skipTransitionRef={skipCanvasTransitionRef} words={displayWords}
@@ -7281,6 +7453,7 @@ export function EditorShell({
                   editTextOverlayId={previewOpen ? editTextId : null} onEditTextDone={() => setEditTextId(null)} onDeleteTextOverlay={askDeleteTextOverlay}
                   onCaptionPositionChange={(y, x) => updateCaptionStyle({ position_y: y, position_x: x })}
                   onCaptionSizeChange={size => changeCaptionStyle({ size })}
+                  onCaptionTap={() => { clearPicksRef.current(); openSettings('captions') }}
                   frameMedia={framePool}
                   onFrameLaneClick={focusLane}
                   activeFrameItemId={activeFrameItemId}
@@ -7310,18 +7483,18 @@ export function EditorShell({
                 />
               )}
               {!rendering && <PlatformOverlay platform={platform} />}
-              {/* Full view: in the preview video's own bottom-right corner */}
+              </div>
+              </div>
+              {/* Full view: just outside the video's bottom-right corner, so it covers none of it (user, 2026-11-06) */}
               {!fullView && !rendering && (
                 <button onClick={openFullView} aria-label="Full view: see the preview big" title="Full view (Esc to leave)"
-                  className="ed-fullview-btn absolute w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-black/80"
-                  style={{ right: 10, bottom: 10, zIndex: 20, color: '#fff', background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.14)', backdropFilter: 'blur(4px)' }}>
+                  className="ed-fullview-btn absolute w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
+                  style={{ left: 'calc(100% + 8px)', bottom: 0, zIndex: 20, color: 'rgb(var(--ed-fg) / 0.8)', background: 'rgb(var(--ed-fg) / 0.05)', border: '1px solid rgb(var(--ed-fg) / 0.14)' }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
                   </svg>
                 </button>
               )}
-              </div>
-              </div>
             </div>
             {fullView && (
               <FullViewBar playing={playing} onTogglePlay={togglePlay} onSeek={seekToMs} lengthMs={clipDurationMs} onClose={closeFullView} />
@@ -7561,18 +7734,22 @@ export function EditorShell({
             const it = sg ? frameOf(sg).items?.find(x => x.id === itemId) : undefined
             if (sg && it) selectInFrame(segId, itemId, Math.max(it.start_ms, sg.start_ms))
           }}
-          onAddFrameItem={(lane, anchor) => {
-            if (!frameSeg) return
+          onAddFrameItem={(lane, anchor, spot) => {
+            // (an empty spot clicked: that frame, from where the spot starts — the playhead goes there)
+            const fs = spot ? segments.find(x => x.id === spot.segId) : frameSeg
+            if (!fs) return
+            const t = spot ? spot.t : currentTimeMs
             pause()
-            if (isTextLane(lane)) { addBandText(frameSeg.id, currentTimeMs, lane); return }
+            if (spot) seekToMs(t)
+            if (isTextLane(lane)) { addBandText(fs.id, t, lane); return }
             // A slot that takes one thing only (Pic + Vid's Pic: a photo) goes straight to it
-            const only = isFrameLayout(frameSeg.layout) && typeof lane === 'number'
-              ? addChoices(slotOffers(frameSeg.layout, lane), !(frameOf(frameSeg).main_slots ?? [0]).includes(lane)) : []
+            const only = isFrameLayout(fs.layout) && typeof lane === 'number'
+              ? addChoices(slotOffers(fs.layout, lane), !(frameOf(fs).main_slots ?? [0]).includes(lane)) : []
             if (only.length === 1 && (only[0].id === 'photo' || only[0].id === 'video')) {
-              if (!sectionBlocked(frameSeg.id)) setFramePicker({ segId: frameSeg.id, kind: only[0].id, lane, t: currentTimeMs })
+              if (!sectionBlocked(fs.id)) setFramePicker({ segId: fs.id, kind: only[0].id, lane, t })
               return
             }
-            setAddMenu({ segId: frameSeg.id, lane, t: currentTimeMs, anchor })
+            setAddMenu({ segId: fs.id, lane, t, anchor })
           }}
           viewMarkers={timelineViewMarkers}
           selectedViewT={selectedView && viewBox && selectedView.boxId === viewBox.id ? selectedView.t : null}
@@ -7647,8 +7824,17 @@ export function EditorShell({
       {framePicker && (
         <MediaPickerModal clipId={clip.id} atMs={currentTimeMs} initialTab={framePicker.kind === 'photo' ? 'image' : framePicker.replaceId ? 'videos' : 'upload'}
           only={framePicker.kind === 'photo' ? 'photo' : 'video'}
+          pickPart={framePicker.kind === 'video' ? { roomMs: framePicker.replaceId ? itemRoomMs(framePicker.segId, framePicker.replaceId) : framePicker.lane !== undefined ? slotRoomMs(framePicker.segId, framePicker.lane, framePicker.t ?? currentTimeMs) : null } : undefined}
           onInsertVideo={handlePickedVideo} onInsertImage={handlePickedPhoto}
           onClose={() => setFramePicker(null)} />
+      )}
+
+      {partAsk && (
+        <VideoPartModal title={partAsk.change ? 'Change the part' : 'Choose the part'} url={partAsk.url} durationMs={partAsk.durationMs} roomMs={partAsk.roomMs} initial={partAsk.initial}
+          confirmLabel={partAsk.change ? 'Use this part' : 'Insert selected part'}
+          onConfirm={part => { partAsk.resolve(part); setPartAsk(null) }}
+          onWhole={partAsk.change ? undefined : () => { partAsk.resolve('whole'); setPartAsk(null) }}
+          onClose={() => { partAsk.resolve(null); setPartAsk(null) }} />
       )}
 
       {pickerAtMs !== null && (
@@ -7785,7 +7971,9 @@ function withGroupsSaved<L extends object>(layers: L | null, groups: Groups): L 
 function withLanes<L extends object>(layers: L | null, items: Array<{ id: string; track?: number }>, below = 0): L | { v: 1; rows: string[]; cut: never[]; parts: string[]; lanes: Record<string, number>; below?: number } | null {
   const lanes: Record<string, number> = {}
   for (const x of items) if (x.track != null) lanes[x.id] = x.track
-  if (!Object.keys(lanes).length) return layers
+  // (`below` is kept with no photo, text or sound on a row too: a clip with only a video under the
+  // main video lost it, and the video came back above the main video when opened again, 2026-11-06)
+  if (!Object.keys(lanes).length && !(below > 0)) return layers
   // (`below`: how many of the rows sit under the main video on the timeline)
   return { ...(layers ?? { v: 1 as const, rows: [], cut: [], parts: [] }), lanes, ...(below > 0 ? { below } : {}) } as L & { lanes: Record<string, number>; below?: number }
 }
@@ -7803,8 +7991,17 @@ const SECTION_KINDS: { id: SectionItemKind; one: string; plural: string; color: 
 
 // ── Small UI pieces ───────────────────────────────────────────────────────────
 
+/** The Captions panel's sub-tabs (its sub-bar) */
+type CaptionTab = 'captions' | 'style' | 'look' | 'keywords'
+const CAPTION_TABS: { id: CaptionTab; label: string; tip: string }[] = [
+  { id: 'captions', label: 'Captions', tip: 'Captions on or off, their language, and their words' },
+  { id: 'style', label: 'Style', tip: 'How the captions look and move' },
+  { id: 'look', label: 'Look', tip: 'Colours, font, size and capitals' },
+  { id: 'keywords', label: 'Key words', tip: 'The words the style makes stand out' },
+]
+
 /**
- * The top of the Captions panel: what a style picked below changes — the caption lines selected
+ * The top of the Captions panel's Style and Look tabs: what a style picked below changes — the caption lines selected
  * on the timeline's Captions row (as in CapCut), else every caption — with quick selections.
  */
 function CaptionSelectBar({ lines, styles, onClear, onFromHere, onAll, onOneStyle }: {

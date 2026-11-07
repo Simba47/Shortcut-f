@@ -75,6 +75,18 @@ export const templateOf = (style: Partial<CaptionStyle>) => (style.template ? CA
 /** Only Latin letters (and digits, punctuation, emoji): a template's own font can draw it (render.py _is_latin) */
 export const isLatinText = (text: string) => ![...text].some(ch => ch.codePointAt(0)! > 0x024f && /\p{L}/u.test(ch))
 
+/** The animated presets (VideoPreview drawPresetCaptions, render.py _PRESETS): they draw key words bigger, in the highlight colour */
+export const PRESET_ANIMATIONS = ['pop', 'highlight', 'bounce', 'word', 'hormozi', 'box', 'glow'] as const
+
+/**
+ * Whether a style shows key words (caption_styles.emphasis): a Creator style, any caption style
+ * (a preset in its own look) or an animated preset — not Karaoke, Fade or None. The export picks
+ * them for the same styles (render.ts pickEmphasis).
+ */
+export function usesKeyWords(style: Partial<CaptionStyle>): boolean {
+  return !!templateOf(style) || (PRESET_ANIMATIONS as readonly string[]).includes(style.animation ?? '')
+}
+
 /** The preset saved as `animation` with a template: what is drawn where templates aren't known */
 export const baseAnimation = (t: CaptionTemplate): AnimationType => (t.base === 'plain' ? 'karaoke' : t.base)
 

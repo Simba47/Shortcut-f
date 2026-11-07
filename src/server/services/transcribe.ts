@@ -1,7 +1,7 @@
 import sql from '@/lib/db'
 
 // renderAfter: when set, the worker queues this render job once transcription finishes
-export async function queueRetranscribe(userId: string, clipId: string, languageCode: string, renderAfter?: { clip_id: string; video_storage_path: string; quality: string; watermark: boolean; user_id?: string; priority?: boolean }) {
+export async function queueRetranscribe(userId: string, clipId: string, languageCode: string, renderAfter?: { clip_id: string; video_storage_path: string; quality: string; watermark: boolean; user_id?: string; priority?: boolean }, opts: { fresh?: boolean } = {}) {
   const [row] = await sql`
     SELECT c.video_id, c.start_ms, c.end_ms, v.storage_path, v.user_id
     FROM clips c JOIN videos v ON v.id = c.video_id
@@ -37,8 +37,9 @@ export async function queueRetranscribe(userId: string, clipId: string, language
     // The top plan: first in the worker's line and in the shared Google line, as its exports
     ...(plan.priorityExports ? { priority: true } : {}),
     // "Captions on" (no language picked, no fresh-captions export): only parts with no words need
-    // reading, so a video already read in full needs no new reading (the worker checks)
-    ...(!renderAfter && (!languageCode || languageCode === 'unknown') ? { fill_gaps: true } : {}),
+    // reading, so a video already read in full needs no new reading (the worker checks). Regenerate
+    // (`fresh`) always reads the clip again: it did nothing on a video read in full (user, 2026-11-06)
+    ...(!renderAfter && !opts.fresh && (!languageCode || languageCode === 'unknown') ? { fill_gaps: true } : {}),
     ...(renderAfter ? { render_after: renderAfter } : {}),
   }
   const [job] = await sql`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${sql.json(payload)}, 'queued') RETURNING id`
@@ -240,6 +241,23 @@ export async function stopVideoTranscript(userId: string, videoId: string): Prom
       AND status IN ('queued', 'processing')
   `
   return videoTranscriptState(userId, videoId)
+}
+
+/**
+ * The editor's Stop on a clip's Regenerate (user, 2026-11-06): the job is marked stopped, so a queued
+ * one never runs and a running one stops within ~2 s (the worker's runTranscribeJob) without writing
+ * anything — the clip keeps the words it had. False when it had already finished.
+ */
+export async function stopClipCaptions(userId: string, jobId: string): Promise<boolean> {
+  if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw Object.assign(new Error('Not found'), { status: 404 })
+  const [job] = await sql<{ user_id: string | null }[]>`
+    SELECT v.user_id FROM jobs j JOIN clips c ON c.id::text = j.payload->>'clip_id' JOIN videos v ON v.id = c.video_id
+    WHERE j.id = ${jobId} AND j.type = 'transcribe'`
+  if (!job || job.user_id !== userId) throw Object.assign(new Error('Not found'), { status: 404 })
+  const stopped = await sql`
+    UPDATE jobs SET status = 'failed', error = ${READING_STOPPED}
+    WHERE id = ${jobId} AND status IN ('queued', 'processing') RETURNING id`
+  return stopped.length > 0
 }
 
 /** Why a reading failed, in a sentence: the worker's own message, without a failed command's pages of output */

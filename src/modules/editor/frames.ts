@@ -84,7 +84,9 @@ export interface FrameTemplate {
 
 export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
   frame_single: {
-    name: 'Title', description: 'One video with a top letterbox for text.',
+    // Out of the gallery (user, 2026-11-06): Title + Caption became Title — its caption strip's bar
+    // drags down to close it, which is this. Kept so clips that have it still show and export it
+    name: 'Title (old)', description: 'One video with a top letterbox for text.',
     rows: [{ kind: 'band', h: 0.2 }, { kind: 'slot', slot: 0, h: 0.8 }],
     defaults: ['video'],
   },
@@ -132,8 +134,10 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
     bar2: { dir: 'v', at: 0.5, min: 0.2, max: 0.8, swap: true },
   },
   frame_title_caption: {
-    name: 'Title + Caption', description: 'A title on top, the video, and a strip below for captions.',
-    rows: [{ kind: 'band', h: 0.16 }, { kind: 'slot', slot: 0, h: 0.68 }, { kind: 'caption', h: 0.16 }],
+    // "Title" in the gallery (user, 2026-11-06: Title and Title + Caption merged): the caption strip
+    // starts open at 16%; its bar drags it bigger, or down to nothing (closed: the old Title)
+    name: 'Title', description: 'A title on top, the video, and a strip below for captions — drag its bottom bar down to close the strip.',
+    rows: [{ kind: 'band', h: 0.16, label: 'Title' }, { kind: 'slot', slot: 0, h: 0.68, label: 'Video' }, { kind: 'caption', h: 0.16 }],
     defaults: ['video'],
   },
   frame_big_small: {
@@ -304,7 +308,7 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
  * Pic + Video, which Video + Media covers (user, 2026-11-04).
  */
 export const FRAME_LAYOUTS: FrameLayout[] = [
-  'frame_single', 'frame_title_caption', 'frame_blur_fill', 'frame_dual', 'frame_video_photo', 'frame_triple',
+  'frame_title_caption', 'frame_blur_fill', 'frame_dual', 'frame_video_photo', 'frame_triple',
   'frame_trio_main', 'frame_screen_face', 'frame_brand_card',
 ]
 /** How a new frame of this template is laid out (its starting row order), for the gallery's picture */
@@ -411,14 +415,16 @@ export function validRowOrder(layout: FrameLayout, custom: RowLayout): number[] 
   return order.every((v, i) => v === i) ? null : order
 }
 
-export function frameRows(layout: FrameLayout, showBand = true, custom?: RowLayout): (FrameRow & { y: number })[] {
+/** `keepClosed`: a closed caption strip (0 high) kept in the list — for the bars, so it can be opened again */
+export function frameRows(layout: FrameLayout, showBand = true, custom?: RowLayout, keepClosed = false): (FrameRow & { y: number })[] {
   const tplRows = FRAME_TEMPLATES[layout].rows
   if (!tplRows) return []   // a free template has no rows (its areas don't resize)
   const hs = validRowHeights(layout, rowHeightsOf(custom))
   const sized = tplRows.map((r, i) => hs ? { ...r, h: hs[i] } : r)
   // Swapped with the bar's swap: the rows in that order, each keeping its own size and look
   const order = validRowOrder(layout, custom)
-  const rows = (order ? order.map(i => sized[i]) : sized).filter(r => showBand || r.kind !== 'band')
+  // (a closed caption strip isn't there: no strip, the captions where they usually are — frames.py frame_rows)
+  const rows = (order ? order.map(i => sized[i]) : sized).filter(r => (showBand || r.kind !== 'band') && (keepClosed || r.h > 0))
   const total = rows.reduce((a, r) => a + r.h, 0) || 1
   let y = 0
   return rows.map(r => { const h = r.h / total, row = { ...r, h, y }; y += h; return row })
@@ -473,16 +479,36 @@ export function boxRect(r: { x: number; y: number; w: number; h: number } | null
   return w > 0.999 && h > 0.999 ? null : { x, y, w, h }
 }
 
+/**
+ * The old Title (frame_single: a title strip and the video) as the merged Title with its caption
+ * strip closed — the same picture (user, 2026-11-06: "remove Title (old)"). Its sizes and swap go
+ * with it; null for any other part.
+ */
+export function oldTitleAsTitle(seg: SegmentLocal): Pick<SegmentLocal, 'layout' | 'frame'> | null {
+  if (seg.layout !== 'frame_single') return null
+  const f = frameOf(seg)
+  const hs = validRowHeights('frame_single', f.row_h) ?? FRAME_TEMPLATES.frame_single.rows!.map(r => r.h)
+  const order = validRowOrder('frame_single', f)
+  return {
+    layout: 'frame_title_caption',
+    frame: { ...f, row_h: [hs[0], hs[1], 0], ...(order ? { row_order: [...order, 2] } : { row_order: undefined }) },
+  }
+}
+
 /** The smallest a row can be dragged to (share of the frame) */
 export const MIN_ROW_H = 0.08
+/** A caption strip dragged thinner than this closes (0 high: no strip — Title's bottom bar) */
+export const CAPTION_CLOSE_H = 0.04
 
 /** A frame's resized row heights if they fit its template (one per row, none too small); else null. render.py (frames.py) mirrors this. */
 export function validRowHeights(layout: FrameLayout, custom?: number[] | null): number[] | null {
   const tplRows = FRAME_TEMPLATES[layout].rows
   if (!tplRows) return null
   const n = tplRows.length
-  if (!Array.isArray(custom) || custom.length !== n || !custom.every(h => typeof h === 'number' && isFinite(h) && h >= 0.03)) return null
+  // (a caption strip can be closed: 0, dragged down to nothing — user, 2026-11-06, Title's bottom bar)
+  if (!Array.isArray(custom) || custom.length !== n || !custom.every((h, i) => typeof h === 'number' && isFinite(h) && (h >= 0.03 || (h === 0 && tplRows[i].kind === 'caption')))) return null
   const total = custom.reduce((a, h) => a + h, 0)
+  if (!(total > 0)) return null
   return custom.map(h => h / total)
 }
 
@@ -653,21 +679,13 @@ export function frameLanesFor(seg: SegmentLocal): FrameLaneInfo[] {
 }
 
 /**
- * The lanes a frame shows on the timeline, top to bottom as its preview shows them. The band's lane
- * appears once text is on it (the band itself is always in the preview, with its own "Add text"
- * button). A Single frame's slot is just the main video — the film strip already shows that — so it
- * only gets a lane once something is put on it. `asTemplate`: in the template's own order (unswapped).
+ * The lanes a frame shows on the timeline, top to bottom as its preview shows them — every one,
+ * empty or not (user, 2026-11-06: a text area's row and a one-video frame's video row are there
+ * from the start, as a media spot's is — "Title · empty" with its "+ Add", "Video · Main video";
+ * they used to appear only once something was put on them). `asTemplate`: in the template's own order (unswapped).
  */
 export function timelineLanes(seg: SegmentLocal, asTemplate = false): FrameLaneInfo[] {
-  const frame = frameOf(seg)
-  const main = frame.main_slots ?? [0]
-  const slots = frameSlotCount(seg.layout as FrameLayout)
-  const all = asTemplate ? frameLanes(seg.layout as FrameLayout, frameBandShown(seg), { row_h: seg.frame?.row_h }) : frameLanesFor(seg)
-  return all.filter(r => {
-    const empty = laneItems(frame, r.lane, seg).length === 0
-    if (isTextLane(r.lane)) return !empty
-    return !(slots === 1 && main.includes(r.lane) && empty)
-  })
+  return asTemplate ? frameLanes(seg.layout as FrameLayout, frameBandShown(seg), { row_h: seg.frame?.row_h }) : frameLanesFor(seg)
 }
 
 /**
@@ -813,15 +831,20 @@ export function itemBounds(frame: FrameSettings, item: FrameItem, seg: { start_m
   return { min: Math.max(seg.start_ms, prev?.end_ms ?? -Infinity), max: Math.min(seg.end_ms, next?.start_ms ?? Infinity) }
 }
 
-/** Frame text-band item showing live captions at t, if any */
-export function captionBandAt(seg: SegmentLocal | null, t: number): { y: number; h: number } | null {
+/**
+ * Frame text-band item showing live captions at t, if any. strips false: captions the user has
+ * moved (position_y set) stay where they were put in a frame with a caption strip too (user,
+ * 2026-11-06: moving them works in every frame); in a text band they still sit there.
+ * render.py caption_band_zones does the same.
+ */
+export function captionBandAt(seg: SegmentLocal | null, t: number, strips = true): { y: number; h: number } | null {
   if (!seg || !isFrameLayout(seg.layout)) return null
   const areas = frameAreas(seg.layout, true, seg.frame)
   const band = areas.find(a => a.kind === 'band' && a.lane === 'band')
   const it = band ? itemAt(frameOf(seg), 'band', t, seg) : null
   if (band && it?.captions && !it.hidden) return { y: band.y, h: band.h }
   // A frame with a caption strip: the captions sit there
-  const strip = areas.find(a => a.kind === 'caption')
+  const strip = strips ? areas.find(a => a.kind === 'caption') : undefined
   return strip ? { y: strip.y, h: strip.h } : null
 }
 

@@ -20,6 +20,8 @@ import {
 
 /** How near a part's end a video on a row must start to be offered a transition there (ms) */
 const JOIN_REACH_MS = 500
+/** A frozen video piece on a frame lane: pale ice-blue stripes over its colour */
+const FROZEN_STRIPES = 'repeating-linear-gradient(135deg, rgba(125,211,252,0.22) 0 4px, transparent 4px 9px)'
 
 /**
  * The editor's timeline: the whole clip across the width, the playhead line moving over it. Press
@@ -66,7 +68,8 @@ export interface TimelineProps {
   videoTitles?: Record<string, string>
   onSelectFrameItem?: (id: string | null) => void
   onUpdateFrameItem?: (id: string, patch: Partial<Pick<FrameItem, 'start_ms' | 'end_ms' | 'source_offset_ms'>>) => void
-  onAddFrameItem?: (lane: FrameLane, anchor: DOMRect) => void
+  /** `at`: an empty spot clicked (that frame, from that time); else the frame under the playhead, at it */
+  onAddFrameItem?: (lane: FrameLane, anchor: DOMRect, at?: { segId: string; t: number }) => void
   onJumpToFrameItem?: (segId: string, itemId: string) => void
   viewMarkers?: { t_ms: number; cut: boolean }[]
   selectedViewT?: number | null
@@ -199,6 +202,8 @@ const ROW_H = 30
 const VIS_ROW_H = BLOCK_H + 4
 const ROW_GAP = 3
 const FRAME_LANE_H = 26
+/** The picked frame's name and time over its rows */
+const FRAME_HEAD_H = 16
 const LEFT_W = 52
 /** With a row's buttons beside its icon (view, sound, lock: as in Resolve's track header) */
 const LEFT_W_CTL = 104
@@ -2083,60 +2088,81 @@ export function Timeline({
       (edge, d) => { if (!m.locked) onMusicTrim?.(m.id, edge, Math.round((edge === 'start' ? m.start_ms : end) + d)) })
   }
 
-  // ── Frame lanes (the frame under the playhead: its slots and items) ──
+  // ── Frame lanes: only the frame picked (the one under the playhead) — its own rows, under its name
+  // and time, each with its own eye / sound / lock (user, 2026-11-06: rows shared by every frame
+  // didn't say which frame was shown, hidden or muted). Another frame picked: the rows switch to it ──
   const frameLanes = () => {
-    const frames = mains.filter(s => isFrameLayout(s.layout))
-    const active = frameSeg && isFrameLayout(frameSeg.layout) ? frameSeg : null
-    const rows: ReturnType<typeof visibleLanes> = []
-    for (const f of active ? [active, ...frames.filter(x => x.id !== active.id)] : frames) {
-      for (const r of visibleLanes(f)) if (!rows.some(x => x.lane === r.lane)) rows.push(r)
-    }
-    if (!rows.length) return null
-    const seg = active
+    const seg = frameSeg && isFrameLayout(frameSeg.layout) ? frameSeg : null
+    if (!seg || !visibleLanes(seg).length) return null
+    // The other frames only as plain grey bars on the rows they have too (user, 2026-11-06: as
+    // before — where they are shows, what's in them doesn't); a row only another frame has stays
+    // too, grey, with no buttons
+    const others = mains.filter(s => s.id !== seg.id && isFrameLayout(s.layout))
+    const rows = [...visibleLanes(seg)]
+    for (const o of others) for (const r of visibleLanes(o)) if (!rows.some(x => x.lane === r.lane)) rows.push(r)
     const frame = seg ? frameOf(seg) : null
     const main = frame?.main_slots ?? [0]
     const inSection = !!seg && currentTimeMs >= seg.start_ms && currentTimeMs < seg.end_ms
     const plusAt = seg ? (inSection ? currentTimeMs : seg.start_ms) : 0
     const itemName = (it: FrameItem) => it.kind === 'video' ? (videoTitles[it.source_video_id ?? ''] ?? 'Video') : it.kind === 'photo' ? 'Photo' : it.captions ? 'Captions' : (it.text?.trim() || 'Text')
+    const isMainLane = (f: SegmentLocal, lane: FrameLane) => !isTextLane(lane) && (frameOf(f).main_slots ?? [0]).includes(lane as number)
+    // The empty spots of the frame's lane (user, 2026-11-06: named, dashed, "+ Add" on
+    // hover — a faint grey strip didn't say what it was). Clicked: the add menu for that spot there
+    const empties = (f: SegmentLocal, lane: FrameLane, label: string) => {
+      if (isMainLane(f, lane)) return null
+      const out: Array<{ from: number; to: number }> = []
+      let from = f.start_ms
+      for (const it of laneItems(frameOf(f), lane, f)) {
+        if (it.start_ms - from >= MIN_ITEM_MS) out.push({ from, to: it.start_ms })
+        from = Math.max(from, it.end_ms)
+      }
+      if (f.end_ms - from >= MIN_ITEM_MS) out.push({ from, to: f.end_ms })
+      const what = isTextLane(lane) ? 'text' : 'a photo or video'
+      return out.map(g => (
+        <button key={`empty-${f.id}-${g.from}`} type="button" className="group/empty absolute inset-y-0.5 flex items-center gap-1.5 overflow-hidden"
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => {
+            e.stopPropagation()
+            // (the menu opens at the pointer, not at the spot's far corner)
+            const r = e.currentTarget.getBoundingClientRect()
+            onAddFrameItem?.(lane, new DOMRect(e.clientX - 9, r.top, 18, r.height), { segId: f.id, t: g.from })
+          }}
+          aria-label={`${label}, empty ${msToLabel(g.from)}–${msToLabel(g.to)}: add ${what} here`}
+          title={`${label} is empty here · click to add ${what}`}
+          style={{ left: `${at(g.from)}%`, width: `${pct(g.to - g.from)}%`, borderRadius: 5, background: 'rgb(var(--ed-fg) / 0.035)', border: '1px dashed rgb(var(--ed-fg) / 0.25)' }}>
+          <span className="pl-2 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>{label} · empty</span>
+          <span className="shrink-0 pr-2 text-[10px] font-bold pointer-events-none opacity-0 group-hover/empty:opacity-100 transition-opacity" style={{ color: ACCENT }}>+ Add</span>
+        </button>
+      ))
+    }
     return (
       <div ref={lanesRef} className="relative flex flex-col" style={{ gap: 2, paddingTop: 4, paddingBottom: 2 }}>
+        {/* Whose rows these are: the frame's name and time, a bracket over its stretch */}
+        <div className="relative pointer-events-none" style={{ height: FRAME_HEAD_H }} aria-label={`Rows of ${formatTag(seg)}, ${msToLabel(seg.start_ms)}–${msToLabel(seg.end_ms)}`}>
+          <div className="absolute bottom-0.5 flex items-end gap-1.5 whitespace-nowrap" style={{ left: `${at(seg.start_ms)}%`, minWidth: `${pct(seg.end_ms - seg.start_ms)}%`, borderBottom: `1.5px solid ${LAYOUT_COLORS[seg.layout] ?? ACCENT}88` }}>
+            <span className="text-[10px] font-bold pl-1" style={{ color: LAYOUT_COLORS[seg.layout] ?? ACCENT }}>{formatTag(seg)}</span>
+            <span className="text-[10px] tabular-nums pb-px" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>{msToLabel(seg.start_ms)}–{msToLabel(seg.end_ms)}</span>
+          </div>
+        </div>
         {rows.map(lane => {
           const laneKey = String(lane.lane)
-          const row = seg ? visibleLanes(seg).find(r => r.lane === lane.lane) : undefined
+          const row = visibleLanes(seg).find(r => r.lane === lane.lane)
           const isMain = !!row && !isTextLane(row.lane) && main.includes(row.lane)
           const mainId = `main:${lane.lane}`
           const pulsing = pulseLane === lane.lane
           return (
             <div key={laneKey} data-lane={`frame:${laneKey}`} className="group/lane relative" style={{ height: FRAME_LANE_H }}
               onPointerDown={e => { onSelectFrameItem?.(null); handleScrubDown(e) }}>
-              {frames.filter(o => o.id !== seg?.id).map(o => {
-                const r2 = visibleLanes(o).find(r => r.lane === lane.lane)
-                if (!r2) return null
-                const of = frameOf(o)
-                return (
-                  <Fragment key={o.id}>
-                    <div className="absolute inset-y-0.5 pointer-events-none" style={{ left: `${at(o.start_ms)}%`, width: `${pct(o.end_ms - o.start_ms)}%`, borderRadius: 5, background: 'rgb(var(--ed-fg) / 0.045)' }} />
-                    {laneItems(of, r2.lane, o).map(it => {
-                      const from = Math.max(it.start_ms, o.start_ms), to = Math.min(it.end_ms, o.end_ms), color = frameItemColor(it)
-                      return (
-                        <button key={it.id} type="button" className="absolute inset-y-0.5 flex items-center overflow-hidden"
-                          aria-label={`${itemName(it)}, ${r2.label}, ${msToLabel(from)}–${msToLabel(to)}: go there and pick it`}
-                          onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onJumpToFrameItem?.(o.id, it.id) }}
-                          style={{ left: `${at(from)}%`, width: `max(8px, ${pct(to - from)}%)`, borderRadius: 5, background: `${color}38`, boxShadow: `inset 0 0 0 1px ${color}88` }}>
-                          <span className="px-2 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.9)' }}>{itemName(it)}</span>
-                        </button>
-                      )
-                    })}
-                  </Fragment>
-                )
-              })}
-              {seg && frame && row && (<>
+              {others.filter(o => visibleLanes(o).some(r => r.lane === lane.lane)).map(o => (
+                <div key={o.id} className="absolute inset-y-0.5 pointer-events-none" title={formatTag(o)}
+                  style={{ left: `${at(o.start_ms)}%`, width: `${pct(o.end_ms - o.start_ms)}%`, borderRadius: 5, background: 'rgb(var(--ed-fg) / 0.045)' }} />
+              ))}
+              {frame && row && (<>
                 <div className="absolute inset-y-0.5 pointer-events-none" style={{
                   left: `${at(seg.start_ms)}%`, width: `${pct(seg.end_ms - seg.start_ms)}%`, borderRadius: 5,
                   background: pulsing ? 'rgba(200,255,0,0.12)' : 'rgb(var(--ed-fg) / 0.045)', boxShadow: pulsing ? `inset 0 0 0 1.5px ${ACCENT}` : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.06)',
-                }}>
-                  <span className="absolute top-1/2 -translate-y-1/2 text-[10px] font-semibold whitespace-nowrap" style={{ left: 8, color: 'rgb(var(--ed-fg) / 0.3)' }}>{row.label}</span>
-                </div>
+                }} />
+                {empties(seg, row.lane, row.label)}
                 {isMain && (() => {
                   const on = isSel(mainId, activeFrameItemId === mainId)
                   return (
@@ -2156,10 +2182,10 @@ export function Timeline({
                     <div key={it.id} className="absolute inset-y-0.5 flex items-center overflow-hidden"
                       onPointerDown={e => handleFrameItemDown(e, it, 'move')}
                       title={`${itemName(it)} · ${msToLabel(from)}–${msToLabel(to)} · drag to move, drag the ends to trim`}
-                      style={{ left: `${at(from)}%`, width: `max(8px, ${pct(to - from)}%)`, borderRadius: 5, zIndex: on ? 3 : 2, background: `${color}${on ? '55' : '38'}`, boxShadow: on ? SELECTED_RING : `inset 0 0 0 1px ${color}88`, cursor: 'grab', touchAction: 'none' }}>
+                      style={{ left: `${at(from)}%`, width: `max(8px, ${pct(to - from)}%)`, borderRadius: 5, zIndex: on ? 3 : 2, background: `${it.freeze ? FROZEN_STRIPES + ', ' : ''}${color}${on ? '55' : '38'}`, boxShadow: on ? SELECTED_RING : `inset 0 0 0 1px ${color}88`, cursor: 'grab', touchAction: 'none' }}>
                       <div className="absolute left-0 inset-y-0 w-2 cursor-col-resize z-10" style={{ background: 'rgba(0,0,0,0.25)' }} onPointerDown={e => handleFrameItemDown(e, it, 'start')} />
                       {it.kind === 'photo' && it.image_url && <img src={it.image_url} alt="" crossOrigin="anonymous" className="h-full w-7 object-cover shrink-0 pointer-events-none" style={{ marginLeft: 8, opacity: 0.9 }} />}
-                      <span className="px-2.5 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.92)' }}>{it.kind === 'text' && !it.captions ? 'T · ' : ''}{itemName(it)}</span>
+                      <span className="px-2.5 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.92)' }}>{it.kind === 'text' && !it.captions ? 'T · ' : ''}{it.freeze ? '❄ ' : ''}{itemName(it)}</span>
                       <span className="shrink-0 pr-2.5 pointer-events-none"><StateBadges st={it} /></span>
                       <div className="absolute right-0 inset-y-0 w-2 cursor-col-resize z-10" style={{ background: 'rgba(0,0,0,0.25)' }} onPointerDown={e => handleFrameItemDown(e, it, 'end')} />
                     </div>
@@ -2323,9 +2349,12 @@ export function Timeline({
         )}
         {laneSpans.map(sp => {
           const meta = metaOf(sp.kind)
-          // (the main row keeps its own sound button: beside it, its lock)
-          const ctl = laneCtl && (sp.kind === 'main' || /^(track|audio)-\d+$/.test(sp.kind)) ? laneCtl(sp.kind) : null
+          // (the main row keeps its own sound button: beside it, its lock. A frame's rows: theirs, for
+          // that frame only — the frame picked, whose rows these are)
+          const ctl = laneCtl && (sp.kind === 'main' || /^(track|audio)-\d+$/.test(sp.kind) || sp.kind.startsWith('frame:')) ? laneCtl(sp.kind) : null
           if (!meta && !ctl) return null
+          const frameRow = sp.kind.startsWith('frame:') && frameSeg && isFrameLayout(frameSeg.layout)
+            ? visibleLanes(frameSeg).find(r => `frame:${r.lane}` === sp.kind) : undefined
           const mid = sp.kind === 'main' ? sp.top + MAIN_PAD + BLOCK_H / 2 : sp.top + sp.h / 2
           return (
             <Fragment key={sp.kind}>
@@ -2335,7 +2364,8 @@ export function Timeline({
                 </span>
               )}
               {/* (the main row has no icon: photos and frames go in it too — user, 2026-10-30) */}
-              {ctl && !ctl.empty && ctl.can.map(k => rowButton(sp.kind, k, !!ctl.state[k], mid, sp.kind === 'main' ? 'Main video' : meta?.label ?? 'Media', ctl.note))}
+              {ctl && !ctl.empty && ctl.can.map(k => rowButton(sp.kind, k, !!ctl.state[k], mid,
+                sp.kind === 'main' ? 'Main video' : frameRow && frameSeg ? `${frameRow.label} in ${formatTag(frameSeg)}` : meta?.label ?? 'Media', ctl.note))}
             </Fragment>
           )
         })}

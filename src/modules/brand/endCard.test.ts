@@ -115,7 +115,7 @@ function clip(over: Partial<BrandTarget> = {}): BrandTarget {
   const tl = timeline([part('p1', 0, LEN)])
   return {
     clipId: 'c1', lengthMs: LEN, mainVideoId: MAIN, overlays: [], texts: [], caption: {}, textCase: 'title',
-    segments: tl.segments, keyframes: tl.keyframes, transitions: [], progressBar: null, timelineEdits: true, audioTracks: [], canInsert: true, ...over,
+    segments: tl.segments, keyframes: tl.keyframes, transitions: [], timelineEdits: true, audioTracks: [], canInsert: true, ...over,
   }
 }
 const cardOf = (t: BrandTarget) => t.segments.find(s => s.layout === 'frame_brand_card')
