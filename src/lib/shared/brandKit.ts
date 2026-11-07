@@ -12,8 +12,9 @@
  * title style, a caption look, the Branded card and brand corners, whether it's the default, and its
  * brand lock. The brand sound, brand voice and names & spellings that kits held for a while (taken out
  * of the kit's screens 2026-10-20) are gone from it: a kit saved with them loses them on its next save.
- * Its progress bar, end card, intro and outro came back in Phase 4 (2026-10-27), now through the brand
- * engine like the rest — under new keys, so what an older kit kept of them doesn't come back on by itself.
+ * Its end card, intro and outro came back in Phase 4 (2026-10-27), now through the brand engine like the
+ * rest — under new keys, so what an older kit kept of them doesn't come back on by itself. Its progress
+ * bar came back then too, and was taken out for good 2026-11-05 (user): a kit saved with one loses it.
  * Its words (spellings, hidden words, lines, hashtags, tone) came in Phase 5 (2026-10-28: lib/brandWords.ts),
  * under a new key too.
  */
@@ -24,13 +25,6 @@ import { cleanBrandWords, NO_BRAND_WORDS, type BrandWords } from '../brandWords'
 export type LogoCorner = 'tl' | 'tr' | 'bl' | 'br'
 /** When the logo shows: the whole clip, or only its first / last seconds */
 export type LogoShow = 'all' | 'start' | 'end'
-
-/**
- * A clip's progress bar: a bar along the top or bottom edge that fills from the left as the clip
- * plays (clips.progress_bar, set in the Brand kit panel; the preview draws it in VideoPreview, the
- * export in render.py): its colour, its thickness in px on a 1080 × 1920 frame, and its edge
- */
-export interface ProgressBar { color: string; height: number; position: 'top' | 'bottom' }
 
 /**
  * A kit's caption look: the same choices as the editor's Captions tool (a caption style and its
@@ -121,11 +115,6 @@ export interface BrandKitData {
   /** Brand lock: the people the kit is shared with can pick only its colours and fonts (brandLockOf) */
   lock: boolean
   /**
-   * The progress bar the brand puts on its clips (Phase 4) when `on`: as a clip's own (ProgressBar),
-   * its colour a colour or 'accent' — the kit's accent colour, as it changes (brandProgressBar)
-   */
-  progress_bar: BrandProgress
-  /**
    * How the brand ends and starts its clips (Phase 4): an end card — the clip's last `seconds` made its
    * Branded card (modules/brand/endCard.ts) — and an intro and outro: videos of the user's library put
    * in before and after it (their ids; null: none)
@@ -145,8 +134,6 @@ export interface BrandEndVideo { id: string; ms: number; title: string }
 export const END_CARD_SECONDS: [number, number] = [2, 8]
 /** The longest video an intro or outro can be (ms) */
 export const MAX_END_VIDEO_MS = 30_000
-
-export interface BrandProgress { on: boolean; color: string; height: number; position: ProgressBar['position'] }
 
 /** The Branded card a kit customizes: its look, and its title's and @handle's colour, size and whether each shows */
 export interface BrandCardSettings extends CardLook {
@@ -184,8 +171,6 @@ export const brandFontKey = (userId: string, family: string) => `brand/${userId}
 
 /** The logo shown only at the start or end: for this long (s) */
 export const LOGO_SECONDS: [number, number] = [1, 15]
-/** A progress bar's thickness (px on a 1080 × 1920 frame) */
-export const PROGRESS_HEIGHT: [number, number] = [4, 40]
 /** More brand colours besides the main and accent */
 export const MAX_EXTRA_COLORS = 3
 /** Space between the logo and the frame's edge, as a share of the frame's width */
@@ -213,7 +198,6 @@ export const DEFAULT_BRAND_KIT: BrandKitData = {
   card_title: '',
   card: { ...DEFAULT_CARD_LOOK, title: { show: true, color: '#ffffff', size: 64 }, handle: { show: true, color: '#c8ff00', size: 40 } },
   is_default: false,
-  progress_bar: { on: false, color: 'accent', height: 12, position: 'bottom' },
   ends: { card: false, seconds: 3, intro: null, outro: null },
   words: NO_BRAND_WORDS,
 }
@@ -226,17 +210,6 @@ const num = (v: unknown, lo: number, hi: number, fallback: number) =>
   typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback
 const text = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : '')
 
-/** A saved progress bar (a clip's progress_bar, or a kit's) made safe; null when it is not one */
-export function cleanProgressBar(raw: unknown, fallbackColor = '#ffffff'): ProgressBar | null {
-  if (!raw || typeof raw !== 'object') return null
-  const p = raw as Record<string, unknown>
-  return {
-    color: color(p.color, fallbackColor),
-    height: Math.round(num(p.height, PROGRESS_HEIGHT[0], PROGRESS_HEIGHT[1], 12)),
-    position: p.position === 'top' ? 'top' : 'bottom',
-  }
-}
-
 /** Whether two intros (or outros) are the same video at the same length */
 export const sameEndVideo = (a: BrandEndVideo | null, b: BrandEndVideo | null) => (a?.id ?? null) === (b?.id ?? null) && (a?.ms ?? 0) === (b?.ms ?? 0)
 
@@ -244,12 +217,6 @@ function endVideoOf(raw: unknown): BrandEndVideo | null {
   const v = raw && typeof raw === 'object' ? raw as Record<string, unknown> : null
   if (!v || typeof v.id !== 'string' || !/^[0-9a-f-]{36}$/i.test(v.id) || typeof v.ms !== 'number' || !(v.ms >= 300)) return null
   return { id: v.id.toLowerCase(), ms: Math.round(Math.min(MAX_END_VIDEO_MS, v.ms)), title: text(v.title, 80) }
-}
-
-/** The progress bar a kit puts on its clips (its accent colour filled in); null: none */
-export function brandProgressBar(d: Pick<BrandKitData, 'progress_bar' | 'colors'>): ProgressBar | null {
-  const p = d.progress_bar
-  return p?.on ? { color: p.color === 'accent' ? d.colors.accent : p.color, height: p.height, position: p.position } : null
 }
 
 /** A kit's settings as they may be saved: anything missing or wrong takes the default */
@@ -324,13 +291,6 @@ export function cleanBrandKitData(raw: unknown, userId?: string): BrandKitData {
       handle: { show: true, color: color(d.colors?.accent, def.colors.accent), size: 40 },
     }),
     is_default: d.is_default === true,
-    // (its own key: a kit's `progress` from before 2026-10-20, hidden since, doesn't come back on by itself)
-    progress_bar: {
-      on: d.progress_bar?.on === true,
-      color: d.progress_bar?.color === 'accent' ? 'accent' : color(d.progress_bar?.color, 'accent'),
-      height: Math.round(num(d.progress_bar?.height, PROGRESS_HEIGHT[0], PROGRESS_HEIGHT[1], def.progress_bar.height)),
-      position: d.progress_bar?.position === 'top' ? 'top' : 'bottom',
-    },
     ends: {
       card: d.ends?.card === true,
       seconds: Math.round(num(d.ends?.seconds, END_CARD_SECONDS[0], END_CARD_SECONDS[1], def.ends.seconds)),

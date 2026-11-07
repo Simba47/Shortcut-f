@@ -84,13 +84,14 @@ export function createFrameMediaPool(getVideoUrl: (videoId: string) => string | 
       inUse.add(it.id)
       if (!(v.duration > 0)) continue
       const showing = clipMs >= from
-      // Where this item's video should be, looping over its own length
-      const target = (((it.source_offset_ms ?? 0) + Math.max(0, clipMs - it.start_ms)) / 1000) % v.duration
+      // Where this item's video should be, looping over its own length (frozen: held on the picture
+      // at its own start, silent — render.py holds that one picture)
+      const target = (((it.source_offset_ms ?? 0) + (it.freeze ? 0 : Math.max(0, clipMs - it.start_ms))) / 1000) % v.duration
       const drift = Math.abs(v.currentTime - target)
-      const vol = it.muted ? 0 : it.volume ?? 1
+      const vol = it.muted || it.freeze ? 0 : it.volume ?? 1
       v.muted = !showing || vol <= 0
       v.volume = Math.max(0, Math.min(1, vol))
-      if (playing && showing) {
+      if (playing && showing && !it.freeze) {
         if (v.paused) v.play().catch(() => {})
         if (drift > 0.35 && drift < v.duration - 0.35) v.currentTime = target
       } else {

@@ -2359,6 +2359,13 @@ body {
   text-shadow: 0 2px 6px rgba(0,0,0,0.6);
 }
 .cp-sample > span { display: inline; }
+/* The Captions panel's preview, over its sub-tabs (CaptionPreview.tsx): the sample's box, the line drawn in it */
+.cap-preview {
+  border-radius: 14px; overflow: hidden; transition: opacity .2s;
+  background: radial-gradient(120% 100% at 50% 0%, #2c2c31, #0e0e10); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
+}
+.cap-preview > canvas { display: block; width: 100%; aspect-ratio: 3 / 1; }
+.cap-preview[data-dim] { opacity: 0.4; }
 .cp-sample { display: flex; align-items: center; justify-content: center; white-space: pre; }
 .cp-theme {
   display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 9px 2px 7px; border-radius: 11px;
@@ -3126,7 +3133,8 @@ html:not([data-theme="light"]) .editor-theme [data-layout-panel="Editing panel"]
   border-color: rgba(255, 255, 255, 0.06) !important; box-shadow: 0 20px 44px -20px rgba(0, 0, 0, 0.85) !important;
 }
 [data-theme="light"] .editor-theme .ed-fullview-btn {
-  width: 30px; height: 30px; border-radius: 50%; background: rgba(10, 10, 12, 0.5) !important; border-color: rgba(255, 255, 255, 0.18) !important;
+  /* (beside the video since 2026-11-06, on the page: the page's own colours, not a dark glass over the picture) */
+  width: 30px; height: 30px; border-radius: 50%;
   opacity: .85; transition: opacity .15s, background-color .15s, transform .15s;
 }
 [data-theme="light"] .editor-theme .ed-fullview-btn:hover { opacity: 1; transform: scale(1.05); }

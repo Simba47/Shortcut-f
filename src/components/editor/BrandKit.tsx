@@ -12,9 +12,9 @@ import { inviteLink, ROLE_NAMES, type KitInviteIn, type KitInviteOut, type KitMe
 import { cardAreas, cardBackgroundPixels, CARD_PATTERNS, CARD_PATTERN_SCALE, CARD_VIDEO_WIDTH, type CardPattern } from '@/lib/shared/brandCard'
 import { templateOf, templateFontFamily } from '@/modules/captions/templates'
 import {
-  LOGO_SIZE, LOGO_SECONDS, MAX_BRAND_FONTS, PROGRESS_HEIGHT, CARD_TEXT_SIZE, type BrandCardSettings,
-  brandCaptionStyle, logoBox, showHandle, WATERMARK, isWatermark, brandProgressBar, END_CARD_SECONDS, MAX_END_VIDEO_MS, type BrandProgress, brandTextStyle, MAX_MORE_CAPTIONS, DEFAULT_BRAND_KIT, type LinkBrand, type BrandTextStyle, type BrandCaptionLook,
-  type BrandKit, type BrandKitData, type BrandCaptions, type LogoCorner, type LogoShow, type ProgressBar,
+  LOGO_SIZE, LOGO_SECONDS, MAX_BRAND_FONTS, CARD_TEXT_SIZE, type BrandCardSettings,
+  brandCaptionStyle, logoBox, showHandle, WATERMARK, isWatermark, END_CARD_SECONDS, MAX_END_VIDEO_MS, brandTextStyle, MAX_MORE_CAPTIONS, DEFAULT_BRAND_KIT, type LinkBrand, type BrandTextStyle, type BrandCaptionLook,
+  type BrandKit, type BrandKitData, type BrandCaptions, type LogoCorner, type LogoShow,
 } from '@/lib/shared/brandKit'
 
 /**
@@ -308,13 +308,10 @@ function BrandOnSwitch({ kit, onKitId, onTurnOn, onTurnOff, compact = false }: B
 
 // ── Options panel: the kits, a new one, Apply ────────────────────────────────
 
-export function BrandKitPanel({ brand, onKitId, onTurnOn, onTurnOff, onDelete, progressBar, onProgressBarChange, editing, onEdit }: BrandSwitchProps & {
+export function BrandKitPanel({ brand, onKitId, onTurnOn, onTurnOff, onDelete, editing, onEdit }: BrandSwitchProps & {
   brand: BrandKits
   /** Asks first, then deletes */
   onDelete: (kit: BrandKit) => void
-  /** This clip's progress bar (null = none) and its change: shown when given */
-  progressBar?: ProgressBar | null
-  onProgressBarChange?: (bar: ProgressBar | null) => void
   /** The kit's workshop is open (in the video's place); Edit kit opens it */
   editing?: boolean
   onEdit?: () => void
@@ -407,18 +404,6 @@ export function BrandKitPanel({ brand, onKitId, onTurnOn, onTurnOff, onDelete, p
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
               {editing ? 'Editing it on the right' : brand.current.shared_by && brand.current.role !== 'edit' ? 'See the kit' : 'Edit kit'}
             </button>
-          )}
-          {onProgressBarChange && (
-            <details className="group rounded-lg" style={{ background: 'rgb(var(--ed-fg) / 0.03)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.07)' }}>
-              <summary className="flex items-center justify-between px-3 h-9 cursor-pointer select-none text-xs font-semibold text-[var(--ed-text)] list-none">
-                This clip <span className="text-[11px] font-normal" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>{progressBar ? 'Progress bar on' : 'Progress bar off'}</span>
-              </summary>
-              <div className="px-3 pb-3">
-                <ClipProgressBar value={progressBar ?? null} onChange={onProgressBarChange}
-                  // Switched on: in the kit's accent colour, along the bottom
-                  start={{ color: brand.current.data.colors.accent, height: 12, position: 'bottom' }} />
-              </div>
-            </details>
           )}
           <details className="rounded-lg">
             <summary className="px-1 cursor-pointer select-none text-[11px] font-medium list-none" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>More…</summary>
@@ -613,51 +598,10 @@ function RolePick({ value, onChange, label }: { value: KitRole; onChange: (r: Ki
   )
 }
 
-/** This clip's progress bar: on or off, its colour, thickness and edge */
-function ClipProgressBar({ value, start, onChange }: { value: ProgressBar | null; start: ProgressBar; onChange: (bar: ProgressBar | null) => void }) {
-  return (
-    <div className="flex flex-col gap-2 pt-3" style={{ borderTop: '1px solid rgb(var(--ed-fg) / 0.08)' }}>
-      <label className="cap-row cursor-pointer select-none">
-        <span className="flex flex-col min-w-0">
-          <span className="cap-label">Progress bar</span>
-          <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>Fills up as this clip plays</span>
-        </span>
-        <Switch on={!!value} label="Progress bar on this clip" onChange={on => onChange(on ? (value ?? start) : null)} />
-      </label>
-      {value && <ProgressBarFields value={value} onChange={onChange} />}
-    </div>
-  )
-}
-
-/** A kit's progress bar (Phase 4): on its clips or not, its colour — the accent colour, or its own — thickness and edge */
-function KitProgressBar({ d, onChange }: { d: BrandKitData; onChange: (p: BrandProgress) => void }) {
-  const p = d.progress_bar, shown = brandProgressBar({ ...d, progress_bar: { ...p, on: true } })!
-  return (
-    <>
-      <label className="cap-row cursor-pointer select-none">
-        <span className="flex flex-col min-w-0">
-          <span className="cap-label">On its clips</span>
-          <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>A bar that fills up as the clip plays</span>
-        </span>
-        <Switch on={p.on} label="Progress bar on its clips" onChange={on => onChange({ ...p, on })} />
-      </label>
-      {p.on && (
-        <>
-          <label className="cap-row cursor-pointer select-none">
-            <span className="cap-label">Your accent colour</span>
-            <Switch on={p.color === 'accent'} label="Progress bar in your accent colour" onChange={on => onChange({ ...p, color: on ? 'accent' : d.colors.accent })} />
-          </label>
-          <ProgressBarFields value={shown} onChange={bar => onChange({ ...p, ...bar, color: bar.color === shown.color ? p.color : bar.color })} />
-        </>
-      )}
-    </>
-  )
-}
-
 /** A kit's settings with the ones added in Phases 4 and 5 filled in, should they be missing (the server fills them in as it reads a kit) */
 const withNewFields = (d: BrandKitData): BrandKitData =>
-  d.progress_bar && d.ends && d.words ? d
-    : { ...d, progress_bar: d.progress_bar ?? DEFAULT_BRAND_KIT.progress_bar, ends: d.ends ?? DEFAULT_BRAND_KIT.ends, words: d.words ?? DEFAULT_BRAND_KIT.words }
+  d.ends && d.words ? d
+    : { ...d, ends: d.ends ?? DEFAULT_BRAND_KIT.ends, words: d.words ?? DEFAULT_BRAND_KIT.words }
 
 /** A video of the library that can open or close clips: one of the user's own, short enough */
 type EndVideoChoice = { id: string; title: string; ms: number }
@@ -719,26 +663,6 @@ function KitBookends({ d, onChange }: { d: BrandKitData; onChange: (ends: Partia
   )
 }
 
-/** A progress bar's colour, thickness and edge (the clip's, or a kit's) */
-function ProgressBarFields({ value, onChange }: { value: ProgressBar; onChange: (bar: ProgressBar) => void }) {
-  return (
-    <>
-      <ColorRow label="Colour" value={value.color} onChange={color => onChange({ ...value, color })} />
-      <RangeRow label="Thickness" min={PROGRESS_HEIGHT[0]} max={PROGRESS_HEIGHT[1]} step={1} value={value.height} text={`${value.height} px`}
-        onChange={height => onChange({ ...value, height })} />
-      <div className="cap-row">
-        <span className="cap-label">Edge</span>
-        <div role="radiogroup" aria-label="Which edge the progress bar is on" className="cap-seg">
-          {([['top', 'Top'], ['bottom', 'Bottom']] as const).map(([v, label]) => (
-            <button key={v} type="button" role="radio" aria-checked={value.position === v} onClick={() => onChange({ ...value, position: v })}
-              className="cap-seg-btn" data-on={value.position === v || undefined}>{label}</button>
-          ))}
-        </div>
-      </div>
-    </>
-  )
-}
-
 export function KitBadge({ kit }: { kit: BrandKit }) {
   return (
     <span className="shrink-0 w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden" style={{ background: kit.data.colors.main, boxShadow: '0 0 0 1px rgb(var(--ed-fg) / 0.12)' }}>
@@ -752,8 +676,9 @@ export function KitBadge({ kit }: { kit: BrandKit }) {
 
 // ── Workshop: the kit set up, in the video's place ─────────────────────────
 // One step at a time (user, 2026-10-20: the long page was hard to follow), the preview always in view.
-// Sound and AI voice / names & spellings were taken out (user, 2026-10-20). The intro / outro, end card
-// and kit progress bar taken out then came back in brand kit Phase 4 (2026-10-27), through the brand engine;
+// Sound and AI voice / names & spellings were taken out (user, 2026-10-20). The intro / outro and end card
+// taken out then came back in brand kit Phase 4 (2026-10-27), through the brand engine; the progress bar
+// came back then too, and was taken out for good (user, 2026-11-05);
 // names & spellings came back in Phase 5 (2026-10-28) as the kit's Words, with no paid AI behind them
 
 type StepId = 'basics' | 'text' | 'captions' | 'words' | 'card' | 'team'
@@ -943,9 +868,6 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
                       : <button type="button" className="text-xs font-semibold hover:underline" style={{ color: 'var(--ed-accent-text)' }}
                           onClick={() => set({ ...now(), logo: { ...now().logo, ...WATERMARK } })}>Make it a watermark</button>}
                   </div>
-                </Section>
-                <Section title="Progress bar">
-                  <KitProgressBar d={d} onChange={progress_bar => set({ ...now(), progress_bar })} />
                 </Section>
                 {!shared && (
                   <Section title="New clips">
@@ -1169,7 +1091,6 @@ export function ClipMock({ kit, platform = 'off', onPlace }: { kit: BrandKit; pl
         Your text here
       </div>
       {d.captions.on && <CaptionSample c={d.captions} />}
-      {d.progress_bar.on && <KitBarSample d={d} />}
       {platform !== 'off' && <div className="absolute inset-0 pointer-events-none"><PlatformOverlay platform={platform} /></div>}
       {d.logo.path && kit.logo_url && (
         // eslint-disable-next-line @next/next/no-img-element
@@ -1178,16 +1099,6 @@ export function ClipMock({ kit, platform = 'off', onPlace }: { kit: BrandKit; pl
           className="absolute select-none"
           style={{ left: `${shown.x * 100}%`, top: `${shown.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%`, opacity: d.logo.opacity, objectFit: 'fill', cursor: onPlace ? (drag ? 'grabbing' : 'grab') : undefined, touchAction: 'none', outline: drag ? '1.5px dashed #c8ff00' : undefined }} />
       )}
-    </div>
-  )
-}
-
-/** The kit's progress bar on the preview, part filled, at its thickness on a 1080 × 1920 frame */
-function KitBarSample({ d }: { d: BrandKitData }) {
-  const bar = brandProgressBar(d)!
-  return (
-    <div className="absolute inset-x-0 pointer-events-none" style={{ [bar.position]: 0, height: `${(bar.height / 1920) * 100}%`, minHeight: 2 }}>
-      <div style={{ width: '60%', height: '100%', background: bar.color }} />
     </div>
   )
 }

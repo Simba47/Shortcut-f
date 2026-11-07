@@ -60,6 +60,19 @@ export interface FrameItem {
   locked?: boolean
   /** Video / photo: its box inside its slot when resized / moved (shares of the slot; absent = the whole slot) */
   rect?: { x: number; y: number; w: number; h: number } | null
+  /**
+   * Photo: which part of it shows in its box when it fills it (user, 2026-11-05: dragged in the
+   * preview) — x / y as shares of the room to spare each way (0 = its left / top edge, 0.5 = the
+   * middle), zoom ≥ 1 (scrolled). Absent = the middle at 1×. Not with a motion (that moves it itself).
+   */
+  pan?: { x: number; y: number; zoom?: number } | null
+  /**
+   * Video items: frozen (user, 2026-11-06) — one still picture, the one at source_offset_ms, for
+   * its whole time, with no sound. "Freeze until playhead" makes the piece after it start playing
+   * from that same picture. `dim`: a frozen piece shown darker (55%), so the playing one stands out.
+   */
+  freeze?: boolean
+  dim?: boolean
   // Photo
   image_path?: string | null
   /** Signed URL for image_path — preview only, never saved */
@@ -280,6 +293,8 @@ export interface CaptionStyle {
   stroke_width?: number | null
   /** Words the AI marked important, keyed by the word's start_ms; set by the export */
   emphasis?: Record<string, boolean> | null
+  /** The word a Creator style makes big on a line with no key word, keyed by its start_ms (AI: lib/keyWords.ts) */
+  line_keys?: Record<string, boolean> | null
   /**
    * The caption style picked (modules/captions/templates.ts: a preset in its own font and look);
    * null = none. `animation` then holds its base preset, drawn where templates aren't known.

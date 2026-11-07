@@ -2,7 +2,6 @@ import { TRANSITION_KINDS } from '@/lib/shared/transitionKinds'
 import { savedTextStyle } from '@/modules/editor/textStyle'
 import sql from '@/lib/db'
 import { cleanTrims, trimMap, MAX_CLIP_MS, MIN_CLIP_MS } from '@/lib/trims'
-import { cleanProgressBar } from '@/lib/shared/brandKit'
 import { cleanCardLook, cleanFrameBackground } from '@/lib/shared/brandCard'
 import { cleanBrandOn } from '@/lib/shared/brandOn'
 import { lockCaption, lockClipLook, lockHolds, lockSetOf } from '@/lib/shared/brandTeam'
@@ -53,8 +52,6 @@ interface SaveClipInput {
   removeFillers?: boolean
   /** The clip's own sound (top of the Music panel) */
   originalSound?: { volume: number; muted: boolean }
-  /** The clip's progress bar (Brand kit panel), null = none; left out by an editor that doesn't know it: what's saved stays */
-  progressBar?: unknown
   /** The brand kit on the clip and what it changed (lib/shared/brandOn.ts); null = off */
   brand?: unknown
   /**
@@ -203,6 +200,8 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
   const hasTemplateField = await hasColumn('caption_styles', 'template')
   // The key words (emphasis): the backend adds that field too
   const hasEmphasisField = await hasColumn('caption_styles', 'emphasis')
+  // The line words (what a Creator line makes big with no key word), once the worker has added the field
+  const hasLineKeysField = await hasColumn('caption_styles', 'line_keys')
   // Captions moved left or right, once the worker has added the field
   const hasCaptionX = await hasColumn('caption_styles', 'position_x')
   // The captions' case (Title, UPPER, lower), once the worker has added the field
@@ -236,9 +235,6 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
     && await hasColumn('clips', 'layers')
   const original = body.originalSound
   const hasOriginal = !!original && typeof original.volume === 'number' && await hasColumn('clips', 'original_volume')
-  // The progress bar, once the worker has added the field
-  const bar = body.progressBar === undefined ? undefined : cleanProgressBar(body.progressBar)
-  const savesBar = bar !== undefined && await hasColumn('clips', 'progress_bar')
   // The brand kit switch (clips.brand, once the backend has added it). A huge `before` (thousands of
   // texts) is dropped rather than refused: the brand then comes off without putting styles back
   let brandOn = body.brand === undefined ? undefined : cleanBrandOn(body.brand)
@@ -330,6 +326,10 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
       if (hasEmphasisField && emphasis && typeof emphasis === 'object') {
         fields.emphasis = sql.json(emphasis as never)
       }
+      const lineKeys = (captionStyle as Partial<CaptionStyle>).line_keys
+      if (hasLineKeysField && lineKeys && typeof lineKeys === 'object') {
+        fields.line_keys = sql.json(lineKeys as never)
+      }
       // A database the backend hasn't updated yet only accepts the original animations
       if (!hasPresetFields && typeof fields.animation === 'string' && !['karaoke', 'fade', 'none'].includes(fields.animation)) {
         fields.animation = 'karaoke'
@@ -353,7 +353,6 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
     }
     if (trims) q.push(tx`UPDATE clips SET trim_ranges = ${trims.length ? sql.json(trims as never) : null} WHERE id = ${clipId}`)
     if (savesLayers) q.push(tx`UPDATE clips SET layers = ${body.layers ? sql.json(body.layers as never) : null} WHERE id = ${clipId}`)
-    if (savesBar) q.push(tx`UPDATE clips SET progress_bar = ${bar ? sql.json(bar as never) : null} WHERE id = ${clipId}`)
     if (savesBrand) q.push(tx`UPDATE clips SET brand = ${brandJson ? sql.json(brandJson as never) : null} WHERE id = ${clipId}`)
     if (hasOriginal) {
       q.push(tx`UPDATE clips SET original_volume = ${Math.max(0, Math.min(1, original!.volume))}, original_muted = ${!!original!.muted} WHERE id = ${clipId}`)
@@ -614,6 +613,13 @@ function cleanFrame(frame: FrameSettings): FrameSettings {
     const r3 = (v: number) => Math.round(v * 1000) / 1000
     return x !== undefined && y !== undefined && w !== undefined && h !== undefined ? { rect: { x: r3(x), y: r3(y), w: r3(w), h: r3(h) } } : {}
   }
+  // Which part of a photo shows in its box (FrameItem.pan), or nothing when it's the middle at 1×
+  const panOf = (p: unknown) => {
+    const q = p as { x?: unknown; y?: unknown; zoom?: unknown } | null | undefined
+    const x = num(q?.x, 0, 1), y = num(q?.y, 0, 1), zoom = num(q?.zoom, 1, 4) ?? 1
+    const r3 = (v: number) => Math.round(v * 1000) / 1000
+    return x !== undefined && y !== undefined ? { pan: { x: r3(x), y: r3(y), zoom: r3(zoom) } } : {}
+  }
   const items: FrameItem[] = (frame.items ?? []).slice(0, 300).flatMap((it): FrameItem[] => {
     if (!it || typeof it.id !== 'string' || !['video', 'photo', 'text'].includes(it.kind)) return []
     // A slot (0–3), the band, or a frame's second text area
@@ -624,16 +630,17 @@ function cleanFrame(frame: FrameSettings): FrameSettings {
     if (it.kind === 'video') {
       if (typeof it.source_video_id !== 'string') return []
       const broll = cleanBroll(it.broll)
-      return [{ ...base, source_video_id: it.source_video_id, source_offset_ms: Math.round(num(it.source_offset_ms, 0, 1e9) ?? 0), volume: num(it.volume, 0, 1) ?? 1, muted: !!it.muted, corners: corner(it.corners), ...rectOf(it.rect), ...(broll ? { broll } : {}) }]
+      return [{ ...base, source_video_id: it.source_video_id, source_offset_ms: Math.round(num(it.source_offset_ms, 0, 1e9) ?? 0), volume: num(it.volume, 0, 1) ?? 1, muted: !!it.muted, corners: corner(it.corners), ...rectOf(it.rect), ...(broll ? { broll } : {}), ...(it.freeze ? { freeze: true, ...(it.dim ? { dim: true } : {}) } : {}) }]
     }
     if (it.kind === 'photo') {
       if (typeof it.image_path !== 'string') return []
-      return [{ ...base, image_path: it.image_path, motion: it.motion && motions.includes(it.motion) ? it.motion : 'none', corners: corner(it.corners), ...rectOf(it.rect) }]
+      return [{ ...base, image_path: it.image_path, motion: it.motion && motions.includes(it.motion) ? it.motion : 'none', corners: corner(it.corners), ...rectOf(it.rect), ...panOf(it.pan) }]
     }
     return [{
       ...base, text: typeof it.text === 'string' ? it.text.slice(0, 500) : '', captions: !!it.captions,
       bg: bgHex(it.bg), color: hex(it.color), size: num(it.size, 16, 200),
-      x: num(it.x, 0, 1), y: num(it.y, 0, 1), w: num(it.w, 0.05, 1), h: num(it.h, 0.01, 1),
+      // (x, y: shares of its area — beyond 0–1 when it's been moved out of it, anywhere in the frame)
+      x: num(it.x, -20, 20), y: num(it.y, -20, 20), w: num(it.w, 0.05, 1), h: num(it.h, 0.01, 1),
       ...(typeof it.rotation === 'number' && isFinite(it.rotation) && Math.round(it.rotation * 10) % 3600 !== 0
         ? { rotation: Math.round(((((it.rotation % 360) + 540) % 360) - 180) * 10) / 10 } : {}),
     }]
@@ -656,7 +663,8 @@ function cleanFrame(frame: FrameSettings): FrameSettings {
         }))
       : undefined,
     // Resized rows (at most 4 in a template); the export checks they fit the frame's template
-    row_h: Array.isArray(frame.row_h) && frame.row_h.length >= 2 && frame.row_h.length <= 4 && frame.row_h.every(h => typeof h === 'number' && h >= 0.03 && h <= 1)
+    // (0: a caption strip closed — whether that row is one, frames.ts validRowHeights / frames.py check)
+    row_h: Array.isArray(frame.row_h) && frame.row_h.length >= 2 && frame.row_h.length <= 4 && frame.row_h.every(h => typeof h === 'number' && (h === 0 || h >= 0.03) && h <= 1)
       ? frame.row_h.map(h => Math.round(h * 1000) / 1000) : undefined,
     // The bar's swap: the rows' order, a reordering of the template's rows (0..n-1, each once)
     row_order: Array.isArray(frame.row_order) && frame.row_order.length >= 2 && frame.row_order.length <= 4

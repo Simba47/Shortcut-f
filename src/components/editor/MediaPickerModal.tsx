@@ -4,20 +4,27 @@ import { useEffect, useRef, useState, useMemo } from 'react'
 import type { Video } from '@chai-cut/shared'
 import { ACCEPTED_VIDEO_EXTENSIONS } from '@chai-cut/shared'
 import { useVideoUpload } from '@/modules/upload/useVideoUpload'
+import { VideoPartChooser, type VideoPart } from './VideoPartChooser'
+import { PhotoCropper, bakePhoto, NO_PHOTO_EDIT, type PhotoEdit } from './PhotoCropper'
 
 interface Props {
   clipId: string
   atMs: number
-  onInsertVideo: (videoId: string) => void
+  /** `part`: the part of it picked to go in (absent: the whole video) */
+  onInsertVideo: (videoId: string, part?: VideoPart) => void
   onInsertImage: (storagePath: string, url: string) => void
   onClose: () => void
   /** Which tab to open on (e.g. photos when filling a frame's photo slot) */
   initialTab?: 'videos' | 'upload' | 'image'
   /** Offer only videos (your videos + upload) or only a photo — e.g. for a frame's video or photo slot */
   only?: 'video' | 'photo'
+  /** A video picked or uploaded is played first to pick the part that goes in (a frame's slot);
+   *  `roomMs`: how long it can play there (null: no limit) */
+  pickPart?: { roomMs: number | null }
 }
 
 type Tab = 'videos' | 'upload' | 'image'
+type LibraryVideo = Video & { is_upload_asset?: boolean; is_asset?: boolean; video_url?: string | null }
 
 function msToLabel(ms: number) {
   const s = Math.floor(ms / 1000)
@@ -25,17 +32,21 @@ function msToLabel(ms: number) {
   return `${m}:${String(s % 60).padStart(2, '0')}`
 }
 
-export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, onClose, initialTab, only }: Props) {
+export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, onClose, initialTab, only, pickPart }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab ?? 'videos')
   // Your uploads (B-roll added from this computer before) first, then your videos
-  const [videos, setVideos] = useState<Array<Video & { is_upload_asset?: boolean; is_asset?: boolean }>>([])
+  const [videos, setVideos] = useState<LibraryVideo[]>([])
   const [loadingVideos, setLoadingVideos] = useState(true)
 
   // Upload video from device: the same resumable upload as the dashboard (plan limits checked,
   // straight to storage), then the new video goes into the slot
   const [videoFile, setVideoFile] = useState<File | null>(null)
   // An upload here is B-roll: saved as an asset, so it stays off the dashboard and the plan's video count
-  const upload = useVideoUpload(videoId => onInsertVideo(videoId), { asset: true })
+  const upload = useVideoUpload(videoId => {
+    // (the file just uploaded plays from the computer while its part is picked)
+    if (pickPart && videoFile) setPicked({ id: videoId, url: URL.createObjectURL(videoFile), duration_ms: null, local: true })
+    else onInsertVideo(videoId)
+  }, { asset: true })
   const videoUploading = upload.state.phase === 'uploading' || upload.state.phase === 'finishing'
   const videoProgress = upload.state.progress
   const videoError = upload.state.phase === 'failed' ? upload.state.error : null
@@ -43,11 +54,21 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
   // Closing mid-upload would cancel it, so the backdrop and ✕ wait until it's done
   const safeClose = () => { if (!videoUploading) onClose() }
 
+  // The video picked or uploaded, while its part is picked (pickPart)
+  const [picked, setPicked] = useState<{ id: string; url: string; duration_ms: number | null; local?: boolean } | null>(null)
+  useEffect(() => () => { if (picked?.local) URL.revokeObjectURL(picked.url) }, [picked])
+  function pickVideo(v: LibraryVideo) {
+    if (pickPart && v.video_url) setPicked({ id: v.id, url: v.video_url, duration_ms: v.duration_ms })
+    else onInsertVideo(v.id)
+  }
+
   // Upload image from device
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [imageUploading, setImageUploading] = useState(false)
   const [imageError, setImageError] = useState<string | null>(null)
+  // Its crop and mirror, made into the photo before it's uploaded (PhotoCropper)
+  const [imageEdit, setImageEdit] = useState<PhotoEdit>(NO_PHOTO_EDIT)
   const imageInputRef = useRef<HTMLInputElement>(null)
 
   const backdropRef = useRef<HTMLDivElement>(null)
@@ -57,7 +78,7 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
       .then(r => r.json())
       .then(({ videos }) => {
         // Stock clips (also assets) are picked from Stock, not here
-        const all = ((videos ?? []) as Array<Video & { is_upload_asset?: boolean; is_asset?: boolean }>)
+        const all = ((videos ?? []) as LibraryVideo[])
           .filter(v => v.status === 'ready')
         setVideos([...all.filter(v => v.is_upload_asset), ...all.filter(v => !v.is_asset)])
         setLoadingVideos(false)
@@ -77,6 +98,7 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
     if (!f.type.startsWith('image/')) return
     setImageFile(f)
     setImagePreview(URL.createObjectURL(f))
+    setImageEdit(NO_PHOTO_EDIT)
     setImageError(null)
   }
 
@@ -86,7 +108,8 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
     setImageError(null)
     try {
       const form = new FormData()
-      form.append('file', imageFile)
+      // (a GIF goes in as it is: cropping it would stop it moving)
+      form.append('file', imageFile.type === 'image/gif' ? imageFile : await bakePhoto(imageFile, imageEdit))
       const res = await fetch('/api/overlays/upload', { method: 'POST', body: form })
       if (!res.ok) throw new Error((await res.json()).error ?? 'Upload failed')
       const { storage_path, preview_url } = await res.json()
@@ -116,7 +139,7 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
   return (
     <div
       ref={backdropRef}
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-[120] flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)' }}
       onClick={e => { if (e.target === backdropRef.current) safeClose() }}
     >
@@ -137,7 +160,7 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
         </div>
 
         {/* Tabs (hidden when there's only one kind to pick) */}
-        <div className="shrink-0 flex px-3 pb-3 gap-1.5" style={TABS.length < 2 ? { display: 'none' } : undefined}>
+        <div className="shrink-0 flex px-3 pb-3 gap-1.5" style={TABS.length < 2 || picked ? { display: 'none' } : undefined}>
           {TABS.map(t => (
             <button
               key={t.id}
@@ -156,8 +179,16 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
 
         <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', flexShrink: 0 }} />
 
+        {/* ── The part of the picked video that goes in ───────────────────── */}
+        {picked && (
+          <VideoPartChooser key={picked.id} url={picked.url} durationMs={picked.duration_ms} roomMs={pickPart?.roomMs ?? null}
+            onConfirm={part => onInsertVideo(picked.id, part)}
+            onWhole={() => onInsertVideo(picked.id)}
+            onBack={() => { setPicked(null); if (picked.local) { upload.cancel(); setVideoFile(null) } }} />
+        )}
+
         {/* ── My Videos tab ─────────────────────────────────────────────── */}
-        {tab === 'videos' && (
+        {!picked && tab === 'videos' && (
           <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
             {loadingVideos && <p className="text-xs text-center py-10" style={{ color: 'rgba(255,255,255,0.25)' }}>Loading…</p>}
             {!loadingVideos && videos.length === 0 && (
@@ -187,7 +218,7 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
                   {v.duration_ms != null && <p className="text-xs" style={{ color: 'rgba(255,255,255,0.35)', marginTop: 1 }}>{msToLabel(v.duration_ms)}</p>}
                 </div>
                 <button
-                  onClick={() => onInsertVideo(v.id)}
+                  onClick={() => pickVideo(v)}
                   className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold"
                   style={{ background: 'rgba(249,115,22,0.2)', color: '#fb923c', border: '1px solid rgba(249,115,22,0.35)' }}
                 >
@@ -199,7 +230,7 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
         )}
 
         {/* ── Upload Video tab ───────────────────────────────────────────── */}
-        {tab === 'upload' && (
+        {!picked && tab === 'upload' && (
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
             <input ref={videoInputRef} type="file" accept={ACCEPTED_VIDEO_EXTENSIONS.join(',')} className="hidden"
               onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) { upload.cancel(); setVideoFile(f) } }} />
@@ -254,13 +285,13 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
               {upload.state.phase === 'finishing' ? 'Finishing…'
                 : videoUploading ? `Uploading ${videoProgress}%…`
                 : upload.state.phase === 'failed' && upload.state.canRetry ? `Retry from ${videoProgress}%`
-                : 'Upload & insert'}
+                : pickPart ? 'Upload & pick the part' : 'Upload & insert'}
             </button>
           </div>
         )}
 
         {/* ── Image tab ─────────────────────────────────────────────────── */}
-        {tab === 'image' && (
+        {!picked && tab === 'image' && (
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
             <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden"
               onChange={e => { if (e.target.files?.[0]) handleImageFile(e.target.files[0]) }} />
@@ -285,6 +316,19 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
               </button>
             ) : (
               <div className="flex flex-col gap-3">
+                {imageFile?.type !== 'image/gif' ? (
+                  <div className="relative">
+                    <PhotoCropper src={imagePreview} value={imageEdit} onChange={setImageEdit} />
+                    <button
+                      onClick={() => { setImageFile(null); setImagePreview(null) }}
+                      aria-label="Remove this photo"
+                      className="absolute top-2 right-2 flex items-center justify-center rounded-full"
+                      style={{ width: 26, height: 26, background: 'rgba(0,0,0,0.75)', border: '1px solid rgba(255,255,255,0.15)' }}
+                    >
+                      <svg width="8" height="8" viewBox="0 0 10 10" fill="none"><path d="M1 1l8 8M9 1L1 9" stroke="white" strokeWidth="1.6" strokeLinecap="round"/></svg>
+                    </button>
+                  </div>
+                ) : (
                 <div className="relative rounded-xl overflow-hidden" style={{ aspectRatio: '16/9', background: '#111' }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={imagePreview} alt="preview" className="w-full h-full object-contain" />
@@ -296,6 +340,7 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
                     <svg width="8" height="8" viewBox="0 0 10 10" fill="none"><path d="M1 1l8 8M9 1L1 9" stroke="white" strokeWidth="1.6" strokeLinecap="round"/></svg>
                   </button>
                 </div>
+                )}
                 <div className="flex items-center gap-2">
                   <p className="text-xs flex-1 truncate" style={{ color: 'rgba(255,255,255,0.35)' }}>{imageFile?.name}</p>
                   <button onClick={() => imageInputRef.current?.click()} className="text-xs shrink-0" style={{ color: '#c8ff00' }}>Change</button>
