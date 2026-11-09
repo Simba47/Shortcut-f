@@ -19,7 +19,7 @@ import { normalizedSlotAspect, fitToAspect } from '@/modules/editor/utils'
 import { framePicture } from '@/modules/editor/framePicture'
 import { draggedView, zoomedView, wholeView } from '@/modules/editor/frameView'
 import { backgroundPixels, frameBackgroundOf, type FrameBackground } from '@/lib/shared/brandCard'
-import { mainFreezeItem, mainFreezeItems, isMediaFrame, mediaFrameItemAt, isFrameLayout, frameSlotLabels, frameLanesFor, frameBandShown, frameOf, itemAt, captionBandAt, cornerGeometry, MIN_ROW_H, CAPTION_CLOSE_H, mainRect, boxRect, MIN_BOX as MIN_MAIN_BOX, frameAreas, frameBase, areaRadius, frameSlotSize, isTextLane, frameRows, validRowOrder, slotOffers, BLUR_SOURCE_SLOT, FRAME_TEMPLATES, barAt, barFlipped, MIN_MOVABLE_W, itemSourceAt } from '@/modules/editor/frames'
+import { frameHeldAt, withFrameFreeze, isMediaFrame, mediaFrameItemAt, isFrameLayout, frameSlotLabels, frameLanesFor, frameBandShown, frameOf, itemAt, captionBandAt, cornerGeometry, MIN_ROW_H, CAPTION_CLOSE_H, mainRect, boxRect, MIN_BOX as MIN_MAIN_BOX, frameAreas, frameBase, areaRadius, frameSlotSize, isTextLane, frameRows, validRowOrder, slotOffers, BLUR_SOURCE_SLOT, FRAME_TEMPLATES, barAt, barFlipped, MIN_MOVABLE_W, itemSourceAt } from '@/modules/editor/frames'
 import type { FrameMediaPool } from '@/modules/editor/frameMedia'
 import { useLiveTimeMs, liveTime, usePlayerStore, LIVE_REDRAW_MS } from '@/modules/player/store'
 import { addedVideoBox, isGapPart } from '@/modules/editor/visibility'
@@ -107,8 +107,7 @@ export function VideoPreview({
   // (or a frame made on media: the main video isn't in it, its media is shown the same way)
   const overlayBox = activeSegment && overlaySource ? addedVideoBox(activeSegment, mainVideoId) : null
   const mediaFrame = isMediaFrame(activeSegment)
-  // (the main video frozen in a slot: its frozen copy, so this view stops with the frame)
-  const frameItem = activeSegment ? (mediaFrame ? mediaFrameItemAt(activeSegment, currentTimeMs) : mainFreezeItems(activeSegment)[0] ?? null) : null
+  const frameItem = mediaFrame && activeSegment ? mediaFrameItemAt(activeSegment, currentTimeMs) : null
   const showsOverlay = !!overlayBox || !!frameItem
   const [overlayAR, setOverlayAR] = useState<number | null>(null)
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -810,19 +809,15 @@ function paintFrame(
     if (fill !== 'none' && ring !== 'none') { ctx.save(); clipArea(ctx, a); ctx.fillStyle = fill; ctx.fillRect(a.x, a.y, a.w, a.h); ctx.restore() }
     if (main.has(area.slot) && !frame.main_hidden?.[String(area.slot)] && vW && vH && !coveredHere) {
       const box = seg.crop_boxes.find(b => b.slot_index === area.slot)
-      // Frozen for stretches in this slot: its own copy is drawn (frameMedia.ts), once it's ready
-      const frozen = mainFreezeItem(seg, area.slot)
-      const copy = frozen ? pool?.video(frozen) : null
-      const pic = copy && copy.readyState >= 2 && copy.videoWidth ? copy : video
-      const dimMain = !!frozen?.dim && itemSourceAt(frozen, tMs).held
+      const dimMain = !!frame.freeze?.dim && frameHeldAt(seg, tMs)
       // Shown whole: the video isn't cropped here — unless the slot crops the main video to its own
       // view (mainCrop: Screen + face cam's Screen, with Same video)
       if (contain && !(area.kind === 'slot' && area.mainCrop)) {
-        inSlot(ctx, frame.main_corners?.[String(area.slot)], a, dimWhen(ctx, dimMain, (dx, dy, dw, dh) => containSource(ctx, pic, vW, vH, dx, dy, dw, dh)), mainRect(frame, area.slot), 'none', { w: vW, h: vH })
+        inSlot(ctx, frame.main_corners?.[String(area.slot)], a, dimWhen(ctx, dimMain, (dx, dy, dw, dh) => containSource(ctx, video, vW, vH, dx, dy, dw, dh)), mainRect(frame, area.slot), 'none', { w: vW, h: vH })
       } else if (box) {
         const p = getPositionAt(box.id, tMs)
         inSlot(ctx, frame.main_corners?.[String(area.slot)], a,
-          dimWhen(ctx, dimMain, (dx, dy, dw, dh) => coverCrop(ctx, pic, p.x * vW, p.y * vH, p.w * vW, p.h * vH, dx, dy, dw, dh)),
+          dimWhen(ctx, dimMain, (dx, dy, dw, dh) => coverCrop(ctx, video, p.x * vW, p.y * vH, p.w * vW, p.h * vH, dx, dy, dw, dh)),
           mainRect(frame, area.slot), ring)
       }
     }
@@ -846,7 +841,8 @@ function paintFrame(
       // (the part of it picked: dragged / zoomed in the preview, as a photo)
       const draw = put(v, v.videoWidth, v.videoHeight, it.pan ? Math.max(1, it.pan.zoom ?? 1) : 1, 0, it.pan)
       // Frozen (or in a freeze stretch) and dimmed: the picture at 55% brightness (render.py _dim_filter)
-      const dimmed = dimWhen(ctx, !!it.dim && itemSourceAt(it, tMs).held, draw)
+      const playing = withFrameFreeze(seg, it)
+      const dimmed = dimWhen(ctx, !!playing.dim && itemSourceAt(playing, tMs).held, draw)
       inSlot(ctx, it.corners, a, dimmed, boxRect(it.rect), contain ? fill : ring, contain ? { w: v.videoWidth, h: v.videoHeight } : true)
     }
   }

@@ -700,14 +700,8 @@ function cleanFrame(frame: FrameSettings): FrameSettings {
     main_volume: num(frame.main_volume, 0, 1),
     main_muted: frame.main_muted === undefined ? undefined : !!frame.main_muted,
     main_under: frame.main_under ? true : undefined,
-    // The main video's freeze stretches, per slot
-    main_freeze: frame.main_freeze && typeof frame.main_freeze === 'object'
-      ? (o => Object.keys(o).length ? o : undefined)(Object.fromEntries(Object.entries(frame.main_freeze).flatMap(([k, f]) => {
-        const { holds, dim } = holdsOf(f ?? {}, 1e9)
-        return /^[0-3]$/.test(k) && holds?.length ? [[k, { holds, ...(dim ? { dim: true } : {}) }]] : []
-      })))
-      : undefined,
-    no_main: frame.no_main ? { ...(frame.no_main.gap ? { gap: true } : {}), ...(frame.no_main.muted ? { muted: true } : {}) } : undefined,
+    // The frame's freezes (they add to its length)
+    freeze: frame.freeze ? (f => (f.holds?.length ? { holds: f.holds, ...(f.dim ? { dim: true } : {}) } : undefined))(holdsOf(frame.freeze, 1e9)) : undefined,
     // The main video's box in its slot, when resized / moved
     main_rects: frame.main_rects && typeof frame.main_rects === 'object'
       ? Object.fromEntries(Object.entries(frame.main_rects).flatMap(([k, r]) => {

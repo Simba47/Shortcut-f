@@ -155,10 +155,11 @@ export interface FrameSettings {
   /** Rounded corners of the main video, per slot index */
   main_corners?: Record<string, CornerStyle>
   /**
-   * The main video frozen in a slot for stretches (user, 2026-11-10: as a video added to a slot, FrameItem.holds),
-   * by slot index. `at_ms` from the frame's start. It plays on from the same picture after each; `dim` darkens them.
+   * Freezes of the whole frame (user, 2026-11-10: "everything waits"): every video in it holds still,
+   * silent, for each stretch, then plays on from the same picture, and the frame and the clip are that
+   * much longer. `at_ms` from the frame's start, on the timeline. `dim` darkens the videos meanwhile.
    */
-  main_freeze?: Record<string, { holds: FrameHold[]; dim?: boolean }> | null
+  freeze?: { holds: FrameHold[]; dim?: boolean } | null
   /** The main video is heard under the frame though no slot shows it (Photo Story), at main_volume */
   main_under?: boolean
   /**

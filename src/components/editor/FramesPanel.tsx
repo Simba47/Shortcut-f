@@ -11,7 +11,7 @@ import { Switch } from './BrandKit'
 
 const ACCENT = '#c8ff00'
 
-type FramePatch = Partial<Pick<FrameSettings, 'main_slots' | 'main_volume' | 'main_muted' | 'main_volumes' | 'main_mutes' | 'main_corners' | 'main_freeze' | 'bg'>>
+type FramePatch = Partial<Pick<FrameSettings, 'main_slots' | 'main_volume' | 'main_muted' | 'main_volumes' | 'main_mutes' | 'main_corners' | 'freeze' | 'bg'>>
 
 interface Props {
   /** Every format that uses a frame, in time order */
@@ -493,7 +493,8 @@ function FrameContents({ seg, currentTimeMs, videoTitles, selected, onSelectItem
                             <Switch on label="Let it play" onChange={() => onFreeze(r.id, false)} />
                           </div>
                         )}
-                        {(r.item.freeze || !!r.item.holds?.length) && <FreezeDim dim={!!r.item.dim} onDim={dim => onUpdateItem(r.id, { dim })} />}
+                        {(r.item.freeze || !!r.item.holds?.length) && !frame.freeze?.holds?.length && <FreezeDim dim={!!r.item.dim} onDim={dim => onUpdateItem(r.id, { dim })} />}
+                        {!!frame.freeze?.holds?.length && <FreezeDim dim={!!frame.freeze.dim} onDim={dim => onUpdateFrame({ freeze: { ...frame.freeze!, dim } })} />}
                         {r.item.broll && r.item.broll.alts.length > 1 && onSwapBroll && (
                           <BrollSwap pick={r.item.broll} busy={swappingBroll === r.id} onPick={index => onSwapBroll(r.id, index)} />
                         )}
@@ -520,9 +521,8 @@ function FrameContents({ seg, currentTimeMs, videoTitles, selected, onSelectItem
                   <>
                     <div className="flex flex-col gap-1.5">
                       <span className="text-[11px] font-medium" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>Volume</span>
-                      {!!frame.main_freeze?.[String(r.lane)]?.holds?.length && (
-                      <FreezeDim dim={!!frame.main_freeze[String(r.lane)].dim}
-                        onDim={dim => onUpdateFrame({ main_freeze: { ...frame.main_freeze, [String(r.lane)]: { ...frame.main_freeze![String(r.lane)], dim } } })} />
+                      {!!frame.freeze?.holds?.length && (
+                      <FreezeDim dim={!!frame.freeze.dim} onDim={dim => onUpdateFrame({ freeze: { ...frame.freeze!, dim } })} />
                     )}
                     {(() => {
                         // This slot's own sound — other slots showing the main video aren't affected

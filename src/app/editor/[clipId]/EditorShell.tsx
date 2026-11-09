@@ -10,7 +10,7 @@ import { withoutRanges, computeCutRanges, reactionRanges } from '@/lib/cuts'
 import { inLineText } from '@/lib/inLine'
 import { cleanTrims, trimMap, addTrim, wordsOnTimeline, MAX_CLIP_MS, MIN_CLIP_MS } from '@/lib/trims'
 import { toTimelineState, toSourceState, rippleDelete, rippleStretch, lockedInRange, insertAtStart, extendEnd, type TimedState } from '@/modules/editor/trimState'
-import { insertsOf, insertedMs, rippleInsert, isInsert, goesAfterMain, piecesOf, piecesLength, videoAtPieces, timelineAtPieces, rippleCut, pieceAt, speedOf, pieceVideoMs, mainFrom } from '@/modules/editor/inserts'
+import { freezeChanged, insertsOf, insertedMs, rippleInsert, isInsert, goesAfterMain, piecesOf, piecesLength, videoAtPieces, timelineAtPieces, rippleCut, pieceAt, speedOf, pieceVideoMs, mainFrom } from '@/modules/editor/inserts'
 import { PostText, type PostTextValue } from '@/components/clips/PostText'
 import { BrollPanel, type StockResult } from '@/components/editor/BrollPanel'
 import { VideoPanel, type PanelVideo } from '@/components/editor/VideoPanel'
@@ -60,7 +60,7 @@ import { setBrandFonts, ensureBrandFont } from '@/components/editor/brandFonts'
 import { EditorTour, hasSeenEditorTour } from '@/components/editor/EditorTour'
 import { FrameAddMenu, addChoices, type AddChoice } from '@/components/editor/FrameAddMenu'
 import { createFrameMediaPool } from '@/modules/editor/frameMedia'
-import { FRAME_TEMPLATES, MAIN_SOURCE, newHoldAt, withMainHolds, isMediaFrame, isFrameLayout, frameOf, mainAudioVolume, mainSlotSound, frameLanes, frameSlotLabels, emptySlotStretches, slotOffers, laneInRowKey, newItemCorners, frameSlotCount, itemAt, isTextLane, textLaneLook, type TextLane } from '@/modules/editor/frames'
+import { FRAME_TEMPLATES, newHoldAt, MIN_ITEM_MS as MIN_FREEZE_MS, isMediaFrame, isFrameLayout, frameOf, mainAudioVolume, mainSlotSound, frameLanes, frameSlotLabels, emptySlotStretches, slotOffers, laneInRowKey, newItemCorners, frameSlotCount, itemAt, isTextLane, textLaneLook, type TextLane } from '@/modules/editor/frames'
 import { signOut } from 'next-auth/react'
 import { PlatformOverlay, PLATFORM_SAFE, type Platform } from '@/components/editor/PlatformOverlay'
 // ── Domain stores ──────────────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ import { briefView, withWide, WIDEN_MIN_MS } from '@/modules/editor/briefWiden'
 import { decideFormat, decideVertical, AUTO_FORMAT, SOURCE_PX_H, WHOLE_PICTURE, keepsAll, viewsOverlap } from '@/modules/editor/autoFormat'
 import { pictureOrWhole, toPicture, fromPicture, pictureAR } from '@/modules/editor/pictureBox'
 import { setFramePicture, framePicture, inFramePicture } from '@/modules/editor/framePicture'
-import type { SegmentLocal, CropBoxLocal, FrameLayout, FrameLane, FrameItem, TransitionType } from '@chai-cut/shared'
+import type { SegmentLocal, CropBoxLocal, FrameHold, FrameLayout, FrameLane, FrameItem, TransitionType } from '@chai-cut/shared'
 import { SPEED_MIN, SPEED_MAX } from '@chai-cut/shared'
 import { TransitionsPanel, TRANSITION_DEFAULT_MS, TRANSITION_KINDS, playedTransitionMs, type TransitionJoin } from '@/components/editor/TransitionsPanel'
 
@@ -298,7 +298,9 @@ export function EditorShell({
     () => (trimmed ? [] : piecesOf(mainRowOf(storeSegments, belowRows), ownVideoIdForInserts, s => isShot(s, ownVideoIdForInserts), true)),
     [trimmed, storeSegments, ownVideoIdForInserts, belowRows, rawClip.start_ms], // eslint-disable-line react-hooks/exhaustive-deps
   )
-  const piecesOn = hasInserts || allPieces.some(p => p.from != null && Math.abs(p.from - p.at) > 1) || allPieces.some(p => (p.speed ?? 1) !== 1)
+  // (a frame with a freeze: the main video waits in it, as for a video put in between)
+  const hasFreeze = allPieces.some(p => p.hold != null && !p.blank && !inserts.some(i => i.id === p.id))
+  const piecesOn = hasInserts || hasFreeze || allPieces.some(p => p.from != null && Math.abs(p.from - p.at) > 1) || allPieces.some(p => (p.speed ?? 1) !== 1)
   const pieces = useMemo(() => (piecesOn ? allPieces : []), [piecesOn, allPieces])
   const insertsKey = pieces.map(p => `${p.id}:${p.at}+${p.ms}:${p.from ?? ''}@${p.hold ?? ''}x${p.speed ?? 1}`).join(',')
   const clip = useMemo(
@@ -648,9 +650,7 @@ export function EditorShell({
   const [videoLibrary, setVideoLibrary] = useState<Record<string, { url: string; title: string; duration_ms?: number | null; stock?: boolean }>>({})
   const videoLibraryRef = useRef(videoLibrary)
   videoLibraryRef.current = videoLibrary
-  const clipUrlRef = useRef(clipVideoUrl)
-  clipUrlRef.current = clipVideoUrl
-  const framePool = useMemo(() => createFrameMediaPool(id => id === MAIN_SOURCE ? clipUrlRef.current : videoLibraryRef.current[id]?.url), [])
+  const framePool = useMemo(() => createFrameMediaPool(id => videoLibraryRef.current[id]?.url), [])
   useEffect(() => () => framePool.dispose(), [framePool])
   async function loadVideoLibrary() {
     const res = await fetch('/api/videos?assets=1').catch(() => null)
@@ -797,7 +797,7 @@ export function EditorShell({
   }
   // (with videos put in between, the clip's clock runs the added videos: the main video waits during one)
   const brollSource = useBrollSources(videoRef, clip.start_ms, id => videoLibraryRef.current[id]?.url, mainVideoId, videoToTimeline,
-    hasInserts || pieces.some(p => p.hold != null) ? () => ({ ms: liveTime.get(), playing: usePlayerStore.getState().playing }) : undefined)
+    hasInserts || hasFreeze || pieces.some(p => p.hold != null) ? () => ({ ms: liveTime.get(), playing: usePlayerStore.getState().playing }) : undefined)
   heldPlayedRef.current = id => {
     const seg = useEditorStore.getState().segments.find(s => s.id === id)
     // The empty stretch after the main video has no video of its own to follow (its box only names
@@ -1771,6 +1771,10 @@ export function EditorShell({
     setFormatPlay(p => ({ id, n: (p?.n ?? 0) + 1 }))
     if (tool === 'subjects' && pickForScene(id)) return
     const onFrame = pickedPartAt(liveTime.get()) ?? activeSegment
+    if (onFrame?.frame?.freeze?.holds?.length && isFrameLayout(onFrame.layout)) {
+      notifyLocked('This frame has a freeze — remove it first to change the format')
+      return
+    }
     if (onFrame?.frame?.no_main && isFrameLayout(onFrame.layout)) {
       notifyLocked('This frame holds media, not the main video — pick None in Frames to take it off')
       return
@@ -2054,22 +2058,47 @@ export function EditorShell({
     if (!frameSeg || !activeFrameItemId) return null
     const frame = frameOf(frameSeg)
     if (activeFrameItemId.startsWith('main:')) {
-      const slot = Number(activeFrameItemId.slice(5))
-      return { slot, holds: frame.main_freeze?.[String(slot)]?.holds ?? null, origin: frameSeg.start_ms, from: frameSeg.start_ms, to: frameSeg.end_ms }
+      return { from: frameSeg.start_ms, to: frameSeg.end_ms }
     }
     const it = frame.items?.find(x => x.id === activeFrameItemId)
-    return it?.kind === 'video' && !it.freeze
-      ? { id: it.id, holds: it.holds ?? null, origin: it.start_ms, from: Math.max(it.start_ms, frameSeg.start_ms), to: Math.min(it.end_ms, frameSeg.end_ms) } : null
+    return it?.kind === 'video' && !it.freeze ? { from: Math.max(it.start_ms, frameSeg.start_ms), to: Math.min(it.end_ms, frameSeg.end_ms) } : null
   }
+  /** One of a frame's freezes changed (i < 0: `h` added; `h` null: removed): the clip gets longer or shorter by it. One burst, one undo step */
+  function setFreeze(segId: string, i: number, h: FrameHold | null) {
+    const editor = useEditorStore.getState(), media = useMediaStore.getState()
+    const seg = editor.segments.find(x => x.id === segId)
+    const added = !h ? 0 : h.len_ms - (i < 0 ? 0 : seg?.frame?.freeze?.holds[i]?.len_ms ?? 0)
+    if (added > MAX_CLIP_MS - clipLengthMs) { notifyLocked('The clip is as long as a clip can be (5 minutes): there is no room for more freeze'); return }
+    const next = freezeChanged({ segments: editor.segments, keyframes: editor.keyframes, overlays: media.overlays, textOverlays: media.textOverlays, audioTracks: media.audioTracks, transitions: media.transitions }, segId, i, h)
+    skipCanvasTransitionRef.current = true
+    seekAfterInsertRef.current = liveTime.get()
+    editor.applyTrim(next.segments, next.keyframes, editor.trims)
+    useMediaStore.setState({ overlays: next.overlays, textOverlays: next.textOverlays, audioTracks: next.audioTracks })
+  }
+  /** Every freeze of a frame taken out (the frame is going: its time goes with them) */
+  function dropFreezes(segId: string) {
+    for (let n = useEditorStore.getState().segments.find(x => x.id === segId)?.frame?.freeze?.holds.length ?? 0; n > 0; n--) setFreeze(segId, n - 1, null)
+  }
+  // (removed parts first become a clip of pieces: a freeze holds the main video in one)
+  const pendingFreezeRef = useRef(false)
+  useEffect(() => {
+    if (!pendingFreezeRef.current || trimmed) return
+    pendingFreezeRef.current = false
+    addFreeze()
+  }, [trimmed]) // eslint-disable-line react-hooks/exhaustive-deps
   /** Freeze: a new blue range on the picked video, at the playhead (dragged to where it should be) */
   function addFreeze() {
     const bar = freezeBar()
     if (!frameSeg || !bar || !activeFrameItemId || frameItemBlocked(frameSeg.id, activeFrameItemId)) return
     pause()
-    const holds = newHoldAt(bar.holds, liveTime.get() - bar.origin, bar.from - bar.origin, bar.to - bar.origin)
-    if (!holds) { notifyLocked('No room for another freeze on this video'); return }
-    if (bar.id) updateFrameItem(frameSeg.id, bar.id, { holds })
-    else updateFrame(frameSeg.id, { main_freeze: withMainHolds(frameOf(frameSeg), bar.slot as number, holds) })
+    if (trimmed) { pendingFreezeRef.current = true; trimsToPieces(); return }
+    const old = frameSeg.frame?.freeze?.holds ?? []
+    const s0 = frameSeg.start_ms
+    // (it may start anywhere up to just before the video's end: its time is added)
+    const holds = newHoldAt(old, liveTime.get() - s0, bar.from - s0, bar.to - s0 - MIN_FREEZE_MS + 2000)
+    const h = holds?.find(x => !old.includes(x))
+    if (!h) { notifyLocked('No room for another freeze on this video'); return }
+    setFreeze(frameSeg.id, -1, h)
   }
   /** The picked item in a frame's lanes, when the playhead is inside it (where a split would cut it) */
   function frameItemCut(): { segId: string; id: string } | null {
@@ -3304,6 +3333,7 @@ export function EditorShell({
   function removeFrame(segId: string) {
     pause()
     skipCanvasTransitionRef.current = true
+    dropFreezes(segId)
     if (frameOffMedia(segId, clip.id, getVideoAR())) return
     applyLayout(segId, 'vertical', getVideoAR())
   }
@@ -5955,7 +5985,7 @@ export function EditorShell({
   }
 
   function setRemoveFillers(on: boolean) {
-    if (on && hasInserts) { notifyLocked('Remove pauses can\u2019t be used with a video put in between (yet)'); return }
+    if (on && (hasInserts || hasFreeze)) { notifyLocked(hasFreeze ? 'Remove pauses can\u2019t be used with a freeze (yet)' : 'Remove pauses can\u2019t be used with a video put in between (yet)'); return }
     setRemoveFillersState(on)
     removeFillersRef.current = on
     unsavedRef.current = true
@@ -7496,7 +7526,7 @@ export function EditorShell({
                   )}
                 </div>
               ) : (
-                <OutputCanvas live segmentAt={viewAt} transitionCuts={transitionCuts} watermark={showWatermark} timelineToVideo={timelineToVideo} clock={hasInserts ? liveTime.get : undefined}
+                <OutputCanvas live segmentAt={viewAt} transitionCuts={transitionCuts} watermark={showWatermark} timelineToVideo={timelineToVideo} clock={hasInserts || hasFreeze ? liveTime.get : undefined}
                   videoRef={videoRef} currentTimeMs={currentTimeMs} clipStartMs={clip.start_ms} videoToTimeline={videoToTimeline}
                   activeSegment={viewSegment} getPositionAt={viewGetPositionAt} sourceFor={brollSource} slotSourceFor={borrowed.slotSourceFor}
                   skipTransitionRef={skipCanvasTransitionRef} words={displayWords}
@@ -7819,7 +7849,7 @@ export function EditorShell({
           selectedId={lastPick === 'frameItem' && activeFrameItemId ? activeFrameItemId : selTarget?.id ?? (activeFrameItemId?.startsWith('main:') ? activeFrameItemId : null)}
           onSelectFrameItem={id => selectFrameItem(id, undefined, !!id && doubleTap(`f${id}`))}
           onUpdateFrameItem={(id, patch) => { if (frameSeg && !frameItemBlocked(frameSeg.id, id)) updateFrameItem(frameSeg.id, id, patch) }}
-          onFrameMainFreeze={(slot, holds) => { if (frameSeg && !frameItemBlocked(frameSeg.id, `main:${slot}`)) updateFrame(frameSeg.id, { main_freeze: withMainHolds(frameOf(frameSeg), slot, holds) }) }}
+          onFrameFreeze={(i, h) => { if (frameSeg && activeFrameItemId && !frameItemBlocked(frameSeg.id, activeFrameItemId)) setFreeze(frameSeg.id, i, h) }}
           onJumpToFrameItem={(segId, itemId) => {
             const sg = segments.find(x => x.id === segId)
             const it = sg ? frameOf(sg).items?.find(x => x.id === itemId) : undefined

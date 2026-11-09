@@ -654,7 +654,7 @@ const NEW_HOLD_MS = 2000
 /**
  * `holds` with a new one at `rel` (ms from what they're counted from), inside [lo, hi): up to
  * NEW_HOLD_MS long, in the room there (a playhead outside, or on another freeze: the nearest room).
- * Null when none is left. Never merged: each stays its own blue range.
+ * Null when none is left. Never merged: each stays its own blue range. (The time for it is added: nothing is used up.)
  */
 export function newHoldAt(holds: FrameHold[] | null | undefined, rel: number, lo: number, hi: number): FrameHold[] | null {
   const list = [...(holds ?? [])].sort((x, y) => x.at_ms - y.at_ms)
@@ -684,44 +684,32 @@ export function movedHold(h: FrameHold, mode: 'move' | 'start' | 'end', d: numbe
   return { at_ms: h.at_ms, len_ms: Math.round(Math.min(hi, Math.max(h.at_ms + MIN_ITEM_MS, end + d))) - h.at_ms }
 }
 
-// The main video frozen in a slot. It can't really stop (it's the clip's clock, and other slots show
-// it), so a second copy of it plays there, as an added video would: frameMedia.ts keeps it in step
+// A freeze of a frame: every video in it waits. The main video really does (inserts.ts piecesOf holds
+// it, the clock runs on), and each video added to a slot takes the freeze as stretches of its own
 
-/** The id the frame media players know the main video by (the page gives its address) */
-export const MAIN_SOURCE = '__main__'
-
-type MainFreezeSeg = Pick<SegmentLocal, 'id' | 'layout' | 'frame' | 'crop_boxes' | 'start_ms' | 'end_ms'>
-
-/** The main video in a slot, as an item, when it's frozen there. `source`: where in the video the frame starts */
-export function mainFreezeItem(seg: MainFreezeSeg, slot: number, source = 0): FrameItem | null {
-  if (!isFrameLayout(seg.layout)) return null
-  const frame = frameOf(seg)
-  const f = frame.main_freeze?.[String(slot)]
-  if (!f?.holds?.length || !(frame.main_slots ?? [0]).includes(slot)) return null
-  const sound = mainSlotSound(frame, slot)
-  return { id: `main-freeze:${seg.id}:${slot}`, lane: slot, kind: 'video', start_ms: seg.start_ms, end_ms: seg.end_ms, source_video_id: MAIN_SOURCE, source_offset_ms: source, volume: sound.volume, muted: sound.muted, holds: f.holds, dim: f.dim }
+/** Whether the frame's videos are held still at clip time `t` */
+export function frameHeldAt(seg: Pick<SegmentLocal, 'start_ms' | 'frame'>, t: number): boolean {
+  const rel = t - seg.start_ms
+  return !!seg.frame?.freeze?.holds?.some(h => rel >= h.at_ms && rel < h.at_ms + h.len_ms)
 }
 
-/** Every slot the main video is frozen in */
-export function mainFreezeItems(seg: MainFreezeSeg, source = 0): FrameItem[] {
-  return isFrameLayout(seg.layout) ? (frameOf(seg).main_slots ?? [0]).flatMap(slot => mainFreezeItem(seg, slot, source) ?? []) : []
+/** How much of the first `rel` ms of a frame its freezes take */
+export const frameHeldBefore = (frame: FrameSettings | null | undefined, rel: number) => heldBefore(frame?.freeze?.holds, rel)
+
+/** A video item as it plays in its frame: the frame's freezes among its own stretches */
+export function withFrameFreeze(seg: Pick<SegmentLocal, 'start_ms' | 'frame'>, it: FrameItem): FrameItem {
+  const f = seg.frame?.freeze
+  if (!f?.holds?.length || it.kind !== 'video' || it.freeze) return it
+  const off = seg.start_ms - it.start_ms
+  const mine = f.holds.map(h => ({ at_ms: Math.max(0, h.at_ms + off), len_ms: h.at_ms + off + h.len_ms - Math.max(0, h.at_ms + off) }))
+  return { ...it, holds: fitHolds([...(it.holds ?? []), ...mine], it.end_ms - it.start_ms), dim: it.dim || f.dim }
 }
 
-/** frame.main_freeze with slot's stretches set (none: the slot goes, with its Dim) */
-export function withMainHolds(frame: FrameSettings, slot: number, holds: FrameHold[] | null | undefined): FrameSettings['main_freeze'] {
-  const { [String(slot)]: was, ...rest } = frame.main_freeze ?? {}
-  const out = holds?.length ? { ...rest, [String(slot)]: { ...was, holds } } : rest
-  return Object.keys(out).length ? out : null
-}
-
-/** frame.main_freeze for a frame whose start moved by `d` and that's now `len` long */
-export function fitMainFreeze(mf: FrameSettings['main_freeze'], d: number, len: number): FrameSettings['main_freeze'] {
-  if (!mf) return mf
-  const out = Object.fromEntries(Object.entries(mf).flatMap(([k, f]) => {
-    const holds = fitHolds(f.holds.map(h => ({ at_ms: h.at_ms - d, len_ms: h.len_ms })), len)
-    return holds.length ? [[k, { ...f, holds }]] : []
-  }))
-  return Object.keys(out).length ? out : null
+/** frame.freeze for a frame whose start moved by `d` and that's now `len` long (null: none left) */
+export function fitFrameFreeze(f: FrameSettings['freeze'], d: number, len: number): FrameSettings['freeze'] {
+  if (!f) return f
+  const holds = fitHolds(f.holds.map(h => ({ at_ms: h.at_ms - d, len_ms: h.len_ms })), len)
+  return holds.length ? { ...f, holds } : null
 }
 
 /**
@@ -771,8 +759,6 @@ export function mainAudioVolume(frame: FrameSettings): number {
   if (frame.main_under && !(frame.main_slots ?? [0]).length) return frame.main_muted ? 0 : frame.main_volume ?? 1
   return (frame.main_slots ?? [0]).reduce((sum, slot) => {
     const s = mainSlotSound(frame, slot)
-    // (frozen for stretches: its sound comes from its own copy, silent while it's still)
-    if (frame.main_freeze?.[String(slot)]?.holds?.length) return sum
     return sum + (s.muted ? 0 : s.volume)
   }, 0)
 }
@@ -848,7 +834,7 @@ export function defaultFrame(layout: FrameLayout, prev?: FrameSettings | null): 
     main_slots: main,
     main_under: under || (!!prev?.no_main && !prev.no_main.gap && !prev.no_main.muted),
     ...(prev?.no_main ? { no_main: prev.no_main } : {}),
-    ...(prev?.main_freeze ? { main_freeze: prev.main_freeze } : {}),
+    ...(prev?.freeze ? { freeze: prev.freeze } : {}),
     // (a template's own starting order: Pic + Text + Video, the picture on top)
     ...(tpl.startOrder ? { row_order: tpl.startOrder } : {}),
     main_volume: prev?.main_volume ?? 1,

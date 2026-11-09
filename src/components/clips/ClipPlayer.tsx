@@ -6,7 +6,6 @@ import { OutputCanvas } from '@/components/editor/VideoPreview'
 import { getBoxPositionAtLerp } from '@/lib/interpolation'
 import { BorrowedPool, isBorrowedSlot } from '@/modules/editor/brollSources'
 import { createFrameMediaPool } from '@/modules/editor/frameMedia'
-import { MAIN_SOURCE } from '@/modules/editor/frames'
 import { insertsOf, piecesOf, piecesLength, pieceAt, videoAtPieces, timelineAtPieces, pieceVideoMs, type Piece } from '@/modules/editor/inserts'
 
 /** The video plays a piece at its speed (a part played faster or slower): its voice natural unless its pitch follows */
@@ -79,7 +78,7 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
   const pieces = useMemo(() => {
     if (removed) return removed.pieces
     const all = piecesOf(segments, mainVideoId, s => isShot(s, mainVideoId))
-    return insertsOf(segments, mainVideoId).length || all.some(p => (p.from != null && Math.abs(p.from - p.at) > 1) || (p.speed ?? 1) !== 1) ? all : []
+    return insertsOf(segments, mainVideoId).length || all.some(p => p.hold != null || (p.from != null && Math.abs(p.from - p.at) > 1) || (p.speed ?? 1) !== 1) ? all : []
   }, [segments, mainVideoId, removed])
   const lengthMs = pieces.length ? piecesLength(pieces) : endMs - startMs
   const tRef = useRef(0)
@@ -136,9 +135,7 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
   // Frames: the other videos and photos in their slots (the canvas keeps them in step)
   const stockUrlsRef = useRef(stockUrls)
   stockUrlsRef.current = stockUrls
-  const videoUrlRef = useRef(videoUrl)
-  videoUrlRef.current = videoUrl
-  const framePool = useMemo(() => createFrameMediaPool(id => id === MAIN_SOURCE ? videoUrlRef.current : stockUrlsRef.current[id]), [])
+  const framePool = useMemo(() => createFrameMediaPool(id => stockUrlsRef.current[id]), [])
   useEffect(() => () => framePool.dispose(), [framePool])
 
   // B-roll: the stock videos, drawn in place of the source during their shots (muted: the

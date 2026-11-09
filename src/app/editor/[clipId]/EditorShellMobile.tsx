@@ -113,7 +113,7 @@ export function EditorShellMobile({
     const vid = (clip as unknown as { video_id: string }).video_id
     const all = piecesOf(mobileSegments, vid, s => isShot(s, vid))
     // (pieces only once the parts don't simply follow the video: a video put in between, or a part cut)
-    return insertsOf(mobileSegments, vid).length || all.some(p => (p.from != null && Math.abs(p.from - p.at) > 1) || (p.speed ?? 1) !== 1) ? all : []
+    return insertsOf(mobileSegments, vid).length || all.some(p => p.hold != null || (p.from != null && Math.abs(p.from - p.at) > 1) || (p.speed ?? 1) !== 1) ? all : []
   }, [mobileSegments, clip])
   const { videoRef, seekToMs, togglePlay, pause } = useVideoSync(clip.start_ms, clip.end_ms, mobileInserts)
   const { currentTimeMs, durationMs, playing } = usePlayerStore()

@@ -24,7 +24,7 @@ const JOIN_REACH_MS = 500
 /** A frozen stretch on a bar: see-through blue (user, 2026-11-10) */
 const FROZEN_BLUE = 'rgba(59,130,246,0.32)'
 
-/** A bar that can have freeze ranges (FrameItem.holds; a frame's main video in a slot) */
+/** A bar with freeze ranges on it (FrameSettings.freeze, or an older FrameItem.holds) */
 interface FreezeBar {
   holds: FrameHold[]
   /** Clip time its `at_ms` count from */
@@ -35,7 +35,10 @@ interface FreezeBar {
   /** Picked: the ranges can be dragged */
   on: boolean
   locked: boolean
-  apply: (holds: FrameHold[] | null) => void
+  /** Dragging its end adds time, rather than meeting what's next */
+  grows?: boolean
+  /** Freeze `i` is now `h` (null: removed) */
+  set: (i: number, h: FrameHold | null) => void
 }
 
 /**
@@ -83,8 +86,8 @@ export interface TimelineProps {
   videoTitles?: Record<string, string>
   onSelectFrameItem?: (id: string | null) => void
   onUpdateFrameItem?: (id: string, patch: Partial<Pick<FrameItem, 'start_ms' | 'end_ms' | 'source_offset_ms' | 'holds' | 'dim'>>) => void
-  /** The main video's freeze ranges in a slot, changed on its bar */
-  onFrameMainFreeze?: (slot: number, holds: FrameHold[] | null) => void
+  /** One of the frame's freezes changed on a bar: now `h`, or removed (null) */
+  onFrameFreeze?: (i: number, h: FrameHold | null) => void
   /** `at`: an empty spot clicked (that frame, from that time); else the frame under the playhead, at it */
   onAddFrameItem?: (lane: FrameLane, anchor: DOMRect, at?: { segId: string; t: number }) => void
   onJumpToFrameItem?: (segId: string, itemId: string) => void
@@ -289,7 +292,7 @@ export function Timeline({
   textOverlays = [], photos = [], activePhotoId = null, onSelectPhoto, onPhotoTimeChange,
   musicTracks = [], onMusicMove, onMusicTrim, selectedMusicId = null, onSelectMusic,
   activeTextOverlayId, onSelectTextOverlay, onTextOverlayUpdate,
-  frameSeg, activeFrameItemId, laneHighlight, videoTitles = {}, onSelectFrameItem, onUpdateFrameItem, onFrameMainFreeze, onAddFrameItem, onJumpToFrameItem,
+  frameSeg, activeFrameItemId, laneHighlight, videoTitles = {}, onSelectFrameItem, onUpdateFrameItem, onFrameFreeze, onAddFrameItem, onJumpToFrameItem,
   viewMarkers = [], selectedViewT = null, onSelectView, onMoveView, onRemoveView, onDuplicateView,
   onBrollChange, videoUrls = {}, mediaLengths = {}, zoom: zoomProp, onZoomChange,
   onAddKind, cutJoins = [], isStock, onDropFiles, onDropStock, onDropMedia,
@@ -1546,14 +1549,14 @@ export function Timeline({
     if (frameSeg?.locked || bar.locked) return
     const h0 = bar.holds[i]
     const lo = i ? bar.holds[i - 1].at_ms + bar.holds[i - 1].len_ms : bar.from - bar.origin
-    const hi = i < bar.holds.length - 1 ? bar.holds[i + 1].at_ms : bar.to - bar.origin
+    const hi = bar.grows && mode === 'end' ? Infinity : i < bar.holds.length - 1 ? bar.holds[i + 1].at_ms : bar.to - bar.origin
     const sx = e.clientX, k = msPerPx()
     let moved = false
     setDragging(`freeze-${i}`)
     track(ev => {
       if (!moved && Math.abs(ev.clientX - sx) < 3) return
       moved = true
-      bar.apply(bar.holds.map((h, j) => (j === i ? movedHold(h0, mode, (ev.clientX - sx) * k, lo, hi) : h)))
+      bar.set(i, movedHold(h0, mode, (ev.clientX - sx) * k, lo, hi))
     })
   }
   /** The blue ranges on a bar; picked, each has its handles and an ✕ */
@@ -1582,7 +1585,7 @@ export function Timeline({
               className="absolute top-1/2 left-1/2 flex items-center justify-center rounded-full"
               style={{ transform: 'translate(-50%, -50%)', width: 14, height: 14, background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 9, lineHeight: 1 }}
               onPointerDown={e => e.stopPropagation()}
-              onClick={e => { e.stopPropagation(); const left = bar.holds.filter((_, j) => j !== i); bar.apply(left.length ? left : null) }}>✕</button>
+              onClick={e => { e.stopPropagation(); bar.set(i, null) }}>✕</button>
           </>)}
         </div>
       )
@@ -2257,8 +2260,8 @@ export function Timeline({
                       style={{ left: `${at(seg.start_ms)}%`, width: `${pct(seg.end_ms - seg.start_ms)}%`, borderRadius: 5, background: `${FRAME_ITEM_COLORS.main}${on ? '40' : '24'}`, boxShadow: on ? SELECTED_RING : `inset 2px 0 0 ${FRAME_ITEM_COLORS.main}`, zIndex: on ? 3 : undefined }}>
                       <span className="px-2 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>{row.label} · Main video</span>
                       {freezeRanges({
-                        holds: frame.main_freeze?.[String(row.lane)]?.holds ?? [], origin: seg.start_ms, from: seg.start_ms, to: seg.end_ms, on,
-                        locked: !!frame.main_locked?.[String(row.lane)], apply: holds => onFrameMainFreeze?.(row.lane as number, holds),
+                        holds: frame.freeze?.holds ?? [], origin: seg.start_ms, from: seg.start_ms, to: seg.end_ms, on, grows: true,
+                        locked: !!frame.main_locked?.[String(row.lane)], set: (i, h) => onFrameFreeze?.(i, h),
                       })}
                     </div>
                   )
@@ -2273,9 +2276,17 @@ export function Timeline({
                       title={`${itemName(it)} · ${msToLabel(from)}–${msToLabel(to)} · drag to move, drag the ends to trim`}
                       style={{ left: `${at(from)}%`, width: `max(8px, ${pct(to - from)}%)`, borderRadius: 5, zIndex: on ? 3 : 2, background: it.freeze ? FROZEN_BLUE : `${color}${on ? '55' : '38'}`, boxShadow: on ? SELECTED_RING : `inset 0 0 0 1px ${color}88`, cursor: 'grab', touchAction: 'none' }}>
                       {/* Its freeze stretches: striped where it holds a still picture (it stays one piece) */}
+                      {!it.freeze && it.kind === 'video' && freezeRanges({
+                        holds: frame.freeze?.holds ?? [], origin: seg.start_ms, from, to, on, grows: true, locked: !!it.locked,
+                        set: (i, h) => onFrameFreeze?.(i, h),
+                      })}
+                      {/* (a freeze from before they added time: it can still be changed or taken off) */}
                       {!it.freeze && freezeRanges({
                         holds: it.holds ?? [], origin: it.start_ms, from, to, on, locked: !!it.locked,
-                        apply: holds => onUpdateFrameItem?.(it.id, holds ? { holds } : { holds: null, dim: false }),
+                        set: (i, h) => {
+                          const holds = (it.holds ?? []).flatMap((x, j) => (j !== i ? [x] : h ? [h] : []))
+                          onUpdateFrameItem?.(it.id, holds.length ? { holds } : { holds: null, dim: false })
+                        },
                       })}
                       <div className="absolute left-0 inset-y-0 w-2 cursor-col-resize z-10" style={{ background: 'rgba(0,0,0,0.25)' }} onPointerDown={e => handleFrameItemDown(e, it, 'start')} />
                       {it.kind === 'photo' && it.image_url && <img src={it.image_url} alt="" crossOrigin="anonymous" className="h-full w-7 object-cover shrink-0 pointer-events-none" style={{ marginLeft: 8, opacity: 0.9 }} />}

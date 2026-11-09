@@ -1,5 +1,5 @@
 import type { SegmentLocal, FrameItem } from '@chai-cut/shared'
-import { mainFreezeItems, isFrameLayout, frameOf, mainAudioVolume, itemSourceAt } from './frames'
+import { withFrameFreeze, isFrameLayout, frameOf, mainAudioVolume, itemSourceAt } from './frames'
 
 // Media a frame's lanes show besides the main video: other uploaded videos and photos. The
 // preview canvas draws them; this keeps one element per video item, in step with the main
@@ -75,9 +75,9 @@ export function createFrameMediaPool(getVideoUrl: (videoId: string) => string | 
       if (Math.abs(main.volume - vol) > 0.01) main.volume = Math.max(0, Math.min(1, vol))
     }
     const inUse = new Set<string>()
-    // (the main video frozen in a slot plays there from its own copy; where the frame starts in it: read off the real one)
-    const frozenMain = seg && frame && main ? mainFreezeItems(seg, main.currentTime * 1000 - (clipMs - seg.start_ms)) : []
-    for (const it of [...(frame?.items ?? []), ...frozenMain]) {
+    for (const raw of frame?.items ?? []) {
+      // (the frame's freezes hold it still too)
+      const it = seg ? withFrameFreeze(seg, raw) : raw
       if (it.kind !== 'video' || !it.source_video_id || !seg) continue
       const from = Math.max(it.start_ms, seg.start_ms), to = Math.min(it.end_ms, seg.end_ms)
       if (clipMs < from - PRELOAD_MS || clipMs >= to) continue
