@@ -69,7 +69,7 @@ export function useClipBrands(videoId: string, clipIds: string[]): ClipBrands {
   async function applyAll(kitId: string | null) {
     setBusy('all'); setNote(null)
     try {
-      const r = await fetch(`/api/videos/${videoId}/brand`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kit_id: kitId }) })
+      const r = await fetch(`/api/videos/${videoId}/brand`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kit_id: kitId, clip_ids: clipIds }) })
         .then(res => json<{ changed: number; skipped: number }>(res))
       await loadClips()
       const kit = kits.find(k => k.id === kitId)

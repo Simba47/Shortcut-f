@@ -8,6 +8,7 @@ import sql from '@/lib/db'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import { rowsToLocal } from '@/modules/editor/utils'
 import { ClipsGallery, type GalleryClip } from './ClipsGallery'
+import { imageOverlaysFor } from '@/server/services/clipPreview'
 
 // AI edits: every clip "Make my clips" has made from this video (all batches, newest first),
 // each playable in 9:16 without exporting it
@@ -16,8 +17,20 @@ export default async function AutoClipsPage({ params }: { params: Promise<{ vide
   const user = await requireUser()
   if (!user) redirect('/login')
 
-  const [video] = await sql`SELECT id, user_id, title, storage_path FROM videos WHERE id = ${videoId}`
+  const [video] = await sql`
+    SELECT id, user_id, title, status, storage_path,
+      -- (read through to_jsonb: works before the worker adds the columns)
+      to_jsonb(videos)->>'proxy_path' AS proxy_path, to_jsonb(videos)->>'stock_ref' AS stock_ref
+    FROM videos WHERE id = ${videoId}`
   if (!video || video.user_id !== user.id) notFound()
+  // The cards play the video's editing copy when it has one, as the editor and clip board do
+  // (jobs/proxy.ts: 720p, a full picture every half second, about a quarter of the size): each
+  // card starts at its own moment, which the original (a full picture every 6–7 s, full size)
+  // reaches slowly. Its frames keep their times; the export always uses the original.
+  // (Before 2026-11-09 the cards loaded the original: a card could spin for minutes.)
+  const playKey = (video.proxy_path as string | null) || (video.storage_path as string | null)
+  // A video from before copies were made: the page asks the worker for one (used from the next visit)
+  const needsProxy = video.status === 'ready' && !!video.storage_path && !video.proxy_path && !video.stock_ref
 
   const [job] = await sql`
     SELECT id, status, error, clip_count FROM ai_edit_jobs WHERE video_id = ${videoId} ORDER BY created_at DESC LIMIT 1
@@ -32,9 +45,9 @@ export default async function AutoClipsPage({ params }: { params: Promise<{ vide
   ` : []
   const ids = clipRows.map(c => c.id as string)
 
-  const [videoUrl, words, segRows, styles, overlays] = await Promise.all([
-    video.storage_path
-      ? getSignedUrl(r2, new GetObjectCommand({ Bucket: R2_BUCKET, Key: video.storage_path }), { expiresIn: 43200 })
+  const [videoUrl, words, segRows, styles, overlays, pictures] = await Promise.all([
+    playKey
+      ? getSignedUrl(r2, new GetObjectCommand({ Bucket: R2_BUCKET, Key: playKey }), { expiresIn: 43200 }).catch(() => '')
       : Promise.resolve(''),
     ids.length ? sql`
       SELECT tw.* FROM transcript_words tw
@@ -54,6 +67,8 @@ export default async function AutoClipsPage({ params }: { params: Promise<{ vide
       WHERE s.clip_id = ANY(${ids}) GROUP BY s.id ORDER BY s.sort_order` : Promise.resolve([]),
     ids.length ? sql`SELECT * FROM caption_styles WHERE clip_id = ANY(${ids})` : Promise.resolve([]),
     ids.length ? sql`SELECT * FROM text_overlays WHERE clip_id = ANY(${ids})` : Promise.resolve([]),
+    // (the pictures on top — a brand kit's logo, photos — signed: the cards show them, as the export does)
+    imageOverlaysFor(ids),
   ])
 
   // B-roll videos the clips show (only the owner's own videos, as the export uses)
@@ -81,12 +96,14 @@ export default async function AutoClipsPage({ params }: { params: Promise<{ vide
     captionStyle: ((styles as unknown as CaptionStyle[]).find(s => s.clip_id === c.id)) ?? null,
     textOverlays: (overlays as unknown as TextOverlay[]).filter(o => o.clip_id === c.id).map(withSavedStyle),
     trims: Array.isArray(c.trim_ranges) ? c.trim_ranges : [],
+    overlays: pictures[c.id] ?? [],
   })))
 
   return (
     <ClipsGallery
       video={{ id: video.id, title: video.title ?? null }}
       videoUrl={videoUrl}
+      needsProxy={needsProxy}
       stockUrls={stockUrls}
       job={job ? { status: job.status, error: job.error ?? null } : null}
       clips={clips}
