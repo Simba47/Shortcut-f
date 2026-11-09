@@ -34,6 +34,7 @@ import { AudioMixerPanel } from '@/components/editor/AudioMixerPanel'
 import { MediaPickerModal } from '@/components/editor/MediaPickerModal'
 import { shownSegment, addedVideoBox, isGapPart, isMainShot, STAND_IN_SUFFIX } from '@/modules/editor/visibility'
 import { placeInRow, liftToRow, lowerToRow, liftBlock, fillUncovered } from '@/modules/editor/place'
+import { frameOffMedia, frameOnMedia, mediaForFrame, type RowMedia } from '@/modules/editor/frameOnMedia'
 import { restsOnSplit, splitTargets } from '@/modules/editor/split'
 import { AccountMenu } from '@/components/ui/account-menu'
 import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
@@ -59,7 +60,7 @@ import { setBrandFonts, ensureBrandFont } from '@/components/editor/brandFonts'
 import { EditorTour, hasSeenEditorTour } from '@/components/editor/EditorTour'
 import { FrameAddMenu, addChoices, type AddChoice } from '@/components/editor/FrameAddMenu'
 import { createFrameMediaPool } from '@/modules/editor/frameMedia'
-import { FRAME_TEMPLATES, isFrameLayout, frameOf, mainAudioVolume, mainSlotSound, frameLanes, frameSlotLabels, emptySlotStretches, slotOffers, laneInRowKey, newItemCorners, frameSlotCount, itemAt, isTextLane, textLaneLook, type TextLane } from '@/modules/editor/frames'
+import { FRAME_TEMPLATES, MAIN_SOURCE, newHoldAt, withMainHolds, isMediaFrame, isFrameLayout, frameOf, mainAudioVolume, mainSlotSound, frameLanes, frameSlotLabels, emptySlotStretches, slotOffers, laneInRowKey, newItemCorners, frameSlotCount, itemAt, isTextLane, textLaneLook, type TextLane } from '@/modules/editor/frames'
 import { signOut } from 'next-auth/react'
 import { PlatformOverlay, PLATFORM_SAFE, type Platform } from '@/components/editor/PlatformOverlay'
 // ── Domain stores ──────────────────────────────────────────────────────────────
@@ -647,7 +648,9 @@ export function EditorShell({
   const [videoLibrary, setVideoLibrary] = useState<Record<string, { url: string; title: string; duration_ms?: number | null; stock?: boolean }>>({})
   const videoLibraryRef = useRef(videoLibrary)
   videoLibraryRef.current = videoLibrary
-  const framePool = useMemo(() => createFrameMediaPool(id => videoLibraryRef.current[id]?.url), [])
+  const clipUrlRef = useRef(clipVideoUrl)
+  clipUrlRef.current = clipVideoUrl
+  const framePool = useMemo(() => createFrameMediaPool(id => id === MAIN_SOURCE ? clipUrlRef.current : videoLibraryRef.current[id]?.url), [])
   useEffect(() => () => framePool.dispose(), [framePool])
   async function loadVideoLibrary() {
     const res = await fetch('/api/videos?assets=1').catch(() => null)
@@ -1767,6 +1770,11 @@ export function EditorShell({
     if (usePlayerStore.getState().playing) { pause(); setQueuedFormat(id); return }
     setFormatPlay(p => ({ id, n: (p?.n ?? 0) + 1 }))
     if (tool === 'subjects' && pickForScene(id)) return
+    const onFrame = pickedPartAt(liveTime.get()) ?? activeSegment
+    if (onFrame?.frame?.no_main && isFrameLayout(onFrame.layout)) {
+      notifyLocked('This frame holds media, not the main video — pick None in Frames to take it off')
+      return
+    }
     // A part picked on the timeline, the playhead in it or on its edge: that whole part gets the format
     // (user, 2026-11-01: a short part picked, the playhead resting on its last moment — the line into the
     // next part — and Vertical went to the next part, or seemed to do nothing)
@@ -2040,6 +2048,28 @@ export function EditorShell({
       return
     }
     setTextOverlays(prev => prev.flatMap(o => (o.id === p.id ? [{ ...o, end_ms: t }, { ...o, id: crypto.randomUUID(), start_ms: t }] : [o])))
+  }
+  /** What the Freeze button (timeline toolbar) adds to: the video picked in a frame, or its main video */
+  function freezeBar() {
+    if (!frameSeg || !activeFrameItemId) return null
+    const frame = frameOf(frameSeg)
+    if (activeFrameItemId.startsWith('main:')) {
+      const slot = Number(activeFrameItemId.slice(5))
+      return { slot, holds: frame.main_freeze?.[String(slot)]?.holds ?? null, origin: frameSeg.start_ms, from: frameSeg.start_ms, to: frameSeg.end_ms }
+    }
+    const it = frame.items?.find(x => x.id === activeFrameItemId)
+    return it?.kind === 'video' && !it.freeze
+      ? { id: it.id, holds: it.holds ?? null, origin: it.start_ms, from: Math.max(it.start_ms, frameSeg.start_ms), to: Math.min(it.end_ms, frameSeg.end_ms) } : null
+  }
+  /** Freeze: a new blue range on the picked video, at the playhead (dragged to where it should be) */
+  function addFreeze() {
+    const bar = freezeBar()
+    if (!frameSeg || !bar || !activeFrameItemId || frameItemBlocked(frameSeg.id, activeFrameItemId)) return
+    pause()
+    const holds = newHoldAt(bar.holds, liveTime.get() - bar.origin, bar.from - bar.origin, bar.to - bar.origin)
+    if (!holds) { notifyLocked('No room for another freeze on this video'); return }
+    if (bar.id) updateFrameItem(frameSeg.id, bar.id, { holds })
+    else updateFrame(frameSeg.id, { main_freeze: withMainHolds(frameOf(frameSeg), bar.slot as number, holds) })
   }
   /** The picked item in a frame's lanes, when the playhead is inside it (where a split would cut it) */
   function frameItemCut(): { segId: string; id: string } | null {
@@ -3010,8 +3040,24 @@ export function EditorShell({
     const picked = pickedPartAt(liveTime.get())
     // (with the brand kit on, the brand-on watcher below dresses it, from the kit that's on)
     brandFillRef.current = layout === 'frame_brand_card' && !useBrandStore.getState().on ? { t: picked ? picked.start_ms : currentTimeMs, until: Date.now() + 4000 } : null
+    // (the main video isn't showing here: the frame goes on the video or photo that is)
+    const media = rowMediaHere(liveTime.get())
+    if (media) { frameRowMedia(media, layout); return }
     if (picked) { formatWholePart(picked, layout, liveTime.get()); return }
     handleLayoutChange(layout, 'fromPlayhead')
+  }
+  const rowMediaHere = (t: number) => mediaForFrame(t, segments, overlays, mainVideoId)
+  function frameRowMedia(m: RowMedia, layout: FrameLayout) {
+    if (sectionBlocked(m.part) || blocked({ kind: m.kind === 'video' ? 'broll' : 'photo', id: m.id })) return
+    pause()
+    skipCanvasTransitionRef.current = true
+    setActiveBoxId(null)
+    setActiveOverlayId(null)
+    const id = frameOnMedia(m, layout, getVideoAR())
+    if (!id) { notifyLocked(`This frame can’t show a ${m.kind}`); return }
+    setPickedSegIdState(id)
+    const part = useEditorStore.getState().segments.find(x => x.id === id)
+    if (part) seekIntoPart(part, liveTime.get())
   }
   /** The frames gallery's None: the frame comes off all of the part picked, or the one under the playhead */
   function handleNoFrame() {
@@ -3027,6 +3073,8 @@ export function EditorShell({
   // What a layout or frame picked now will cover (see handleLayoutChange)
   const frameTarget = (() => {
     const t = currentTimeMs
+    const media = rowMediaHere(t)
+    if (media) return `${msToLabel(media.start_ms)}–${msToLabel(media.end_ms)}`
     const picked = pickedPartAt(t)
     if (picked) return `${msToLabel(picked.start_ms)}–${msToLabel(picked.end_ms)}`
     if (activeSegment) {
@@ -3256,6 +3304,7 @@ export function EditorShell({
   function removeFrame(segId: string) {
     pause()
     skipCanvasTransitionRef.current = true
+    if (frameOffMedia(segId, clip.id, getVideoAR())) return
     applyLayout(segId, 'vertical', getVideoAR())
   }
 
@@ -6851,7 +6900,6 @@ export function EditorShell({
                 onReplaceMedia={(segId, id, kind) => { if (sectionBlocked(segId)) return; pause(); setFramePicker({ segId, kind, replaceId: id }) }}
                 onChangePart={(segId, id) => { void changeItemPart(segId, id) }}
                 onFreeze={(segId, id, on) => { if (!frameItemBlocked(segId, id)) useEditorStore.getState().setFrameItemFreeze(segId, id, on) }}
-                onFreezeRange={(segId, id, from, to) => { if (!frameItemBlocked(segId, id)) { pause(); useEditorStore.getState().freezeFrameItemRange(segId, id, from, to) } }}
                 onSwapBroll={(segId, id, index) => { if (!frameItemBlocked(segId, id)) void swapBroll(segId, id, index) }}
                 swappingBroll={swappingBroll}
                 onRemoveFrame={askRemoveFrame}
@@ -7254,7 +7302,8 @@ export function EditorShell({
               Styles: .ed-fmt* and .ed-motion* at the end of globals.css */}
           <div className="ed-canvas-bar shrink-0 flex items-center justify-center gap-3 px-4" style={{ minHeight: 60, borderBottom: '1px solid rgb(var(--ed-fg) / 0.06)' }}>
             {/* (in the empty space a deleted part left: nothing here — no layout to pick) */}
-            {!inGap && <>
+            {/* (nor on a frame made on media: it has no main video to lay out) */}
+            {!inGap && !isMediaFrame(activeSegment) && <>
             <FormatSwitcher
               activeId={activeSegment ? formatLayoutOf(activeSegment.layout) : null}
               play={formatPlay} liveActive={formatAt}
@@ -7280,7 +7329,7 @@ export function EditorShell({
           <AmbientGlow videoRef={videoRef} />
           <div className="ed-stage relative flex-1 min-h-0" style={{ background: 'var(--ed-canvas)' }}>
             <div className="ed-stage-box absolute flex flex-col rounded-xl overflow-hidden" style={{ inset: 8, border: '1px solid rgb(var(--ed-fg) / 0.1)' }}>
-              <VideoPreview live segmentAt={viewAt} overlaySource={brollSource} mainVideoId={mainVideoId}
+              <VideoPreview live segmentAt={viewAt} overlaySource={brollSource} frameMedia={framePool} mainVideoId={mainVideoId}
                 videoRef={videoRef} videoUrl={clipVideoUrl} currentTimeMs={currentTimeMs}
                 activeSegment={viewSegment} getPositionAt={viewGetPositionAt}
                 activeBoxId={activeBoxId ?? null}
@@ -7574,6 +7623,14 @@ export function EditorShell({
                     <circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12" />
                   </svg>
                 </button>
+                {/* Freeze: on a video picked in a frame (the part of it to hold still is dragged on its bar) */}
+                {freezeBar() && (
+                  <button onClick={addFreeze} aria-label="Freeze a part of this video" title="Freeze: add a blue range on this video, then drag it and its ends. It holds still there, then plays on" className="ed-tl-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M12 2v20M4 6.5l16 11M20 6.5l-16 11M12 6L9.5 3.5M12 6l2.5-2.5M12 18l-2.5 2.5M12 18l2.5 2.5" />
+                    </svg>
+                  </button>
+                )}
                 {/* Delete: whatever is selected — a song, photo, video, text, frame item or section */}
                 {(() => {
                   const del = deleteTarget()
@@ -7658,12 +7715,12 @@ export function EditorShell({
                   {aiMade && (
                     <div className="flex flex-col gap-2">
                       <button onClick={() => handleResetAll(true)} className="px-3 py-2 rounded-lg text-left transition-colors hover:bg-[rgb(var(--ed-fg)/0.14)]" style={{ background: 'rgb(var(--ed-fg) / 0.08)', color: 'var(--ed-text)' }}>
-                        <span className="block text-xs font-bold">Reset my edits</span>
+                        <span className="block text-xs font-bold">Reset AI edit</span>
                         <span className="block text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>Back to how AI made it</span>
                       </button>
                       <button onClick={() => handleResetAll()} className="px-3 py-2 rounded-lg text-left transition-opacity hover:opacity-90" style={{ background: '#ef4444', color: '#fff' }}>
-                        <span className="block text-xs font-bold">Reset AI edits too</span>
-                        <span className="block text-[11px]" style={{ opacity: 0.85 }}>Back to a plain clip</span>
+                        <span className="block text-xs font-bold">Reset everything</span>
+                        <span className="block text-[11px]" style={{ opacity: 0.85 }}>Back to the original clip</span>
                       </button>
                     </div>
                   )}
@@ -7762,6 +7819,7 @@ export function EditorShell({
           selectedId={lastPick === 'frameItem' && activeFrameItemId ? activeFrameItemId : selTarget?.id ?? (activeFrameItemId?.startsWith('main:') ? activeFrameItemId : null)}
           onSelectFrameItem={id => selectFrameItem(id, undefined, !!id && doubleTap(`f${id}`))}
           onUpdateFrameItem={(id, patch) => { if (frameSeg && !frameItemBlocked(frameSeg.id, id)) updateFrameItem(frameSeg.id, id, patch) }}
+          onFrameMainFreeze={(slot, holds) => { if (frameSeg && !frameItemBlocked(frameSeg.id, `main:${slot}`)) updateFrame(frameSeg.id, { main_freeze: withMainHolds(frameOf(frameSeg), slot, holds) }) }}
           onJumpToFrameItem={(segId, itemId) => {
             const sg = segments.find(x => x.id === segId)
             const it = sg ? frameOf(sg).items?.find(x => x.id === itemId) : undefined

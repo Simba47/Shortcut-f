@@ -42,6 +42,23 @@ export type FrameItemKind = 'video' | 'photo' | 'text'
 /** A frozen stretch inside a frame video item (FrameItem.holds) */
 export interface FrameHold { at_ms: number; len_ms: number }
 
+/** What a video or photo moved from its row into a frame needs to go back there */
+export interface FrameRowOrigin {
+  start_ms: number
+  track?: number
+  lane?: 'broll'
+  /** Video: its views on the row */
+  views?: Array<{ t_ms: number; x: number; y: number; w: number; h: number }>
+  /** Photo: its box on the row */
+  x?: number
+  y?: number
+  w?: number
+  h?: number
+  z_index?: number
+  rotation?: number
+  opacity?: number
+}
+
 export interface FrameItem {
   id: string
   lane: FrameLane
@@ -83,6 +100,8 @@ export interface FrameItem {
    * darkens them too. Not used while the whole item is frozen.
    */
   holds?: FrameHold[] | null
+  /** It came off a row when a frame was put on it (frameOnMedia.ts): where it goes back to when the frame comes off */
+  from_row?: FrameRowOrigin | null
   // Photo
   image_path?: string | null
   /** Signed URL for image_path — preview only, never saved */
@@ -135,8 +154,19 @@ export interface FrameSettings {
   main_locked?: Record<string, boolean>
   /** Rounded corners of the main video, per slot index */
   main_corners?: Record<string, CornerStyle>
+  /**
+   * The main video frozen in a slot for stretches (user, 2026-11-10: as a video added to a slot, FrameItem.holds),
+   * by slot index. `at_ms` from the frame's start. It plays on from the same picture after each; `dim` darkens them.
+   */
+  main_freeze?: Record<string, { holds: FrameHold[]; dim?: boolean }> | null
   /** The main video is heard under the frame though no slot shows it (Photo Story), at main_volume */
   main_under?: boolean
+  /**
+   * Made on media where the main video wasn't showing (frameOnMedia.ts): it has no main video, in any
+   * frame it's switched to. How the main row was: `gap` the empty space a deleted part left, else the
+   * part's eye off, `muted` its sound off too.
+   */
+  no_main?: { gap?: boolean; muted?: boolean } | null
   /** Heights of the frame's rows (one per template row, shares of the frame) when resized; absent = the template's */
   row_h?: number[] | null
   /** The rows' order top to bottom (template row numbers) when swapped with the bar's swap; absent = the template's */

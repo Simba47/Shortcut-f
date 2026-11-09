@@ -19,7 +19,7 @@ import { normalizedSlotAspect, fitToAspect } from '@/modules/editor/utils'
 import { framePicture } from '@/modules/editor/framePicture'
 import { draggedView, zoomedView, wholeView } from '@/modules/editor/frameView'
 import { backgroundPixels, frameBackgroundOf, type FrameBackground } from '@/lib/shared/brandCard'
-import { isFrameLayout, frameSlotLabels, frameLanesFor, frameBandShown, frameOf, itemAt, captionBandAt, cornerGeometry, MIN_ROW_H, CAPTION_CLOSE_H, mainRect, boxRect, MIN_BOX as MIN_MAIN_BOX, frameAreas, frameBase, areaRadius, frameSlotSize, isTextLane, frameRows, validRowOrder, slotOffers, BLUR_SOURCE_SLOT, FRAME_TEMPLATES, barAt, barFlipped, MIN_MOVABLE_W, itemSourceAt } from '@/modules/editor/frames'
+import { mainFreezeItem, mainFreezeItems, isMediaFrame, mediaFrameItemAt, isFrameLayout, frameSlotLabels, frameLanesFor, frameBandShown, frameOf, itemAt, captionBandAt, cornerGeometry, MIN_ROW_H, CAPTION_CLOSE_H, mainRect, boxRect, MIN_BOX as MIN_MAIN_BOX, frameAreas, frameBase, areaRadius, frameSlotSize, isTextLane, frameRows, validRowOrder, slotOffers, BLUR_SOURCE_SLOT, FRAME_TEMPLATES, barAt, barFlipped, MIN_MOVABLE_W, itemSourceAt } from '@/modules/editor/frames'
 import type { FrameMediaPool } from '@/modules/editor/frameMedia'
 import { useLiveTimeMs, liveTime, usePlayerStore, LIVE_REDRAW_MS } from '@/modules/player/store'
 import { addedVideoBox, isGapPart } from '@/modules/editor/visibility'
@@ -67,6 +67,8 @@ interface VideoPreviewProps {
    * the main video (useBrollSources). While one shows, this view shows it, with its crop box on it.
    */
   overlaySource?: (seg: SegmentLocal | null) => HTMLVideoElement | null
+  /** The frame media players: a frame made on media (frameOnMedia.ts) shows that media here */
+  frameMedia?: FrameMediaPool | null
   /** The clip's own video (a part showing another video is a video on top) */
   mainVideoId?: string | null
   getPositionAt: (boxId: string, t_ms: number) => BoxPosition
@@ -84,7 +86,7 @@ interface VideoPreviewProps {
 
 export function VideoPreview({
   videoRef, videoUrl, currentTimeMs: timeProp, live = false, activeSegment: segmentProp, segmentAt,
-  overlaySource, mainVideoId, getPositionAt, activeBoxId, onSelectBox, onBoxChange,
+  overlaySource, frameMedia, mainVideoId, getPositionAt, activeBoxId, onSelectBox, onBoxChange,
   marking = false, onMark, subjectsAt, captionScan = null,
 }: VideoPreviewProps) {
   // (redrawn at most ~30 times a second: the picture itself is drawn every frame, from the live time)
@@ -102,25 +104,37 @@ export function VideoPreview({
 
   // ── A video on top playing here: this view shows it (and its crop box is framed on it) ──
   // (a hidden one isn't here: shownSegment puts the main video in its place)
+  // (or a frame made on media: the main video isn't in it, its media is shown the same way)
   const overlayBox = activeSegment && overlaySource ? addedVideoBox(activeSegment, mainVideoId) : null
-  const showsOverlay = !!overlayBox
+  const mediaFrame = isMediaFrame(activeSegment)
+  // (the main video frozen in a slot: its frozen copy, so this view stops with the frame)
+  const frameItem = activeSegment ? (mediaFrame ? mediaFrameItemAt(activeSegment, currentTimeMs) : mainFreezeItems(activeSegment)[0] ?? null) : null
+  const showsOverlay = !!overlayBox || !!frameItem
   const [overlayAR, setOverlayAR] = useState<number | null>(null)
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
   const overlaySegRef = useRef(activeSegment)
   overlaySegRef.current = activeSegment
   const overlaySourceRef = useRef(overlaySource)
   overlaySourceRef.current = overlaySource
+  const frameItemRef = useRef(frameItem)
+  frameItemRef.current = frameItem
+  const frameMediaRef = useRef(frameMedia)
+  frameMediaRef.current = frameMedia
   useEffect(() => {
     if (!showsOverlay) return
     let raf = 0
     // Every frame: the overlay video's picture (the same element the preview draws, kept in step)
     const draw = () => {
-      const el = overlaySourceRef.current?.(overlaySegRef.current)
+      const it = frameItemRef.current
+      const el = !it ? overlaySourceRef.current?.(overlaySegRef.current)
+        : it.kind === 'photo' ? (it.image_url ? frameMediaRef.current?.image(it.image_url) : null) : frameMediaRef.current?.video(it)
       const c = overlayCanvasRef.current
-      if (el && c && el.readyState >= 2 && el.videoWidth && el.videoHeight) {
-        const ar = el.videoWidth / el.videoHeight
+      const photo = el instanceof HTMLImageElement
+      const ew = !el ? 0 : photo ? el.naturalWidth : el.videoWidth, eh = !el ? 0 : photo ? el.naturalHeight : el.videoHeight
+      if (el && c && (photo ? el.complete : el.readyState >= 2) && ew && eh) {
+        const ar = ew / eh
         setOverlayAR(prev => (prev && Math.abs(prev - ar) < 0.001 ? prev : ar))
-        const w = Math.min(1280, el.videoWidth), h = Math.round(w / ar)
+        const w = Math.min(1280, ew), h = Math.round(w / ar)
         if (c.width !== w || c.height !== h) { c.width = w; c.height = h }
         c.getContext('2d')?.drawImage(el, 0, 0, w, h)
       }
@@ -130,7 +144,7 @@ export function VideoPreview({
     return () => cancelAnimationFrame(raf)
   }, [showsOverlay])
   // A gap left by a deleted part, with nothing on top: nothing to show or frame here (black)
-  const gapHere = !!activeSegment && !showsOverlay && isGapPart(activeSegment, mainVideoId)
+  const gapHere = !!activeSegment && !showsOverlay && (isGapPart(activeSegment, mainVideoId) || mediaFrame)
   // The shape of what this view shows: the overlay video's while it shows, else the main video's
   const videoAR = showsOverlay ? overlayAR ?? mainAR : mainAR
 
@@ -169,7 +183,7 @@ export function VideoPreview({
 
         {/* Crop boxes — each is locked to the shape of its slot in the output, so what's
             inside the box is exactly what gets exported */}
-        {activeSegment && !gapHere && (() => {
+        {activeSegment && !gapHere && !mediaFrame && (() => {
           const layout = activeSegment.layout
           const aspect = normalizedSlotAspect(layout, videoAR ?? undefined, frameBandShown(activeSegment))
           const frame = isFrameLayout(layout)
@@ -300,6 +314,12 @@ function coverSource(
   const sx = pan ? spareX * Math.max(0, Math.min(1, pan.x)) : Math.max(0, Math.min(spareX, spareX / 2 + panX * spareX / 2))
   const sy = pan ? spareY * Math.max(0, Math.min(1, pan.y)) : spareY / 2
   ctx.drawImage(src, sx, sy, w, h, dx, dy, dw, dh)
+}
+
+type DrawIn = (dx: number, dy: number, dw: number, dh: number) => void
+/** `draw` at 55% brightness when `on` (render.py _dim_filter) */
+function dimWhen(ctx: CanvasRenderingContext2D, on: boolean, draw: DrawIn): DrawIn {
+  return on ? (dx, dy, dw, dh) => { ctx.save(); ctx.filter = 'brightness(0.55)'; draw(dx, dy, dw, dh); ctx.restore() } : draw
 }
 
 /** Zoom and pan of a photo slot at progress p (0–1) through its format */
@@ -790,14 +810,19 @@ function paintFrame(
     if (fill !== 'none' && ring !== 'none') { ctx.save(); clipArea(ctx, a); ctx.fillStyle = fill; ctx.fillRect(a.x, a.y, a.w, a.h); ctx.restore() }
     if (main.has(area.slot) && !frame.main_hidden?.[String(area.slot)] && vW && vH && !coveredHere) {
       const box = seg.crop_boxes.find(b => b.slot_index === area.slot)
+      // Frozen for stretches in this slot: its own copy is drawn (frameMedia.ts), once it's ready
+      const frozen = mainFreezeItem(seg, area.slot)
+      const copy = frozen ? pool?.video(frozen) : null
+      const pic = copy && copy.readyState >= 2 && copy.videoWidth ? copy : video
+      const dimMain = !!frozen?.dim && itemSourceAt(frozen, tMs).held
       // Shown whole: the video isn't cropped here — unless the slot crops the main video to its own
       // view (mainCrop: Screen + face cam's Screen, with Same video)
       if (contain && !(area.kind === 'slot' && area.mainCrop)) {
-        inSlot(ctx, frame.main_corners?.[String(area.slot)], a, (dx, dy, dw, dh) => containSource(ctx, video, vW, vH, dx, dy, dw, dh), mainRect(frame, area.slot), 'none', { w: vW, h: vH })
+        inSlot(ctx, frame.main_corners?.[String(area.slot)], a, dimWhen(ctx, dimMain, (dx, dy, dw, dh) => containSource(ctx, pic, vW, vH, dx, dy, dw, dh)), mainRect(frame, area.slot), 'none', { w: vW, h: vH })
       } else if (box) {
         const p = getPositionAt(box.id, tMs)
         inSlot(ctx, frame.main_corners?.[String(area.slot)], a,
-          (dx, dy, dw, dh) => coverCrop(ctx, video, p.x * vW, p.y * vH, p.w * vW, p.h * vH, dx, dy, dw, dh),
+          dimWhen(ctx, dimMain, (dx, dy, dw, dh) => coverCrop(ctx, pic, p.x * vW, p.y * vH, p.w * vW, p.h * vH, dx, dy, dw, dh)),
           mainRect(frame, area.slot), ring)
       }
     }
@@ -820,10 +845,8 @@ function paintFrame(
     if (v && v.readyState >= 2) {
       // (the part of it picked: dragged / zoomed in the preview, as a photo)
       const draw = put(v, v.videoWidth, v.videoHeight, it.pan ? Math.max(1, it.pan.zoom ?? 1) : 1, 0, it.pan)
-      // Frozen (or in a freeze stretch) and dimmed: the picture at 55% brightness (render.py: black at 45% over it)
-      const dimmed = it.dim && itemSourceAt(it, tMs).held
-        ? (dx: number, dy: number, dw: number, dh: number) => { ctx.save(); ctx.filter = 'brightness(0.55)'; draw(dx, dy, dw, dh); ctx.restore() }
-        : draw
+      // Frozen (or in a freeze stretch) and dimmed: the picture at 55% brightness (render.py _dim_filter)
+      const dimmed = dimWhen(ctx, !!it.dim && itemSourceAt(it, tMs).held, draw)
       inSlot(ctx, it.corners, a, dimmed, boxRect(it.rect), contain ? fill : ring, contain ? { w: v.videoWidth, h: v.videoHeight } : true)
     }
   }

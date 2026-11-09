@@ -2589,7 +2589,7 @@ body {
   border-radius: 14px; overflow: hidden; transition: opacity .2s;
   background: radial-gradient(120% 100% at 50% 0%, #2c2c31, #0e0e10); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
 }
-.cap-preview > canvas { display: block; width: 100%; aspect-ratio: 3 / 1; }
+.cap-preview > canvas { display: block; width: 100%; aspect-ratio: 6 / 1; }
 .cap-preview[data-dim] { opacity: 0.4; }
 /* The scan over the video while its captions are made (CaptionScan.tsx): corner marks, a glowing
    line going down with a grid in its wake and points riding it. Sized by the picture (cqmin); it

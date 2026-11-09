@@ -648,21 +648,80 @@ export function cutItem(it: FrameItem, t: number, rightId: string): [FrameItem, 
   return [left, { ...withItemStart(it, t), id: rightId }]
 }
 
-/** Freeze [from, to) (clip times) inside a video item: its holds with that one in (overlaps merged) */
-export function addHold(it: FrameItem, from: number, to: number): FrameHold[] | null {
-  const len = it.end_ms - it.start_ms
-  let a = Math.max(0, Math.round(from - it.start_ms)), b = Math.min(len, Math.round(to - it.start_ms))
-  if (a < MIN_ITEM_MS) a = 0
-  if (len - b < MIN_ITEM_MS) b = len
-  if (b - a < MIN_ITEM_MS) return null
-  const all = [...(it.holds ?? []), { at_ms: a, len_ms: b - a }].sort((x, y) => x.at_ms - y.at_ms)
-  const merged: FrameHold[] = []
-  for (const h of all) {
-    const last = merged[merged.length - 1]
-    if (last && h.at_ms <= last.at_ms + last.len_ms) last.len_ms = Math.max(last.len_ms, h.at_ms + h.len_ms - last.at_ms)
-    else merged.push({ ...h })
+/** How long a new freeze starts out on the timeline */
+const NEW_HOLD_MS = 2000
+
+/**
+ * `holds` with a new one at `rel` (ms from what they're counted from), inside [lo, hi): up to
+ * NEW_HOLD_MS long, in the room there (a playhead outside, or on another freeze: the nearest room).
+ * Null when none is left. Never merged: each stays its own blue range.
+ */
+export function newHoldAt(holds: FrameHold[] | null | undefined, rel: number, lo: number, hi: number): FrameHold[] | null {
+  const list = [...(holds ?? [])].sort((x, y) => x.at_ms - y.at_ms)
+  const rooms: Array<[number, number]> = []
+  let from = lo
+  for (const h of list) {
+    if (h.at_ms - from >= MIN_ITEM_MS) rooms.push([from, h.at_ms])
+    from = Math.max(from, h.at_ms + h.len_ms)
   }
-  return fitHolds(merged, len)
+  if (hi - from >= MIN_ITEM_MS) rooms.push([from, hi])
+  if (!rooms.length) return null
+  const gapTo = ([a, b]: [number, number]) => (rel < a ? a - rel : rel >= b ? rel - b + 1 : 0)
+  const room = rooms.reduce((best, r) => (gapTo(r) < gapTo(best) ? r : best))
+  const len = Math.min(NEW_HOLD_MS, room[1] - room[0])
+  const at = Math.round(Math.max(room[0], Math.min(room[1] - len, rel)))
+  return [...list, { at_ms: at, len_ms: Math.round(len) }].sort((x, y) => x.at_ms - y.at_ms)
+}
+
+/** A freeze range dragged by `d` ms: its start, its end, or all of it; it stays inside [lo, hi) and at least MIN_ITEM_MS long */
+export function movedHold(h: FrameHold, mode: 'move' | 'start' | 'end', d: number, lo: number, hi: number): FrameHold {
+  const end = h.at_ms + h.len_ms
+  if (mode === 'move') return { at_ms: Math.round(Math.max(lo, Math.min(hi - h.len_ms, h.at_ms + d))), len_ms: h.len_ms }
+  if (mode === 'start') {
+    const at = Math.round(Math.max(lo, Math.min(end - MIN_ITEM_MS, h.at_ms + d)))
+    return { at_ms: at, len_ms: end - at }
+  }
+  return { at_ms: h.at_ms, len_ms: Math.round(Math.min(hi, Math.max(h.at_ms + MIN_ITEM_MS, end + d))) - h.at_ms }
+}
+
+// The main video frozen in a slot. It can't really stop (it's the clip's clock, and other slots show
+// it), so a second copy of it plays there, as an added video would: frameMedia.ts keeps it in step
+
+/** The id the frame media players know the main video by (the page gives its address) */
+export const MAIN_SOURCE = '__main__'
+
+type MainFreezeSeg = Pick<SegmentLocal, 'id' | 'layout' | 'frame' | 'crop_boxes' | 'start_ms' | 'end_ms'>
+
+/** The main video in a slot, as an item, when it's frozen there. `source`: where in the video the frame starts */
+export function mainFreezeItem(seg: MainFreezeSeg, slot: number, source = 0): FrameItem | null {
+  if (!isFrameLayout(seg.layout)) return null
+  const frame = frameOf(seg)
+  const f = frame.main_freeze?.[String(slot)]
+  if (!f?.holds?.length || !(frame.main_slots ?? [0]).includes(slot)) return null
+  const sound = mainSlotSound(frame, slot)
+  return { id: `main-freeze:${seg.id}:${slot}`, lane: slot, kind: 'video', start_ms: seg.start_ms, end_ms: seg.end_ms, source_video_id: MAIN_SOURCE, source_offset_ms: source, volume: sound.volume, muted: sound.muted, holds: f.holds, dim: f.dim }
+}
+
+/** Every slot the main video is frozen in */
+export function mainFreezeItems(seg: MainFreezeSeg, source = 0): FrameItem[] {
+  return isFrameLayout(seg.layout) ? (frameOf(seg).main_slots ?? [0]).flatMap(slot => mainFreezeItem(seg, slot, source) ?? []) : []
+}
+
+/** frame.main_freeze with slot's stretches set (none: the slot goes, with its Dim) */
+export function withMainHolds(frame: FrameSettings, slot: number, holds: FrameHold[] | null | undefined): FrameSettings['main_freeze'] {
+  const { [String(slot)]: was, ...rest } = frame.main_freeze ?? {}
+  const out = holds?.length ? { ...rest, [String(slot)]: { ...was, holds } } : rest
+  return Object.keys(out).length ? out : null
+}
+
+/** frame.main_freeze for a frame whose start moved by `d` and that's now `len` long */
+export function fitMainFreeze(mf: FrameSettings['main_freeze'], d: number, len: number): FrameSettings['main_freeze'] {
+  if (!mf) return mf
+  const out = Object.fromEntries(Object.entries(mf).flatMap(([k, f]) => {
+    const holds = fitHolds(f.holds.map(h => ({ at_ms: h.at_ms - d, len_ms: h.len_ms })), len)
+    return holds.length ? [[k, { ...f, holds }]] : []
+  }))
+  return Object.keys(out).length ? out : null
 }
 
 /**
@@ -712,6 +771,8 @@ export function mainAudioVolume(frame: FrameSettings): number {
   if (frame.main_under && !(frame.main_slots ?? [0]).length) return frame.main_muted ? 0 : frame.main_volume ?? 1
   return (frame.main_slots ?? [0]).reduce((sum, slot) => {
     const s = mainSlotSound(frame, slot)
+    // (frozen for stretches: its sound comes from its own copy, silent while it's still)
+    if (frame.main_freeze?.[String(slot)]?.holds?.length) return sum
     return sum + (s.muted ? 0 : s.volume)
   }, 0)
 }
@@ -777,14 +838,17 @@ export function defaultFrame(layout: FrameLayout, prev?: FrameSettings | null): 
   // The main video stays in the slots that still take a video; a frame for videos never starts
   // without it. A template that says where the main video goes (e.g. the face cam) puts it there.
   const kept = (prev?.main_slots ?? [0]).filter(i => i < slots && slotOffers(layout, i).video)
-  const main = under ? [] : tpl.mainSlots ?? (kept.length ? kept : [0])
+  // (a frame made on media has no main video: frameOnMedia.ts)
+  const main = under || prev?.no_main ? [] : tpl.mainSlots ?? (kept.length ? kept : [0])
   const corners = tpl.corners ?? DEFAULT_CORNERS
   const prevBand = { ...DEFAULT_BAND, ...prev?.band }
   return {
     // A template with its own colour (Branded card) starts with it, unless a colour was already picked
     band: { ...prevBand, ...(tpl.bandBg && prevBand.bg.toLowerCase() === DEFAULT_BAND.bg ? { bg: tpl.bandBg } : {}) },
     main_slots: main,
-    main_under: under,
+    main_under: under || (!!prev?.no_main && !prev.no_main.gap && !prev.no_main.muted),
+    ...(prev?.no_main ? { no_main: prev.no_main } : {}),
+    ...(prev?.main_freeze ? { main_freeze: prev.main_freeze } : {}),
     // (a template's own starting order: Pic + Text + Video, the picture on top)
     ...(tpl.startOrder ? { row_order: tpl.startOrder } : {}),
     main_volume: prev?.main_volume ?? 1,
@@ -857,6 +921,16 @@ export function itemAt(frame: FrameSettings, lane: FrameLane, t: number, seg: { 
   let hit: FrameItem | null = null
   for (const it of laneItems(frame, lane, seg)) if (t >= Math.max(it.start_ms, seg.start_ms) && t < Math.min(it.end_ms, seg.end_ms)) hit = it
   return hit
+}
+
+/** A frame made on media (FrameSettings.no_main) */
+export const isMediaFrame = (seg: Pick<SegmentLocal, 'layout' | 'frame'> | null | undefined) => !!seg && isFrameLayout(seg.layout) && !!seg.frame?.no_main
+
+/** What the editing view shows at t in a frame made on media: the media moved in, else the first video or photo showing */
+export function mediaFrameItemAt(seg: Pick<SegmentLocal, 'layout' | 'frame' | 'crop_boxes' | 'start_ms' | 'end_ms'>, t: number): FrameItem | null {
+  const here = (frameOf(seg).items ?? []).filter(it => (it.kind === 'video' || it.kind === 'photo') && !it.hidden
+    && t >= Math.max(it.start_ms, seg.start_ms) && t < Math.min(it.end_ms, seg.end_ms))
+  return here.find(it => it.from_row) ?? here[0] ?? null
 }
 
 /**

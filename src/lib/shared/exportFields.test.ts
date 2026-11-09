@@ -46,7 +46,7 @@ const FIELDS: Record<string, Record<string, How>> = {
     x: 'frame', y: 'frame', w: 'frame', h: 'frame', rotation: 'frame', captions: 'frame',
     pan: 'frame', freeze: 'frame', dim: 'frame', holds: 'frame',
     // (a signed link to show the photo; which stock clip was picked; the lock)
-    image_url: 'editor', broll: 'editor', locked: 'editor',
+    image_url: 'editor', broll: 'editor', locked: 'editor', from_row: 'editor',
   },
 }
 

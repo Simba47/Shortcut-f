@@ -21,8 +21,29 @@ const WORDS: TranscriptWord[] = SAMPLE.split(' ').map((word, i) => ({
 /** The line plays, holds its last picture, then starts again */
 const LOOP_MS = 2400
 const HOLD_AT_MS = 1550
-/** Width : height (room for the styles that stack a word a line) */
-const ASPECT = 3
+/** The box, width : height (half the height it had, user 2026-11-10) */
+const ASPECT = 6
+/** The line is drawn on a taller canvas (room for the styles that stack a word a line), then placed in the box */
+const DRAW_ASPECT = 1.2
+/** How the line is measured: on a small canvas of this width, at this many moments of its loop (a pop's peak is short) */
+const MEASURE_W = 360
+const MEASURE_MOMENTS = 27
+/** The caption size every style is fitted at (the Size slider's starting point): sizes above and below it show as bigger and smaller */
+const FIT_AT_SIZE = 52
+/** At that size a line fills this much of the box's width, or of its height, whichever comes first (so all styles look alike in size) */
+const FIT_W = 0.62
+const FIT_H = 0.7
+/** Whatever the size, a line never goes past this much of the box */
+const LIMIT_W = 0.92
+const LIMIT_H = 0.86
+/** A line is never drawn more than this many times larger */
+const MAX_ZOOM = 3
+
+/** Where a line reaches over its whole loop, as shares of the canvas */
+interface Ink { left: number; right: number; top: number; bottom: number }
+/** The zoom that makes a line fill that share of the box's width or height */
+const zoomToFill = (ink: Ink, w: number, h: number) =>
+  Math.min(w / (ink.right - ink.left), (h * DRAW_ASPECT) / (ASPECT * (ink.bottom - ink.top)))
 
 export function CaptionPreview({ style, textCase, dim }: {
   style: Partial<CaptionStyle>
@@ -39,27 +60,83 @@ export function CaptionPreview({ style, textCase, dim }: {
     const canvas = ref.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    const drawn = document.createElement('canvas')
+    const d = drawn.getContext('2d')
+    const measuring = document.createElement('canvas')
+    measuring.width = MEASURE_W
+    measuring.height = Math.round(MEASURE_W / DRAW_ASPECT)
+    const m = measuring.getContext('2d', { willReadFrequently: true })
+    if (!ctx || !d || !m) return
+    let placedFor = '', fittedFor = '', fitZoom = 1
     // (drawn at the screen's own pixels: the caption sizes follow the canvas width, as on the video)
     const fit = () => {
       const dpr = window.devicePixelRatio || 1
       const w = Math.max(1, Math.round(canvas.clientWidth * dpr))
       const h = Math.max(1, Math.round(w / ASPECT))
-      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h }
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; placedFor = '' }
     }
     fit()
     const ro = new ResizeObserver(fit)
     ro.observe(canvas)
     let raf = 0, perLine = -1, chunks: ReturnType<typeof buildCaptionChunks> = []
+    let lastStyle: Partial<CaptionStyle> | null = null, lastCase: TextCase | null = null, styleKey = '', fitKey = ''
+    let centreX = 0.5, centreY = 0.5, fontCount = -1
+    const paint = (on: CanvasRenderingContext2D, st: Partial<CaptionStyle>, ms: number) => {
+      on.setTransform(1, 0, 0, 1, 0, 0)
+      on.clearRect(0, 0, on.canvas.width, on.canvas.height)
+      // (centred wherever the captions sit on the video)
+      drawCaptions(on, chunks, ms, { ...st, position_x: 0.5, position_y: 0.5 }, caseRef.current, null, undefined, false)
+    }
+    /** Where the line reaches over its whole loop; null: nothing is drawn */
+    const inkOf = (st: Partial<CaptionStyle>): Ink | null => {
+      const W = measuring.width, H = measuring.height
+      let left = W, right = -1, top = H, bottom = -1
+      for (let i = 0; i < MEASURE_MOMENTS; i++) {
+        paint(m, st, (HOLD_AT_MS * i) / (MEASURE_MOMENTS - 1))
+        const px = m.getImageData(0, 0, W, H).data
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+          if (px[(y * W + x) * 4 + 3] <= 24) continue
+          if (x < left) left = x
+          if (x > right) right = x
+          if (y < top) top = y
+          if (y > bottom) bottom = y
+        }
+      }
+      return bottom < 0 ? null : { left: left / W, right: (right + 1) / W, top: top / H, bottom: (bottom + 1) / H }
+    }
+    // Each style gets one zoom, from its line at the starting size, so the styles look alike in the
+    // box and the Size slider still shows; the line as it is now is what's kept off the edges and centred
+    const place = (st: Partial<CaptionStyle>) => {
+      if (fittedFor !== fitKey) {
+        fittedFor = fitKey
+        const ink = inkOf({ ...st, size: FIT_AT_SIZE })
+        fitZoom = ink ? Math.min(MAX_ZOOM, zoomToFill(ink, FIT_W, FIT_H)) : 1
+      }
+      const ink = inkOf(st)
+      const zoom = ink ? Math.min(fitZoom, zoomToFill(ink, LIMIT_W, LIMIT_H)) : 1
+      centreX = ink ? (ink.left + ink.right) / 2 : 0.5
+      centreY = ink ? (ink.top + ink.bottom) / 2 : 0.5
+      // (drawn at that zoom, not stretched afterwards: the text stays sharp)
+      drawn.width = Math.max(1, Math.round(canvas.width * zoom))
+      drawn.height = Math.max(1, Math.round(drawn.width / DRAW_ASPECT))
+    }
     const t0 = performance.now()
     const frame = (now: number) => {
       const st = styleRef.current
+      // (a font arriving changes how big the line is; they're added by hand, so no event says so)
+      if (document.fonts.size !== fontCount) { fontCount = document.fonts.size; placedFor = ''; fittedFor = '' }
       const n = captionWordsPerLine(st)
       if (n !== perLine) { perLine = n; chunks = buildCaptionChunks(WORDS, n) }
-      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      if (st !== lastStyle || caseRef.current !== lastCase) {
+        lastStyle = st
+        lastCase = caseRef.current
+        styleKey = JSON.stringify([st, lastCase])
+        fitKey = JSON.stringify([{ ...st, size: null }, lastCase])
+      }
+      if (placedFor !== styleKey) { placedFor = styleKey; place(st) }
+      paint(d, st, Math.min((now - t0) % LOOP_MS, HOLD_AT_MS))
       ctx.clearRect(0, 0, canvas.width, canvas.height)
-      // (centred in the box wherever the captions sit on the video)
-      drawCaptions(ctx, chunks, Math.min((now - t0) % LOOP_MS, HOLD_AT_MS), { ...st, position_x: 0.5, position_y: 0.5 }, caseRef.current, null, undefined, false)
+      ctx.drawImage(drawn, Math.round(canvas.width / 2 - centreX * drawn.width), Math.round(canvas.height / 2 - centreY * drawn.height))
       raf = requestAnimationFrame(frame)
     }
     raf = requestAnimationFrame(frame)

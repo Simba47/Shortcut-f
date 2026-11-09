@@ -651,6 +651,21 @@ function cleanFrame(frame: FrameSettings): FrameSettings {
     const r3 = (v: number) => Math.round(v * 1000) / 1000
     return x !== undefined && y !== undefined ? { pan: { x: r3(x), y: r3(y), zoom: r3(zoom) } } : {}
   }
+  // Where a video or photo moved into a frame came from (FrameItem.from_row)
+  const fromRowOf = (r: FrameItem['from_row']) => {
+    const start_ms = num(r?.start_ms, 0, 1e9)
+    if (!r || start_ms === undefined) return {}
+    const views = Array.isArray(r.views) ? r.views.slice(0, 200).flatMap(k => {
+      const t_ms = num(k?.t_ms, 0, 1e9), x = num(k?.x, 0, 1), y = num(k?.y, 0, 1), w = num(k?.w, 0, 1), h = num(k?.h, 0, 1)
+      return t_ms !== undefined && x !== undefined && y !== undefined && w !== undefined && h !== undefined ? [{ t_ms, x, y, w, h }] : []
+    }) : undefined
+    const opt = (k: 'x' | 'y' | 'w' | 'h' | 'z_index' | 'rotation' | 'opacity', lo: number, hi: number) => { const v = num(r[k], lo, hi); return v === undefined ? {} : { [k]: v } }
+    const track = num(r.track, 0, 100)
+    return { from_row: {
+      start_ms, ...(track !== undefined ? { track: Math.round(track) } : {}), ...(r.lane === 'broll' ? { lane: 'broll' as const } : {}), ...(views?.length ? { views } : {}),
+      ...opt('x', -20, 20), ...opt('y', -20, 20), ...opt('w', 0, 20), ...opt('h', 0, 20), ...opt('z_index', 0, 1e6), ...opt('rotation', -360, 360), ...opt('opacity', 0, 1),
+    } }
+  }
   const items: FrameItem[] = (frame.items ?? []).slice(0, 300).flatMap((it): FrameItem[] => {
     if (!it || typeof it.id !== 'string' || !['video', 'photo', 'text'].includes(it.kind)) return []
     // A slot (0–3), the band, or a frame's second text area
@@ -661,11 +676,11 @@ function cleanFrame(frame: FrameSettings): FrameSettings {
     if (it.kind === 'video') {
       if (typeof it.source_video_id !== 'string') return []
       const broll = cleanBroll(it.broll)
-      return [{ ...base, source_video_id: it.source_video_id, source_offset_ms: Math.round(num(it.source_offset_ms, 0, 1e9) ?? 0), volume: num(it.volume, 0, 1) ?? 1, muted: !!it.muted, corners: corner(it.corners), ...rectOf(it.rect), ...(broll ? { broll } : {}), ...(it.freeze ? { freeze: true, ...(it.dim ? { dim: true } : {}) } : {}), ...holdsOf(it, Math.round(end) - Math.round(start)), ...panOf(it.pan) }]
+      return [{ ...base, source_video_id: it.source_video_id, source_offset_ms: Math.round(num(it.source_offset_ms, 0, 1e9) ?? 0), volume: num(it.volume, 0, 1) ?? 1, muted: !!it.muted, corners: corner(it.corners), ...rectOf(it.rect), ...(broll ? { broll } : {}), ...(it.freeze ? { freeze: true, ...(it.dim ? { dim: true } : {}) } : {}), ...holdsOf(it, Math.round(end) - Math.round(start)), ...panOf(it.pan), ...fromRowOf(it.from_row) }]
     }
     if (it.kind === 'photo') {
       if (typeof it.image_path !== 'string') return []
-      return [{ ...base, image_path: it.image_path, motion: it.motion && motions.includes(it.motion) ? it.motion : 'none', corners: corner(it.corners), ...rectOf(it.rect), ...panOf(it.pan) }]
+      return [{ ...base, image_path: it.image_path, motion: it.motion && motions.includes(it.motion) ? it.motion : 'none', corners: corner(it.corners), ...rectOf(it.rect), ...panOf(it.pan), ...fromRowOf(it.from_row) }]
     }
     return [{
       ...base, text: typeof it.text === 'string' ? it.text.slice(0, 500) : '', captions: !!it.captions,
@@ -685,6 +700,14 @@ function cleanFrame(frame: FrameSettings): FrameSettings {
     main_volume: num(frame.main_volume, 0, 1),
     main_muted: frame.main_muted === undefined ? undefined : !!frame.main_muted,
     main_under: frame.main_under ? true : undefined,
+    // The main video's freeze stretches, per slot
+    main_freeze: frame.main_freeze && typeof frame.main_freeze === 'object'
+      ? (o => Object.keys(o).length ? o : undefined)(Object.fromEntries(Object.entries(frame.main_freeze).flatMap(([k, f]) => {
+        const { holds, dim } = holdsOf(f ?? {}, 1e9)
+        return /^[0-3]$/.test(k) && holds?.length ? [[k, { holds, ...(dim ? { dim: true } : {}) }]] : []
+      })))
+      : undefined,
+    no_main: frame.no_main ? { ...(frame.no_main.gap ? { gap: true } : {}), ...(frame.no_main.muted ? { muted: true } : {}) } : undefined,
     // The main video's box in its slot, when resized / moved
     main_rects: frame.main_rects && typeof frame.main_rects === 'object'
       ? Object.fromEntries(Object.entries(frame.main_rects).flatMap(([k, r]) => {
