@@ -11,6 +11,7 @@ import { useLocalVideo } from '@/modules/clips/localVideo'
 import { usePolling } from '@/lib/usePolling'
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
+import { CaptionScan } from '@/components/editor/CaptionScan'
 import { useRouter } from 'next/navigation'
 import { FilterChip } from '@/components/ui/filter-chip'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -98,22 +99,28 @@ interface AutoJob {
 }
 
 /**
- * The bar between the worker's reports (every 3–8 s, usePolling): it jumps to each report, never goes
- * back, and in between creeps toward the end of the step it's on (`to`) — slower the closer it gets,
- * never reaching it — so a long step shows movement without claiming more than is done.
+ * The bar between the worker's reports (every 3–8 s, usePolling), moving evenly (user, 2026-11-09:
+ * "linear progression", no jumps): it climbs to each report at CLIMB % a tick, never goes back, and in
+ * between moves on toward the end of the step it's on (`to`) at a steady pace that only slows right
+ * before it — never reaching it — so a long step shows movement without claiming more than is done.
  */
+const CLIMB = 1.5, PACE = 0.25
 function useSmoothProgress(jobId: string | null, real: number, to: number | null, active: boolean): number {
   const [shown, setShown] = useState(real)
+  const live = useRef({ real, to, active })
+  live.current = { real, to, active }
   useEffect(() => { setShown(real) }, [jobId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setShown(s => (active ? Math.max(s, real) : real)) }, [real, active])
+  useEffect(() => { if (!active) setShown(real) }, [real, active])
   useEffect(() => {
-    if (!active || to == null) return
+    if (!active) return
     const t = setInterval(() => setShown(s => {
-      const cap = to - 0.5
-      return s >= cap ? s : s + (cap - s) * 0.02
+      const { real, to } = live.current
+      if (s < real) return Math.min(real, s + CLIMB)
+      const cap = to == null ? s : to - 0.5
+      return s >= cap ? s : Math.min(cap, s + Math.max(0.04, Math.min(PACE, (cap - s) * 0.05)))
     }), 500)
     return () => clearInterval(t)
-  }, [active, to])
+  }, [active])
   return shown
 }
 interface AutoClip {
@@ -1763,6 +1770,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     </div>
   )
   const aiTools = aiLocked ? aiToolsLocked : aiToolsOpen
+  // A scan over the video (the editor's CaptionScan) while AI works on it (user, 2026-11-09): its
+  // captions being read, or Make my clips running — the line under it says which
+  const scanLabel = autoRunning
+    ? (autoJob?.status === 'queued' ? 'Waiting to start…' : autoJob?.stage?.text ? `${autoJob.stage.text}…` : 'Making your clips…')
+    : reading?.status === 'running' ? 'Getting captions…' : null
 
   return (
     <div className="cb-page h-screen flex flex-col overflow-hidden">
@@ -1809,14 +1821,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               <div className="cb-player rounded-2xl overflow-hidden flex items-center justify-center bg-black"
                 style={{ width: `min(100cqw, calc(100cqh * ${frameRatio}))`, aspectRatio: `${frameRatio}` }}>
                 {/* The video stays mounted (hidden) while a clip previews, so it keeps its place */}
-                <div className="w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}</div>
+                <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<CaptionScan label={scanLabel} /></div>
                 {viewMode === 'preview' && previewPane}
               </div>
             </div>
           ) : (
             <div className="cb-player w-full rounded-2xl overflow-hidden flex items-center justify-center bg-black shrink-0"
               style={{ aspectRatio: `${frameRatio}`, maxHeight: '70vh', margin: '0 auto', width: `min(100%, calc(70vh * ${frameRatio}))` }}>
-              <div className="w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}</div>
+              <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<CaptionScan label={scanLabel} /></div>
               {viewMode === 'preview' && previewPane}
             </div>
           )}
@@ -2348,10 +2360,18 @@ function prepStage(videoReady: boolean, r: ReadingNow | null, expectMs: number):
 }
 /**
  * The bar's place on screen: the stage's start, moved on with time toward its end (never there), and
- * never back. A step done sooner than expected doesn't make it jump: it climbs there quickly (up to
+ * never back. A step done sooner than expected doesn't make it jump: it climbs there steadily (up to
  * CATCH_UP % a tick) — the same at 100 %.
+ * The pace is even (user, 2026-11-09: it raced at each step's start, then crawled — an easing curve):
+ * a straight line to LINE_TO of the step over its expected time, then a slow tail toward its end, so
+ * a step slower than expected still moves a little and never reaches its end before the worker says.
  */
-const CATCH_UP = 2
+const CATCH_UP = 0.6
+const LINE_TO = 0.85
+function prepAlong(ms: number, tau: number): number {
+  const t = ms / Math.max(1, tau)
+  return t <= 1 ? LINE_TO * t : LINE_TO + (0.97 - LINE_TO) * (1 - Math.exp(-(t - 1) * 1.5))
+}
 function usePrepPct(stage: PrepStage): number {
   const [shown, setShown] = useState(stage.pct)
   const live = useRef({ stage, key: stage.key, at: Date.now(), from: stage.pct, shown: stage.pct })
@@ -2364,7 +2384,7 @@ function usePrepPct(stage: PrepStage): number {
   useEffect(() => {
     const t = setInterval(() => {
       const l = live.current, st = l.stage
-      const target = st.pct >= 100 ? 100 : l.from + Math.max(0, st.next - l.from) * 0.92 * (1 - Math.exp(-(Date.now() - l.at) / Math.max(1, st.tau)))
+      const target = st.pct >= 100 ? 100 : l.from + Math.max(0, st.next - l.from) * prepAlong(Date.now() - l.at, st.tau)
       const next = Math.max(l.shown, Math.min(target, l.shown + CATCH_UP))
       if (next !== l.shown) { l.shown = next; setShown(next) }
     }, 200)
