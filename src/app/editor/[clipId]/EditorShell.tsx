@@ -34,7 +34,7 @@ import { AudioMixerPanel } from '@/components/editor/AudioMixerPanel'
 import { MediaPickerModal } from '@/components/editor/MediaPickerModal'
 import { shownSegment, addedVideoBox, isGapPart, isMainShot, STAND_IN_SUFFIX } from '@/modules/editor/visibility'
 import { placeInRow, liftToRow, lowerToRow, liftBlock, fillUncovered } from '@/modules/editor/place'
-import { splitTargets } from '@/modules/editor/split'
+import { restsOnSplit, splitTargets } from '@/modules/editor/split'
 import { AccountMenu } from '@/components/ui/account-menu'
 import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { BrandLogo } from '@/components/ui/brand-logo'
@@ -74,7 +74,8 @@ import { cleanParts, playedParts, playedPartAt, applyLook, lookOf, isLookChange,
 import { CAPTION_TEMPLATES, usesKeyWords } from '@/modules/captions/templates'
 import { useMediaStore } from '@/modules/media/store'
 import { rowsToLocal, normalizeCoverage, uncoveredRanges, defaultCropForSlot, msToLabel } from '@/modules/editor/utils'
-import { isShot, flattenShots, toSaved, restoreLayers, asMainPart } from '@/modules/editor/shots'
+import { isShot, flattenShots, toSaved, asMainPart } from '@/modules/editor/shots'
+import { stateFromRows, type SegmentRow } from '@/modules/editor/loadRows'
 import { applyGroupShots, applyFormatSpans } from '@/modules/editor/groupShots'
 import { LAYOUT_SLOT_COUNT } from '@chai-cut/shared'
 import { fitsOn, freeTrackIn, settleTracks, savedLanes, type TrackItem, type TrackRef } from '@/modules/editor/tracks'
@@ -100,8 +101,14 @@ type MediaFilter = 'all' | 'video' | 'audio' | 'image'
 /** 'retrying': no answer (the connection); 'refused': the server answered with a failure — both tried again */
 type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'retrying' | 'refused'
 
-interface SegmentRow extends Omit<Segment, never> {
-  crop_boxes: (CropBox & { box_keyframes: BoxKeyframe[] })[]
+/** A Make my clips clip as the AI made it: the rows the editor loads (the worker's saveClip; the page signs its pictures) */
+export interface AiMade {
+  start_ms: number; end_ms: number; trim_ranges: unknown
+  brand: BrandOn | null
+  segments: SegmentRow[]
+  caption_style: (Partial<CaptionStyle> & Record<string, unknown>) | null
+  text_overlays: TextOverlay[]
+  overlays: Overlay[]
 }
 
 interface Props {
@@ -122,6 +129,8 @@ interface Props {
   initialOverlays: Overlay[]
   /** The clip board it was opened from (the dashboard's AI edit / Manual edit choice), so "Clip board" returns to it */
   backStart?: 'ai' | 'manual'
+  /** A Make my clips clip as the AI made it (clip_ai_made): what Reset goes back to. null: none kept */
+  aiMade?: AiMade | null
 }
 
 const LAYOUTS: { id: LayoutType; label: string }[] = [
@@ -233,7 +242,7 @@ type AutoMode = 'vertical' | 'cuts'
 type AutoRecord = { mode: AutoMode; places: Array<[number, number, string]>; groups: string[] }
 
 export function EditorShell({
-  clip: savedClip, videoUrl, words: initialWords, initialSegments,
+  clip: savedClip, aiMade = null, videoUrl, words: initialWords, initialSegments,
   initialCaptionStyles, initialTextOverlays, initialAudioTracks, initialTransitions, initialOverlays,
   initialMusicUrls, initialOriginalSound, initialBrand, backStart,
 }: Props) {
@@ -388,62 +397,12 @@ export function EditorShell({
 
   // ── Hydrate stores from server props (once on mount) ─────────────────────────
   useEffect(() => {
-    // Saved as one row of parts, a video on top (B-roll) cutting the section under it: here the
-    // sections are whole again and the videos lie over them (shots.ts)
     const ownVideoId = (savedClip as unknown as { video_id: string }).video_id
-    const restored = restoreLayers(rowsToLocal(initialSegments), (savedClip as unknown as { layers?: unknown }).layers, ownVideoId)
-    // (videos put in between make the clip longer than its stretch of the video)
-    const lenMs = Math.max(savedClip.end_ms - savedClip.start_ms + insertedMs(insertsOf(restored.segments, ownVideoId)), ...restored.segments.map(s => s.end_ms))
-    const localSegments = [
-      // (time no part covers gets a Vertical part of its own: no "default framing" anywhere)
-      ...fillUncovered(normalizeCoverage(restored.segments.filter(s => !isShot(s, ownVideoId)), lenMs), lenMs, ownVideoId),
-      ...restored.segments.filter(s => isShot(s, ownVideoId)).map(s => ({ ...s, end_ms: Math.min(s.end_ms, lenMs) })).filter(s => s.end_ms - s.start_ms >= 100),
-    ].sort((a, b) => a.start_ms - b.start_ms)
-    const initialKeyframeMap: KeyframeMap = {}
-    for (const seg of localSegments) {
-      for (const box of seg.crop_boxes) {
-        const kfs = box.keyframes?.length ? box.keyframes : [{ t_ms: seg.start_ms, ...inFramePicture(defaultCropForSlot(seg.layout as LayoutType, box.slot_index)) }]
-        initialKeyframeMap[box.id] = kfs.map(k => ({ id: (k as { id?: string }).id ?? crypto.randomUUID(), box_id: box.id, t_ms: k.t_ms, x: k.x, y: k.y, w: k.w, h: k.h })) as typeof initialKeyframeMap[string]
-      }
-    }
-    // A transition after a part that was joined back into its section stays with that section
-    const loadedTransitions = initialTransitions
-      .map(t => (restored.renamed[t.after_segment_id] ? { ...t, after_segment_id: restored.renamed[t.after_segment_id] } : t))
-      .filter((t, i, all) => all.findIndex(x => x.after_segment_id === t.after_segment_id) === i)
-    // Saved in source clip time; shown with the removed parts closed up
-    const savedTrims = cleanTrims((savedClip as unknown as { trim_ranges?: unknown }).trim_ranges, savedClip.start_ms, savedClip.end_ms)
-    let loaded: TimedState = {
-      segments: localSegments, keyframes: initialKeyframeMap,
-      overlays: initialOverlays, textOverlays: initialTextOverlays, audioTracks: initialAudioTracks, transitions: loadedTransitions,
-    }
-    if (savedTrims.length) loaded = toTimelineState(loaded, trimMap(savedTrims, savedClip.start_ms, savedClip.end_ms), savedClip.start_ms)
-    // Tracks (as in CapCut, tracks.ts): videos on top, photos and text share the visual tracks,
-    // music has its own. Each goes back on the track it was saved on.
-    {
-      const lanes = savedLanes((savedClip as unknown as { layers?: unknown }).layers)
-      const vis = settleTracks([
-        ...loaded.segments.filter(s => isShot(s, ownVideoId)).map(s => ({ id: s.id, start_ms: s.start_ms, end_ms: s.end_ms, track: s.track ?? 0 })),
-        ...loaded.overlays.filter(o => o.type === 'image').map(o => ({ id: o.id, start_ms: o.start_ms, end_ms: o.end_ms })),
-        ...loaded.textOverlays.map(o => ({ id: o.id, start_ms: o.start_ms, end_ms: o.end_ms })),
-      ], lanes)
-      // Music keeps its saved track (a song's own length isn't known yet); music saved without one gets the lowest with room
-      const songs = loaded.audioTracks.filter(t => !isMainAudio(t))
-        .map((t): TrackItem => ({ id: t.id, start_ms: t.start_ms, end_ms: t.end_ms ?? lenMs, ...(lanes[t.id] != null ? { track: lanes[t.id] } : {}) }))
-      const aud: Record<string, number> = {}
-      const placed = songs.filter(t => t.track != null)
-      for (const t of placed) aud[t.id] = t.track!
-      for (const t of songs.filter(x => x.track == null).sort((a, b) => a.start_ms - b.start_ms)) {
-        aud[t.id] = freeTrackIn(placed, t.start_ms, t.end_ms)
-        placed.push({ ...t, track: aud[t.id] })
-      }
-      loaded = {
-        ...loaded,
-        segments: loaded.segments.map(s => (isShot(s, ownVideoId) && vis[s.id] != null && (s.track ?? 0) !== vis[s.id] ? { ...s, track: vis[s.id] } : s)),
-        overlays: loaded.overlays.map(o => (vis[o.id] != null ? { ...o, track: vis[o.id] } : o)),
-        textOverlays: loaded.textOverlays.map(o => (vis[o.id] != null ? { ...o, track: vis[o.id] } : o)),
-        audioTracks: loaded.audioTracks.map(t => (aud[t.id] != null ? { ...t, track: aud[t.id] } : t)),
-      }
-    }
+    const { loaded, trims: savedTrims, lenMs } = stateFromRows({
+      rows: initialSegments, layers: (savedClip as unknown as { layers?: unknown }).layers, mainVideoId: ownVideoId,
+      startMs: savedClip.start_ms, endMs: savedClip.end_ms, trimRanges: (savedClip as unknown as { trim_ranges?: unknown }).trim_ranges,
+      overlays: initialOverlays, textOverlays: initialTextOverlays, audioTracks: initialAudioTracks, transitions: initialTransitions,
+    })
     hydrateEditor(loaded.segments, loaded.keyframes, savedTrims, ownVideoId)
 
     // Captions on/off: the saved choice when the clip has a caption style; a clip without one yet
@@ -1841,9 +1800,12 @@ export function EditorShell({
     const now = useEditorStore.getState().segments.find(x => x.id === keep)
     if (!now) return
     setPickedSegIdState(now.id)
-    // (a little inside the edge: a jump onto the line itself can land a hair before it, in the part before)
-    const edge = Math.min(80, (now.end_ms - now.start_ms) / 3)
-    if (t < now.start_ms + 1 || t > now.end_ms - edge) seekToMs(Math.min(Math.max(t, now.start_ms + edge), now.end_ms - edge))
+    seekIntoPart(now, t)
+  }
+  /** The playhead inside `part` if it's on its edge (a little in: a jump onto the line itself can land a hair before it, in the part before) */
+  function seekIntoPart(part: SegmentLocal, t: number) {
+    const edge = Math.min(80, (part.end_ms - part.start_ms) / 3)
+    if (t < part.start_ms + 1 || t > part.end_ms - edge) seekToMs(Math.min(Math.max(t, part.start_ms + edge), part.end_ms - edge))
   }
   useEffect(() => {
     if (!queuedFormat || playing) return
@@ -1986,6 +1948,9 @@ export function EditorShell({
   const pickedShot = pickedSegId ? shots.find(x => x.id === pickedSegId) : undefined
   const splitTo = splitTargets(currentTimeMs, playingSection, shots, pickedShot, mainVideoId)
   const canSplitHere = splitTo.ids.length > 0
+  // The main video split (user, 2026-11-09): the part before the cut is picked, so a format or frame
+  // picked next goes on all of it (pickedPartAt)
+  const justSplitRef = useRef<{ id: string; t: number } | null>(null)
   function splitHere() {
     if (!canSplitHere) return
     const ids = splitTo.main ? splitTo.ids.filter(id => !sectionBlocked(id)) : splitTo.ids.filter(id => !blocked({ kind: 'broll', id }))
@@ -1993,6 +1958,10 @@ export function EditorShell({
     pause()
     skipCanvasTransitionRef.current = true
     for (const id of ids) splitAtMs(id, currentTimeMs, getPositionAt)
+    if (splitTo.main) {
+      justSplitRef.current = { id: ids[0], t: currentTimeMs }
+      setPickedSegId(ids[0])
+    }
   }
 
   const musicName = (t: { storage_path: string }) => {
@@ -3044,6 +3013,17 @@ export function EditorShell({
     if (picked) { formatWholePart(picked, layout, liveTime.get()); return }
     handleLayoutChange(layout, 'fromPlayhead')
   }
+  /** The frames gallery's None: the frame comes off all of the part picked, or the one under the playhead */
+  function handleNoFrame() {
+    const t = liveTime.get()
+    const picked = pickedPartAt(t)
+    const seg = picked ?? activeSegment
+    if (!seg || !isFrameLayout(seg.layout) || sectionBlocked(seg.id)) return
+    setActiveBoxId(null)
+    setActiveFrameItemId(null)
+    removeFrame(seg.id)
+    if (picked) seekIntoPart(picked, t)
+  }
   // What a layout or frame picked now will cover (see handleLayoutChange)
   const frameTarget = (() => {
     const t = currentTimeMs
@@ -3284,8 +3264,11 @@ export function EditorShell({
   // part of it cut out, one Vertical format over the whole of it, no frames, text, media, music,
   // transitions or filters, pauses kept, and the default caption look. The captions themselves
   // (words, language, on/off) stay. It's one undo step, so Undo brings everything back.
+  // A Make my clips clip has two (user, 2026-11-09): back to how the AI made it (`toAi`: only the manual
+  // changes go — its formats and framing, title, logo, caption look, pause cuts and brand come back),
+  // or everything, the AI's work too, as above.
   const [confirmResetAll, setConfirmResetAll] = useState(false)
-  function handleResetAll() {
+  function handleResetAll(toAi = false) {
     setConfirmResetAll(false)
     pause()
     skipCanvasTransitionRef.current = true
@@ -3295,28 +3278,53 @@ export function EditorShell({
     edgeBaseRef.current = null
     // Where the clip was made: kept when its ends were first dragged (else: as it was loaded)
     const made = savedClip as typeof savedClip & { original_start_ms?: number | null; original_end_ms?: number | null }
-    const origStart = made.original_start_ms ?? savedClip.start_ms
-    const origEnd = made.original_end_ms ?? savedClip.end_ms
-    useEditorStore.setState({
-      segments: [], keyframes: {}, trims: [], activeSegmentId: null, activeBoxId: null,
-      clipRange: origStart === savedClip.start_ms && origEnd === savedClip.end_ms ? null : [origStart, origEnd],
-    })
+    const backTo = toAi ? aiMade : null
+    const origStart = backTo ? backTo.start_ms : made.original_start_ms ?? savedClip.start_ms
+    const origEnd = backTo ? backTo.end_ms : made.original_end_ms ?? savedClip.end_ms
+    const rangeBack = origStart === savedClip.start_ms && origEnd === savedClip.end_ms ? null : [origStart, origEnd] as [number, number]
     seekAfterTrimRef.current = 0
     // The playhead goes back to the start of the clip, once the reset clip is in place (the
     // removed-parts effect does it only when those changed; this always does, and clears its ask)
     setTimeout(() => { seekAfterTrimRef.current = null; seekToMs(0) }, 0)
-    addFormat(0, origEnd - origStart, 'vertical', getVideoAR())
     if (removeFillers) setRemoveFillers(false)
-    useMediaStore.setState({
-      overlays: [], textOverlays: [], audioTracks: [], transitions: [],
-      filters: { brightness: 100, contrast: 100, saturation: 100 }, activeOverlayId: null,
-    })
-    // Explicit defaults (not blanks): the save only writes caption fields that have a value
-    useCaptionStore.setState(st => ({
-      // (one caption style for the whole clip again: no parts)
-      captionParts: [], pickedCaptionPart: null,
-      captionStyle: { ...st.captionStyle, font: null, size: null, color: '#FFE700', position: null, position_y: null, position_x: null, animation: 'karaoke', template: null },
-    }))
+    const noFilters = { brightness: 100, contrast: 100, saturation: 100 }
+    const plainLook = { font: null, size: null, color: '#FFE700', position: null, position_y: null, position_x: null, animation: 'karaoke', template: null } as const
+    if (backTo) {
+      // The rows as the AI saved them, through the same path as opening the clip
+      const { loaded, trims: madeTrims } = stateFromRows({
+        rows: backTo.segments, layers: null, mainVideoId: (savedClip as unknown as { video_id: string }).video_id,
+        startMs: backTo.start_ms, endMs: backTo.end_ms, trimRanges: backTo.trim_ranges,
+        overlays: backTo.overlays, textOverlays: backTo.text_overlays, audioTracks: [], transitions: [],
+      })
+      useEditorStore.setState({ segments: loaded.segments, keyframes: loaded.keyframes, trims: madeTrims, activeSegmentId: null, activeBoxId: null, clipRange: rangeBack })
+      useMediaStore.setState({ overlays: loaded.overlays, textOverlays: loaded.textOverlays, audioTracks: [], transitions: [], filters: noFilters, activeOverlayId: null })
+      // The look the AI gave the captions (its row has every field, so a look added by hand is blanked);
+      // the words, their language, on/off and key words stay
+      let look: Partial<CaptionStyle> = plainLook
+      if (backTo.caption_style) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { id, clip_id, enabled, language, emphasis, line_keys, created_at, updated_at, ...fields } = backTo.caption_style
+        look = fields
+      }
+      useCaptionStore.setState(st => ({ captionParts: [], pickedCaptionPart: null, captionStyle: { ...st.captionStyle, ...look } }))
+      // The brand as the AI left it (a kit put on by hand since comes off with what it changed); groups were by hand
+      setBrandOn(backTo.brand)
+      useGroupStore.setState({ groups: [] })
+    } else {
+      useEditorStore.setState({ segments: [], keyframes: {}, trims: [], activeSegmentId: null, activeBoxId: null, clipRange: rangeBack })
+      addFormat(0, origEnd - origStart, 'vertical', getVideoAR())
+      useMediaStore.setState({ overlays: [], textOverlays: [], audioTracks: [], transitions: [], filters: noFilters, activeOverlayId: null })
+      // Explicit defaults (not blanks): the save only writes caption fields that have a value
+      useCaptionStore.setState(st => ({
+        // (one caption style for the whole clip again: no parts)
+        captionParts: [], pickedCaptionPart: null, captionStyle: { ...st.captionStyle, ...plainLook },
+      }))
+      // (an AI clip with its logo gone: its brand kit, which the AI put on, is off too)
+      if ((savedClip as unknown as { ai_edit_job_id?: string | null }).ai_edit_job_id) {
+        setBrandOn(null)
+        useGroupStore.setState({ groups: [] })
+      }
+    }
     // The video's own sound: full volume, not muted; and nothing stays selected
     setOriginalVolume(1)
     setOriginalMuted(false)
@@ -5965,6 +5973,7 @@ export function EditorShell({
     if (pickPressRef.current && !usePlayerStore.getState().playing) return
     const t = liveTime.get()
     if (t >= cur.start_ms && t < cur.end_ms) return
+    if (restsOnSplit(justSplitRef.current, cur.id, t)) return
     const here = partAt(sections, t)
     if (!here || here.id === cur.id || isGapPart(here, mainVideoId)) return
     setPickedSegIdState(here.id)
@@ -6829,6 +6838,7 @@ export function EditorShell({
                 videoTitles={videoTitles}
                 selected={activeFrameItemId}
                 onApply={handleApplyFrame}
+                onNoFrame={handleNoFrame}
                 onOpenFrame={openFrame}
                 onSelectItem={selectInFrame}
                 onToggleLock={segId => toggleCtl({ kind: 'section', id: segId }, 'locked')}
@@ -7478,6 +7488,12 @@ export function EditorShell({
                     if (rect) rects[String(slot)] = rect; else delete rects[String(slot)]
                     updateFrame(frameSeg.id, { main_rects: rects })
                   }}
+                  onFrameMainViewChange={(slot, boxId, pos) => {
+                    if (!frameSeg || sectionBlocked(frameSeg.id) || frameItemBlocked(frameSeg.id, `main:${slot}`)) return
+                    // (its ◆ show on the Views row: that row follows the picked box)
+                    if (useEditorStore.getState().activeBoxId !== boxId) setActiveBoxId(boxId)
+                    handleBoxChange(boxId, pos)
+                  }}
                   style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 10, border: '1px solid rgb(var(--ed-fg) / 0.1)', boxShadow: '0 4px 24px rgba(0,0,0,0.6)' }}
                 />
               )}
@@ -7630,17 +7646,35 @@ export function EditorShell({
                 <div role="alertdialog" aria-labelledby="reset-all-title" aria-describedby="reset-all-desc"
                   className="absolute right-0 bottom-full mb-2 flex flex-col gap-3 p-4 rounded-xl"
                   style={{ width: 280, zIndex: 71, background: 'var(--ed-panel)', border: '1px solid rgb(var(--ed-fg) / 0.12)', boxShadow: '0 12px 32px rgba(0,0,0,0.55)' }}>
-                  <p id="reset-all-title" className="text-sm font-semibold text-[var(--ed-text)]">Reset all edits?</p>
+                  <p id="reset-all-title" className="text-sm font-semibold text-[var(--ed-text)]">{aiMade ? 'Reset this clip?' : 'Reset all edits?'}</p>
                   <p id="reset-all-desc" className="text-xs leading-relaxed" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
-                    The clip goes back to how it was made: its original start and end, nothing cut out. Formats, frames, text, media, music, the video’s sound and the caption look go back to the start, and the people marked in Subjects are removed. Your captions stay. Undo brings back everything except the marked people.
+                    {aiMade
+                      ? 'Captions stay. Undo brings it back, except marked people.'
+                      : (savedClip as unknown as { ai_edit_job_id?: string | null }).ai_edit_job_id
+                        ? 'AI’s edits go too on this older clip. Captions stay. Undo brings it back, except marked people.'
+                        : 'Back to how it was made. Captions stay. Undo brings it back, except marked people.'}
                   </p>
+                  {/* A Make my clips clip: only my edits, or the AI's too */}
+                  {aiMade && (
+                    <div className="flex flex-col gap-2">
+                      <button onClick={() => handleResetAll(true)} className="px-3 py-2 rounded-lg text-left transition-colors hover:bg-[rgb(var(--ed-fg)/0.14)]" style={{ background: 'rgb(var(--ed-fg) / 0.08)', color: 'var(--ed-text)' }}>
+                        <span className="block text-xs font-bold">Reset my edits</span>
+                        <span className="block text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>Back to how AI made it</span>
+                      </button>
+                      <button onClick={() => handleResetAll()} className="px-3 py-2 rounded-lg text-left transition-opacity hover:opacity-90" style={{ background: '#ef4444', color: '#fff' }}>
+                        <span className="block text-xs font-bold">Reset AI edits too</span>
+                        <span className="block text-[11px]" style={{ opacity: 0.85 }}>Back to a plain clip</span>
+                      </button>
+                    </div>
+                  )}
                   <div className="flex justify-end gap-2">
                     <button onClick={() => setConfirmResetAll(false)} autoFocus
                       className="h-8 px-3 rounded-lg text-xs font-medium transition-colors hover:bg-[rgb(var(--ed-fg)/0.08)]"
                       style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>Cancel</button>
-                    <button onClick={handleResetAll}
-                      className="h-8 px-3 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90"
-                      style={{ background: '#ef4444', color: '#fff' }}>Reset everything</button>
+                    {!aiMade && (
+                      <button onClick={() => handleResetAll()} className="h-8 px-3 rounded-lg text-xs font-bold transition-opacity hover:opacity-90"
+                        style={{ background: '#ef4444', color: '#fff' }}>Reset everything</button>
+                    )}
                   </div>
                 </div>
               </>

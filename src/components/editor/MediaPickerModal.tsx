@@ -220,7 +220,7 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
                 <button
                   onClick={() => pickVideo(v)}
                   className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold"
-                  style={{ background: 'rgba(249,115,22,0.2)', color: '#fb923c', border: '1px solid rgba(249,115,22,0.35)' }}
+                  style={{ background: 'rgba(200,255,0,0.14)', color: '#c8ff00', border: '1px solid rgba(200,255,0,0.35)' }}
                 >
                   Insert
                 </button>
@@ -302,11 +302,11 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
                 className="flex flex-col items-center justify-center gap-3 rounded-2xl py-12"
                 style={{ border: '2px dashed rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.02)' }}
               >
-                <div className="w-12 h-12 flex items-center justify-center rounded-2xl" style={{ background: 'rgba(249,115,22,0.12)', border: '1px solid rgba(249,115,22,0.25)' }}>
+                <div className="w-12 h-12 flex items-center justify-center rounded-2xl" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                    <rect x="3" y="3" width="18" height="18" rx="3" stroke="#fb923c" strokeWidth="1.6"/>
-                    <circle cx="8.5" cy="8.5" r="2" fill="#fb923c"/>
-                    <path d="M3 15l5-5 4 4 3-3.5L21 15" stroke="#fb923c" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                    <rect x="3" y="3" width="18" height="18" rx="3" stroke="rgba(255,255,255,0.7)" strokeWidth="1.6"/>
+                    <circle cx="8.5" cy="8.5" r="2" fill="rgba(255,255,255,0.7)"/>
+                    <path d="M3 15l5-5 4 4 3-3.5L21 15" stroke="rgba(255,255,255,0.7)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
                 </div>
                 <div className="text-center">
@@ -353,8 +353,8 @@ export function MediaPickerModal({ clipId, atMs, onInsertVideo, onInsertImage, o
             <button
               onClick={handleImageUpload}
               disabled={!imageFile || imageUploading}
-              className="py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40"
-              style={{ background: 'linear-gradient(135deg,#ea580c,#f97316)', marginTop: 'auto' }}
+              className="py-2.5 rounded-xl text-sm font-bold disabled:opacity-40"
+              style={{ background: '#c8ff00', color: '#000', marginTop: 'auto' }}
             >
               {imageUploading ? 'Uploading…' : 'Insert image'}
             </button>

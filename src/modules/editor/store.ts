@@ -167,8 +167,10 @@ function withStart(seg: SegmentLocal, start_ms: number): SegmentLocal {
  * at its end, and they go when another video or a photo takes its place.
  */
 function patchItem(it: FrameItem, patch: Partial<Omit<FrameItem, 'id'>>): FrameItem {
-  if (it.kind !== 'video' || !it.holds?.length) return { ...it, ...patch }
-  if ((patch.source_video_id !== undefined && patch.source_video_id !== it.source_video_id) || (patch.kind && patch.kind !== it.kind)) return { ...it, ...patch, holds: null }
+  if (it.kind !== 'video') return { ...it, ...patch }
+  // (another video in its place: the stretches and the part picked were this one's)
+  if ((patch.source_video_id !== undefined && patch.source_video_id !== it.source_video_id) || (patch.kind && patch.kind !== it.kind)) return { ...it, ...patch, holds: null, pan: null }
+  if (!it.holds?.length) return { ...it, ...patch }
   const { start_ms, source_offset_ms, ...rest } = patch
   const trimmed = start_ms != null && start_ms !== it.start_ms && source_offset_ms !== undefined
   const out: FrameItem = trimmed
