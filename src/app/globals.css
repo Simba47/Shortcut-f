@@ -2357,6 +2357,48 @@ body {
 .tx-add:hover:not(:disabled) { filter: brightness(1.06); }
 .tx-add:active:not(:disabled) { transform: scale(.96); }
 .tx-add:disabled { opacity: .4; cursor: default; }
+/* The Text panel's tabbed layout (TextOverlayPanel layout="tabs"): the picked text on the caption preview's
+   card, then each text a slim row — its words in its own style and when it shows; the picked one outlined */
+/* An editor panel's sub-tabs (TextOverlayPanel's Text · Style · Look · Motion), compact, one line. (user, 2026-11-09:
+   "ordinary… make it look premium — not bigger") A recessed track with a bevel; hairline dividers between the tabs,
+   fading beside the open one; the open one a raised pill — a soft top light, a hairline edge, a shadow under it —
+   and a short lime bar with a faint glow under its name (the one lime touch). Names in a tight, even weight.
+   --n tabs, --i the open one */
+.ed-subtabs { position: relative; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); padding: 3px; border-radius: 12px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.28), rgb(var(--ed-fg) / 0.025));
+  box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.07), inset 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 0 rgb(var(--ed-fg) / 0.04); }
+.ed-subtabs-pill { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / var(--n)); border-radius: 9px; pointer-events: none;
+  transform: translateX(calc(var(--i) * 100%)); transition: transform .34s cubic-bezier(.3, 1.2, .5, 1);
+  background: linear-gradient(180deg, rgb(var(--ed-fg) / 0.13), rgb(var(--ed-fg) / 0.07));
+  box-shadow: inset 0 1px 0 rgb(var(--ed-fg) / 0.14), inset 0 0 0 1px rgb(var(--ed-fg) / 0.07), 0 6px 14px -7px rgba(0, 0, 0, 0.85); }
+.ed-subtabs-pill::after { content: ''; position: absolute; left: 50%; bottom: 3px; width: 16px; height: 2px; translate: -50% 0; border-radius: 2px;
+  background: #c8ff00; box-shadow: 0 0 8px rgba(200, 255, 0, 0.55); }
+.ed-subtab { position: relative; z-index: 1; height: 34px; padding: 0 6px 2px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border-radius: 9px; font-size: 11.5px; font-weight: 550; letter-spacing: .01em; white-space: nowrap; color: rgb(var(--ed-fg) / 0.5); transition: color .2s; }
+.ed-subtab + .ed-subtab::before { content: ''; position: absolute; left: 0; top: 50%; height: 14px; width: 1px; translate: 0 -50%;
+  background: rgb(var(--ed-fg) / 0.08); transition: opacity .2s; }
+.ed-subtab[data-on]::before, .ed-subtab[data-on] + .ed-subtab::before { opacity: 0; }
+.ed-subtab-icon { flex-shrink: 0; opacity: .75; transition: opacity .2s; }
+.ed-subtab:hover:not(:disabled):not([data-on]) { color: rgb(var(--ed-fg) / 0.85); }
+.ed-subtab:hover:not(:disabled):not([data-on]) .ed-subtab-icon { opacity: 1; }
+.ed-subtab[data-on] { color: var(--ed-text); font-weight: 650; }
+.ed-subtab[data-on] .ed-subtab-icon { opacity: 1; }
+/* (waiting for a text to be picked: quieter, still readable) */
+.ed-subtab:disabled { color: rgb(var(--ed-fg) / 0.28); cursor: not-allowed; }
+.ed-subtab:focus-visible { outline: 2px solid rgba(200, 255, 0, 0.6); outline-offset: 1px; }
+html[data-theme="light"] .editor-theme .ed-subtabs { background: rgb(var(--ed-fg) / 0.05); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.08), inset 0 1px 2px rgba(0, 0, 0, 0.06); }
+html[data-theme="light"] .editor-theme .ed-subtabs-pill { background: #fff; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.08), 0 2px 8px -3px rgba(0, 0, 0, 0.2); }
+html[data-theme="light"] .editor-theme .ed-subtabs-pill::after { background: #8fb800; box-shadow: none; }
+@media (prefers-reduced-motion: reduce) { .ed-subtabs-pill { transition: none; } }
+.tx-preview { display: grid; place-items: center; aspect-ratio: 3 / 1; padding: 10px 16px; }
+.tx-preview-text { max-width: 100%; text-align: center; overflow-wrap: anywhere; line-height: 1.15; }
+.tx-row { padding: 6px 6px 6px 10px; border-radius: 12px; background: rgb(var(--ed-fg) / 0.03); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.08); transition: box-shadow .2s, background-color .2s; }
+.tx-row:hover { background: rgb(var(--ed-fg) / 0.05); }
+.tx-row[data-on] { box-shadow: inset 0 0 0 1px rgba(200,255,0,0.4); padding-bottom: 10px; }
+.tx-row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 32px; text-align: left; }
+.tx-row-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-row-time { flex-shrink: 0; font-size: 11px; font-variant-numeric: tabular-nums; color: rgb(var(--ed-fg) / 0.5); }
+[data-theme="light"] .tx-row[data-on] { box-shadow: inset 0 0 0 1px rgba(143,184,0,0.6); }
 .tx-item { padding: 8px; border-radius: 14px; background: rgb(var(--ed-fg) / 0.03); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.08); transition: box-shadow .2s; }
 .tx-item[data-open] { box-shadow: inset 0 0 0 1px rgba(200,255,0,0.4); }
 .tx-head {
@@ -4371,5 +4413,43 @@ html:not([data-theme="light"]) .bkd-box { --ed-panel: #121214; }
 .sp-mode-opt:focus-visible { outline: 2px solid rgba(200, 255, 0, 0.6); outline-offset: 1px; }
 .sp-mode[data-off] { opacity: .55; }
 .sp-mode-opt:disabled { cursor: default; }
+/* ── Subjects' start (user, 2026-11-09: "simple and odd — make it attractive and clear"): Auto format a card —
+   its icon, what it does, two pictured choices of how each scene is framed (a small 9:16 screen each; the chosen
+   one outlined, a lime tick), its button; Detect a quiet row under it. Lime only on the icon, the chosen tile and
+   the button. SubjectsPanel .sp-auto / .sp-tile / .sp-detect ── */
+.sp-auto { display: flex; flex-direction: column; gap: 14px; padding: 14px; border-radius: 16px;
+  background: linear-gradient(180deg, rgb(var(--ed-fg) / 0.05), rgb(var(--ed-fg) / 0.02)); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.09); }
+.sp-auto-icon { flex-shrink: 0; width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center;
+  color: var(--ed-accent-text); background: rgba(200, 255, 0, 0.1); box-shadow: inset 0 0 0 1px rgba(200, 255, 0, 0.25); }
+.sp-card-title { font-size: 14px; font-weight: 700; line-height: 1.25; color: var(--ed-text); }
+.sp-card-title[data-size="sm"] { font-size: 13px; }
+.sp-card-sub { margin-top: 2px; font-size: 11.5px; line-height: 1.4; color: rgb(var(--ed-fg) / 0.55); }
+.sp-q { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: rgb(var(--ed-fg) / 0.45); }
+.sp-tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 10px 11px; border-radius: 12px; text-align: center;
+  background: rgb(var(--ed-fg) / 0.03); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.1); transition: background-color .2s, box-shadow .2s, transform .12s; }
+.sp-tile:hover:not(:disabled):not([data-on]) { background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.2); }
+.sp-tile[data-on] { background: rgb(var(--ed-fg) / 0.07); box-shadow: inset 0 0 0 1.5px rgba(200, 255, 0, 0.55); }
+.sp-tile:active:not(:disabled) { transform: scale(.98); }
+.sp-tile:disabled { cursor: default; }
+[data-off] > .sp-tile { opacity: .55; }
+.sp-tile:focus-visible { outline: 2px solid rgba(200, 255, 0, 0.6); outline-offset: 2px; }
+.sp-tile-tick { position: absolute; top: 7px; right: 7px; width: 16px; height: 16px; border-radius: 999px; display: grid; place-items: center; background: #c8ff00; color: #0c0c0e; }
+.sp-tile-art svg { display: block; }
+.sp-art-screen { fill: rgb(var(--ed-fg) / 0.05); stroke: rgb(var(--ed-fg) / 0.28); stroke-width: 1.5; transition: stroke .2s; }
+.sp-art-person { fill: rgb(var(--ed-fg) / 0.26); transition: fill .2s; }
+.sp-art-line { stroke: rgb(var(--ed-fg) / 0.28); }
+.sp-art-mark { stroke: rgb(var(--ed-fg) / 0.5); transition: stroke .2s; }
+.sp-tile[data-on] .sp-art-screen { stroke: rgb(var(--ed-fg) / 0.5); }
+.sp-tile[data-on] .sp-art-person { fill: rgb(var(--ed-fg) / 0.55); }
+.sp-tile[data-on] .sp-art-mark { stroke: var(--ed-accent-text); }
+.sp-tile-name { font-size: 12.5px; font-weight: 700; color: var(--ed-text); }
+.sp-tile-sub { font-size: 10.5px; line-height: 1.35; color: rgb(var(--ed-fg) / 0.5); }
+.sp-detect { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 14px; border-radius: 14px; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.08); }
+.sp-detect[data-running] { padding: 0; box-shadow: none; }
+.sp-detect-icon { flex-shrink: 0; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: rgb(var(--ed-fg) / 0.75); background: rgb(var(--ed-fg) / 0.06); }
+html[data-theme="light"] .editor-theme .sp-auto-icon { background: rgba(150, 200, 0, 0.14); box-shadow: inset 0 0 0 1px rgba(110, 150, 0, 0.35); }
+html[data-theme="light"] .editor-theme .sp-tile[data-on] { box-shadow: inset 0 0 0 1.5px rgba(110, 150, 0, 0.6); }
+html[data-theme="light"] .editor-theme .sp-tile-tick { background: #b4e600; }
+@media (prefers-reduced-motion: reduce) { .sp-tile { transition: none; } .sp-tile:active:not(:disabled) { transform: none; } }
 html[data-theme="light"] .sp-mode-pill { background: linear-gradient(135deg, rgba(150, 200, 0, 0.28), rgba(150, 200, 0, 0.1)); box-shadow: inset 0 0 0 1px rgba(110, 150, 0, 0.55); }
 @media (prefers-reduced-motion: reduce) { .sp-mode-pill { transition: none; } }

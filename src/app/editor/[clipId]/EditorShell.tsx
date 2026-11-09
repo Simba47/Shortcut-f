@@ -6873,21 +6873,29 @@ export function EditorShell({
                   <CaptionPreview style={panelCaptionStyle} textCase={captionTextCase} dim={!showCaptions} />
                   {/* Sub-bar: the Captions tool one kind of setting at a time (user, 2026-11-06; one long
                       scroll before). Captions off: only Captions; Key words only with a style that draws them */}
-                  <div role="tablist" aria-label="Caption settings" className="grid gap-0.5 p-0.5 mt-2 rounded-lg"
-                    style={{ gridTemplateColumns: `repeat(${keyWordsOn ? 4 : 3}, minmax(0, 1fr))`, background: 'rgb(var(--ed-fg) / 0.06)', border: '1px solid rgb(var(--ed-fg) / 0.07)' }}>
-                    {CAPTION_TABS.filter(t => t.id !== 'keywords' || keyWordsOn).map(t => {
-                      const on = captionTab === t.id
-                      const off = t.id !== 'captions' && !showCaptions
-                      return (
-                        <button key={t.id} type="button" role="tab" aria-selected={on} disabled={off} onClick={() => setCaptionTab(t.id)}
-                          title={off ? 'Turn on Show captions first' : t.tip}
-                          className="h-7 px-1 rounded-md text-[11.5px] font-semibold whitespace-nowrap transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                          style={on ? { background: 'rgb(var(--ed-fg) / 0.12)', color: 'var(--ed-accent-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.08)' } : { color: 'rgb(var(--ed-fg) / 0.6)' }}>
-                          {t.label}
-                        </button>
-                      )
-                    })}
-                  </div>
+                  {/* (user, 2026-11-09: as the Text panel's) each tab its icon, a raised pill sliding under the open one, a lime bar under its name */}
+                  {(() => {
+                    const shownTabs = CAPTION_TABS.filter(t => t.id !== 'keywords' || keyWordsOn)
+                    return (
+                      <div role="tablist" aria-label="Caption settings" className="ed-subtabs mt-2"
+                        style={{ '--n': shownTabs.length, '--i': Math.max(0, shownTabs.findIndex(t => t.id === captionTab)) } as React.CSSProperties}>
+                        <span className="ed-subtabs-pill" aria-hidden="true" />
+                        {shownTabs.map(t => {
+                          const on = captionTab === t.id
+                          const off = t.id !== 'captions' && !showCaptions
+                          return (
+                            <button key={t.id} type="button" role="tab" aria-selected={on} disabled={off} onClick={() => setCaptionTab(t.id)}
+                              title={off ? 'Turn on Show captions first' : t.tip} className="ed-subtab" data-on={on || undefined}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="ed-subtab-icon">
+                                {CAPTION_TAB_ICONS[t.id]}
+                              </svg>
+                              <span>{t.label}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
                   </div>
 
                   {/* ── Captions: on/off with its status, the language, and editing the words ── */}
@@ -7212,6 +7220,8 @@ export function EditorShell({
                 onUpdateBand={patch => { if (frameSeg && !sectionBlocked(frameSeg.id)) updateFrameBand(frameSeg.id, patch) }}
               />
               <TextOverlayPanel
+                // (tabbed, as the Captions panel: the picked text's preview and Text · Style · Look · Motion pinned at the top)
+                layout="tabs"
                 overlays={textOverlays}
                 currentTimeMs={currentTimeMs}
                 clipDurationMs={clip.end_ms - clip.start_ms}
@@ -7998,6 +8008,14 @@ const CAPTION_TABS: { id: CaptionTab; label: string; tip: string }[] = [
   { id: 'look', label: 'Look', tip: 'Colours, font, size and capitals' },
   { id: 'keywords', label: 'Key words', tip: 'The words the style makes stand out' },
 ]
+
+/** Each Captions sub-tab's icon (24-unit paths): a CC box, a wand with sparks, a palette, a highlighted word */
+const CAPTION_TAB_ICONS: Record<CaptionTab, React.ReactNode> = {
+  captions: <><rect x="3" y="5" width="18" height="14" rx="3" /><path d="M10 10.2a2 2 0 100 3.6M16.5 10.2a2 2 0 100 3.6" /></>,
+  style: <><path d="M4 20L15 9" /><path d="M14 4l.8 2.2L17 7l-2.2.8L14 10l-.8-2.2L11 7l2.2-.8z" /><path d="M19 12l.5 1.5L21 14l-1.5.5L19 16l-.5-1.5L17 14l1.5-.5z" /></>,
+  look: <><path d="M12 3a9 9 0 100 18c1.1 0 1.6-.8 1.6-1.6 0-.9-.6-1.3-.6-2.1 0-.9.7-1.5 1.6-1.5H17a4 4 0 004-4c0-4.9-4-8.8-9-8.8z" /><circle cx="7.5" cy="11" r="1" /><circle cx="10.5" cy="7" r="1" /><circle cx="15.5" cy="7.5" r="1" /></>,
+  keywords: <><path d="M4 19h16" /><path d="M7 15l4.5-10L16 15M8.7 11.5h5.6" /></>,
+}
 
 /**
  * The top of the Captions panel's Style and Look tabs: what a style picked below changes — the caption lines selected
