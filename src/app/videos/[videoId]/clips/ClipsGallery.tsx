@@ -3,7 +3,7 @@
 import { preloadMascot } from '@/components/ui/mascot'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import type { CaptionStyle, SegmentLocal, TextOverlay, TranscriptWord } from '@chai-cut/shared'
+import type { CaptionStyle, Overlay, SegmentLocal, TextOverlay, TranscriptWord } from '@chai-cut/shared'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { BrandLoaderScreen } from '@/components/ui/brand-loader'
 import { AccountMenu } from '@/components/ui/account-menu'
@@ -22,6 +22,8 @@ export interface GalleryClip {
   captionStyle: CaptionStyle | null; textOverlays: TextOverlay[]
   /** Its removed parts (clips.trim_ranges, source ms) */
   trims: [number, number][]
+  /** Its pictures on top (a brand kit's logo, photos), signed */
+  overlays: Overlay[]
 }
 
 const ACCENT = '#c8ff00'
@@ -30,9 +32,11 @@ const ACCENT = '#c8ff00'
  * AI edits: every clip "Make my clips" made from the video, a section per run (newest first), each
  * playable in 9:16 here; Edit opens the editor, Export renders one
  */
-export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }: {
+export function ClipsGallery({ video, videoUrl, needsProxy, stockUrls, job, clips: initial }: {
   video: { id: string; title: string | null }
   videoUrl: string
+  /** No editing copy yet: ask the worker for one (the cards play it from the next visit) */
+  needsProxy?: boolean
   stockUrls: Record<string, string>
   job: { status: string; error: string | null } | null
   clips: GalleryClip[]
@@ -43,6 +47,11 @@ export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }
   const [clips, setClips] = useState(initial)
   const [opening, setOpening] = useState(false)
   useEffect(() => { setClips(initial) }, [initial])
+  // A video from before editing copies were made: ask the worker for one, as the clip board does
+  // (the cards play the original until then)
+  useEffect(() => {
+    if (needsProxy) fetch(`/api/videos/${video.id}/proxy`, { method: 'POST' }).catch(() => {})
+  }, [needsProxy, video.id])
   const [exportError, setExportError] = useState<string | null>(null)
   const running = job?.status === 'queued' || job?.status === 'running'
   // One section per Make my clips run, newest first (clips arrive in that order)
@@ -78,8 +87,6 @@ export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }
   }
   const order = (a: GalleryClip, b: GalleryClip) =>
     sortBy === 'score' ? (b.ai_score ?? -1) - (a.ai_score ?? -1)
-      : sortBy === 'short' ? lenOf(a) - lenOf(b)
-      : sortBy === 'long' ? lenOf(b) - lenOf(a)
       : 0   // 'made': the order the AI made them in
   const filtering = terms.length > 0 || lenF !== 'all' || scoreF !== 'all'
   const shownBatches = batches.map(b => ({ ...b, clips: b.clips.filter(keep).sort(order) })).filter(b => b.clips.length)
@@ -247,7 +254,7 @@ export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }
               <FilterChip label="Score" value={scoreF} onChange={setScoreF} clearable
                 options={[['all', 'Any score'], ['70', '70 and up'], ['80', '80 and up']]} />
               <FilterChip label="Sort" value={sortBy} onChange={setSortBy}
-                options={[['score', 'Best score'], ['made', 'AI’s order'], ['short', 'Shortest first'], ['long', 'Longest first']]} />
+                options={[['score', 'Best score'], ['made', 'AI’s order']]} />
             </div>
             <p className="ag-filter-count" role="status">
               {filtering
@@ -280,7 +287,7 @@ export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }
                       stockUrls={Object.fromEntries(c.segments.flatMap(sg => sg.crop_boxes.map(b => b.source_video_id))
                         .filter((id): id is string => !!id && !!stockUrls[id]).map(id => [id, stockUrls[id]]))}
                       startMs={c.start_ms} endMs={c.end_ms} segments={c.segments}
-                      words={c.words} captionStyle={c.captionStyle} textOverlays={c.textOverlays} trims={c.trims} />
+                      words={c.words} captionStyle={c.captionStyle} textOverlays={c.textOverlays} trims={c.trims} overlays={c.overlays} />
                     {/* Score and length on top of the reel */}
                     <div className="ag-overlay" aria-hidden="true">
                       {typeof c.ai_score === 'number' && (
@@ -350,4 +357,5 @@ export function ClipsGallery({ video, videoUrl, stockUrls, job, clips: initial }
 
 type LenFilter = 'all' | 'short' | 'mid' | 'long'
 type ScoreFilter = 'all' | '70' | '80'
-type SortBy = 'score' | 'made' | 'short' | 'long'
+// (length is the Length filter's alone: "Shortest / Longest first" were the same thing twice, out 2026-11-09)
+type SortBy = 'score' | 'made'

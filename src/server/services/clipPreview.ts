@@ -2,7 +2,7 @@ import { withSavedStyle } from '@/modules/editor/textStyle'
 import { shownSegment } from '@/modules/editor/visibility'
 import { GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import type { CaptionStyle, SegmentLocal, TextOverlay, TranscriptWord } from '@chai-cut/shared'
+import type { CaptionStyle, Overlay, SegmentLocal, TextOverlay, TranscriptWord } from '@chai-cut/shared'
 import sql from '@/lib/db'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import { rowsToLocal } from '@/modules/editor/utils'
@@ -23,6 +23,34 @@ export interface ClipPreviewData {
   stockUrls: Record<string, string>
   /** Its removed parts (clips.trim_ranges, source ms): the player plays without them, as the export does */
   trims: [number, number][]
+  /** Its pictures on top — a brand kit's logo, photos — each with a signed preview_url */
+  overlays: Overlay[]
+}
+
+/**
+ * The pictures on top of these clips (a brand kit's logo, photos added in the editor), by clip id,
+ * each signed so a preview can show it — as the export draws them (render.py image overlays): not
+ * hidden ones. (Before 2026-11-09 the previews left them out: a branded clip showed no logo
+ * until it was exported or opened.) Videos on top (picture in picture) are left to the editor.
+ */
+export async function imageOverlaysFor(clipIds: string[]): Promise<Record<string, Overlay[]>> {
+  if (!clipIds.length) return {}
+  const rows = await sql`SELECT * FROM overlays WHERE clip_id = ANY(${clipIds}) AND type = 'image' ORDER BY z_index`
+    .catch(() => []) as unknown as Overlay[]
+  const out: Record<string, Overlay[]> = {}
+  await Promise.all(rows.filter(o => !o.hidden && o.storage_path).map(async o => {
+    const preview_url = await getSignedUrl(r2, new GetObjectCommand({ Bucket: R2_BUCKET, Key: o.storage_path! }), { expiresIn: 43200 }).catch(() => undefined)
+    // (numbers: the database's decimal columns arrive as text)
+    const num = (v: unknown) => (v == null ? null : Number(v))
+    if (preview_url) (out[o.clip_id] ??= []).push({
+      ...o, preview_url, x: Number(o.x), y: Number(o.y), w: Number(o.w), h: Number(o.h),
+      start_ms: Number(o.start_ms), end_ms: Number(o.end_ms), z_index: Number(o.z_index) || 0,
+      opacity: num(o.opacity), rotation: num(o.rotation),
+    })
+  }))
+  // (back in drawing order: z_index, as the export stacks them)
+  for (const id in out) out[id].sort((a, b) => a.z_index - b.z_index)
+  return out
 }
 
 /** Everything needed to play one clip in 9:16 as edited (framing, captions, text, B-roll), without exporting it */
@@ -88,5 +116,6 @@ export async function getClipPreview(userId: string, clipId: string): Promise<Cl
     textOverlays: (overlays as unknown as TextOverlay[]).filter(t => !t.hidden).map(withSavedStyle),
     stockUrls,
     trims: Array.isArray(clip.trim_ranges) ? clip.trim_ranges : [],
+    overlays: (await imageOverlaysFor([clipId]))[clipId] ?? [],
   }
 }

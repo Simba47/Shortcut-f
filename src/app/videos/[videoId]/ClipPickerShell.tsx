@@ -11,6 +11,7 @@ import { useLocalVideo } from '@/modules/clips/localVideo'
 import { usePolling } from '@/lib/usePolling'
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
+import { CaptionScan } from '@/components/editor/CaptionScan'
 import { useRouter } from 'next/navigation'
 import { FilterChip } from '@/components/ui/filter-chip'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -98,22 +99,28 @@ interface AutoJob {
 }
 
 /**
- * The bar between the worker's reports (every 3–8 s, usePolling): it jumps to each report, never goes
- * back, and in between creeps toward the end of the step it's on (`to`) — slower the closer it gets,
- * never reaching it — so a long step shows movement without claiming more than is done.
+ * The bar between the worker's reports (every 3–8 s, usePolling), moving evenly (user, 2026-11-09:
+ * "linear progression", no jumps): it climbs to each report at CLIMB % a tick, never goes back, and in
+ * between moves on toward the end of the step it's on (`to`) at a steady pace that only slows right
+ * before it — never reaching it — so a long step shows movement without claiming more than is done.
  */
+const CLIMB = 1.5, PACE = 0.25
 function useSmoothProgress(jobId: string | null, real: number, to: number | null, active: boolean): number {
   const [shown, setShown] = useState(real)
+  const live = useRef({ real, to, active })
+  live.current = { real, to, active }
   useEffect(() => { setShown(real) }, [jobId]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setShown(s => (active ? Math.max(s, real) : real)) }, [real, active])
+  useEffect(() => { if (!active) setShown(real) }, [real, active])
   useEffect(() => {
-    if (!active || to == null) return
+    if (!active) return
     const t = setInterval(() => setShown(s => {
-      const cap = to - 0.5
-      return s >= cap ? s : s + (cap - s) * 0.02
+      const { real, to } = live.current
+      if (s < real) return Math.min(real, s + CLIMB)
+      const cap = to == null ? s : to - 0.5
+      return s >= cap ? s : Math.min(cap, s + Math.max(0.04, Math.min(PACE, (cap - s) * 0.05)))
     }), 500)
     return () => clearInterval(t)
-  }, [active, to])
+  }, [active])
   return shown
 }
 interface AutoClip {
@@ -443,11 +450,18 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const [clipTab, setClipTab] = useState<ClipTab>(manualOnly ? 'yours' : 'all')
   // The clipboard badge: Manual edit counts only the user's own clips, as that board lists only those
   // Clips on this board: Start with AI never lists the clips cut by hand (they belong to Pick my moments)
-  // Numbered in the order they were made (Clip 1 is the first one, and keeps its number), listed newest first
+  // Numbered in the order they were made (Clip 1 is the first one, and keeps its number), listed newest first.
+  // Two counts (user, 2026-11-09): the clips cut by hand (Manual edit) and the AI's (Make my clips, Ask AI,
+  // Best moments) — separate boards, so AI clips start at 1 however many were cut by hand, and back.
+  // (One count for all the AI's: "All clips" lists them together, never two with one number.)
   // (created_at comes from the database as a Date, from a new clip as text: compared as times)
   const madeAt = (c: { created_at: string | Date }) => new Date(c.created_at).getTime() || 0
+  const counts = { yours: 0, ai: 0 }
   const byTime = [...clips].sort((a, b) => madeAt(a) - madeAt(b))
-    .map((c, i) => (c.index === i + 1 ? c : { ...c, index: i + 1 }))
+    .map(c => {
+      const n = c.origin === 'yours' ? ++counts.yours : ++counts.ai
+      return c.index === n ? c : { ...c, index: n }
+    })
     .reverse()
   const boardClips = manualOnly ? byTime : byTime.filter(c => c.origin !== 'yours')
   const badgeCount = manualOnly ? byTime.filter(c => c.origin === 'yours').length : boardClips.length
@@ -455,12 +469,16 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // (Manual edit lists only the user's own clips, so an AI-made clip never counts, even though it has formats)
   const isEdited = (c: { layout: string | null; origin: ClipOrigin }) => c.layout != null && (!manualOnly || c.origin === 'yours')
   // (brand kit Phase 2) each clip's kit, for its tag, and "Put on all"
-  const brands = useClipBrands(initialVideo.id, boardClips.map(c => c.id))
+  // ("Put on all": this board's own clips — the AI's here, the ones cut by hand on Manual edit — never the other board's)
+  const brandClips = manualOnly ? byTime.filter(c => c.origin === 'yours') : boardClips
+  const brands = useClipBrands(initialVideo.id, brandClips.map(c => c.id))
   const tabClips = clipTab === 'all' ? boardClips : clipTab === 'fav' ? boardClips.filter(c => c.favorite) : clipTab === 'edited' ? byTime.filter(isEdited) : byTime.filter(c => c.origin === clipTab)
   // Filters on the tab's clips (user, 2026-11-05: "get the clips easily", no search): their length, exported
-  // or not, and the order — newest first (as before), oldest first, as they come in the video, shortest, longest
+  // or not, and the order — newest first (as before), oldest first, as they come in the video. (Length is
+  // the Length filter's alone: Sort's "Shortest / Longest first" were the same thing twice, out 2026-11-09.)
   const [lenF, setLenF] = useState<'all' | 'short' | 'mid' | 'long'>('all')
   const [expF, setExpF] = useState<'all' | 'yes' | 'no'>('all')
+  // (user, 2026-11-09: Shortest / Longest first kept in Sort as well)
   const [sortBy, setSortBy] = useState<'new' | 'old' | 'video' | 'short' | 'long'>('new')
   const lenOf = (c: { start_ms: number; end_ms: number }) => c.end_ms - c.start_ms
   const exported = (c: { status: string; output_url: string | null }) => c.status === 'done' && !!c.output_url
@@ -595,6 +613,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     } catch (e) {
       setClipError(e instanceof Error ? e.message : 'Delete failed')
     }
+  }
+
+  /** Download every ticked clip (in the list's order), each as its card's Download does; then out of select mode */
+  function downloadSelected() {
+    const ids = shownClips.filter(c => selected.has(c.id)).map(c => c.id)
+    if (!ids.length) return
+    for (const id of ids) void downloadClip(id)
+    stopSelecting()
   }
 
   async function deleteSelected() {
@@ -1127,7 +1153,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           words={previewData.words}
           // No saved style yet: captions off, as the editor opens a new clip
           captionStyle={previewData.captionStyle ?? null}
-          textOverlays={previewData.textOverlays} trims={previewData.trims} />
+          textOverlays={previewData.textOverlays} trims={previewData.trims} overlays={previewData.overlays} />
       )}
     </div>
   )
@@ -1255,9 +1281,12 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           </button>}
         </div>
       </div>
-      <p className="text-xs" style={{ color: formError ? '#f87171' : 'rgb(var(--cb-fg) / 0.45)' }}>
-        {formError ?? (formRangeValid ? `Length: ${durLabel(formStartMs!, formEndMs!)}` : 'Type hours, minutes and seconds: two digits move you on')}
-      </p>
+      {/* (the "Type hours, minutes and seconds" hint: out, user 2026-11-09 — only the length or a problem shows) */}
+      {(formError || formRangeValid) && (
+        <p className="text-xs" style={{ color: formError ? '#f87171' : 'rgb(var(--cb-fg) / 0.45)' }}>
+          {formError ?? `Length: ${durLabel(formStartMs!, formEndMs!)}`}
+        </p>
+      )}
     </form>
   ) : (
     // Previewing a clip or a moment: two equal-width, equal-height buttons (same border, weight and
@@ -1763,6 +1792,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     </div>
   )
   const aiTools = aiLocked ? aiToolsLocked : aiToolsOpen
+  // A scan over the video (the editor's CaptionScan) while AI works on it (user, 2026-11-09): its
+  // captions being read, or Make my clips running — the line under it says which
+  const scanLabel = autoRunning
+    ? (autoJob?.status === 'queued' ? 'Waiting to start…' : autoJob?.stage?.text ? `${autoJob.stage.text}…` : 'Making your clips…')
+    : reading?.status === 'running' ? 'Getting captions…' : null
 
   return (
     <div className="cb-page h-screen flex flex-col overflow-hidden">
@@ -1809,14 +1843,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               <div className="cb-player rounded-2xl overflow-hidden flex items-center justify-center bg-black"
                 style={{ width: `min(100cqw, calc(100cqh * ${frameRatio}))`, aspectRatio: `${frameRatio}` }}>
                 {/* The video stays mounted (hidden) while a clip previews, so it keeps its place */}
-                <div className="w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}</div>
+                <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<CaptionScan label={scanLabel} /></div>
                 {viewMode === 'preview' && previewPane}
               </div>
             </div>
           ) : (
             <div className="cb-player w-full rounded-2xl overflow-hidden flex items-center justify-center bg-black shrink-0"
               style={{ aspectRatio: `${frameRatio}`, maxHeight: '70vh', margin: '0 auto', width: `min(100%, calc(70vh * ${frameRatio}))` }}>
-              <div className="w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}</div>
+              <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<CaptionScan label={scanLabel} /></div>
               {viewMode === 'preview' && previewPane}
             </div>
           )}
@@ -1843,20 +1877,20 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               </span>
             )}
             <div className="flex-1" />
-            {(selecting || shownClips.length > 0) && (() => {
-              const all = shownClips.length > 0 && shownClips.every(c => selected.has(c.id))
-              return (
-                <label className="flex items-center gap-1.5 text-xs font-medium cursor-pointer select-none" style={{ color: 'rgb(var(--cb-fg) / 0.75)' }}>
-                  <input type="checkbox" checked={all}
-                    onChange={() => {
-                      if (all) { stopSelecting(); return }
-                      setSelecting(true); setSelected(new Set(shownClips.map(c => c.id)))
-                    }}
-                    className="cb-check w-3.5 h-3.5 rounded" style={{ accentColor: ACCENT }} />
-                  Select all
-                </label>
-              )
-            })()}
+            {/* Select (user, 2026-11-09): starts with nothing ticked — tap the clips wanted; Cancel leaves,
+                clearing the ticks. (It was a "Select all" tick box: it ticked every clip, and once one was
+                unticked it showed empty and ticked them all again — no way out but Esc.) */}
+            {(selecting || shownClips.length > 0) && (
+              <button type="button" className="cb-select-btn" data-on={selecting || undefined} aria-pressed={selecting}
+                onClick={() => (selecting ? stopSelecting() : (setSelecting(true), setSelected(new Set())))}>
+                {selecting ? 'Cancel' : (
+                  <>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4" /><path d="M8 12.5l2.8 2.8L16.5 9.5" /></svg>
+                    Select
+                  </>
+                )}
+              </button>
+            )}
           </div>
           {/* Sections: every clip, or only those from one place */}
           {/* Sections, the brand and the filters as one block (user, 2026-11-09: it was messy — tabs on
@@ -1883,25 +1917,26 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             </div>
             {/* (brand kit Phase 2) a kit on every clip at once */}
             {/* (shown while selecting too: the kit then goes on the ticked clips only) */}
-            <BrandAllBar b={brands} total={boardClips.length} selected={selecting ? [...selected] : []} />
+            <BrandAllBar b={brands} total={brandClips.length} selected={selecting ? [...selected] : []} />
             {tabClips.length > 1 && (
               <div className="cb-filters" role="group" aria-label="Filter the clips">
                 <FilterChip size="xs" label="Length" value={lenF} onChange={setLenF} clearable
                   options={[['all', 'Any length'], ['short', 'Under 30s'], ['mid', '30–60s'], ['long', 'Over 1 min']]} />
                 <FilterChip size="xs" label="Exported" value={expF} onChange={setExpF} clearable
                   options={[['all', 'Any'], ['yes', 'Exported'], ['no', 'Not exported yet']]} />
-                {clipFiltering && (
-                  <p className="cb-filter-count" role="status">
-                    {shownClips.length} of {tabClips.length}
-                    <button type="button" onClick={clearClipFilters}>Clear</button>
-                  </p>
-                )}
                 {/* Sort at the far end, as an icon and its choice */}
                 <span className="cb-filters-end">
                   <FilterChip size="xs" align="end" label="Sort" value={sortBy} onChange={setSortBy}
                     icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 4v16M3.5 16.5L7 20l3.5-3.5M17 20V4M13.5 7.5L17 4l3.5 3.5" /></svg>}
                     options={[['new', 'Newest first'], ['old', 'Oldest first'], ['video', 'Order in the video'], ['short', 'Shortest first'], ['long', 'Longest first']]} />
                 </span>
+                {/* ("3 of 7 · Clear" on its own line under the chips: .cb-filter-count) */}
+                {clipFiltering && (
+                  <p className="cb-filter-count" role="status">
+                    {shownClips.length} of {tabClips.length}
+                    <button type="button" onClick={clearClipFilters}>Clear</button>
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -1965,6 +2000,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 brandTag={<BrandTag b={brands} clipId={clip.id} />}
               />
             ))}
+            {/* (the "Tip: tap a clip to open it" box under the list: out, user 2026-11-09) */}
           </div>
 
           {/* Select mode: what's ticked, and what to do with it */}
@@ -1973,18 +2009,28 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             return (
               <div className="shrink-0 px-4 py-3 flex flex-col gap-2" style={{ borderTop: PANEL_LINE, background: PANEL_BG }} role="toolbar" aria-label="Selected clips">
                 {deleteError && !confirmDelete && <p role="alert" className="text-xs" style={{ color: '#f87171' }}>{deleteError}</p>}
+                {/* (two rows, for the narrow panel: what's ticked and Select all / Clear; then what to do with them) */}
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-white flex-1" aria-live="polite">
+                  <span className="text-xs font-semibold text-white flex-1 min-w-0" aria-live="polite">
                     {selected.size === 0 ? 'Tap clips to select them' : `${selected.size} selected`}
                   </span>
                   <button type="button" onClick={() => setSelected(allOn ? new Set() : new Set(shownClips.map(c => c.id)))}
-                    className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-white/10" style={{ color: 'rgb(var(--cb-fg) / 0.75)' }}>
+                    className="shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-white/10" style={{ color: 'rgb(var(--cb-fg) / 0.75)' }}>
                     {allOn ? 'Clear' : 'Select all'}
                   </button>
+                </div>
+                {/* (small pills at the right, Delete first: quiet until pointed at; Download the one lime action) */}
+                <div className="flex items-center justify-end gap-2">
                   <button type="button" disabled={selected.size === 0} onClick={() => { setDeleteError(null); setConfirmDelete(true) }}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-40 transition-opacity hover:opacity-90"
-                    style={{ background: '#ef4444', color: '#fff' }}>
+                    className="cb-bulk" data-tone="danger">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
                     Delete{selected.size > 0 ? ` ${selected.size}` : ''}
+                  </button>
+                  {/* (each ticked clip as its own Download does it: exported, then saved when ready — their
+                      cards show it, so select mode closes) */}
+                  <button type="button" disabled={selected.size === 0} onClick={downloadSelected} className="cb-bulk" data-tone="primary">
+                    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    Download{selected.size > 0 ? ` ${selected.size}` : ''}
                   </button>
                 </div>
               </div>
@@ -2348,10 +2394,18 @@ function prepStage(videoReady: boolean, r: ReadingNow | null, expectMs: number):
 }
 /**
  * The bar's place on screen: the stage's start, moved on with time toward its end (never there), and
- * never back. A step done sooner than expected doesn't make it jump: it climbs there quickly (up to
+ * never back. A step done sooner than expected doesn't make it jump: it climbs there steadily (up to
  * CATCH_UP % a tick) — the same at 100 %.
+ * The pace is even (user, 2026-11-09: it raced at each step's start, then crawled — an easing curve):
+ * a straight line to LINE_TO of the step over its expected time, then a slow tail toward its end, so
+ * a step slower than expected still moves a little and never reaches its end before the worker says.
  */
-const CATCH_UP = 2
+const CATCH_UP = 0.6
+const LINE_TO = 0.85
+function prepAlong(ms: number, tau: number): number {
+  const t = ms / Math.max(1, tau)
+  return t <= 1 ? LINE_TO * t : LINE_TO + (0.97 - LINE_TO) * (1 - Math.exp(-(t - 1) * 1.5))
+}
 function usePrepPct(stage: PrepStage): number {
   const [shown, setShown] = useState(stage.pct)
   const live = useRef({ stage, key: stage.key, at: Date.now(), from: stage.pct, shown: stage.pct })
@@ -2364,7 +2418,7 @@ function usePrepPct(stage: PrepStage): number {
   useEffect(() => {
     const t = setInterval(() => {
       const l = live.current, st = l.stage
-      const target = st.pct >= 100 ? 100 : l.from + Math.max(0, st.next - l.from) * 0.92 * (1 - Math.exp(-(Date.now() - l.at) / Math.max(1, st.tau)))
+      const target = st.pct >= 100 ? 100 : l.from + Math.max(0, st.next - l.from) * prepAlong(Date.now() - l.at, st.tau)
       const next = Math.max(l.shown, Math.min(target, l.shown + CATCH_UP))
       if (next !== l.shown) { l.shown = next; setShown(next) }
     }, 200)
@@ -2434,7 +2488,7 @@ function ResultCard({ s, rank, videoUrl, busy, inClips, open, onOpen, onClose, o
 }) {
   const working = busy === s.id
   const score = typeof s.score === 'number' && (
-    <span title="Viral score (0–99)" className="shrink-0 px-1.5 py-px rounded-md text-[10px] font-bold tabular-nums"
+    <span role="img" aria-label={`Viral score ${s.score} out of 99`} className="shrink-0 px-1.5 py-px rounded-md text-[10px] font-bold tabular-nums"
       style={{ color: ACCENT, background: 'rgba(200,255,0,0.1)', border: '1px solid rgba(200,255,0,0.25)' }}>{s.score}</span>
   )
   const addIcon = inClips
@@ -2450,7 +2504,7 @@ function ResultCard({ s, rank, videoUrl, busy, inClips, open, onOpen, onClose, o
 
   if (!open) {
     return (
-      <div role="button" tabIndex={0} onClick={click} onKeyDown={keys} title={`${s.title} · click to preview`}
+      <div role="button" tabIndex={0} onClick={click} onKeyDown={keys}
         className="shrink-0 flex items-center gap-3 rounded-xl p-2 min-h-[68px] cursor-pointer transition-colors hover:bg-white/[0.05] focus-visible:outline focus-visible:outline-2"
         style={{ background: 'rgb(var(--cb-fg) / 0.03)', border: '1px solid rgb(var(--cb-fg) / 0.07)', outlineColor: ACCENT }}>
         <ClipThumb videoUrl={videoUrl} atMs={s.start_ms} number={rank} w={84} h={48} />
@@ -2462,7 +2516,6 @@ function ResultCard({ s, rank, videoUrl, busy, inClips, open, onOpen, onClose, o
           </span>
         </span>
         <button type="button" onClick={onAdd} disabled={!!busy} aria-label={inClips ? 'In your clips — show it' : 'Add to your clips'}
-          title={inClips ? 'In your clips — show it' : 'Add to your clips'}
           className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-opacity hover:opacity-90 disabled:opacity-40"
           style={inClips ? { color: ACCENT, border: `1px solid ${ACCENT}` } : { background: ACCENT, color: '#000' }}>
           {working ? <Spinner /> : addIcon}
@@ -2472,13 +2525,13 @@ function ResultCard({ s, rank, videoUrl, busy, inClips, open, onOpen, onClose, o
   }
 
   return (
-    <div role="button" tabIndex={0} onClick={click} onKeyDown={keys} title="Click to close"
+    <div role="button" tabIndex={0} onClick={click} onKeyDown={keys}
       className="shrink-0 rounded-xl p-2.5 cursor-pointer transition-colors hover:bg-white/[0.04] focus-visible:outline focus-visible:outline-2"
       style={{ background: 'rgba(200,255,0,0.03)', border: `1px solid ${ACCENT}`, outlineColor: ACCENT }}>
       <div className="flex items-start gap-3">
         <ClipThumb videoUrl={videoUrl} atMs={s.start_ms} number={rank} w={112} h={64} />
         <div className="flex-1 min-w-0 flex flex-col gap-1">
-          <p className="text-sm font-semibold text-white leading-snug line-clamp-2" title={s.title}>{s.title}</p>
+          <p className="text-sm font-semibold text-white leading-snug line-clamp-2">{s.title}</p>
           <span className="flex items-center gap-1.5 text-xs tabular-nums" style={{ color: 'rgb(var(--cb-fg) / 0.65)' }}>
             <ClockIcon />{msToDisplay(s.start_ms)} – {msToDisplay(s.end_ms)}
             <span style={{ color: 'rgb(var(--cb-fg) / 0.35)' }}>· {durLabel(s.start_ms, s.end_ms)}</span>
@@ -2499,13 +2552,13 @@ function ResultCard({ s, rank, videoUrl, busy, inClips, open, onOpen, onClose, o
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>
           Previewing
         </span>
-        <button type="button" onClick={onEdit} disabled={!!busy} title={inClips ? 'Open this clip in the editor' : 'Make it a clip and open it in the editor'}
+        <button type="button" onClick={onEdit} disabled={!!busy}
           className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-white/10 disabled:opacity-40"
           style={{ color: 'rgb(var(--cb-fg) / 0.85)', border: '1px solid rgb(var(--cb-fg) / 0.14)' }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
           Edit
         </button>
-        <button type="button" onClick={onAdd} disabled={!!busy} title={inClips ? 'Show it in your clips' : 'Add it to your clip board'}
+        <button type="button" onClick={onAdd} disabled={!!busy}
           className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-90 disabled:opacity-40"
           style={inClips ? { color: ACCENT, border: `1px solid ${ACCENT}` } : { background: ACCENT, color: '#000' }}>
           {working ? <Spinner /> : addIcon}
@@ -2750,7 +2803,7 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
     { label: 'Draft', color: 'rgb(var(--cb-fg) / 0.45)' }
   const heart = (
     <button type="button" onClick={e => { e.stopPropagation(); onFavorite() }} aria-pressed={favorite}
-      aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'} title={favorite ? 'Remove from favorites' : 'Add to favorites'}
+      aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'}
       className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg transition-colors hover:bg-white/10" style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}>
       <Heart on={favorite} />
     </button>
@@ -2767,7 +2820,6 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
       <div id={`clip-${id}`} role="button" tabIndex={0}
         onClick={e => { if (!disabled && !(e.target as HTMLElement).closest('button')) tapCard() }}
         onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !disabled && e.target === e.currentTarget) { e.preventDefault(); tapCard() } }}
-        title={open ? `${title} · click to close the preview` : `${title} · click to preview`}
         data-playing={playing || undefined} data-on={previewing || undefined} aria-pressed={!!previewing}
         className="cb-card cb-sheen group shrink-0 flex flex-col p-2.5 min-h-[72px] cursor-pointer focus-visible:outline focus-visible:outline-2"
         style={{ outlineColor: ACCENT }}>
@@ -2783,11 +2835,11 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
               {/* ♡ and 🗑, a pair at the top right; the bin slides in beside the heart while the card is pointed at */}
               <span className="cb-tools -mt-1 -mr-1">
                 <button type="button" onClick={e => { e.stopPropagation(); setMenu(m => (m ? false : 'confirm')) }} aria-expanded={!!menu}
-                  className="cb-tool cb-tool-hide cb-tool-bin" data-tone="danger" data-on={menu ? '' : undefined} aria-label="Delete clip" title="Delete clip">
+                  className="cb-tool cb-tool-hide cb-tool-bin" data-tone="danger" data-on={menu ? '' : undefined} aria-label="Delete clip">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path className="cb-bin-lid" d="M3 6h18M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6" /></svg>
                 </button>
                 <button type="button" onClick={e => { e.stopPropagation(); onFavorite() }} aria-pressed={favorite} className="cb-tool cb-tool-heart" data-on={favorite ? '' : undefined}
-                  aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'} title={favorite ? 'Remove from favorites' : 'Add to favorites'}>
+                  aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'}>
                   <Heart on={favorite} />
                 </button>
               </span>
@@ -2805,27 +2857,26 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
         <span className="cb-reveal" data-open={menu ? '' : undefined}>
           <span className="cb-reveal-in">
             {menu ? (
-              <span className="flex items-center gap-1.5 pt-2" onClick={e => e.stopPropagation()}>
+              <span className="flex items-center gap-1.5 pt-2.5" onClick={e => e.stopPropagation()}>
                 <span className="text-[11px] text-white mr-auto">Delete this clip?</span>
                 <button type="button" onClick={() => setMenu(false)} autoFocus className="cb-act">Cancel</button>
                 <button type="button" onClick={() => { setMenu(false); onDelete() }} className="cb-act" data-tone="danger">Delete</button>
               </span>
             ) : (
-              <span className="flex flex-wrap items-center gap-1.5 pt-2">
-                <button type="button" onClick={e => { e.stopPropagation(); onEdit() }} disabled={disabled} className="cb-act" title="Open in the editor">
+              <span className={`grid ${onRename ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 pt-2.5`}>
+                <button type="button" onClick={e => { e.stopPropagation(); onEdit() }} disabled={disabled} className="cb-act justify-center">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
                   Edit
                 </button>
-                <button type="button" onClick={e => { e.stopPropagation(); onDownload() }} disabled={download === 'preparing'} className="cb-act"
-                  data-tone={download === 'failed' ? 'danger' : undefined}
-                  title={download === 'preparing' ? 'Exporting — it downloads by itself when ready' : download === 'failed' ? 'The export failed — try again' : 'Download this clip'}>
+                <button type="button" onClick={e => { e.stopPropagation(); onDownload() }} disabled={download === 'preparing'} className="cb-act justify-center"
+                  data-tone={download === 'failed' ? 'danger' : undefined}>
                   {download === 'preparing' ? <Spinner /> : (
                     <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   )}
                   {download === 'preparing' ? 'Preparing' : download === 'failed' ? 'Retry' : 'Download'}
                 </button>
                 {onRename && (
-                  <button type="button" onClick={startRename} className="cb-act" data-on={renaming ? '' : undefined} title="Give this clip a name of your own">
+                  <button type="button" onClick={startRename} className="cb-act justify-center" data-on={renaming ? '' : undefined}>
                     {renameIcon(12)}
                     Rename
                   </button>
@@ -2839,9 +2890,11 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
   }
 
   return (
-    <div id={`clip-${id}`} data-playing={playing || undefined} data-on={selected || focused || previewing || undefined}
+    <div id={`clip-${id}`} data-playing={playing || undefined}
+      // (ticked in select mode: a neutral outline, not the lime — user, 2026-11-09: "keep it minimal")
+      data-on={(!selecting && (focused || previewing)) || undefined} data-selected={(selecting && selected) || undefined}
       className={`cb-card relative p-2.5 ${focused ? 'shadow-[0_0_0_3px_rgba(200,255,0,0.25)]' : ''} ${selecting ? 'cursor-pointer select-none focus-visible:outline focus-visible:outline-2' : 'cursor-pointer'}`}
-      style={{ ...(selected ? { background: 'rgba(200,255,0,0.06)' } : {}), outlineColor: ACCENT }}
+      style={{ ...(selecting && selected ? { background: 'rgb(var(--cb-fg) / 0.045)' } : {}), outlineColor: ACCENT }}
       {...(selecting ? {
         role: 'checkbox',
         'aria-checked': !!selected,
@@ -2855,15 +2908,15 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
           if (disabled || (e.target as HTMLElement).closest('button, a, input, label')) return
           if (open && onClose) onClose(); else onPreview()
         },
-        title: open ? 'Click to close' : 'Click to preview this clip',
       })}>
       {sub.busy && !selecting && <SubEditOverlay startedAt={sub.startedAt} estimate={sub.estimate} ahead={sub.ahead} onStop={sub.stop} />}
       <div className="flex items-start gap-3">
         {selecting ? (
           <span aria-hidden="true" className="shrink-0 mt-1 w-6 h-6 rounded-full flex items-center justify-center transition-colors"
             style={selected
-              ? { background: ACCENT, border: `2px solid ${ACCENT}`, color: '#000' }
-              : { background: 'transparent', border: '2px solid rgb(var(--cb-fg) / 0.45)' }}>
+              // (the tick alone in the brand's lime: the card itself stays neutral — user, 2026-11-09)
+              ? { background: ACCENT, border: `2px solid ${ACCENT}`, color: '#0c0c0e' }
+              : { background: 'transparent', border: '2px solid rgb(var(--cb-fg) / 0.35)' }}>
             {selected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
           </span>
         ) : null}
@@ -2871,12 +2924,12 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
         <div className="flex-1 min-w-0 flex flex-col gap-1">
           <div className="flex items-start gap-1">
             {nameField || (
-              <p className="flex-1 min-w-0 text-sm font-semibold text-white leading-snug break-words" title={title} onDoubleClick={startRename}>{title}</p>
+              <p className="flex-1 min-w-0 text-sm font-semibold text-white leading-snug break-words" onDoubleClick={startRename}>{title}</p>
             )}
             {!selecting && heart}
             {!selecting && (
               <span className="relative shrink-0">
-                <button type="button" onClick={e => { e.stopPropagation(); setMenu(m => m ? false : 'confirm') }} aria-label="Delete clip" title="Delete clip"
+                <button type="button" onClick={e => { e.stopPropagation(); setMenu(m => m ? false : 'confirm') }} aria-label="Delete clip"
                   aria-expanded={!!menu}
                   className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors hover:bg-red-500/15 hover:text-red-400" style={{ color: menu ? '#f87171' : 'rgb(var(--cb-fg) / 0.6)' }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" /></svg>
@@ -2894,7 +2947,7 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
               </span>
             )}
           </div>
-          <button type="button" onClick={e => { e.stopPropagation(); onSeek() }} title="Play this clip in the video"
+          <button type="button" onClick={e => { e.stopPropagation(); onSeek() }}
             className="self-start flex items-center gap-1.5 text-xs tabular-nums transition-colors hover:text-white" style={{ color: 'rgb(var(--cb-fg) / 0.65)' }}>
             <ClockIcon />{msToDisplay(startMs)} – {msToDisplay(endMs)}
             <span style={{ color: 'rgb(var(--cb-fg) / 0.35)' }}>· {durLabel(startMs, endMs)}</span>
@@ -2919,17 +2972,14 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
       {/* Edit · Download (a click on the card itself previews it); a Sub-edit already running still shows its overlay */}
       {!selecting && sub.error && <p role="alert" className="mt-2 text-[11px]" style={{ color: '#f87171' }}>{sub.error}</p>}
       {!selecting && (
-        <div className="cb-open-acts mt-2.5">
-          <button onClick={e => { e.stopPropagation(); onEdit() }} disabled={disabled} title="Open in the editor"
+        <div className={`mt-2.5 grid gap-1.5 ${onRename ? 'grid-cols-3' : 'grid-cols-2'}`}>
+          <button onClick={e => { e.stopPropagation(); onEdit() }} disabled={disabled}
             className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-white/10 disabled:opacity-40"
             style={{ color: 'rgb(var(--cb-fg) / 0.85)', border: '1px solid rgb(var(--cb-fg) / 0.14)' }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
             Edit
           </button>
           <button onClick={e => { e.stopPropagation(); onDownload() }} disabled={download === 'preparing'}
-            title={download === 'preparing' ? 'Exporting — it downloads by itself when ready'
-              : download === 'failed' ? 'The export failed — try again'
-              : outputUrl && status === 'done' ? 'Download the exported reel' : 'Export this clip as it is, then download it'}
             className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-90 disabled:opacity-70"
             style={download === 'failed' ? { color: '#f87171', border: '1px solid rgba(239,68,68,0.45)' } : { background: ACCENT, color: '#000' }}>
             {download === 'preparing' ? <Spinner /> : (
@@ -2938,7 +2988,7 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
             {download === 'preparing' ? 'Preparing' : download === 'failed' ? 'Retry' : 'Download'}
           </button>
           {onRename && (
-            <button onClick={startRename} title="Give this clip a name of your own"
+            <button onClick={startRename}
               className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-white/10"
               style={{ color: 'rgb(var(--cb-fg) / 0.85)', border: `1px solid rgb(var(--cb-fg) / ${renaming ? 0.4 : 0.14})` }}>
               {renameIcon(13)}

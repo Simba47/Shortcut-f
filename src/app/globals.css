@@ -1624,7 +1624,44 @@ body {
 .ag-chip[data-size="sm"] .ag-menu li { height: 32px; font-size: 12.5px; }
 /* The clip board's filter row (ClipPickerShell), under the brand row */
 .cb-filters { position: relative; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.cb-filter-count { display: flex; align-items: center; gap: 8px; margin: 0 0 0 4px; font-size: 12px; font-weight: 600; color: rgb(var(--cb-fg) / 0.55); }
+/* The three side by side, one even gap (user, 2026-11-09: no gap before Sort); "3 of 7 · Clear" on its own line below */
+.cb-filter-sort { display: contents; }
+/* The clip list's Select / Cancel (ClipPickerShell) */
+.cb-select-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  color: rgb(var(--cb-fg) / 0.8); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.16); transition: background-color .15s, box-shadow .15s, color .15s; }
+.cb-select-btn:hover { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.3); }
+.cb-select-btn[data-on] { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.08); }
+.cb-select-btn:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
+/* Select mode's Delete · Download (ClipPickerShell): small pills. Download is the one lime action (solid,
+   a soft top light); Delete stays quiet — outlined, its red only a hint — and shows red when pointed at */
+.cb-bulk { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 14px; border-radius: 999px;
+  font-size: 12px; font-weight: 650; letter-spacing: .005em; white-space: nowrap;
+  transition: background-color .15s, box-shadow .15s, color .15s, transform .12s; }
+.cb-bulk:active:not(:disabled) { transform: scale(.97); }
+.cb-bulk:disabled { opacity: .38; cursor: default; }
+.cb-bulk:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
+.cb-bulk[data-tone="primary"] { color: #0c0c0e; background: #c8ff00;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.45), 0 6px 16px -8px rgba(200,255,0,0.55); }
+.cb-bulk[data-tone="primary"]:hover:not(:disabled) { background: #d4ff3d; }
+.cb-bulk[data-tone="danger"] { color: rgba(248,113,113,0.9); background: transparent; box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.14); }
+.cb-bulk[data-tone="danger"]:hover:not(:disabled) { color: #fca5a5; background: rgba(239,68,68,0.1); box-shadow: inset 0 0 0 1px rgba(239,68,68,0.4); }
+[data-theme="light"] .cb-bulk[data-tone="primary"] { box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 6px 14px -8px rgba(120,160,0,0.55); }
+[data-theme="light"] .cb-bulk[data-tone="danger"] { color: #dc2626; }
+[data-theme="light"] .cb-bulk[data-tone="danger"]:hover:not(:disabled) { color: #b91c1c; background: rgba(220,38,38,0.07); box-shadow: inset 0 0 0 1px rgba(220,38,38,0.35); }
+@media (prefers-reduced-motion: reduce) { .cb-bulk { transition: none; } .cb-bulk:active:not(:disabled) { transform: none; } }
+/* One line in the clip board's narrow list (user, 2026-11-09): smaller chips; Sort an icon, not the word;
+   a set filter says only its choice ("Under 30s ✕", not "Length · Under 30s ✕") */
+.cb-filters .ag-chip[data-size="sm"] { height: 28px; }
+.cb-filters .ag-chip[data-size="sm"] .ag-chip-main { gap: 5px; padding: 0 9px 0 11px; font-size: 12px; }
+.cb-filters .ag-chip[data-size="sm"][data-set] .ag-chip-main { padding-right: 2px; }
+.cb-filters .ag-chip[data-size="sm"] .ag-chip-x { width: 18px; height: 18px; margin-right: 5px; }
+.cb-filters .ag-chip[data-size="sm"] .ag-chip-chev { width: 11px; height: 11px; }
+.cb-filters .ag-chip[data-set] .ag-chip-label { display: none; }
+.cb-filters .ag-chip[data-set] .ag-chip-value::before { display: none; }
+.ag-chip-icon { display: inline-flex; color: rgba(244,244,245,0.6); }
+.ag-chip-icon + .ag-chip-value::before { display: none; }
+[data-theme="light"] .ag-chip-icon { color: rgba(12,12,14,0.55); }
+.cb-filter-count { flex-basis: 100%; display: flex; align-items: center; gap: 8px; margin: 2px 0 0 4px; font-size: 12px; font-weight: 600; color: rgb(var(--cb-fg) / 0.55); }
 .cb-filter-count button { color: var(--cb-text); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgb(var(--cb-fg) / 0.35); }
 
 /* ── Clip board: the bars between its three columns (ClipPickerShell startColumnResize), as the
@@ -2884,6 +2921,8 @@ body {
 @media (prefers-reduced-motion: reduce) { .cb-card, .cb-card:hover { transform: none; } }
 .cb-card[data-playing] { border-color: rgba(200, 255, 0, 0.3); box-shadow: inset 2px 0 0 rgba(200, 255, 0, 0.7); }
 .cb-card[data-on] { border-color: #c8ff00; }
+/* Ticked in select mode: neutral, a brighter outline (no lime) */
+.cb-card[data-selected] { border-color: rgb(var(--cb-fg) / 0.42); }
 .cb-thumb { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 6px 14px -6px rgba(0, 0, 0, 0.8); }
 /* its picture zooms in slowly while the card is pointed at */
 .cb-thumb img { transition: transform .6s cubic-bezier(.2, .8, .2, 1); }
@@ -2982,6 +3021,7 @@ body {
 [data-theme="light"] :is(.cb-card:hover, .cb-card:focus-within) { border-color: rgba(143, 184, 0, 0.55); box-shadow: 0 16px 32px -20px rgba(120, 160, 0, 0.4); }
 [data-theme="light"] .cb-card[data-playing] { border-color: rgba(143, 184, 0, 0.5); box-shadow: inset 2px 0 0 #8fb800; }
 [data-theme="light"] .cb-card[data-on] { border-color: #8fb800; }
+[data-theme="light"] .cb-card[data-selected] { border-color: rgba(12, 12, 14, 0.45); }
 [data-theme="light"] .cb-sheen::after { background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.85) 48%, rgba(255, 255, 255, 0.3) 55%, transparent 65%); }
 [data-theme="light"] .cb-thumb { box-shadow: 0 0 0 1px rgba(12, 12, 14, 0.06), 0 6px 14px -8px rgba(12, 12, 14, 0.45); }
 [data-theme="light"] .cb-act { color: #0c0c0e; border-color: rgba(12, 12, 14, 0.12); background: var(--smoke); }

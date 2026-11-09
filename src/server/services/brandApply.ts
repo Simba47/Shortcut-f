@@ -298,10 +298,14 @@ export async function clipBrands(userId: string, videoId: string): Promise<Recor
 /**
  * "Apply brand to all clips" (the clip board): a kit on every clip of a video (or the brand off
  * them all, `null`). Clips being exported are left alone. Returns how many changed.
+ * `clipIds`: only these of the video's clips — the ones on the board pressed (user, 2026-11-09: the AI's
+ * board said "Put on all 7" and put it on the clips cut by hand too, which that board doesn't list)
  */
-export async function brandVideoClips(userId: string, videoId: string, kitId: string | null): Promise<{ changed: number; skipped: number }> {
-  const rows = await sql<{ id: string; status: string }[]>`
+export async function brandVideoClips(userId: string, videoId: string, kitId: string | null, clipIds?: string[]): Promise<{ changed: number; skipped: number }> {
+  const all = await sql<{ id: string; status: string }[]>`
     SELECT c.id, c.status FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.video_id = ${videoId} AND v.user_id = ${userId}`
+  const only = clipIds ? new Set(clipIds) : null
+  const rows = only ? all.filter(r => only.has(r.id)) : all
   if (kitId && !(await usableKit(userId, kitId))) throw err('That brand kit isn’t yours to use', 403)
   let changed = 0, skipped = 0
   for (const r of rows) {
