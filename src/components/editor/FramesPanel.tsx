@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import type { SegmentLocal, FrameLayout, FrameItem, FrameSettings, SlotMotion, CornerStyle, BrollPick } from '@chai-cut/shared'
 import { FRAME_TEMPLATES, FRAME_LAYOUTS, isFrameLayout, frameLanes, frameOf, cornerGeometry, CORNER_MAX, mainSlotSound, frameAreas, frameBase, isTextLane, startLayout, defaultFrame, frameSlotCount, MIN_ITEM_MS } from '@/modules/editor/frames'
 import { frameItemColor, FRAME_ITEM_COLORS } from './SegmentTimeline'
-import { ItemTimeRange, TimeField } from './ItemTimeRange'
+import { ItemTimeRange, TimeField, clockLabel } from './ItemTimeRange'
 import { FrameBackgroundFields } from './FrameBackgroundFields'
 import { Switch } from './BrandKit'
 
@@ -354,16 +354,18 @@ ${mediaTip(id)}`}
 
 /**
  * Freeze (user, 2026-11-06, as in news and facts shorts): a slot's video held on one still picture,
- * with no sound, while the other plays. "Freeze until playhead" holds it until the playhead, then
- * plays it from that same picture; Dim shows it darker while it's frozen.
+ * with no sound, while the other plays — all of it, or a From–Until stretch inside it (it stays one
+ * piece, user 2026-11-09; FrameItem.holds); Dim shows it darker while it's frozen.
  */
-function FreezeFields({ item, segment, currentTimeMs, onFreeze, onDim, onRange }: {
+function FreezeFields({ item, segment, currentTimeMs, onFreeze, onDim, onRange, onUnhold }: {
   item: FrameItem
   segment: SegmentLocal
   currentTimeMs: number
   onFreeze: (on: boolean) => void
   onDim: (dim: boolean) => void
   onRange?: (from: number, to: number) => void
+  /** Take its freeze stretch `index` out (FrameItem.holds) */
+  onUnhold: (index: number) => void
 }) {
   // The part of it shown in this frame; the stretch to freeze starts at the playhead when it's in it
   const lo = Math.max(item.start_ms, segment.start_ms), hi = Math.min(item.end_ms, segment.end_ms)
@@ -384,7 +386,19 @@ function FreezeFields({ item, segment, currentTimeMs, onFreeze, onDim, onRange }
         </span>
         <Switch on={!!item.freeze} label={item.freeze ? 'Let it play' : 'Freeze it on one picture'} onChange={onFreeze} />
       </div>
-      {item.freeze && (
+      {/* Its freeze stretches (it stays one piece): each with an ✕ to let it play there again */}
+      {!item.freeze && !!item.holds?.length && (
+        <div className="flex flex-wrap gap-1.5">
+          {item.holds.map((h, i) => (
+            <span key={i} className="inline-flex items-center gap-1 h-6 pl-2 pr-1 rounded-md text-[10.5px] font-semibold tabular-nums" style={{ background: 'rgba(125,211,252,0.12)', color: '#7dd3fc', boxShadow: 'inset 0 0 0 1px rgba(125,211,252,0.3)' }}>
+              ❄ {clockLabel(item.start_ms + h.at_ms)} – {clockLabel(item.start_ms + h.at_ms + h.len_ms)}
+              <button onClick={() => onUnhold(i)} title="Let it play here again" aria-label="Remove this freeze"
+                className="w-4 h-4 rounded flex items-center justify-center hover:bg-[rgba(125,211,252,0.2)]">✕</button>
+            </span>
+          ))}
+        </div>
+      )}
+      {(item.freeze || !!item.holds?.length) && (
         <div className={row} style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>
           <span>Dim while frozen</span>
           <Switch on={!!item.dim} label={item.dim ? 'Show it at full brightness' : 'Show it darker while frozen'} onChange={onDim} />
@@ -400,9 +414,9 @@ function FreezeFields({ item, segment, currentTimeMs, onFreeze, onDim, onRange }
             <TimeField label="Until" ms={to} onCommit={t => setRange(r => ({ ...r, to: clamp(t) }))} onNow={() => setRange(r => ({ ...r, to: clamp(currentTimeMs) }))} />
           </div>
           <button onClick={() => onRange(from, to)} disabled={!ok}
-            title={ok ? `Still from ${msToLabel(from)} to ${msToLabel(to)}` : '"Until" has to be after "Freeze from"'}
+            title={ok ? `Still from ${clockLabel(from)} to ${clockLabel(to)}` : '"Until" has to be after "Freeze from"'}
             className="self-start h-7 px-3 rounded-md text-[11px] font-bold disabled:opacity-40" style={{ background: 'rgba(125,211,252,0.16)', color: '#7dd3fc', boxShadow: 'inset 0 0 0 1px rgba(125,211,252,0.35)' }}>
-            ❄ Freeze {msToLabel(from)} – {msToLabel(to)}
+            ❄ Freeze {clockLabel(from)} – {clockLabel(to)}
           </button>
         </>
       )}
@@ -470,6 +484,7 @@ function FrameContents({ seg, currentTimeMs, videoTitles, selected, onSelectItem
               </span>
               <span className="text-[11.5px] font-medium truncate flex-1 text-[var(--ed-text)]">{r.name}</span>
               {r.item?.freeze && <span className="text-[9.5px] font-semibold shrink-0 px-1.5 rounded" style={{ background: 'rgba(125,211,252,0.14)', color: '#7dd3fc' }} title="Frozen: a still picture">❄ Frozen</span>}
+              {!r.item?.freeze && !!r.item?.holds?.length && <span className="text-[9.5px] font-semibold shrink-0 px-1.5 rounded" style={{ background: 'rgba(125,211,252,0.14)', color: '#7dd3fc' }} title="Frozen for a stretch (or more) inside it">❄ {r.item.holds.length}</span>}
               <span className="text-[10px] shrink-0" style={{ color: 'rgb(var(--ed-fg) / 0.42)' }}>{laneName(r.lane)}</span>
             </button>
               {/* Quick switches, as on the Format cards: show / hide, sound */}
@@ -526,7 +541,8 @@ function FrameContents({ seg, currentTimeMs, videoTitles, selected, onSelectItem
                         {onFreeze && (
                           <FreezeFields item={r.item} segment={seg} currentTimeMs={currentTimeMs}
                             onFreeze={on => onFreeze(r.id, on)} onDim={dim => onUpdateItem(r.id, { dim })}
-                            onRange={onFreezeRange && ((from, to) => onFreezeRange(r.id, from, to))} />
+                            onRange={onFreezeRange && ((from, to) => onFreezeRange(r.id, from, to))}
+                            onUnhold={i => { const holds = (r.item?.holds ?? []).filter((_, j) => j !== i); onUpdateItem(r.id, { holds: holds.length ? holds : null, ...(holds.length ? {} : { dim: false }) }) }} />
                         )}
                         {r.item.broll && r.item.broll.alts.length > 1 && onSwapBroll && (
                           <BrollSwap pick={r.item.broll} busy={swappingBroll === r.id} onPick={index => onSwapBroll(r.id, index)} />

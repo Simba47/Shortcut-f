@@ -39,6 +39,9 @@ export type FrameItemKind = 'video' | 'photo' | 'text'
  * one after another (a slideshow); they never overlap. Times are clip time, like text overlays,
  * and anything outside the format's own range isn't shown.
  */
+/** A frozen stretch inside a frame video item (FrameItem.holds) */
+export interface FrameHold { at_ms: number; len_ms: number }
+
 export interface FrameItem {
   id: string
   lane: FrameLane
@@ -73,6 +76,13 @@ export interface FrameItem {
    */
   freeze?: boolean
   dim?: boolean
+  /**
+   * Video items: stretches frozen inside it (user, 2026-11-09: "❄ Freeze a–b" mustn't cut the media).
+   * `at_ms` from the item's own start (clip ms), `len_ms` long, in order, not overlapping. It plays up
+   * to one, holds that picture (silent) for its length, then plays on from the same picture. `dim`
+   * darkens them too. Not used while the whole item is frozen.
+   */
+  holds?: FrameHold[] | null
   // Photo
   image_path?: string | null
   /** Signed URL for image_path — preview only, never saved */

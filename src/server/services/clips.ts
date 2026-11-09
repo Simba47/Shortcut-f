@@ -613,6 +613,20 @@ function cleanFrame(frame: FrameSettings): FrameSettings {
     const r3 = (v: number) => Math.round(v * 1000) / 1000
     return x !== undefined && y !== undefined && w !== undefined && h !== undefined ? { rect: { x: r3(x), y: r3(y), w: r3(w), h: r3(h) } } : {}
   }
+  // A video's freeze stretches (FrameItem.holds): whole ms inside it, in order, not overlapping, at most
+  // 20; with them, `dim` darkens them (the worker's render.py reads both)
+  const holdsOf = (it: { holds?: unknown; dim?: unknown; freeze?: unknown }, len: number): Pick<FrameItem, 'holds' | 'dim'> => {
+    if (it.freeze || !Array.isArray(it.holds)) return {}
+    const holds: { at_ms: number; len_ms: number }[] = []
+    for (const h of it.holds.slice(0, 20)) {
+      const at = Number((h as { at_ms?: unknown })?.at_ms), l = Number((h as { len_ms?: unknown })?.len_ms)
+      if (!Number.isFinite(at) || !Number.isFinite(l)) continue
+      const a = Math.max(0, Math.round(at), holds.length ? holds[holds.length - 1].at_ms + holds[holds.length - 1].len_ms : 0)
+      const b = Math.min(len, Math.round(at + l))
+      if (b - a >= 1) holds.push({ at_ms: a, len_ms: b - a })
+    }
+    return holds.length ? { holds, ...(it.dim ? { dim: true } : {}) } : {}
+  }
   // Which part of a photo shows in its box (FrameItem.pan), or nothing when it's the middle at 1×
   const panOf = (p: unknown) => {
     const q = p as { x?: unknown; y?: unknown; zoom?: unknown } | null | undefined
@@ -630,7 +644,7 @@ function cleanFrame(frame: FrameSettings): FrameSettings {
     if (it.kind === 'video') {
       if (typeof it.source_video_id !== 'string') return []
       const broll = cleanBroll(it.broll)
-      return [{ ...base, source_video_id: it.source_video_id, source_offset_ms: Math.round(num(it.source_offset_ms, 0, 1e9) ?? 0), volume: num(it.volume, 0, 1) ?? 1, muted: !!it.muted, corners: corner(it.corners), ...rectOf(it.rect), ...(broll ? { broll } : {}), ...(it.freeze ? { freeze: true, ...(it.dim ? { dim: true } : {}) } : {}) }]
+      return [{ ...base, source_video_id: it.source_video_id, source_offset_ms: Math.round(num(it.source_offset_ms, 0, 1e9) ?? 0), volume: num(it.volume, 0, 1) ?? 1, muted: !!it.muted, corners: corner(it.corners), ...rectOf(it.rect), ...(broll ? { broll } : {}), ...(it.freeze ? { freeze: true, ...(it.dim ? { dim: true } : {}) } : {}), ...holdsOf(it, Math.round(end) - Math.round(start)) }]
     }
     if (it.kind === 'photo') {
       if (typeof it.image_path !== 'string') return []

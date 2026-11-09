@@ -9,10 +9,12 @@ import { useEffect, useId, useRef, useState } from 'react'
  * has an ✕ that sets it back. Sort always says its choice. The menu: a tick on the choice, arrow keys,
  * Enter, Esc; a click outside closes it.
  */
-export function FilterChip<T extends string>({ label, value, onChange, options, clearable = false, align = 'start', size = 'md' }: {
+export function FilterChip<T extends string>({ label, value, onChange, options, clearable = false, align = 'start', size = 'md', icon }: {
   label: string; value: T; onChange: (v: T) => void; options: Array<[T, string]>; clearable?: boolean; align?: 'start' | 'end'
-  /** md: 40 px (AI edits, beside the dashboard's search pill); sm: 32 px (the clip board's narrow list) */
-  size?: 'md' | 'sm'
+  /** md: 40 px (AI edits, beside the dashboard's search pill); sm: 32 px; xs: 28 px (the clip board's narrow list) */
+  size?: 'md' | 'sm' | 'xs'
+  /** Shown in place of the label's words (which stay for screen readers): e.g. Sort's arrows */
+  icon?: React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
   // (kept a moment after closing, to fade out: .ag-menu[data-closing])
@@ -49,7 +51,7 @@ export function FilterChip<T extends string>({ label, value, onChange, options, 
     <div ref={wrap} className="ag-chip" data-size={size} data-set={set || undefined} data-open={open || undefined}>
       <button ref={btn} type="button" className="ag-chip-main" aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined}
         aria-label={`${label}: ${name}`} onClick={() => (open ? setOpen(false) : show())} onKeyDown={onKey}>
-        <span className="ag-chip-label">{label}</span>
+        {icon ? <span className="ag-chip-icon" title={label}>{icon}</span> : <span className="ag-chip-label">{label}</span>}
         {(set || !clearable) && <span className="ag-chip-value">{name}</span>}
         {!set && <svg className="ag-chip-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>}
       </button>

@@ -919,7 +919,7 @@ function EditModeDialog({ title, videoUrl, durationMs, onClose, onPick }: {
     {
       mode: 'ai' as const, name: 'AI edit', tag: 'Recommended', cta: 'Start with AI',
       desc: 'AI watches your video and turns its best moments into ready-to-post clips.',
-      points: ['Best moments found for you', 'Captions and titles added', 'Ready in a few minutes'],
+      points: ['Top moments picked for you', 'Captions and titles added', 'Ready in a few minutes'],
     },
     {
       mode: 'manual' as const, name: 'Manual edit', tag: 'Full control', cta: 'Pick my moments',

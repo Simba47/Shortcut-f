@@ -1,4 +1,4 @@
-import type { FrameLayout, FrameBand, FrameItem, FrameLane, FrameSettings, LayoutType, SegmentLocal, CornerStyle } from '@chai-cut/shared'
+import type { FrameLayout, FrameBand, FrameHold, FrameItem, FrameLane, FrameSettings, LayoutType, SegmentLocal, CornerStyle } from '@chai-cut/shared'
 import { cardAreas, cleanCardLook } from '@/lib/shared/brandCard'
 
 // Frame templates. Most divide the 9:16 reel top-to-bottom into rows (media slots, a letterbox
@@ -600,6 +600,70 @@ export function frameLanes(layout: FrameLayout, showBand = true, custom?: RowLay
 }
 
 export const MIN_ITEM_MS = 200
+
+// ── Freeze stretches inside a video item (FrameItem.holds; user, 2026-11-09: the media stays one
+// piece). Times are clip ms; a hold's at_ms counts from the item's start. render.py does the same.
+
+/** Its holds kept inside a `len` long item: cut at its end, in order, none shorter than 1 ms */
+export function fitHolds(holds: FrameHold[] | null | undefined, len: number): FrameHold[] {
+  const out: FrameHold[] = []
+  for (const h of [...(holds ?? [])].sort((a, b) => a.at_ms - b.at_ms)) {
+    const at = Math.max(0, Math.round(h.at_ms), out.length ? out[out.length - 1].at_ms + out[out.length - 1].len_ms : 0)
+    const end = Math.min(len, Math.round(h.at_ms + h.len_ms))
+    if (end - at >= 1) out.push({ at_ms: at, len_ms: end - at })
+  }
+  return out
+}
+
+/** How much of the first `rel` ms of an item its holds take (no video plays then) */
+function heldBefore(holds: FrameHold[] | null | undefined, rel: number): number {
+  let held = 0
+  for (const h of holds ?? []) held += Math.max(0, Math.min(rel - h.at_ms, h.len_ms))
+  return held
+}
+
+/** Where in its video (ms) a video item is at clip time `t`, and whether it's held still then */
+export function itemSourceAt(it: FrameItem, t: number): { ms: number; held: boolean } {
+  const off = it.source_offset_ms ?? 0
+  if (it.freeze) return { ms: off, held: true }
+  const rel = Math.max(0, t - it.start_ms)
+  const held = !!it.holds?.some(h => rel >= h.at_ms && rel < h.at_ms + h.len_ms)
+  return { ms: off + rel - heldBefore(it.holds, rel), held }
+}
+
+/** The item with its start moved to `start`, showing the same pictures at the same times (a trim) */
+export function withItemStart(it: FrameItem, start: number): FrameItem {
+  const d = start - it.start_ms
+  if (!d || it.kind !== 'video') return { ...it, start_ms: start }
+  const holds = it.holds?.length ? fitHolds(it.holds.map(h => ({ at_ms: h.at_ms - d, len_ms: h.len_ms })), it.end_ms - start) : it.holds
+  const off = it.freeze ? (it.source_offset_ms ?? 0) : Math.max(0, d > 0 ? itemSourceAt(it, start).ms : (it.source_offset_ms ?? 0) + d)
+  return { ...it, start_ms: start, source_offset_ms: off, ...(it.holds ? { holds: holds?.length ? holds : null } : {}) }
+}
+
+/** An item cut in two at clip time `t`: the right part goes on from where the left stops (a frozen stretch carries over) */
+export function cutItem(it: FrameItem, t: number, rightId: string): [FrameItem, FrameItem] {
+  const left: FrameItem = { ...it, end_ms: t }
+  if (it.holds) left.holds = fitHolds(it.holds, t - it.start_ms)
+  if (left.holds && !left.holds.length) left.holds = null
+  return [left, { ...withItemStart(it, t), id: rightId }]
+}
+
+/** Freeze [from, to) (clip times) inside a video item: its holds with that one in (overlaps merged) */
+export function addHold(it: FrameItem, from: number, to: number): FrameHold[] | null {
+  const len = it.end_ms - it.start_ms
+  let a = Math.max(0, Math.round(from - it.start_ms)), b = Math.min(len, Math.round(to - it.start_ms))
+  if (a < MIN_ITEM_MS) a = 0
+  if (len - b < MIN_ITEM_MS) b = len
+  if (b - a < MIN_ITEM_MS) return null
+  const all = [...(it.holds ?? []), { at_ms: a, len_ms: b - a }].sort((x, y) => x.at_ms - y.at_ms)
+  const merged: FrameHold[] = []
+  for (const h of all) {
+    const last = merged[merged.length - 1]
+    if (last && h.at_ms <= last.at_ms + last.len_ms) last.len_ms = Math.max(last.len_ms, h.at_ms + h.len_ms - last.at_ms)
+    else merged.push({ ...h })
+  }
+  return fitHolds(merged, len)
+}
 
 /**
  * What a slot's "+" offers in each frame. Video slots offer the same (main) video or a different

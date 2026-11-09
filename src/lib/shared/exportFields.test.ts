@@ -44,7 +44,7 @@ const FIELDS: Record<string, Record<string, How>> = {
     source_offset_ms: 'frame', volume: 'frame', muted: 'frame', hidden: 'frame', rect: 'frame', image_path: 'frame',
     motion: 'frame', corners: 'frame', text: 'frame', bg: 'frame', color: 'frame', size: 'frame', font: 'frame',
     x: 'frame', y: 'frame', w: 'frame', h: 'frame', rotation: 'frame', captions: 'frame',
-    pan: 'frame', freeze: 'frame', dim: 'frame',
+    pan: 'frame', freeze: 'frame', dim: 'frame', holds: 'frame',
     // (a signed link to show the photo; which stock clip was picked; the lock)
     image_url: 'editor', broll: 'editor', locked: 'editor',
   },

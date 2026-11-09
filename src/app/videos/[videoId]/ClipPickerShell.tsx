@@ -10,6 +10,7 @@ import { ScrubPlayer } from '@/components/clips/ScrubPlayer'
 import { useLocalVideo } from '@/modules/clips/localVideo'
 import { usePolling } from '@/lib/usePolling'
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { FilterChip } from '@/components/ui/filter-chip'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -61,7 +62,8 @@ const CLIP_TABS: Array<{ id: ClipTab; label: string; empty: string }> = [
   { id: 'yours', label: 'Your clips', empty: 'Clips you make yourself (New clip) show here.' },
   { id: 'ask', label: 'Ask AI', empty: 'Describe what you want in Ask AI, then press Use on a result.' },
   { id: 'auto', label: 'Make my clips', empty: 'Clips AI makes for you with Make my clips show here.' },
-  { id: 'best', label: 'Best moments', empty: 'Find best moments, then press + on the ones you want.' },
+  // (Best moments: removed 2026-11-09 (user), kept commented; clips it made stay under All clips)
+  // { id: 'best', label: 'Best moments', empty: 'Find best moments, then press + on the ones you want.' },
   { id: 'edited', label: 'Edited clips', empty: 'Clips you open in the editor show here.' },
   { id: 'fav', label: 'Favorites', empty: 'Tap the heart on a clip to keep it here.' },
 ]
@@ -89,7 +91,31 @@ interface Suggestion {
 }
 
 // 'confirm': the run found fewer good moments (found_count) than clips asked for and waits for a yes
-interface AutoJob { id: string; status: 'queued' | 'running' | 'done' | 'failed' | 'confirm'; progress: number; error: string | null; clip_count: number; found_count?: number }
+interface AutoJob {
+  id: string; status: 'queued' | 'running' | 'done' | 'failed' | 'confirm'; progress: number; error: string | null; clip_count: number; found_count?: number
+  /** What the run is doing in words, and where this step's part of the bar ends (the worker's setProgress) */
+  stage?: { text: string; to: number } | null
+}
+
+/**
+ * The bar between the worker's reports (every 3–8 s, usePolling): it jumps to each report, never goes
+ * back, and in between creeps toward the end of the step it's on (`to`) — slower the closer it gets,
+ * never reaching it — so a long step shows movement without claiming more than is done.
+ */
+function useSmoothProgress(jobId: string | null, real: number, to: number | null, active: boolean): number {
+  const [shown, setShown] = useState(real)
+  useEffect(() => { setShown(real) }, [jobId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setShown(s => (active ? Math.max(s, real) : real)) }, [real, active])
+  useEffect(() => {
+    if (!active || to == null) return
+    const t = setInterval(() => setShown(s => {
+      const cap = to - 0.5
+      return s >= cap ? s : s + (cap - s) * 0.02
+    }), 500)
+    return () => clearInterval(t)
+  }, [active, to])
+  return shown
+}
 interface AutoClip {
   id: string; title: string | null; start_ms: number; end_ms: number; status: string
   output_url: string | null; ai_score: number | null; ai_reason: string | null
@@ -137,15 +163,15 @@ const AUTO_OPTIONS_KEY = 'clipboard.makeOptions'
 // What the captions and the title are written in (speech in an Indian language; English speech stays English)
 type CaptionLanguage = 'native' | 'roman'
 type TitleLanguage = 'roman' | 'english' | 'native'
-// (each choice shows the same word written that way: an example says it faster than a name)
-const CAPTION_LANGUAGES: Array<{ id: CaptionLanguage; label: string }> = [
-  { id: 'native', label: 'Native letters · నమస్తే, नमस्ते' },
-  { id: 'roman', label: 'English letters · Namaste' },
+// (each choice shows the same word written that way, "e.g. Namaste": an example says it faster than a name)
+const CAPTION_LANGUAGES: Array<{ id: CaptionLanguage; label: string; example: string }> = [
+  { id: 'native', label: 'Native letters', example: 'నమస్తే, नमस्ते' },
+  { id: 'roman', label: 'English letters', example: 'Namaste' },
 ]
-const TITLE_LANGUAGES: Array<{ id: TitleLanguage; label: string }> = [
-  { id: 'roman', label: 'English letters · Namaste' },
-  { id: 'english', label: 'English · Hello' },
-  { id: 'native', label: 'Native letters · నమస్తే, नमस्ते' },
+const TITLE_LANGUAGES: Array<{ id: TitleLanguage; label: string; example: string }> = [
+  { id: 'roman', label: 'English letters', example: 'Namaste' },
+  { id: 'english', label: 'English', example: 'Hello' },
+  { id: 'native', label: 'Native letters', example: 'నమస్తే, नमस्ते' },
 ]
 const AUTO_LANGUAGE_KEY = 'clipboard.makeLanguages'
 
@@ -172,6 +198,13 @@ const PANEL_LINE = '1px solid rgb(var(--cb-fg) / 0.07)'
 
 // Wide screens get three columns (AI tools · video · clips); narrower ones stack the AI tools under the video
 const WIDE_QUERY = '(min-width: 1280px)'
+// The side columns' usual widths and how far their bars drag them; the video column keeps CENTRE_MIN
+const AI_W = 340, CLIPS_W = 340, CLIPS_W_MANUAL = 420
+const AI_RANGE: [number, number] = [300, 520]
+const CLIPS_RANGE: [number, number] = [280, 720]
+const CENTRE_MIN = 420
+// The AI column's split: the least Make my clips and Ask AI keep
+const MMC_MIN = 120, ASK_MIN = 260, ASK_MIN_EMPTY = 170
 function useWide() {
   return useSyncExternalStore(
     cb => { const mq = window.matchMedia(WIDE_QUERY); mq.addEventListener('change', cb); return () => mq.removeEventListener('change', cb) },
@@ -239,16 +272,17 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const [formError, setFormError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [clipError, setClipError] = useState<string | null>(null)
-  const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null)
-  const [momentsNote, setMomentsNote] = useState<string | null>(null)
-  const [momentsAdded, setMomentsAdded] = useState<string | null>(null)
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false)
-  const [suggestionsError, setSuggestionsError] = useState<string | null>(null)
+  // (Best moments: removed 2026-11-09 (user), kept commented)
+  // const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null)
+  // const [momentsNote, setMomentsNote] = useState<string | null>(null)
+  // const [momentsAdded, setMomentsAdded] = useState<string | null>(null)
+  // const [loadingSuggestions, setLoadingSuggestions] = useState(false)
+  // const [suggestionsError, setSuggestionsError] = useState<string | null>(null)
   const [aiCriteria, setAiCriteria] = useState('')
   // Click counters that replay the AI buttons' animations (styles: .ai-btn in globals.css)
   const [makePulse, setMakePulse] = useState(0)
   const [findPulse, setFindPulse] = useState(0)
-  const [bestPulse, setBestPulse] = useState(0)
+  // const [bestPulse, setBestPulse] = useState(0)   (Best moments: removed 2026-11-09 (user), kept commented)
   // Typing hint in the Ask AI box: whenever it's empty, example searches are typed out letter by
   // letter (left → right), held for a moment, erased, and the next one typed — on a loop
   const [typedHint, setTypedHint] = useState('')
@@ -277,14 +311,15 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // Earlier Ask AI answers by search (newest last), and which search the shown saved answer is for
   const [askSaved, setAskSaved] = useState<Record<string, Suggestion[]>>({})
   const [askFrom, setAskFrom] = useState<string | null>(null)
-  const askKey = `clipboard.ask.${video.id}`, bestKey = `clipboard.best.${video.id}`
+  const askKey = `clipboard.ask.${video.id}`
+  // const bestKey = `clipboard.best.${video.id}`   (Best moments: removed 2026-11-09 (user), kept commented)
   useEffect(() => {
     setAskSaved(readSaved<Record<string, Suggestion[]>>(askKey) ?? {})
-    const best = readSaved<Suggestion[]>(bestKey)
-    if (best) setSuggestions(prev => prev ?? best)
-  }, [askKey, bestKey])
+    // const best = readSaved<Suggestion[]>(bestKey)
+    // if (best) setSuggestions(prev => prev ?? best)
+  }, [askKey])
   // The Best moments list is saved whenever it changes (found, View more, or a moment added)
-  useEffect(() => { if (suggestions) writeSaved(bestKey, suggestions) }, [suggestions, bestKey])
+  // useEffect(() => { if (suggestions) writeSaved(bestKey, suggestions) }, [suggestions, bestKey])
   const [loadingAi, setLoadingAi] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
   // "Make my clips": the AI Edit job for this video and the clips it made
@@ -735,6 +770,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     setAutoClips(data.clips ?? [])
   }
   const autoRunning = autoJob?.status === 'queued' || autoJob?.status === 'running'
+  // The bar's percent as shown: moving between the worker's reports (user, 2026-11-09: it sat still)
+  const autoShown = useSmoothProgress(autoJob?.id ?? null, autoJob?.progress ?? 0,
+    autoJob?.status === 'running' ? autoJob.stage?.to ?? null : null, autoJob?.status === 'running')
   // The run stopped to ask: fewer good moments were found than clips asked for
   const autoAsking = autoJob?.status === 'confirm' && !!autoJob.found_count
   // A run that finishes while this page is open goes straight to its clips
@@ -806,52 +844,51 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     }
   }
 
-  // On demand only — each call asks AI to read the transcript. Every moment it finds is
-  // saved as a draft clip in the Best moments section; the next call finds new ones.
-  // Cancel on a running Ask AI / Best moments search: the request is dropped and the list stays as it was
-  const momentsAbort = useRef<AbortController | null>(null)
+  // Cancel on a running Ask AI search: the request is dropped and the list stays as it was
+  // (Best moments: removed 2026-11-09 (user), kept commented: "Find best moments" asked AI to read the transcript on demand)
+  // const momentsAbort = useRef<AbortController | null>(null)
   const askAbort = useRef<AbortController | null>(null)
   const isAbort = (e: unknown) => e instanceof DOMException && e.name === 'AbortError'
 
-  async function findMoments() {
-    momentsAbort.current?.abort()
-    const ctl = new AbortController()
-    momentsAbort.current = ctl
-    setLoadingSuggestions(true)
-    setSuggestionsError(null)
-    setMomentsNote(null)
-    setMomentsAdded(null)
-    try {
-      // A list to pick from: nothing is saved until "+"; moments already listed are skipped
-      const exclude = (suggestions ?? []).map(s => [s.start_ms, s.end_ms])
-      const res = await fetch(`/api/videos/${video.id}/best-moments?list=1`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exclude }), signal: ctl.signal,
-      })
-      // The video is still being read: Best moments runs by itself when it's done
-      if (res.status === 409) { waitForReading('Best moments', () => findMoments()); return }
-      if (!res.ok) throw new Error((await res.json()).error ?? 'Could not load suggestions')
-      const { moments, limitMessage } = await res.json() as { moments: Suggestion[]; limitMessage: string | null }
-      const batch = Date.now()
-      const found = (moments ?? []).map(m => ({ ...m, id: m.clip_id ?? `${batch}-${m.id}` }))
-      // Earlier finds stay listed above the new ones
-      setSuggestions(prev => [...(prev ?? []), ...found])
-      setMomentsNote(limitMessage)
-      const added = found.filter(m => m.clip_id)
-      if (added.length) {
-        setClips(prev => [...prev, ...added.filter(m => !prev.some(c => c.id === m.clip_id)).map((m, i) => ({
-          id: m.clip_id!, title: m.title, start_ms: m.start_ms, end_ms: m.end_ms, status: 'draft', output_url: null,
-          layout: null, created_at: new Date().toISOString(), index: prev.length + i + 1, origin: 'best' as const,
-        }))])
-        setMomentsAdded(`✓ Added ${added.length} moment${added.length === 1 ? '' : 's'} to Clips › Best moments`)
-        focusClip(added[0].clip_id!, 'best')
-        router.refresh()
-      }
-    } catch (e) {
-      if (!isAbort(e)) setSuggestionsError(e instanceof Error ? e.message : 'Could not load suggestions')
-    } finally {
-      if (momentsAbort.current === ctl) { momentsAbort.current = null; setLoadingSuggestions(false) }
-    }
-  }
+  // async function findMoments() {
+    // momentsAbort.current?.abort()
+    // const ctl = new AbortController()
+    // momentsAbort.current = ctl
+    // setLoadingSuggestions(true)
+    // setSuggestionsError(null)
+    // setMomentsNote(null)
+    // setMomentsAdded(null)
+    // try {
+      // // A list to pick from: nothing is saved until "+"; moments already listed are skipped
+      // const exclude = (suggestions ?? []).map(s => [s.start_ms, s.end_ms])
+      // const res = await fetch(`/api/videos/${video.id}/best-moments?list=1`, {
+        // method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exclude }), signal: ctl.signal,
+      // })
+      // // The video is still being read: Best moments runs by itself when it's done
+      // if (res.status === 409) { waitForReading('Best moments', () => findMoments()); return }
+      // if (!res.ok) throw new Error((await res.json()).error ?? 'Could not load suggestions')
+      // const { moments, limitMessage } = await res.json() as { moments: Suggestion[]; limitMessage: string | null }
+      // const batch = Date.now()
+      // const found = (moments ?? []).map(m => ({ ...m, id: m.clip_id ?? `${batch}-${m.id}` }))
+      // // Earlier finds stay listed above the new ones
+      // setSuggestions(prev => [...(prev ?? []), ...found])
+      // setMomentsNote(limitMessage)
+      // const added = found.filter(m => m.clip_id)
+      // if (added.length) {
+        // setClips(prev => [...prev, ...added.filter(m => !prev.some(c => c.id === m.clip_id)).map((m, i) => ({
+          // id: m.clip_id!, title: m.title, start_ms: m.start_ms, end_ms: m.end_ms, status: 'draft', output_url: null,
+          // layout: null, created_at: new Date().toISOString(), index: prev.length + i + 1, origin: 'best' as const,
+        // }))])
+        // setMomentsAdded(`✓ Added ${added.length} moment${added.length === 1 ? '' : 's'} to Clips › Best moments`)
+        // focusClip(added[0].clip_id!, 'best')
+        // router.refresh()
+      // }
+    // } catch (e) {
+      // if (!isAbort(e)) setSuggestionsError(e instanceof Error ? e.message : 'Could not load suggestions')
+    // } finally {
+      // if (momentsAbort.current === ctl) { momentsAbort.current = null; setLoadingSuggestions(false) }
+    // }
+  // }
 
   /** The clip a result already became (same start and end), if any */
   function clipFor(s: Suggestion) {
@@ -922,10 +959,10 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     }
   }
   function cancelAsk() { askAbort.current?.abort(); askAbort.current = null; setLoadingAi(false) }
-  function cancelMoments() { momentsAbort.current?.abort(); momentsAbort.current = null; setLoadingSuggestions(false) }
+  // function cancelMoments() { momentsAbort.current?.abort(); momentsAbort.current = null; setLoadingSuggestions(false) }
 
-  // The second AI card: Ask AI or Best moments (one at a time, switched at its top)
-  const [aiPane, setAiPane] = useState<'ask' | 'best'>('ask')
+  // The second AI card: Ask AI (Best moments: removed 2026-11-09 (user), kept commented: it shared the card, switched at its top)
+  // const [aiPane, setAiPane] = useState<'ask' | 'best'>('ask')
 
   // A video from before editing copies were made: ask the worker for one, so dragging along it is
   // quick from the next visit (until then the original plays)
@@ -948,6 +985,66 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   }, [startWith])
 
   const wide = useWide()
+  // Widths of the two side columns, dragged at the bars between the three (user, 2026-11-09: as the
+  // editor's); null = the usual width. This visit only, as in the editor
+  const [aiW, setAiW] = useState<number | null>(null)
+  const [clipsW, setClipsW] = useState<number | null>(null)
+  const [resizing, setResizing] = useState<'ai' | 'clips' | 'split' | null>(null)
+  const columnsRef = useRef<HTMLDivElement>(null)
+  // The AI column doesn't scroll (user, 2026-11-09): a bar between Make my clips and Ask AI shares its
+  // height. mmcH: Make my clips' height (null = as tall as it is, Ask AI takes the rest)
+  const [mmcH, setMmcH] = useState<number | null>(null)
+  const mmcRef = useRef<HTMLElement>(null)
+  const aiColRef = useRef<HTMLElement>(null)
+  // What Ask AI keeps: its box and one-tap searches while it has nothing to show, more once results come
+  const askMin = aiSuggestions?.length || loadingAi || aiError ? ASK_MIN : ASK_MIN_EMPTY
+  function startSplitResize(e: React.PointerEvent) {
+    if (e.button !== 0) return
+    e.preventDefault(); e.stopPropagation()
+    const y0 = e.clientY
+    const h0 = mmcRef.current?.getBoundingClientRect().height ?? 300
+    // (the column less its padding, the gap, and what Ask AI keeps)
+    const colH = aiColRef.current?.clientHeight ?? 800
+    const max = Math.max(MMC_MIN, colH - 24 - 12 - askMin)
+    setResizing('split')
+    const move = (ev: PointerEvent) => setMmcH(Math.round(Math.max(MMC_MIN, Math.min(max, h0 + ev.clientY - y0))))
+    const up = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up)
+      setResizing(null)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+  const aiShown = wide && isReady && !manualOnly
+  const aiWidth = aiW ?? AI_W
+  const clipsWidth = clipsW ?? (manualOnly ? CLIPS_W_MANUAL : CLIPS_W)
+  /** Drag a bar: the AI tools grow to the right, the clipboard to the left; the video keeps CENTRE_MIN */
+  function startColumnResize(e: React.PointerEvent, which: 'ai' | 'clips') {
+    if (e.button !== 0) return
+    e.preventDefault(); e.stopPropagation()
+    const x0 = e.clientX
+    // (from the width it is drawn at: a smaller window may have narrowed it)
+    const col = which === 'ai' ? e.currentTarget.previousElementSibling : e.currentTarget.nextElementSibling
+    const w0 = col?.getBoundingClientRect().width ?? (which === 'ai' ? aiWidth : clipsWidth)
+    const [lo, hi] = which === 'ai' ? AI_RANGE : CLIPS_RANGE
+    // (the room there is: the row less its padding, the other column, the gaps and the video's least)
+    const row = columnsRef.current
+    const other = which === 'ai' ? clipsWidth : aiShown ? aiWidth : 0
+    const room = row ? row.clientWidth - 32 - other - (aiShown ? 32 : 16) - CENTRE_MIN : hi
+    const max = Math.max(lo, Math.min(hi, room))
+    setResizing(which)
+    const move = (ev: PointerEvent) => {
+      const d = which === 'ai' ? ev.clientX - x0 : x0 - ev.clientX
+      const w = Math.round(Math.max(lo, Math.min(max, w0 + d)))
+      if (which === 'ai') setAiW(w); else setClipsW(w)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up)
+      setResizing(null)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
   // Clip previews are 9:16; the video keeps its own shape
   // The frame takes the video's own proportions once it loads, so it fits exactly (no empty bars)
   const [ratio, setRatio] = useState(16 / 9)
@@ -1050,7 +1147,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         ))}
       </div>
       {viewMode === 'preview' && momentPreview && (() => {
-        const list = (momentPreview.source === 'clip_search' ? aiSuggestions : suggestions) ?? []
+        // (with Best moments' own list too, before it was removed: `momentPreview.source === 'clip_search' ? aiSuggestions : suggestions`)
+        const list = aiSuggestions ?? []
         const i = list.findIndex(x => x.id === momentPreview.s.id)
         return (
           <div className="w-full max-w-xl mx-auto flex items-center gap-2">
@@ -1185,7 +1283,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const aiToolsOpen = (
     <>
       {/* (styles: .mmc-* in globals.css) */}
-      <section className="mmc shrink-0 p-3.5 flex flex-col gap-3 rounded-2xl" data-start-target="ai">
+      {/* (wide: its height is shared with Ask AI at the bar under it; what doesn't fit scrolls, no scrollbar) */}
+      <section ref={mmcRef} className={`mmc p-3.5 flex flex-col gap-3 rounded-2xl ${wide ? 'cb-split-top cb-noscroll' : 'shrink-0'}`} data-start-target="ai"
+        style={wide ? { flex: mmcH == null ? '0 1 auto' : `0 1 ${mmcH}px` } : undefined}>
         {/* Header: a spark badge (glass, the spark lime), the title and its ⓘ; on the right, the way to the clips already made */}
         <div className="flex items-center gap-2.5">
           <span aria-hidden="true" className="shrink-0 w-8 h-8 rounded-[10px] grid place-items-center"
@@ -1288,14 +1388,10 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           ]).map(row => {
             const off = autoRunning || !row.on
             return (
-              <label key={row.name} className="mmc-row flex items-center gap-2 text-[11px]" data-off={off || undefined} style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}>
+              <div key={row.name} className="mmc-row flex items-center gap-2 text-[11px]" data-off={off || undefined} style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}>
                 <span className="shrink-0 w-[52px]">{row.name}</span>
-                <select value={row.value} disabled={off} onChange={e => row.pick(e.target.value)}
-                  aria-label={`What the ${row.what} written in`}
-                  className="mmc-select flex-1 min-w-0 px-2 py-1.5 rounded-md text-[11px] text-white outline-none">
-                  {row.list.map(l => <option key={l.id} value={l.id}>{l.label}</option>)}
-                </select>
-              </label>
+                <MmcPick value={row.value} options={row.list} onChange={row.pick} disabled={off} label={`What the ${row.what} written in`} />
+              </div>
             )
           })}
           {/* The brand kit the clips get (shown once the account has a kit) */}
@@ -1307,16 +1403,15 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             const missing = [!autoOpts.captions && 'Captions', !autoOpts.title && 'Title'].filter(Boolean) as string[]
             return (
               <>
-                <label className="mmc-row flex items-center gap-2 text-[11px]" data-off={autoRunning || undefined} style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}>
+                <div className="mmc-row flex items-center gap-2 text-[11px]" data-off={autoRunning || undefined} style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}>
                   <span className="shrink-0 w-[52px]">Brand</span>
-                  <select value={brandPick} disabled={autoRunning} onChange={e => setBrandPick(e.target.value)}
-                    aria-label="The brand kit the clips get"
-                    className="mmc-select flex-1 min-w-0 px-2 py-1.5 rounded-md text-[11px] text-white outline-none">
-                    <option value="default">{def ? `Default · ${def.name}` : 'Default (none set)'}</option>
-                    {brandKits.filter(k => !k.isDefault).map(k => <option key={k.id} value={k.id}>{k.name}</option>)}
-                    <option value="none">No brand kit</option>
-                  </select>
-                </label>
+                  <MmcPick value={brandPick} disabled={autoRunning} onChange={setBrandPick} label="The brand kit the clips get"
+                    options={[
+                      { id: 'default', label: def ? `Default · ${def.name}` : 'Default (none set)' },
+                      ...brandKits.filter(k => !k.isDefault).map(k => ({ id: k.id, label: k.name })),
+                      // (user, 2026-11-09: "No brand kit" taken out of the list — the worker still reads 'none')
+                    ]} />
+                </div>
                 {kitOn && missing.length > 0 && !autoRunning && (
                   <p className="mmc-brand-note" role="status">
                     {missing.length > 1
@@ -1357,17 +1452,20 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         {autoRunning && autoJob && (
           <div className="flex flex-col gap-1.5 px-3 py-2.5 rounded-xl" style={{ background: 'rgba(200,255,0,0.04)', border: '1px solid rgba(200,255,0,0.12)' }}>
             <div className="flex items-center justify-between gap-2 text-xs">
-              <span style={{ color: 'rgb(var(--cb-fg) / 0.7)' }}>
-                {autoJob.status === 'queued' ? 'Waiting to start…' : autoJob.progress < 20 ? 'Reading the video…' : autoJob.progress < 35 ? 'Finding the best moments…' : 'Framing clips…'}
+              {/* What the worker says it's doing (an older worker says nothing: guessed from the percent) */}
+              <span className="min-w-0" style={{ color: 'rgb(var(--cb-fg) / 0.7)' }}>
+                {autoJob.status === 'queued' ? 'Waiting to start…'
+                  : autoJob.stage?.text ? `${autoJob.stage.text}…`
+                  : autoJob.progress < 20 ? 'Reading the video…' : autoJob.progress < 35 ? 'Finding the best moments…' : 'Framing clips…'}
               </span>
-              <span className="font-semibold tabular-nums" style={{ color: ACCENT }}>{autoJob.progress}%</span>
+              <span className="shrink-0 font-semibold tabular-nums" style={{ color: ACCENT }}>{Math.floor(autoShown)}%</span>
             </div>
             <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgb(var(--cb-fg) / 0.08)' }}>
-              <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(3, autoJob.progress)}%`, background: ACCENT }} />
+              <div className="h-full rounded-full transition-[width] duration-500 ease-linear" style={{ width: `${Math.max(3, autoShown)}%`, background: ACCENT }} />
             </div>
             <div className="flex items-center gap-2">
               <p className="flex-1 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.4)' }}>
-                {autoJob.clip_count ? `${autoJob.clip_count} clip${autoJob.clip_count === 1 ? '' : 's'}` : ''}
+                {autoJob.clip_count ? `Making ${autoJob.clip_count} clip${autoJob.clip_count === 1 ? '' : 's'}` : ''}
                 {/* Reading comes first and is the slow part of a long video */}
                 {autoJob.status === 'running' && autoJob.progress < 20 ? ' · a long video takes a while to read; you can leave this page, it carries on' : ''}
               </p>
@@ -1394,23 +1492,44 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               : <>Making clips failed{autoJob.error ? `: ${autoJob.error}` : ''}. Try again, or make clips by hand below.</>}
           </p>
         )}
-        {/* Main action last: quiet — a lime tint and lime words, not a filled block (.mmc-go) */}
-        <button type="button" onClick={() => { setMakePulse(n => n + 1); makeClips() }} disabled={autoRunning || autoStarting}
-          data-busy={autoRunning || autoStarting || undefined}
-          className="ai-btn ai-make mmc-go flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-semibold disabled:opacity-40">
-          <span key={makePulse} className={`ai-fire${makePulse ? ' is-on' : ''}`} aria-hidden="true" />
-          {autoStarting || autoRunning ? <Spinner /> : (
-            <span key={`s${makePulse}`} className={`ai-spark${makePulse ? ' is-on' : ''}`} aria-hidden="true">
-              ✦<i /><i /><i />
-            </span>
-          )} {autoRunning ? 'Making clips…' : `Make ${autoCount} clip${autoCount === 1 ? '' : 's'}`}
-        </button>
+        {/* Main action last: quiet — a lime tint and lime words, not a filled block (.mmc-go). Wide: it
+            stays at the card's bottom however small the card is dragged (user, 2026-11-09: it was cut off) */}
+        <div className={wide ? 'mmc-foot' : 'contents'}>
+          <button type="button" onClick={() => { setMakePulse(n => n + 1); makeClips() }} disabled={autoRunning || autoStarting}
+            data-busy={autoRunning || autoStarting || undefined}
+            className="ai-btn ai-make mmc-go w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-semibold disabled:opacity-40">
+            <span key={makePulse} className={`ai-fire${makePulse ? ' is-on' : ''}`} aria-hidden="true" />
+            {autoStarting || autoRunning ? <Spinner /> : (
+              <span key={`s${makePulse}`} className={`ai-spark${makePulse ? ' is-on' : ''}`} aria-hidden="true">
+                ✦<i /><i /><i />
+              </span>
+            )} {autoRunning ? 'Making clips…' : `Make ${autoCount} clip${autoCount === 1 ? '' : 's'}`}
+          </button>
+        </div>
       </section>
 
-      {/* Ask AI and Best moments share one card: a switch at the top picks which one shows */}
-      <section className="flex-1 min-h-[260px] p-3.5 flex flex-col gap-2.5 rounded-2xl" style={CARD}>
+      {/* The bar between the two (wide): drag to share the height, double-click for the usual split */}
+      {wide && (
+        <div role="separator" aria-orientation="horizontal" aria-label="Resize Make my clips and Ask AI"
+          title="Drag to resize · double-click to reset" className="cb-row-handle" data-on={resizing === 'split' || undefined}
+          onPointerDown={startSplitResize} onDoubleClick={() => setMmcH(null)} />
+      )}
+
+      {/* Ask AI (Best moments: removed 2026-11-09 (user), kept commented: it shared this card through a switch at the top, commented below) */}
+      <section className="flex-1 p-3.5 flex flex-col gap-2.5 rounded-2xl" style={{ ...CARD, minHeight: askMin }}>
         <div className="shrink-0 flex items-center gap-2">
-          {/* Segmented switch: a tile of light glass slides under the picked side (styles: .ai-seg in globals.css) */}
+          <h3 className="flex-1 flex items-center gap-2 text-[13px] font-semibold" style={{ color: 'var(--cb-text)' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.8A8 8 0 1 1 21 12z" />
+              <path d="M12 8.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z" fill="currentColor" stroke="none" />
+            </svg>
+            Ask AI
+          </h3>
+          <InfoTip label="About Ask AI">Describe a moment — an emotion, a topic, a hot take — and AI finds matching clips. Press Use on a result to add it.</InfoTip>
+        </div>
+        {/* The Ask AI ⇄ Best moments switch, as it was (inner comments written /~ ~/):
+        <div className="shrink-0 flex items-center gap-2">
+          {/~ Segmented switch: a tile of light glass slides under the picked side (styles: .ai-seg in globals.css) ~/}
           <div role="tablist" aria-label="Find clips with AI" className="ai-seg flex-1" data-side={aiPane === 'best' ? 'right' : 'left'}
             onKeyDown={e => {
               if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -1445,7 +1564,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             ? <InfoTip label="About Ask AI">Describe a moment — an emotion, a topic, a hot take — and AI finds matching clips. Press Use on a result to add it.</InfoTip>
             : <InfoTip label="About Best moments">AI picks the moments most likely to work as reels. Press + on the ones you want to add them to your clip board.</InfoTip>}
         </div>
-        {aiPane === 'ask' && (<>
+        */}
+        <>
         <form className="shrink-0 flex gap-2" onSubmit={e => { e.preventDefault(); setFindPulse(n => n + 1); findByCriteria() }}>
           {/* While the box is empty, example searches are typed out left → right with a blinking
               caret, on a loop; the newest letters stay in view (styles: .ai-hint in globals.css) */}
@@ -1486,8 +1606,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             </button>
           ))}
         </div>
-        {/* Results scroll inside the card, so the card never grows */}
-        <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-2 -mr-2 pr-2">
+        {/* Results scroll inside the card, so the card never grows (no scrollbar shown) */}
+        <div className="cb-noscroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2">
         {aiError && <p className="text-xs" style={{ color: '#f87171' }}>{aiError}</p>}
         {!loadingAi && askFrom && aiSuggestions && (
           <div className="shrink-0 flex items-center gap-2 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
@@ -1516,13 +1636,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             onEdit={() => editMoment(s, 'clip_search')} onAdd={() => addMomentToBoard(s, 'clip_search')} />
         ))}
         </div>
-        </>)}
+        </>
 
+        {/* The Best moments pane, as it was (Best moments: removed 2026-11-09 (user), kept commented; inner comments written /~ ~/):
         {aiPane === 'best' && (<>
         {!suggestions && !loadingSuggestions && (
           <>
-            {/* Spotlight: on hover the stars twinkle in turn and the edge warms to lime;
-                on click a lime spotlight flashes out of the stars (styles: .ai-best in globals.css) */}
+            {/~ Spotlight: on hover the stars twinkle in turn and the edge warms to lime;
+                on click a lime spotlight flashes out of the stars (styles: .ai-best in globals.css) ~/}
             <button onClick={() => { setBestPulse(n => n + 1); findMoments() }}
               className="ai-btn ai-best shrink-0 flex items-center justify-center gap-2 h-9 rounded-lg text-xs font-medium"
               style={{ color: 'rgb(var(--cb-fg) / 0.85)' }}>
@@ -1565,6 +1686,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           </button>
         )}
         </>)}
+        */}
       </section>
     </>
   )
@@ -1578,9 +1700,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // the video itself). Manual clips never wait for any of this: each clip's captions are its own.
   const aiLocked = isReady && reading?.status !== 'ready' && !autoRunning && !autoAsking
   const aiToolsLocked = (
-    <div className={`relative ${wide ? 'flex flex-col gap-3' : 'md:col-span-2 h-full'}`} data-start-target="ai">
+    <div className={`relative ${wide ? 'flex-1 min-h-0 flex flex-col' : 'md:col-span-2 h-full'}`} data-start-target="ai">
       {/* The tools themselves, greyed and out of reach until the transcript is in */}
-      <div inert aria-hidden="true" className={`select-none pointer-events-none ${wide ? 'flex flex-col gap-3' : 'grid grid-cols-1 md:grid-cols-2 gap-4 h-full'}`}
+      <div inert aria-hidden="true" className={`select-none pointer-events-none ${wide ? 'flex-1 min-h-0 flex flex-col gap-3' : 'grid grid-cols-1 md:grid-cols-2 gap-4 h-full'}`}
         style={{ opacity: 0.32, filter: 'grayscale(0.7)' }}>
         {aiToolsOpen}
       </div>
@@ -1597,7 +1719,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             </span>
             <span className="flex flex-col">
               <span className="text-[13.5px] font-semibold text-white">Edit tools are locked</span>
-              <span className="text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>Make my clips · Best moments · Ask AI</span>
+              <span className="text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>Make my clips · Ask AI</span>
             </span>
           </div>
           {/* AI edit picked: the one line and percentage show from the first moment (checking the
@@ -1660,19 +1782,26 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         <AccountMenu />
       </nav>
 
-      <div className="flex-1 flex gap-4 p-4 min-h-0 overflow-hidden">
+      <div ref={columnsRef} data-resizing={resizing || undefined} className="cb-columns flex-1 flex gap-4 p-4 min-h-0 overflow-hidden">
 
         {/* ── Left: AI tools (wide screens) ─────────────────────── */}
-        {wide && isReady && !manualOnly && (
-          <aside className="cb-panel shrink-0 flex flex-col gap-3 p-3 min-h-0 overflow-y-auto" style={{ width: 340 }}>
+        {aiShown && (
+          // (a smaller window: the video keeps CENTRE_MIN and the side columns give way, each by its share)
+          <aside ref={aiColRef} className="cb-panel flex flex-col gap-3 p-3 min-h-0 min-w-0 overflow-hidden" style={{ flex: `0 1 ${aiWidth}px` }}>
             {aiTools}
           </aside>
+        )}
+        {/* The bars between the columns: drag to resize, double-click for the usual width */}
+        {aiShown && (
+          <div role="separator" aria-orientation="vertical" aria-label="Resize the AI tools"
+            title="Drag to resize · double-click to reset" className="cb-col-handle" data-on={resizing === 'ai' || undefined}
+            onPointerDown={e => startColumnResize(e, 'ai')} onDoubleClick={() => setAiW(null)} />
         )}
 
         {/* ── Centre: the video, as large as fits, with the new-clip bar right under it ──
             (data-keep-clip-open: a click here — playing the clip preview, its arrows, Edit this
             clip — doesn't count as "outside" the open clip, so the preview stays) */}
-        <main data-keep-clip-open className="cb-panel flex-1 min-w-0 flex flex-col gap-4 p-4 overflow-y-auto">
+        <main data-keep-clip-open className="cb-panel flex-1 flex flex-col gap-4 p-4 overflow-y-auto" style={{ minWidth: `min(${CENTRE_MIN}px, 45%)` }}>
           {viewBar}
           {wide ? (
             // Container-query box: the player takes the biggest size (in the video's own shape) that fits both ways
@@ -1697,9 +1826,13 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           {!wide && isReady && !manualOnly && <div className="grid grid-cols-1 md:grid-cols-2 gap-4" style={{ height: 420 }}>{aiTools}</div>}
         </main>
 
-        {/* ── Right: your clips ─────────────────────────────────── */}
-        <aside className="cb-panel shrink-0 flex flex-col min-h-0 overflow-hidden" style={{ width: manualOnly ? 420 : 340 }}>
-          <div className="px-4 pt-4 pb-3 flex items-center gap-2 shrink-0">
+        <div role="separator" aria-orientation="vertical" aria-label="Resize the clipboard"
+          title="Drag to resize · double-click to reset" className="cb-col-handle" data-on={resizing === 'clips' || undefined}
+          onPointerDown={e => startColumnResize(e, 'clips')} onDoubleClick={() => setClipsW(null)} />
+
+        {/* ── Right: your clips (cb-clips: its cards follow its width, not the window's) ── */}
+        <aside className="cb-panel cb-clips flex flex-col min-h-0 min-w-0 overflow-hidden" style={{ flex: `0 1 ${clipsWidth}px` }}>
+          <div className="px-4 pt-4 pb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 shrink-0">
             <svg className="cb-head-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 4V3h6v1M9 10h6M9 14h4" />
             </svg>
@@ -1726,52 +1859,59 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             })()}
           </div>
           {/* Sections: every clip, or only those from one place */}
-          {(
-            <div role="tablist" aria-label="Clip sections" className="px-4 pb-3 flex flex-wrap gap-1.5 shrink-0">
+          {/* Sections, the brand and the filters as one block (user, 2026-11-09: it was messy — tabs on
+              two loose lines, a floating "branded" line, filters wrapping) */}
+          <div className="cb-head-tools px-4 pb-3 shrink-0">
+            {/* Sections: one strip; a section with no clips isn't listed (All clips, Ask AI — user, 2026-11-09 —
+                and the open one always are) */}
+            <div role="tablist" aria-label="Clip sections" className="cb-seg">
               {CLIP_TABS.filter(t => manualOnly ? (t.id === 'yours' || t.id === 'edited' || t.id === 'fav') : (t.id !== 'edited' && t.id !== 'yours')).map(t => {
                 const n = t.id === 'all' ? boardClips.length : t.id === 'fav' ? boardClips.filter(c => c.favorite).length : t.id === 'edited' ? clips.filter(isEdited).length : clips.filter(c => c.origin === t.id).length
                 const on = clipTab === t.id
+                if (!n && !on && t.id !== 'all' && t.id !== 'ask' && !manualOnly) return null
                 const dot = t.id === 'all' || t.id === 'fav' || t.id === 'edited' ? null : ORIGIN_BADGE[t.id].color
                 return (
-                  <button key={t.id} type="button" role="tab" aria-selected={on}
-                    onClick={() => { setClipTab(t.id); setSelected(new Set()) }}
-                    className="cb-tab flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold"
-                    style={on ? undefined : { color: n ? 'rgb(var(--cb-fg) / 0.7)' : 'rgb(var(--cb-fg) / 0.35)' }}>
-                    {dot && <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full" style={{ background: dot }} />}
+                  <button key={t.id} type="button" role="tab" aria-selected={on} data-empty={!n || undefined}
+                    onClick={() => { setClipTab(t.id); setSelected(new Set()) }} className="cb-seg-tab">
+                    {dot && <span aria-hidden="true" className="cb-seg-dot" style={{ background: dot }} />}
                     {t.id === 'fav' && <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.5-9.2C1 8 3.4 4.5 7 4.5c2 0 3.6 1.1 5 3 1.4-1.9 3-3 5-3 3.6 0 6 3.5 4.5 7.3C19.5 16.4 12 21 12 21z" /></svg>}
                     {t.label}
-                    <span className="tabular-nums" style={{ opacity: 0.6 }}>{n}</span>
+                    <span className="cb-seg-n">{n}</span>
                   </button>
                 )
               })}
             </div>
-          )}
-          {/* (brand kit Phase 2) a kit on every clip at once */}
-          {/* (shown while selecting too: the kit then goes on the ticked clips only) */}
-          <div className="px-4 pb-3 shrink-0"><BrandAllBar b={brands} total={boardClips.length} selected={selecting ? [...selected] : []} /></div>
-          {tabClips.length > 1 && (
-            <div className="cb-filters px-4 pb-3 shrink-0" role="group" aria-label="Filter the clips">
-              <FilterChip size="sm" label="Length" value={lenF} onChange={setLenF} clearable
-                options={[['all', 'Any length'], ['short', 'Under 30s'], ['mid', '30–60s'], ['long', 'Over 1 min']]} />
-              <FilterChip size="sm" label="Exported" value={expF} onChange={setExpF} clearable
-                options={[['all', 'Any'], ['yes', 'Exported'], ['no', 'Not exported yet']]} />
-              <FilterChip size="sm" label="Sort" value={sortBy} onChange={setSortBy}
-                options={[['new', 'Newest first'], ['old', 'Oldest first'], ['video', 'Order in the video'], ['short', 'Shortest first'], ['long', 'Longest first']]} />
-              {clipFiltering && (
-                <p className="cb-filter-count" role="status">
-                  {shownClips.length} of {tabClips.length}
-                  <button type="button" onClick={clearClipFilters}>Clear</button>
-                </p>
-              )}
-            </div>
-          )}
+            {/* (brand kit Phase 2) a kit on every clip at once */}
+            {/* (shown while selecting too: the kit then goes on the ticked clips only) */}
+            <BrandAllBar b={brands} total={boardClips.length} selected={selecting ? [...selected] : []} />
+            {tabClips.length > 1 && (
+              <div className="cb-filters" role="group" aria-label="Filter the clips">
+                <FilterChip size="xs" label="Length" value={lenF} onChange={setLenF} clearable
+                  options={[['all', 'Any length'], ['short', 'Under 30s'], ['mid', '30–60s'], ['long', 'Over 1 min']]} />
+                <FilterChip size="xs" label="Exported" value={expF} onChange={setExpF} clearable
+                  options={[['all', 'Any'], ['yes', 'Exported'], ['no', 'Not exported yet']]} />
+                {clipFiltering && (
+                  <p className="cb-filter-count" role="status">
+                    {shownClips.length} of {tabClips.length}
+                    <button type="button" onClick={clearClipFilters}>Clear</button>
+                  </p>
+                )}
+                {/* Sort at the far end, as an icon and its choice */}
+                <span className="cb-filters-end">
+                  <FilterChip size="xs" align="end" label="Sort" value={sortBy} onChange={setSortBy}
+                    icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 4v16M3.5 16.5L7 20l3.5-3.5M17 20V4M13.5 7.5L17 4l3.5 3.5" /></svg>}
+                    options={[['new', 'Newest first'], ['old', 'Oldest first'], ['video', 'Order in the video'], ['short', 'Shortest first'], ['long', 'Longest first']]} />
+                </span>
+              </div>
+            )}
+          </div>
           {clipError && (
             <div role="alert" className="mx-4 mb-2 px-3 py-2 rounded-lg flex items-center justify-between gap-2" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)' }}>
               <span className="text-xs" style={{ color: '#f87171' }}>{clipError}</span>
               <button onClick={() => setClipError(null)} aria-label="Dismiss" className="shrink-0 px-1 rounded hover:bg-white/10" style={{ color: 'rgba(239,68,68,0.7)' }}>✕</button>
             </div>
           )}
-          <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 flex flex-col gap-2">
+          <div className="cb-clip-list flex-1 min-h-0 overflow-y-auto px-4 pb-4">
             {boardClips.length === 0 && !isReady && (
               <p className="text-xs leading-relaxed" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
                 You can start clipping once the video has finished processing.
@@ -1825,15 +1965,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 brandTag={<BrandTag b={brands} clipId={clip.id} />}
               />
             ))}
-            {boardClips.length > 0 && !selecting && !manualOnly && (
-              <div className="mt-1 shrink-0 flex items-start gap-2.5 px-3 py-2.5 rounded-xl" style={{ border: '1px solid rgba(200,255,0,0.25)', background: 'rgba(200,255,0,0.04)' }}>
-                <svg className="shrink-0 mt-0.5" width="14" height="14" viewBox="0 0 24 24" fill={ACCENT} aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z" /></svg>
-                <span className="flex flex-col">
-                  <span className="text-xs font-semibold" style={{ color: ACCENT }}>Tip</span>
-                  <span className="text-[11px] leading-relaxed" style={{ color: 'rgb(var(--cb-fg) / 0.55)' }}>Tap a clip to open it. You can preview, edit or download your clips anytime.</span>
-                </span>
-              </div>
-            )}
           </div>
 
           {/* Select mode: what's ticked, and what to do with it */}
@@ -1896,6 +2027,90 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
 }
 
 // ── Pieces ────────────────────────────────────────────────────────────────────
+
+/**
+ * Make my clips' Captions / Title / Brand choice (user, 2026-11-09: a designed menu, not the browser's
+ * list; each language with an example, "e.g. Namaste"). The menu floats over the page (a portal), as
+ * the card it sits in scrolls; it opens under the box, or over it when there's no room below.
+ * ↑ / ↓, Enter, Esc; a click outside, a scroll or a resize closes it.
+ */
+function MmcPick({ value, options, onChange, disabled, label }: {
+  value: string; options: Array<{ id: string; label: string; example?: string }>; onChange: (id: string) => void
+  disabled?: boolean
+  /** What it picks, for screen readers */
+  label: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(0)
+  const [at, setAt] = useState<{ left: number; width: number; top?: number; bottom?: number } | null>(null)
+  const btn = useRef<HTMLButtonElement>(null)
+  const list = useRef<HTMLUListElement>(null)
+  const cur = options.find(o => o.id === value) ?? options[0]
+  const show = () => {
+    const r = btn.current?.getBoundingClientRect()
+    if (!r) return
+    const width = Math.max(r.width, 230)
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8))
+    const below = window.innerHeight - r.bottom - 8
+    setAt(below >= options.length * 36 + 14 || below >= r.top
+      ? { left, width, top: r.bottom + 6 }
+      : { left, width, bottom: window.innerHeight - r.top + 6 })
+    setActive(Math.max(0, options.findIndex(o => o.id === value)))
+    setOpen(true)
+  }
+  const close = (focus = false) => { setOpen(false); if (focus) btn.current?.focus() }
+  const pick = (id: string) => { onChange(id); close(true) }
+  useEffect(() => {
+    if (!open) return
+    const away = (e: PointerEvent) => {
+      const t = e.target as Node
+      if (!btn.current?.contains(t) && !list.current?.contains(t)) setOpen(false)
+    }
+    // (it's placed where the box was: anything moving the box closes it)
+    const moved = () => setOpen(false)
+    window.addEventListener('pointerdown', away)
+    window.addEventListener('scroll', moved, true)
+    window.addEventListener('resize', moved)
+    return () => {
+      window.removeEventListener('pointerdown', away)
+      window.removeEventListener('scroll', moved, true)
+      window.removeEventListener('resize', moved)
+    }
+  }, [open])
+  const onKey = (e: React.KeyboardEvent) => {
+    if (!open) { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); show() } return }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => (i + 1) % options.length) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(i => (i - 1 + options.length) % options.length) }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(options[active].id) }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true) }
+    else if (e.key === 'Tab') setOpen(false)
+  }
+  return (
+    <>
+      <button ref={btn} type="button" className="mmc-pick-btn" disabled={disabled} aria-haspopup="listbox" aria-expanded={open}
+        aria-label={`${label}: ${cur?.label ?? ''}${cur?.example ? `, for example ${cur.example}` : ''}`}
+        onClick={() => (open ? close() : show())} onKeyDown={onKey}>
+        <span className="mmc-pick-name">{cur?.label}</span>
+        {cur?.example && <span className="mmc-pick-eg">e.g. {cur.example}</span>}
+        <svg className="mmc-pick-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      </button>
+      {open && at && createPortal(
+        <ul ref={list} role="listbox" aria-label={label} className="cbb-pick-list mmc-pick-list"
+          style={{ left: at.left, width: at.width, top: at.top ?? 'auto', bottom: at.bottom ?? 'auto' }}>
+          {options.map((o, i) => (
+            <li key={o.id} role="option" aria-selected={o.id === value} className="cbb-pick-item mmc-pick-item" data-active={i === active || undefined}
+              onMouseEnter={() => setActive(i)} onClick={() => pick(o.id)}>
+              <span className="mmc-pick-name">{o.label}</span>
+              {o.example && <span className="mmc-pick-eg">e.g. {o.example}</span>}
+              <svg className="cbb-pick-check" style={{ visibility: o.id === value ? 'visible' : 'hidden' }} width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </li>
+          ))}
+        </ul>,
+        document.body,
+      )}
+    </>
+  )
+}
 
 /**
  * A time box in three fixed parts — hours : minutes : seconds. The colons belong to the box: they
@@ -2182,7 +2397,9 @@ function Spinner() {
 function ClipThumb({ videoUrl, atMs, number, w, h }: { videoUrl: string; atMs: number; number?: number; w: number; h: number }) {
   const src = useFrameAt(videoUrl, atMs)
   return (
-    <span className="cb-thumb relative shrink-0 block rounded-[10px] overflow-hidden" style={{ width: w, height: h, background: 'rgb(var(--cb-fg) / 0.06)' }}>
+    // (--cb-thumb-k: smaller in a narrow clipboard, globals.css .cb-clips)
+    <span className="cb-thumb relative shrink-0 block rounded-[10px] overflow-hidden"
+      style={{ width: `calc(${w}px * var(--cb-thumb-k, 1))`, height: `calc(${h}px * var(--cb-thumb-k, 1))`, background: 'rgb(var(--cb-fg) / 0.06)' }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       {src && <img src={src} alt="" className="w-full h-full object-cover" />}
       {number != null && (
@@ -2539,75 +2756,82 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
     </button>
   )
 
-  // Slim: picture, title, length and the heart; clicking it opens it (and its preview). Pointed at
+  // Slim: picture, title, length and the heart; clicking it previews it (the card stays slim). Pointed at
   // (or tabbed into), Edit · Download · Delete slide open under it, in CSS: the card itself stays
   // as it is (it used to be swapped for the full card, which rebuilt its picture and jumped)
-  if (!open && !focused && !selecting) {
+  // (user, 2026-11-09: a click previews the clip and the card stays slim, outlined; a click on it again
+  // closes the preview)
+  const tapCard = () => { if (open && onClose) onClose(); else onPreview() }
+  if (!focused && !selecting) {
     return (
       <div id={`clip-${id}`} role="button" tabIndex={0}
-        onClick={e => { if (!disabled && !(e.target as HTMLElement).closest('button')) onPreview() }}
-        onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !disabled && e.target === e.currentTarget) { e.preventDefault(); onPreview() } }}
-        title={`${title} · click to open and preview`}
-        data-playing={playing || undefined}
-        className="cb-card cb-sheen group shrink-0 flex items-center gap-3 p-2.5 min-h-[72px] cursor-pointer focus-visible:outline focus-visible:outline-2"
+        onClick={e => { if (!disabled && !(e.target as HTMLElement).closest('button')) tapCard() }}
+        onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !disabled && e.target === e.currentTarget) { e.preventDefault(); tapCard() } }}
+        title={open ? `${title} · click to close the preview` : `${title} · click to preview`}
+        data-playing={playing || undefined} data-on={previewing || undefined} aria-pressed={!!previewing}
+        className="cb-card cb-sheen group shrink-0 flex flex-col p-2.5 min-h-[72px] cursor-pointer focus-visible:outline focus-visible:outline-2"
         style={{ outlineColor: ACCENT }}>
-        <ClipThumb videoUrl={videoUrl} atMs={startMs} number={number} w={84} h={48} />
-        <span className="flex-1 min-w-0 flex flex-col gap-1">
-          <span className="flex items-start gap-2">
-            {nameField || (
-              <span className="flex-1 min-w-0 text-sm font-semibold text-white leading-snug line-clamp-2 break-words" onDoubleClick={startRename}>{title}</span>
-            )}
-            {/* ♡ and 🗑, a pair at the top right; the bin slides in beside the heart while the card is pointed at */}
-            <span className="cb-tools -mt-1 -mr-1">
-              <button type="button" onClick={e => { e.stopPropagation(); setMenu(m => (m ? false : 'confirm')) }} aria-expanded={!!menu}
-                className="cb-tool cb-tool-hide cb-tool-bin" data-tone="danger" data-on={menu ? '' : undefined} aria-label="Delete clip" title="Delete clip">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path className="cb-bin-lid" d="M3 6h18M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6" /></svg>
-              </button>
-              <button type="button" onClick={e => { e.stopPropagation(); onFavorite() }} aria-pressed={favorite} className="cb-tool cb-tool-heart" data-on={favorite ? '' : undefined}
-                aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'} title={favorite ? 'Remove from favorites' : 'Add to favorites'}>
-                <Heart on={favorite} />
-              </button>
-            </span>
-          </span>
-          <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] tabular-nums" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>
-            <ClockIcon />{manual ? <><span className="cb-range" style={{ color: ACCENT }}>{msToDisplay(startMs)} – {msToDisplay(endMs)}</span> · {durLabel(startMs, endMs)}</> : durLabel(startMs, endMs)}
-            {edited && (
-              <span className="cb-edited px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide" style={{ color: ACCENT, background: 'rgba(200,255,0,0.12)' }}>Edited</span>
-            )}
-            {status === 'rendering' && <span className="flex items-center gap-1" style={{ color: ACCENT }}>· <Spinner /> Exporting</span>}
-            {sub.busy && <SubEditInline startedAt={sub.startedAt} estimate={sub.estimate} ahead={sub.ahead} onStop={sub.stop} />}
-          </span>
-          <span className="cb-reveal" data-open={menu ? '' : undefined}>
-            <span className="cb-reveal-in">
-              {menu ? (
-                <span className="flex items-center gap-1.5 pt-2" onClick={e => e.stopPropagation()}>
-                  <span className="text-[11px] text-white mr-auto">Delete this clip?</span>
-                  <button type="button" onClick={() => setMenu(false)} autoFocus className="cb-act">Cancel</button>
-                  <button type="button" onClick={() => { setMenu(false); onDelete() }} className="cb-act" data-tone="danger">Delete</button>
-                </span>
-              ) : (
-                <span className="flex items-center gap-1.5 pt-2">
-                  <button type="button" onClick={e => { e.stopPropagation(); onEdit() }} disabled={disabled} className="cb-act" title="Open in the editor">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
-                    Edit
-                  </button>
-                  <button type="button" onClick={e => { e.stopPropagation(); onDownload() }} disabled={download === 'preparing'} className="cb-act"
-                    data-tone={download === 'failed' ? 'danger' : undefined}
-                    title={download === 'preparing' ? 'Exporting — it downloads by itself when ready' : download === 'failed' ? 'The export failed — try again' : 'Download this clip'}>
-                    {download === 'preparing' ? <Spinner /> : (
-                      <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    )}
-                    {download === 'preparing' ? 'Preparing' : download === 'failed' ? 'Retry' : 'Download'}
-                  </button>
-                  {onRename && (
-                    <button type="button" onClick={startRename} className="cb-act" data-on={renaming ? '' : undefined} title="Give this clip a name of your own">
-                      {renameIcon(12)}
-                      Rename
-                    </button>
-                  )}
-                </span>
+        {/* The picture at the top beside the name; Edit · Download · Rename in one row under both
+            (user, 2026-11-09: they wrapped under the name, the picture sat lower with a gap above) */}
+        <span className="flex items-start gap-3">
+          <ClipThumb videoUrl={videoUrl} atMs={startMs} number={number} w={84} h={48} />
+          <span className="flex-1 min-w-0 flex flex-col gap-1">
+            <span className="flex items-start gap-2">
+              {nameField || (
+                <span className="flex-1 min-w-0 text-sm font-semibold text-white leading-snug break-words" onDoubleClick={startRename}>{title}</span>
               )}
+              {/* ♡ and 🗑, a pair at the top right; the bin slides in beside the heart while the card is pointed at */}
+              <span className="cb-tools -mt-1 -mr-1">
+                <button type="button" onClick={e => { e.stopPropagation(); setMenu(m => (m ? false : 'confirm')) }} aria-expanded={!!menu}
+                  className="cb-tool cb-tool-hide cb-tool-bin" data-tone="danger" data-on={menu ? '' : undefined} aria-label="Delete clip" title="Delete clip">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path className="cb-bin-lid" d="M3 6h18M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6" /></svg>
+                </button>
+                <button type="button" onClick={e => { e.stopPropagation(); onFavorite() }} aria-pressed={favorite} className="cb-tool cb-tool-heart" data-on={favorite ? '' : undefined}
+                  aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'} title={favorite ? 'Remove from favorites' : 'Add to favorites'}>
+                  <Heart on={favorite} />
+                </button>
+              </span>
             </span>
+            <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] tabular-nums" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>
+              <ClockIcon />{manual ? <><span className="cb-range" style={{ color: ACCENT }}>{msToDisplay(startMs)} – {msToDisplay(endMs)}</span> · {durLabel(startMs, endMs)}</> : durLabel(startMs, endMs)}
+              {edited && (
+                <span className="cb-edited px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide" style={{ color: ACCENT, background: 'rgba(200,255,0,0.12)' }}>Edited</span>
+              )}
+              {status === 'rendering' && <span className="flex items-center gap-1" style={{ color: ACCENT }}>· <Spinner /> Exporting</span>}
+              {sub.busy && <SubEditInline startedAt={sub.startedAt} estimate={sub.estimate} ahead={sub.ahead} onStop={sub.stop} />}
+            </span>
+          </span>
+        </span>
+        <span className="cb-reveal" data-open={menu ? '' : undefined}>
+          <span className="cb-reveal-in">
+            {menu ? (
+              <span className="flex items-center gap-1.5 pt-2" onClick={e => e.stopPropagation()}>
+                <span className="text-[11px] text-white mr-auto">Delete this clip?</span>
+                <button type="button" onClick={() => setMenu(false)} autoFocus className="cb-act">Cancel</button>
+                <button type="button" onClick={() => { setMenu(false); onDelete() }} className="cb-act" data-tone="danger">Delete</button>
+              </span>
+            ) : (
+              <span className="flex flex-wrap items-center gap-1.5 pt-2">
+                <button type="button" onClick={e => { e.stopPropagation(); onEdit() }} disabled={disabled} className="cb-act" title="Open in the editor">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
+                  Edit
+                </button>
+                <button type="button" onClick={e => { e.stopPropagation(); onDownload() }} disabled={download === 'preparing'} className="cb-act"
+                  data-tone={download === 'failed' ? 'danger' : undefined}
+                  title={download === 'preparing' ? 'Exporting — it downloads by itself when ready' : download === 'failed' ? 'The export failed — try again' : 'Download this clip'}>
+                  {download === 'preparing' ? <Spinner /> : (
+                    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  )}
+                  {download === 'preparing' ? 'Preparing' : download === 'failed' ? 'Retry' : 'Download'}
+                </button>
+                {onRename && (
+                  <button type="button" onClick={startRename} className="cb-act" data-on={renaming ? '' : undefined} title="Give this clip a name of your own">
+                    {renameIcon(12)}
+                    Rename
+                  </button>
+                )}
+              </span>
+            )}
           </span>
         </span>
       </div>
@@ -2647,7 +2871,7 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
         <div className="flex-1 min-w-0 flex flex-col gap-1">
           <div className="flex items-start gap-1">
             {nameField || (
-              <p className="flex-1 min-w-0 text-sm font-semibold text-white leading-snug line-clamp-2" title={title} onDoubleClick={startRename}>{title}</p>
+              <p className="flex-1 min-w-0 text-sm font-semibold text-white leading-snug break-words" title={title} onDoubleClick={startRename}>{title}</p>
             )}
             {!selecting && heart}
             {!selecting && (
@@ -2695,7 +2919,7 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
       {/* Edit · Download (a click on the card itself previews it); a Sub-edit already running still shows its overlay */}
       {!selecting && sub.error && <p role="alert" className="mt-2 text-[11px]" style={{ color: '#f87171' }}>{sub.error}</p>}
       {!selecting && (
-        <div className={`mt-2.5 grid gap-1.5 ${onRename ? 'grid-cols-3' : 'grid-cols-2'}`}>
+        <div className="cb-open-acts mt-2.5">
           <button onClick={e => { e.stopPropagation(); onEdit() }} disabled={disabled} title="Open in the editor"
             className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-white/10 disabled:opacity-40"
             style={{ color: 'rgb(var(--cb-fg) / 0.85)', border: '1px solid rgb(var(--cb-fg) / 0.14)' }}>

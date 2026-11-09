@@ -659,6 +659,27 @@ body {
 .mmc-select:focus-visible { box-shadow: inset 0 0 0 1px rgba(200,255,0,0.55), 0 0 0 3px rgba(200,255,0,0.1); }
 .mmc-select:disabled { cursor: not-allowed; }
 .mmc-select option { background: #1b1b1f; color: #fff; }
+/* …now a designed menu (ClipPickerShell MmcPick, user 2026-11-09): the choice and a quiet "e.g. Namaste" */
+.mmc-pick-btn {
+  flex: 1; min-width: 0; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 10px; border-radius: 8px;
+  font-size: 11.5px; font-weight: 600; text-align: left; color: var(--cb-text); cursor: pointer;
+  background: rgb(0 0 0 / 0.3); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.1); transition: box-shadow .15s, background-color .15s;
+}
+.mmc-pick-btn:not(:disabled):hover, .mmc-pick-btn[aria-expanded="true"] { background: rgb(var(--cb-fg) / 0.05); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.2); }
+.mmc-pick-btn:focus-visible { outline: none; box-shadow: inset 0 0 0 1px rgba(200,255,0,0.55), 0 0 0 3px rgba(200,255,0,0.1); }
+.mmc-pick-btn:disabled { cursor: not-allowed; }
+.mmc-pick-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mmc-pick-eg { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: rgb(var(--cb-fg) / 0.45); }
+.mmc-pick-chev { flex-shrink: 0; margin-left: auto; color: rgb(var(--cb-fg) / 0.5); transition: transform .2s; }
+.mmc-pick-btn[aria-expanded="true"] .mmc-pick-chev { transform: rotate(180deg); }
+/* the menu: the brand picker's (.cbb-pick-list), floating over the page */
+.cbb-pick-list.mmc-pick-list { position: fixed; right: auto; z-index: 90; min-width: 0; }
+.cbb-pick-item.mmc-pick-item { gap: 10px; }
+/* (the name takes the room, so the example and the tick sit at the right even with no example) */
+.cbb-pick-item.mmc-pick-item .mmc-pick-name { flex: 1 1 auto; }
+.mmc-pick-item .mmc-pick-eg { margin-left: auto; font-size: 11.5px; }
+.mmc-pick-item[aria-selected="true"] .mmc-pick-eg { color: rgb(var(--cb-fg) / 0.55); }
+[data-theme="light"] .mmc-pick-btn { background: rgb(255 255 255 / 0.7); }
 /* Under Brand: the kit's caption / title look can't show while those boxes are off (amber edge, "Turn them on") */
 .mmc-brand-note {
   margin: 0; padding: 6px 9px; border-radius: 8px; font-size: 10.5px; line-height: 1.45;
@@ -1605,6 +1626,68 @@ body {
 .cb-filters { position: relative; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .cb-filter-count { display: flex; align-items: center; gap: 8px; margin: 0 0 0 4px; font-size: 12px; font-weight: 600; color: rgb(var(--cb-fg) / 0.55); }
 .cb-filter-count button { color: var(--cb-text); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgb(var(--cb-fg) / 0.35); }
+
+/* ── Clip board: the bars between its three columns (ClipPickerShell startColumnResize), as the
+   editor's .ed-col-handle; each fills the 16px gap it sits in (its margins take the gap back) ── */
+.cb-col-handle { position: relative; flex: none; align-self: stretch; width: 16px; margin: 0 -16px; z-index: 5; cursor: col-resize; touch-action: none; }
+.cb-col-handle::after {
+  content: ''; position: absolute; top: 14px; bottom: 14px; left: 50%; width: 2px; transform: translateX(-50%); border-radius: 2px;
+  background: linear-gradient(180deg, transparent, rgba(200, 255, 0, 0.5) 12%, rgba(200, 255, 0, 0.5) 88%, transparent);
+  opacity: 0; transition: opacity .15s;
+}
+.cb-col-handle::before {
+  /* the grip shows faintly at rest, so the bar can be found */
+  content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 30px; transform: translate(-50%, -50%); border-radius: 4px; z-index: 1;
+  background: rgb(var(--cb-fg) / 0.85); box-shadow: 0 0 0 2px rgb(0 0 0 / 0.45), 0 2px 8px rgb(0 0 0 / 0.5);
+  opacity: 0.25; transition: opacity .15s, height .15s;
+}
+.cb-col-handle:hover::after, .cb-col-handle[data-on]::after, .cb-col-handle:hover::before, .cb-col-handle[data-on]::before { opacity: 1; }
+.cb-col-handle[data-on]::after { background: linear-gradient(180deg, transparent, rgba(200, 255, 0, 0.7) 12%, rgba(200, 255, 0, 0.7) 88%, transparent); }
+.cb-col-handle[data-on]::before { height: 40px; }
+[data-theme="light"] .cb-col-handle::before { box-shadow: 0 0 0 2px rgb(255 255 255 / 0.6), 0 2px 8px rgb(0 0 0 / 0.15); }
+[data-theme="light"] .cb-col-handle::after { background: linear-gradient(180deg, transparent, rgba(143, 184, 0, 0.7) 12%, rgba(143, 184, 0, 0.7) 88%, transparent); }
+/* The bar between Make my clips and Ask AI (the AI column's split): the same, lying down */
+.cb-row-handle { position: relative; flex: none; height: 12px; margin: -12px 0; z-index: 5; cursor: row-resize; touch-action: none; }
+.cb-row-handle::after {
+  content: ''; position: absolute; left: 14px; right: 14px; top: 50%; height: 2px; transform: translateY(-50%); border-radius: 2px;
+  background: linear-gradient(90deg, transparent, rgba(200, 255, 0, 0.5) 12%, rgba(200, 255, 0, 0.5) 88%, transparent);
+  opacity: 0; transition: opacity .15s;
+}
+.cb-row-handle::before {
+  content: ''; position: absolute; top: 50%; left: 50%; width: 30px; height: 4px; transform: translate(-50%, -50%); border-radius: 4px; z-index: 1;
+  background: rgb(var(--cb-fg) / 0.85); box-shadow: 0 0 0 2px rgb(0 0 0 / 0.45), 0 2px 8px rgb(0 0 0 / 0.5);
+  opacity: 0.25; transition: opacity .15s, width .15s;
+}
+.cb-row-handle:hover::after, .cb-row-handle[data-on]::after, .cb-row-handle:hover::before, .cb-row-handle[data-on]::before { opacity: 1; }
+.cb-row-handle[data-on]::before { width: 40px; }
+[data-theme="light"] .cb-row-handle::before { box-shadow: 0 0 0 2px rgb(255 255 255 / 0.6), 0 2px 8px rgb(0 0 0 / 0.15); }
+[data-theme="light"] .cb-row-handle::after { background: linear-gradient(90deg, transparent, rgba(143, 184, 0, 0.7) 12%, rgba(143, 184, 0, 0.7) 88%, transparent); }
+/* Make my clips above it: a scroll box (its parts keep their size), and no scrollbars in the column */
+.cb-split-top { min-height: 0; overflow-y: auto; }
+.cb-split-top > * { flex-shrink: 0; }
+/* Make my clips' button: held at the card's bottom while the options above scroll under a fade */
+.mmc-foot { position: sticky; bottom: -14px; z-index: 2; margin-bottom: -14px; padding-bottom: 14px; background: #111112; }
+.mmc-foot::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 18px; pointer-events: none; background: linear-gradient(to bottom, rgb(17 17 18 / 0), #111112); }
+[data-theme="light"] .mmc-foot { background: var(--smoke); }
+[data-theme="light"] .mmc-foot::before { background: linear-gradient(to bottom, transparent, var(--smoke)); }
+.cb-noscroll { scrollbar-width: none; }
+.cb-noscroll::-webkit-scrollbar { display: none; }
+.cb-columns[data-resizing] { cursor: col-resize; }
+.cb-columns[data-resizing="split"] { cursor: row-resize; }
+.cb-columns[data-resizing] * { user-select: none; }
+
+/* ── The clipboard follows its own width (dragged), not the window's ── */
+.cb-clips { container: cb-clips / inline-size; }
+.cb-clip-list { display: flex; flex-direction: column; gap: 8px; }
+.cb-clip-list > * { flex-shrink: 0; }
+.cb-open-acts { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 6px; }
+/* Wide: two columns. (max-content rows: in a grid that scrolls, auto rows came out shorter than a
+   card with its Edit · Download row open, and the card under it slid beneath — user, 2026-11-09) */
+@container cb-clips (min-width: 560px) {
+  .cb-clip-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: max-content; align-content: start; align-items: start; }
+  .cb-clip-list > :not(.cb-card) { grid-column: 1 / -1; }
+}
+@container cb-clips (max-width: 310px) { .cb-clip-list { --cb-thumb-k: 0.76; } }
 @media (max-width: 720px) {
   .ag-tools { width: 100%; }
   .ag-search { flex: 1 1 100%; }
@@ -2471,6 +2554,68 @@ body {
 }
 .cap-preview > canvas { display: block; width: 100%; aspect-ratio: 3 / 1; }
 .cap-preview[data-dim] { opacity: 0.4; }
+/* The scan over the video while its captions are made (CaptionScan.tsx): corner marks, a glowing
+   line going down with a grid in its wake and points riding it. Sized by the picture (cqmin); it
+   stands still when hidden or for reduced motion */
+.cap-scan {
+  position: absolute; inset: 0; z-index: 28; pointer-events: none; container-type: size;
+  --scan: #c8ff00; --scan-glow: rgba(200, 255, 0, 0.55); --scan-ms: 2.8s; --scan-ease: cubic-bezier(.45, .05, .55, .95);
+  background: radial-gradient(ellipse at center, transparent 45%, rgba(0, 0, 0, 0.4) 100%), rgba(0, 0, 0, 0.12);
+  opacity: 0; visibility: hidden; transition: opacity .45s ease, visibility 0s linear .45s;
+}
+.cap-scan[data-on] { opacity: 1; visibility: visible; transition: opacity .3s ease, visibility 0s; }
+.cap-scan * { animation-play-state: paused; }
+.cap-scan[data-on] * { animation-play-state: running; }
+.cap-scan-corner {
+  --k: clamp(12px, 9cqmin, 46px); --m: 6cqmin;
+  position: absolute; width: var(--k); height: var(--k); border: 0 solid var(--scan);
+  filter: drop-shadow(0 0 4px var(--scan-glow)); animation: cap-scan-breathe var(--scan-ms) ease-in-out infinite;
+}
+.cap-scan-corner[data-c="tl"] { top: var(--m); left: var(--m); border-width: 2px 0 0 2px; border-top-left-radius: 4px; transform-origin: top left; }
+.cap-scan-corner[data-c="tr"] { top: var(--m); right: var(--m); border-width: 2px 2px 0 0; border-top-right-radius: 4px; transform-origin: top right; }
+.cap-scan-corner[data-c="bl"] { bottom: var(--m); left: var(--m); border-width: 0 0 2px 2px; border-bottom-left-radius: 4px; transform-origin: bottom left; }
+.cap-scan-corner[data-c="br"] { bottom: var(--m); right: var(--m); border-width: 0 2px 2px 0; border-bottom-right-radius: 4px; transform-origin: bottom right; }
+.cap-scan-track { position: absolute; inset: 6cqmin; overflow: hidden; }
+/* (the grid stays put and shows only just above the line: its mask moves with the line — 3× the
+   track tall, band ending at 2/3, so 100% → 50% takes the band's end from the top to the bottom) */
+.cap-scan-grid {
+  position: absolute; inset: 0;
+  background-image: linear-gradient(rgba(200, 255, 0, 0.22) 1px, transparent 1px), linear-gradient(90deg, rgba(200, 255, 0, 0.22) 1px, transparent 1px), linear-gradient(to bottom, transparent, rgba(200, 255, 0, 0.08));
+  background-size: 5cqmin 5cqmin, 5cqmin 5cqmin, 100% 100%;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 53%, #000 66.6%, transparent 66.7%);
+  mask-image: linear-gradient(to bottom, transparent 53%, #000 66.6%, transparent 66.7%);
+  -webkit-mask-size: 100% 300%; mask-size: 100% 300%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  animation: cap-scan-reveal var(--scan-ms) var(--scan-ease) infinite;
+}
+.cap-scan-sweep { position: absolute; left: 0; right: 0; top: -100%; height: 100%; animation: cap-scan-sweep var(--scan-ms) var(--scan-ease) infinite; }
+.cap-scan-line {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--scan) 8%, #f4ffd0 50%, var(--scan) 92%, transparent);
+  box-shadow: 0 0 6px 1px var(--scan-glow), 0 0 22px 4px rgba(200, 255, 0, 0.22);
+}
+.cap-scan-line > b {
+  position: absolute; top: 50%; left: 8%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0 6px 2px var(--scan); animation: cap-scan-node 3.1s ease-in-out infinite alternate;
+}
+.cap-scan-line > b:nth-child(2) { animation-duration: 4.3s; animation-delay: -1.7s; }
+.cap-scan-line > b:nth-child(3) { animation-duration: 2.3s; animation-delay: -0.9s; }
+.cap-scan-tag {
+  position: absolute; left: 50%; bottom: calc(6cqmin + 10px); transform: translateX(-50%); max-width: 80%;
+  display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; line-height: 1.35; color: #ecffb8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: rgba(0, 0, 0, 0.62); box-shadow: inset 0 0 0 1px rgba(200, 255, 0, 0.32); backdrop-filter: blur(6px);
+}
+.cap-scan-tag > i { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--scan); box-shadow: 0 0 6px var(--scan); animation: cap-scan-blink 0.9s ease-in-out infinite alternate; }
+@keyframes cap-scan-sweep { 0% { transform: translateY(0); opacity: 0 } 10%, 88% { opacity: 1 } 100% { transform: translateY(100%); opacity: 0 } }
+@keyframes cap-scan-reveal { 0% { -webkit-mask-position: 0 100%; mask-position: 0 100%; opacity: 0 } 10%, 88% { opacity: 1 } 100% { -webkit-mask-position: 0 50%; mask-position: 0 50%; opacity: 0 } }
+@keyframes cap-scan-node { to { left: 92% } }
+@keyframes cap-scan-breathe { 50% { transform: scale(0.86); opacity: 0.75 } }
+@keyframes cap-scan-blink { to { opacity: 0.35 } }
+@media (prefers-reduced-motion: reduce) {
+  .cap-scan * { animation: none !important; }
+  .cap-scan-sweep { transform: translateY(50%); }
+  .cap-scan-grid { -webkit-mask-position: 0 75%; mask-position: 0 75%; }
+}
 .cp-sample { display: flex; align-items: center; justify-content: center; white-space: pre; }
 .cp-theme {
   display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 9px 2px 7px; border-radius: 11px;
@@ -3664,6 +3809,40 @@ html .editor-theme .ed-body .ed-player .ed-play:focus-visible .ed-play-ring { fi
 .cb-page .cb-range { color: rgb(var(--cb-fg) / 0.75) !important; }
 .cb-page .cb-edited { color: rgb(var(--cb-fg) / 0.5) !important; background: var(--cbx-soft) !important; font-weight: 600 !important; letter-spacing: .04em; }
 .cb-page .cb-act { border-color: var(--cbx-line); background: var(--cbx-soft); }
+
+/* ── The Clipboard's head (user, 2026-11-09: "very messy"): sections, brand and filters as one block ── */
+.cb-head-tools { display: flex; flex-direction: column; gap: 10px; }
+/* sections: one strip on one line (it scrolls sideways when the column is narrow) */
+.cb-seg { display: flex; gap: 2px; padding: 3px; border-radius: 11px; background: var(--cbx-soft); box-shadow: inset 0 0 0 1px var(--cbx-line); overflow-x: auto; scrollbar-width: none; }
+.cb-seg::-webkit-scrollbar { display: none; }
+.cb-seg-tab { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px; border-radius: 8px; font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  color: rgb(var(--cb-fg) / 0.6); transition: background-color .15s, color .15s, box-shadow .15s; }
+.cb-seg-tab:hover { color: var(--cb-text); background: var(--cbx-hover); }
+.cb-seg-tab[aria-selected="true"] { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.11); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.1), 0 2px 6px -3px rgba(0,0,0,0.6); }
+.cb-seg-tab[data-empty]:not([aria-selected="true"]) { color: rgb(var(--cb-fg) / 0.38); }
+.cb-seg-tab:focus-visible { outline: 2px solid rgb(var(--cb-fg) / 0.5); outline-offset: -2px; }
+.cb-seg-dot { flex: none; width: 6px; height: 6px; border-radius: 999px; }
+.cb-seg-n { font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; color: rgb(var(--cb-fg) / 0.45); }
+.cb-seg-tab[aria-selected="true"] .cb-seg-n { color: rgb(var(--cb-fg) / 0.7); }
+[data-theme="light"] .cb-seg-tab[aria-selected="true"] { background: #fff; box-shadow: inset 0 0 0 1px rgba(12,12,14,0.1), 0 1px 3px rgba(12,12,14,0.08); }
+/* brand: one card — the kit and its button on a line, how many have it under them */
+.cbb-card { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 12px; background: var(--cbx-soft); box-shadow: inset 0 0 0 1px var(--cbx-line); }
+.cb-page .cbb-card .cbb-bar { padding: 0; flex-wrap: nowrap; gap: 6px; }
+.cbb-meta { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 2px; }
+.cbb-meta-end { margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cbb-note { padding: 0 2px; }
+/* filters: small chips on one line, Sort at the far end */
+.cb-head-tools .cb-filters { gap: 6px; }
+.cb-filters-end { margin-left: auto; }
+.ag-chip[data-size="xs"] { height: 28px; }
+.ag-chip[data-size="xs"] .ag-chip-main { gap: 5px; padding: 0 9px 0 11px; font-size: 11.5px; }
+.ag-chip[data-size="xs"][data-set] .ag-chip-main { padding-right: 3px; }
+.ag-chip[data-size="xs"] .ag-chip-x { width: 18px; height: 18px; margin-right: 5px; }
+.ag-chip[data-size="xs"] .ag-chip-chev { width: 11px; height: 11px; }
+.ag-chip[data-size="xs"] .ag-menu li { height: 30px; font-size: 12px; }
+.ag-chip-icon { display: inline-flex; color: rgba(244,244,245,0.6); }
+.ag-chip-icon + .ag-chip-value::before { display: none; }
+[data-theme="light"] .ag-chip-icon { color: rgba(12,12,14,0.5); }
 
 /* a real checkbox: a rounded box, ticked in ink */
 .cb-page .cb-check { appearance: none; -webkit-appearance: none; width: 15px; height: 15px; margin: 0; border-radius: 4px; display: grid; place-items: center;

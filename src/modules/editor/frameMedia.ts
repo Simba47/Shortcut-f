@@ -1,5 +1,5 @@
 import type { SegmentLocal, FrameItem } from '@chai-cut/shared'
-import { isFrameLayout, frameOf, mainAudioVolume } from './frames'
+import { isFrameLayout, frameOf, mainAudioVolume, itemSourceAt } from './frames'
 
 // Media a frame's lanes show besides the main video: other uploaded videos and photos. The
 // preview canvas draws them; this keeps one element per video item, in step with the main
@@ -84,14 +84,15 @@ export function createFrameMediaPool(getVideoUrl: (videoId: string) => string | 
       inUse.add(it.id)
       if (!(v.duration > 0)) continue
       const showing = clipMs >= from
-      // Where this item's video should be, looping over its own length (frozen: held on the picture
-      // at its own start, silent — render.py holds that one picture)
-      const target = (((it.source_offset_ms ?? 0) + (it.freeze ? 0 : Math.max(0, clipMs - it.start_ms))) / 1000) % v.duration
+      // Where this item's video should be, looping over its own length (frozen, or in one of its
+      // freeze stretches: held on that picture, silent — render.py holds that one picture)
+      const at = itemSourceAt(it, clipMs)
+      const target = (at.ms / 1000) % v.duration
       const drift = Math.abs(v.currentTime - target)
-      const vol = it.muted || it.freeze ? 0 : it.volume ?? 1
+      const vol = it.muted || at.held ? 0 : it.volume ?? 1
       v.muted = !showing || vol <= 0
       v.volume = Math.max(0, Math.min(1, vol))
-      if (playing && showing && !it.freeze) {
+      if (playing && showing && !at.held) {
         if (v.paused) v.play().catch(() => {})
         if (drift > 0.35 && drift < v.duration - 0.35) v.currentTime = target
       } else {
