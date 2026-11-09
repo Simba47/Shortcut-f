@@ -569,6 +569,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   }, [focusClipId, clipTab])
   // Select mode: tick several clips, then delete them together
   const [selecting, setSelecting] = useState(false)
+  const showSelect = selecting || shownClips.length > 0
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -1913,21 +1914,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 {badgeCount} clip{badgeCount === 1 ? '' : 's'}
               </span>
             )}
-            <div className="flex-1" />
-            {/* Select (user, 2026-11-09): starts with nothing ticked — tap the clips wanted; Cancel leaves,
-                clearing the ticks. (It was a "Select all" tick box: it ticked every clip, and once one was
-                unticked it showed empty and ticked them all again — no way out but Esc.) */}
-            {(selecting || shownClips.length > 0) && (
-              <button type="button" className="cb-select-btn" data-on={selecting || undefined} aria-pressed={selecting}
-                onClick={() => (selecting ? stopSelecting() : (setSelecting(true), setSelected(new Set())))}>
-                {selecting ? 'Cancel' : (
-                  <>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4" /><path d="M8 12.5l2.8 2.8L16.5 9.5" /></svg>
-                    Select
-                  </>
-                )}
-              </button>
-            )}
           </div>
           {/* Sections: every clip, or only those from one place */}
           {/* Sections, the brand and the filters as one block (user, 2026-11-09: it was messy — tabs on
@@ -1955,20 +1941,37 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             {/* (brand kit Phase 2) a kit on every clip at once */}
             {/* (shown while selecting too: the kit then goes on the ticked clips only) */}
             <BrandAllBar b={brands} total={boardClips.length} selected={selecting ? [...selected] : []} />
-            {tabClips.length > 1 && (
+            {(tabClips.length > 1 || showSelect) && (
               <div className="cb-filters" role="group" aria-label="Filter the clips">
-                <FilterChip size="xs" label="Length" value={lenF} onChange={setLenF} clearable
-                  options={[['all', 'Any length'], ['short', 'Under 30s'], ['mid', '30–60s'], ['long', 'Over 1 min']]} />
-                <FilterChip size="xs" label="Exported" value={expF} onChange={setExpF} clearable
-                  options={[['all', 'Any'], ['yes', 'Exported'], ['no', 'Not exported yet']]} />
-                {/* Sort at the far end, as an icon and its choice */}
-                <span className="cb-filters-end">
-                  <FilterChip size="xs" align="end" label="Sort" value={sortBy} onChange={setSortBy}
-                    icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 4v16M3.5 16.5L7 20l3.5-3.5M17 20V4M13.5 7.5L17 4l3.5 3.5" /></svg>}
-                    options={[['new', 'Newest first'], ['old', 'Oldest first'], ['video', 'Order in the video'], ['short', 'Shortest first'], ['long', 'Longest first']]} />
-                </span>
+                {/* Sort first, Select at the far end (user, 2026-11-10) */}
+                {tabClips.length > 1 && (
+                  <>
+                    <FilterChip size="xs" label="Sort" value={sortBy} onChange={setSortBy}
+                      icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 4v16M3.5 16.5L7 20l3.5-3.5M17 20V4M13.5 7.5L17 4l3.5 3.5" /></svg>}
+                      options={[['new', 'Newest first'], ['old', 'Oldest first'], ['video', 'Order in the video'], ['short', 'Shortest first'], ['long', 'Longest first']]} />
+                    <FilterChip size="xs" label="Length" value={lenF} onChange={setLenF} clearable
+                      options={[['all', 'Any length'], ['short', 'Under 30s'], ['mid', '30–60s'], ['long', 'Over 1 min']]} />
+                    <FilterChip size="xs" label="Exported" value={expF} onChange={setExpF} clearable
+                      options={[['all', 'Any'], ['yes', 'Exported'], ['no', 'Not exported yet']]} />
+                  </>
+                )}
+                {/* Select (user, 2026-11-09): starts with nothing ticked; Cancel leaves, clearing the ticks. Without
+                    the filters too: one clip has no filters but can still be ticked */}
+                {showSelect && (
+                  <span className="cb-filters-end">
+                    <button type="button" className="cb-select-btn" data-on={selecting || undefined} aria-pressed={selecting}
+                      onClick={() => (selecting ? stopSelecting() : (setSelecting(true), setSelected(new Set())))}>
+                      {selecting ? 'Cancel' : (
+                        <>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4" /><path d="M8 12.5l2.8 2.8L16.5 9.5" /></svg>
+                          Select
+                        </>
+                      )}
+                    </button>
+                  </span>
+                )}
                 {/* ("3 of 7 · Clear" on its own line under the chips: .cb-filter-count) */}
-                {clipFiltering && (
+                {clipFiltering && tabClips.length > 1 && (
                   <p className="cb-filter-count" role="status">
                     {shownClips.length} of {tabClips.length}
                     <button type="button" onClick={clearClipFilters}>Clear</button>

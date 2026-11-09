@@ -40,7 +40,8 @@ export type FrameItemKind = 'video' | 'photo' | 'text'
  * and anything outside the format's own range isn't shown.
  */
 /** A frozen stretch inside a frame video item (FrameItem.holds) */
-export interface FrameHold { at_ms: number; len_ms: number }
+/** `on`: the layer a freeze of a part belongs to (a frame item's id, or `main:<slot>`); absent = every video in the part */
+export interface FrameHold { at_ms: number; len_ms: number; on?: string }
 
 /** What a video or photo moved from its row into a frame needs to go back there */
 export interface FrameRowOrigin {
@@ -155,9 +156,12 @@ export interface FrameSettings {
   /** Rounded corners of the main video, per slot index */
   main_corners?: Record<string, CornerStyle>
   /**
-   * Freezes of the whole frame (user, 2026-11-10: "everything waits"): every video in it holds still,
-   * silent, for each stretch, then plays on from the same picture, and the frame and the clip are that
-   * much longer. `at_ms` from the frame's start, on the timeline. `dim` darkens the videos meanwhile.
+   * Freezes of the part (user, 2026-11-10): the layer picked holds still, silent, for each stretch, then
+   * plays on from the same picture, and the part and the clip are that much longer; the others play on
+   * and hold their last picture for the time added. `at_ms` from the part's start, on the timeline.
+   * `dim` darkens the frozen layer of a frame meanwhile.
+   * Any part of the main video has them, a frame or not (a plain part keeps them here too), and they
+   * stay when its format changes.
    */
   freeze?: { holds: FrameHold[]; dim?: boolean } | null
   /** The main video is heard under the frame though no slot shows it (Photo Story), at main_volume */

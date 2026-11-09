@@ -235,7 +235,8 @@ export async function brandClip(userId: string, clipId: string, kitId: string | 
   if (l.userId !== userId) throw err('Clip not found', 404)
   const kit = kitId ? await usableKit(userId, kitId) : null
   if (kitId && !kit) throw err('That brand kit isn’t yours to use', 403)
-  if (kit && l.brand?.kit_id === kit.id) return true
+  // (the same kit again: the clip takes the kit as it is now — "Put on all" says so)
+  if (kit && l.brand?.kit_id === kit.id) { await followKit(l, kit); return true }
   // (a locked team kit on it stays on: only its owner, or someone who can edit it, takes it off — Phase 6)
   if (l.brand) {
     const { kitAccess } = await import('./brandKits')
@@ -268,13 +269,19 @@ export async function catchUpClip(clipId: string): Promise<void> {
     if (!l?.brand) return
     const kit = await usableKit(l.userId, l.brand.kit_id)
     if (!kit) return
-    if (!l.brand.applied) { await save(l, l.target, { ...l.brand, applied: kit.data }); return }
-    if (!brandChanged(l.brand.applied, kit.data)) return
-    const r = updateBrand(l.target, l.brand.applied, kit, l.brand.before)
-    await save(l, r.target, { ...l.brand, before: r.before, applied: r.applied })
+    await followKit(l, kit)
   } catch (e) {
     console.error('[brand] a clip could not follow its kit:', e)
   }
+}
+
+/** The clip takes its kit as it is now, if it changed since the clip last took it */
+async function followKit(l: Loaded, kit: BrandKit) {
+  const on = l.brand!
+  if (!on.applied) { await save(l, l.target, { ...on, applied: kit.data }); return }
+  if (!brandChanged(on.applied, kit.data)) return
+  const r = updateBrand(l.target, on.applied, kit, on.before)
+  await save(l, r.target, { ...on, before: r.before, applied: r.applied })
 }
 
 /** The brand kit on one of the user's clips, as saved (null: none) */

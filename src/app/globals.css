@@ -3196,8 +3196,6 @@ html:not([data-theme="light"]) .editor-theme .ed-pv-box:not([data-full-view]) { 
 html:not([data-theme="light"]) .editor-theme .ed-pv-box:not([data-full-view]) > div > .relative > :first-child {
   border-color: rgba(255, 255, 255, 0.07) !important; box-shadow: 0 22px 48px -20px rgba(0, 0, 0, 0.9) !important;
 }
-html:not([data-theme="light"]) .editor-theme .ed-fullview-btn { width: 30px; height: 30px; border-radius: 50%; opacity: .85; transition: opacity .15s, transform .15s; }
-html:not([data-theme="light"]) .editor-theme .ed-fullview-btn:hover { opacity: 1; transform: scale(1.05); }
 
 /* the timeline's bar part of the panel, a hairline under it */
 html:not([data-theme="light"]) .editor-theme .ed-transport { background: transparent !important; border-bottom: 1px solid var(--ed-hair); }
@@ -3426,12 +3424,6 @@ html:not([data-theme="light"]) .editor-theme [data-layout-panel="Editing panel"]
 [data-theme="light"] .editor-theme .ed-pv-box:not([data-full-view]) > div > .relative > :first-child {
   border-color: rgba(255, 255, 255, 0.06) !important; box-shadow: 0 20px 44px -20px rgba(0, 0, 0, 0.85) !important;
 }
-[data-theme="light"] .editor-theme .ed-fullview-btn {
-  /* (beside the video since 2026-11-06, on the page: the page's own colours, not a dark glass over the picture) */
-  width: 30px; height: 30px; border-radius: 50%;
-  opacity: .85; transition: opacity .15s, background-color .15s, transform .15s;
-}
-[data-theme="light"] .editor-theme .ed-fullview-btn:hover { opacity: 1; transform: scale(1.05); }
 /* the timeline's add button: solid lime, a black plus; the main row's mark in ink-lime */
 [data-theme="light"] .editor-theme .tl2-add { background: #c8ff00 !important; color: #0a0a0a !important; border: 0 !important; box-shadow: 0 1px 2px rgba(24, 24, 27, 0.15), inset 0 0 0 1px rgba(0, 0, 0, 0.06) !important; }
 [data-theme="light"] .editor-theme .tl2-add:hover { background: #d4ff33 !important; }

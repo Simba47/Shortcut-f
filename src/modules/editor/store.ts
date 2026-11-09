@@ -367,6 +367,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
       const kf = { ...s.keyframes }
       const joinable = (a: SegmentLocal, b: SegmentLocal) =>
         a.layout === b.layout && !isFrameLayout(a.layout) && !a.locked && !b.locked
+        // (a part with a freeze stays its own: its freezes are counted from its start)
+        && !a.frame?.freeze?.holds?.length && !b.frame?.freeze?.holds?.length
         && Math.abs(b.start_ms - a.end_ms) <= 1
         && !transitionAfter?.has(a.id)
         && a.crop_boxes.length === b.crop_boxes.length
@@ -463,6 +465,9 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     set(s => {
       const seg = s.segments.find(s => s.id === segId)
       if (!seg || tMs <= seg.start_ms + 100 || tMs >= seg.end_ms - 100) return s
+      // (the right half's items are new: a freeze on one follows it)
+      const newItemIds = new Map(seg.frame?.items?.map(it => [it.id, crypto.randomUUID()]))
+      const rightFreeze = seg.frame?.freeze ? fitFrameFreeze(seg.frame.freeze, tMs - seg.start_ms, seg.end_ms - tMs) : undefined
       const newBoxes: CropBoxLocal[] = seg.crop_boxes.map(box => ({
         ...makeBox(box.slot_index, seg.layout, tMs, [{ t_ms: tMs, ...getPos(box.id, tMs) }]),
         source_video_id: box.source_video_id,
@@ -488,8 +493,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
             // (a frame with freezes: its videos on the right go on from where they've got to, freezes and all)
             frame: seg.frame ? {
               ...seg.frame,
-              items: seg.frame.items?.map(it => ({ ...it, id: crypto.randomUUID(), ...(seg.frame?.freeze && it.kind === 'video' && !it.freeze && it.start_ms < tMs && it.end_ms > tMs ? { start_ms: tMs, source_offset_ms: itemSourceAt(withFrameFreeze(seg, it), tMs).ms } : {}) })),
-              ...(seg.frame.freeze ? { freeze: fitFrameFreeze(seg.frame.freeze, tMs - seg.start_ms, seg.end_ms - tMs) } : {}),
+              items: seg.frame.items?.map(it => ({ ...it, id: newItemIds.get(it.id) as string, ...(seg.frame?.freeze && it.kind === 'video' && !it.freeze && it.start_ms < tMs && it.end_ms > tMs ? { start_ms: tMs, source_offset_ms: itemSourceAt(withFrameFreeze(seg, it), tMs).ms } : {}) })),
+              ...(seg.frame.freeze ? { freeze: rightFreeze ? { ...rightFreeze, holds: rightFreeze.holds.map(h => (h.on && newItemIds.has(h.on) ? { ...h, on: newItemIds.get(h.on) } : h)) } : rightFreeze } : {}),
             } : seg.frame,
           },
         ].sort((a, b) => a.sort_order - b.sort_order),
@@ -556,11 +561,18 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     segments: s.segments.map(seg => {
       if (seg.id !== segId) return seg
       const frame = frameOf(seg)
-      return { ...seg, frame: { ...frame, items: (frame.items ?? []).flatMap(it => {
-        if (it.id !== itemId || t <= it.start_ms || t >= it.end_ms) return [it]
-        // (a frozen video's right part holds the same picture; a freeze stretch cut goes on in it)
-        return cutItem(it, t, crypto.randomUUID())
-      }) } }
+      const rightId = crypto.randomUUID()
+      const rel = t - seg.start_ms
+      return { ...seg, frame: {
+        ...frame,
+        items: (frame.items ?? []).flatMap(it => {
+          if (it.id !== itemId || t <= it.start_ms || t >= it.end_ms) return [it]
+          // (a frozen video's right part holds the same picture; a freeze stretch cut goes on in it)
+          return cutItem(it, t, rightId)
+        }),
+        // (the video's freezes after the cut are on its right part now)
+        ...(frame.freeze ? { freeze: { ...frame.freeze, holds: frame.freeze.holds.map(h => (h.on === itemId && h.at_ms >= rel ? { ...h, on: rightId } : h)) } } : {}),
+      } }
     }),
   })),
 

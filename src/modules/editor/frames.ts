@@ -610,7 +610,7 @@ export function fitHolds(holds: FrameHold[] | null | undefined, len: number): Fr
   for (const h of [...(holds ?? [])].sort((a, b) => a.at_ms - b.at_ms)) {
     const at = Math.max(0, Math.round(h.at_ms), out.length ? out[out.length - 1].at_ms + out[out.length - 1].len_ms : 0)
     const end = Math.min(len, Math.round(h.at_ms + h.len_ms))
-    if (end - at >= 1) out.push({ at_ms: at, len_ms: end - at })
+    if (end - at >= 1) out.push({ ...h, at_ms: at, len_ms: end - at })
   }
   return out
 }
@@ -687,28 +687,35 @@ export function movedHold(h: FrameHold, mode: 'move' | 'start' | 'end', d: numbe
 // A freeze of a frame: every video in it waits. The main video really does (inserts.ts piecesOf holds
 // it, the clock runs on), and each video added to a slot takes the freeze as stretches of its own
 
-/** Whether the frame's videos are held still at clip time `t` */
-export function frameHeldAt(seg: Pick<SegmentLocal, 'start_ms' | 'frame'>, t: number): boolean {
+/** Whether a freeze is on the main video (it waits there: inserts.ts) */
+export const isMainHold = (h: FrameHold) => !h.on || h.on.startsWith('main:')
+/** Whether a freeze is on this layer (a frame item's id, or `main:<slot>`) */
+export const sameLayer = (h: FrameHold, layer: string) => !h.on || h.on === layer || (h.on.startsWith('main:') && layer.startsWith('main:'))
+
+/** Whether this layer of the part is frozen at clip time `t` */
+export function frameHeldAt(seg: Pick<SegmentLocal, 'start_ms' | 'frame'>, t: number, layer: string): boolean {
   const rel = t - seg.start_ms
-  return !!seg.frame?.freeze?.holds?.some(h => rel >= h.at_ms && rel < h.at_ms + h.len_ms)
+  return !!seg.frame?.freeze?.holds?.some(h => sameLayer(h, layer) && rel >= h.at_ms && rel < h.at_ms + h.len_ms)
 }
 
 /** How much of the first `rel` ms of a frame its freezes take */
 export const frameHeldBefore = (frame: FrameSettings | null | undefined, rel: number) => heldBefore(frame?.freeze?.holds, rel)
 
-/** A video item as it plays in its frame: the frame's freezes among its own stretches */
-export function withFrameFreeze(seg: Pick<SegmentLocal, 'start_ms' | 'frame'>, it: FrameItem): FrameItem {
+/** A video item as it plays in its frame: its freezes, and its last picture held for the time another layer's freezes added */
+export function withFrameFreeze(seg: Pick<SegmentLocal, 'start_ms' | 'end_ms' | 'frame'>, it: FrameItem): FrameItem {
   const f = seg.frame?.freeze
   if (!f?.holds?.length || it.kind !== 'video' || it.freeze) return it
-  const off = seg.start_ms - it.start_ms
-  const mine = f.holds.map(h => ({ at_ms: Math.max(0, h.at_ms + off), len_ms: h.at_ms + off + h.len_ms - Math.max(0, h.at_ms + off) }))
-  return { ...it, holds: fitHolds([...(it.holds ?? []), ...mine], it.end_ms - it.start_ms), dim: it.dim || f.dim }
+  const off = seg.start_ms - it.start_ms, len = it.end_ms - it.start_ms
+  const mine = f.holds.filter(h => sameLayer(h, it.id)).map(h => ({ at_ms: Math.max(0, h.at_ms + off), len_ms: h.at_ms + off + h.len_ms - Math.max(0, h.at_ms + off) }))
+  const added = it.end_ms >= seg.end_ms - 1 ? f.holds.filter(h => !sameLayer(h, it.id)).reduce((sum, h) => sum + h.len_ms, 0) : 0
+  return { ...it, holds: fitHolds([...(it.holds ?? []), ...mine, ...(added ? [{ at_ms: Math.max(0, len - added), len_ms: Math.min(len, added) }] : [])], len) }
 }
 
 /** frame.freeze for a frame whose start moved by `d` and that's now `len` long (null: none left) */
 export function fitFrameFreeze(f: FrameSettings['freeze'], d: number, len: number): FrameSettings['freeze'] {
   if (!f) return f
-  const holds = fitHolds(f.holds.map(h => ({ at_ms: h.at_ms - d, len_ms: h.len_ms })), len)
+  // (layer by layer: freezes on different layers may overlap)
+  const holds = [...new Set(f.holds.map(h => h.on))].flatMap(on => fitHolds(f.holds.filter(h => h.on === on).map(h => ({ ...h, at_ms: h.at_ms - d })), len)).sort((a, b) => a.at_ms - b.at_ms)
   return holds.length ? { ...f, holds } : null
 }
 

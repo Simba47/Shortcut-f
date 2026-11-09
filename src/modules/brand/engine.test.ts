@@ -60,6 +60,47 @@ test('a clip with no caption style yet: its capitals are kept as off, never empt
   assert.equal(takeBrandOff(on.target, kit().data, old).caption.uppercase, false)
 })
 
+const TELUGU = 'పెద్ద సేల్'
+
+test('text in Telugu letters keeps its own font: a kit font has none of those letters', () => {
+  const on = putBrandOn(clip({ texts: [text('t1', { text: TELUGU, font: 'noto-sans-telugu' }), text('t2')] }), kit())
+  assert.deepEqual([on.target.texts[0].font, on.target.texts[0].color, on.target.texts[0].size], ['noto-sans-telugu', '#ffcc00', 80])
+  assert.equal(on.target.texts[1].font, 'Poppins')
+  // a kit with no title font doesn't leave it with none either
+  const plain = kit({ title: { font: null, color: '#ffcc00', size: 80 } })
+  assert.equal(putBrandOn(clip({ texts: [text('t1', { text: TELUGU, font: 'noto-sans-telugu' })] }), plain).target.texts[0].font, 'noto-sans-telugu')
+  // off: its colour and size go back, its font was never changed
+  const off = takeBrandOff(on.target, kit().data, on.before)
+  assert.deepEqual([off.texts[0].font, off.texts[0].color, off.texts[0].size], ['noto-sans-telugu', '#ffffff', 40])
+})
+
+test('text in Telugu letters: a kit change never gives it the new font; off gives back one the kit put on before', () => {
+  const k2 = kit({ title: { font: 'Anton', color: '#ffcc00', size: 80 } })
+  const t = clip({ texts: [text('t1', { text: TELUGU, font: 'noto-sans-telugu', color: '#ffcc00', size: 80 })] })
+  assert.equal(upd(t, kit().data, k2).texts[0].font, 'noto-sans-telugu')
+  // (branded before this rule: it has the kit's font; the kit's new font doesn't follow, and off takes it away)
+  const before = clip({ texts: [text('t1', { text: TELUGU, font: 'Poppins', color: '#ffcc00', size: 80 })] })
+  assert.equal(upd(before, kit().data, k2).texts[0].font, 'Poppins')
+  const off = takeBrandOff(before, kit().data, { texts: { t1: { font: 'noto-sans-telugu', color: '#ffffff', size: 40 } }, caption: null, text_case: null, frames: {}, end_card: null })
+  assert.equal(off.texts[0].font, 'noto-sans-telugu')
+})
+
+test('a kit with no caption font keeps the font the captions have', () => {
+  const k = kit()   // (its captions name no font)
+  const t = clip({ caption: { template: 'plain', color: '#eeeeee', size: 52, animation: 'karaoke', font: 'roboto' } })
+  assert.equal(putBrandOn(t, k).target.caption.font, 'roboto')
+  const named = kit({ captions: { ...k.data.captions, font: 'Poppins' } })
+  assert.equal(putBrandOn(t, named).target.caption.font, 'Poppins')
+  // the kit later names one: the captions take it; it names none again: they keep what they have
+  const on = putBrandOn(t, k)
+  const followed = updateBrand(on.target, k.data, named, on.before).target
+  assert.equal(followed.caption.font, 'Poppins')
+  assert.equal(updateBrand(followed, named.data, k, on.before).target.caption.font, 'Poppins')
+  // a font the user picked while the kit named none stays theirs
+  const mine = { ...on.target, caption: { ...on.target.caption, font: 'Lato' } }
+  assert.equal(updateBrand(mine, k.data, named, on.before).target.caption.font, 'Lato')
+})
+
 test('off: everything goes back, except what the user changed while it was on', () => {
   const on = putBrandOn(clip(), kit())
   // (the user recolours one text while the brand is on)

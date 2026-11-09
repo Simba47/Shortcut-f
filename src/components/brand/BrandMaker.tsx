@@ -8,8 +8,8 @@ import { foundFromLink, foundList, withFoundBrand, MAX_EXTRA_COLORS, type BrandK
 import { matchBrandStyles, foundFromStyle, type BrandStyle } from '@/lib/shared/brandStyles'
 
 /**
- * Making a brand in a minute (brand kit rebuild, Phase 1, 2026-10-27), the same on the Brands page
- * (BrandSetup) and in the editor's kit workshop (BrandKitStudio):
+ * Making a brand in a minute (brand kit rebuild, Phase 1, 2026-10-27), in the kit's workshop
+ * (BrandKitStudio):
  *
  *  - BrandStart, "Where's your brand?": three ways in — a website or profile link (logo, name,
  *    @handle, colours, font: services/brandFromLink.ts), a logo (its colours read from it), or a few

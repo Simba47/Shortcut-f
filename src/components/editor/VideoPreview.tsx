@@ -17,9 +17,9 @@ import { applyCase, loadVideoFonts } from './CaptionStyler'
 import { captionCaseOf } from '@/modules/captions/store'
 import { normalizedSlotAspect, fitToAspect } from '@/modules/editor/utils'
 import { framePicture } from '@/modules/editor/framePicture'
-import { draggedView, zoomedView, wholeView } from '@/modules/editor/frameView'
+import { draggedView, zoomedView, wholeView, resizedBox, type BoxEdge } from '@/modules/editor/frameView'
 import { backgroundPixels, frameBackgroundOf, type FrameBackground } from '@/lib/shared/brandCard'
-import { frameHeldAt, withFrameFreeze, isMediaFrame, mediaFrameItemAt, isFrameLayout, frameSlotLabels, frameLanesFor, frameBandShown, frameOf, itemAt, captionBandAt, cornerGeometry, MIN_ROW_H, CAPTION_CLOSE_H, mainRect, boxRect, MIN_BOX as MIN_MAIN_BOX, frameAreas, frameBase, areaRadius, frameSlotSize, isTextLane, frameRows, validRowOrder, slotOffers, BLUR_SOURCE_SLOT, FRAME_TEMPLATES, barAt, barFlipped, MIN_MOVABLE_W, itemSourceAt } from '@/modules/editor/frames'
+import { frameHeldAt, isMediaFrame, mediaFrameItemAt, isFrameLayout, frameSlotLabels, frameLanesFor, frameBandShown, frameOf, itemAt, captionBandAt, cornerGeometry, MIN_ROW_H, CAPTION_CLOSE_H, mainRect, boxRect, MIN_BOX as MIN_MAIN_BOX, frameAreas, frameBase, areaRadius, frameSlotSize, isTextLane, frameRows, validRowOrder, slotOffers, BLUR_SOURCE_SLOT, FRAME_TEMPLATES, barAt, barFlipped, MIN_MOVABLE_W, itemSourceAt } from '@/modules/editor/frames'
 import type { FrameMediaPool } from '@/modules/editor/frameMedia'
 import { useLiveTimeMs, liveTime, usePlayerStore, LIVE_REDRAW_MS } from '@/modules/player/store'
 import { addedVideoBox, isGapPart } from '@/modules/editor/visibility'
@@ -809,7 +809,7 @@ function paintFrame(
     if (fill !== 'none' && ring !== 'none') { ctx.save(); clipArea(ctx, a); ctx.fillStyle = fill; ctx.fillRect(a.x, a.y, a.w, a.h); ctx.restore() }
     if (main.has(area.slot) && !frame.main_hidden?.[String(area.slot)] && vW && vH && !coveredHere) {
       const box = seg.crop_boxes.find(b => b.slot_index === area.slot)
-      const dimMain = !!frame.freeze?.dim && frameHeldAt(seg, tMs)
+      const dimMain = !!frame.freeze?.dim && frameHeldAt(seg, tMs, `main:${area.slot}`)
       // Shown whole: the video isn't cropped here — unless the slot crops the main video to its own
       // view (mainCrop: Screen + face cam's Screen, with Same video)
       if (contain && !(area.kind === 'slot' && area.mainCrop)) {
@@ -841,8 +841,7 @@ function paintFrame(
       // (the part of it picked: dragged / zoomed in the preview, as a photo)
       const draw = put(v, v.videoWidth, v.videoHeight, it.pan ? Math.max(1, it.pan.zoom ?? 1) : 1, 0, it.pan)
       // Frozen (or in a freeze stretch) and dimmed: the picture at 55% brightness (render.py _dim_filter)
-      const playing = withFrameFreeze(seg, it)
-      const dimmed = dimWhen(ctx, !!playing.dim && itemSourceAt(playing, tMs).held, draw)
+      const dimmed = dimWhen(ctx, (!!it.dim && itemSourceAt(it, tMs).held) || (!!frame.freeze?.dim && frameHeldAt(seg, tMs, it.id)), draw)
       inSlot(ctx, it.corners, a, dimmed, boxRect(it.rect), contain ? fill : ring, contain ? { w: v.videoWidth, h: v.videoHeight } : true)
     }
   }
@@ -1372,6 +1371,24 @@ function exportFont(id?: string | null) {
 }
 
 /**
+ * After a text's own font, for the letters it doesn't have: the Indian scripts' Noto fonts, then Roboto
+ * for the English letters those have none of — as the export picks them (text_style.py font_runs).
+ * Empty for a text with nothing to fall back for.
+ */
+function letterFallbacks(text: string, font?: string | null): string {
+  if (!SCRIPT_FALLBACKS.includes(font ?? '') && !FRAME_SCRIPTS.some(([lo, hi]) => [...text].some(c => c >= lo && c <= hi))) return ''
+  return [...SCRIPT_FALLBACKS, 'roboto'].map(id => `"${exportFont(id).family}", `).join('')
+}
+
+/** A text's font list for the canvas: `bundled`, its export font when it has one */
+function textFamily(o: Pick<TextOverlayType, 'text' | 'font'>, bundled: { family: string } | null): string {
+  const more = letterFallbacks(o.text ?? '', o.font)
+  if (bundled) return `"${bundled.family}", ${more}sans-serif`
+  if (!more) return o.font ?? 'sans-serif'
+  return `${o.font && o.font !== 'sans-serif' ? `${o.font}, ` : ''}${more}sans-serif`
+}
+
+/**
  * Where captions sit when they haven't been moved (position_y unset), as each look draws them: a
  * Creator style's own place (Behind near the top…), "One word" in the middle, the rest near the
  * bottom. The box that moves them starts from here, so they stay under the pointer.
@@ -1753,7 +1770,7 @@ export function textOverlayLines(o: Pick<TextOverlayType, 'text' | 'uppercase' |
   if (!ctx) return full.split('\n')
   const f = exportFont(o.font)
   ctx.save()
-  ctx.font = `400 ${(o.size ?? 72) * frameW / 1080}px ${emojiFamily()}, "${f.family}", sans-serif`
+  ctx.font = `400 ${(o.size ?? 72) * frameW / 1080}px ${emojiFamily()}, "${f.family}", ${letterFallbacks(full, o.font)}sans-serif`
   if ('letterSpacing' in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = '0px'
   const lines = wrapTextLines(full, o.w * frameW, s => ctx.measureText(s).width)
   ctx.restore()
@@ -1772,7 +1789,7 @@ function drawStyledText(ctx: CanvasRenderingContext2D, o: TextOverlayType, elaps
   const fontSize = Math.max(8, Math.round((o.size ?? 72) * k))
   // A bundled font id (e.g. 'roboto') draws with the export's own file, as drawtext does
   const bundled = EXPORT_FONTS[o.font ?? ''] ? exportFont(o.font) : null
-  const fontFamily = `${emojiFamily()}, ${bundled ? `"${bundled.family}", sans-serif` : (o.font ?? 'sans-serif')}`
+  const fontFamily = `${emojiFamily()}, ${textFamily(o, bundled)}`
   const weight = o.weight ?? (bundled ? 400 : 700)
   const full = shownText(o)
 
@@ -1898,7 +1915,7 @@ function drawStyledText(ctx: CanvasRenderingContext2D, o: TextOverlayType, elaps
 function drawCenteredText(ctx: CanvasRenderingContext2D, o: TextOverlayType) {
   const W = ctx.canvas.width, H = ctx.canvas.height
   const font = EXPORT_FONTS[o.font ?? ''] ? exportFont(o.font) : null
-  const family = `${emojiFamily()}, ${font ? `"${font.family}", sans-serif` : (o.font ?? 'sans-serif')}`
+  const family = `${emojiFamily()}, ${textFamily(o, font)}`
   const weight = font ? 400 : 700                      // drawtext uses the font file as it is
   let px = (o.size ?? 48) * W / 1080
   ctx.save()
@@ -2646,7 +2663,7 @@ export function OutputCanvas({
           .map(r => {
             const box = activeSegment.crop_boxes.find(b => b.slot_index === r.lane)
             return (
-              <FrameMainBox key={`main-${r.lane}`} row={r} rect={mainRect(frame, r.lane as number)}
+              <FrameMainBox key={`main-${r.lane}`} row={r} rect={mainRect(frame, r.lane as number)} selected={activeFrameItemId === `main:${r.lane}`}
                 onChange={rect => onFrameMainRectChange(r.lane as number, rect)}
                 view={box && onFrameMainViewChange ? {
                   read: () => getPositionAtRef.current(box.id, liveTime.get()),
@@ -2739,7 +2756,7 @@ function snapTo(centre: number, target: number, tol = GUIDE_SNAP): [number, bool
  * The main video's box inside its slot: drag it to move, a corner to resize (the picture is cut
  * from the source to the box's new shape). Double-click fills the slot again.
  */
-function FrameMainBox({ row, rect, onChange, selected, onSelect, picture, view }: {
+export function FrameMainBox({ row, rect, onChange, selected, onSelect, picture, view }: {
   /** Its slot's area of the frame (shares of the frame) */
   row: { x: number; y: number; w: number; h: number }
   rect: { x: number; y: number; w: number; h: number } | null
@@ -2748,9 +2765,8 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect, picture, view }
   selected?: boolean
   onSelect?: () => void
   /**
-   * A still photo filling its box (user, 2026-11-05), or a video added to the slot (2026-11-09): drag
-   * it to pick which part shows (with the box smaller than the slot: Alt + drag, a plain drag moves
-   * the box), scroll to zoom in. `size`: a video's own size, read when it's dragged
+   * A still photo in its box (user, 2026-11-05), or a video added to the slot (2026-11-09): drag it to
+   * pick which part shows, scroll to zoom in. `size`: a video's own size, read when it's dragged
    */
   picture?: { url?: string; pan: FrameItem['pan']; onPan: (pan: FrameItem['pan']) => void; size?: () => { w: number; h: number } | null }
   /**
@@ -2804,7 +2820,10 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect, picture, view }
     el.addEventListener('wheel', wheel, { passive: false })
     return () => el.removeEventListener('wheel', wheel)
   }, [canZoom])
-  function start(e: React.PointerEvent, mode: 'move' | 'nw' | 'ne' | 'sw' | 'se') {
+  // Dragged inside, the box moves what's in it (user, 2026-11-10: at any size); the box itself moves
+  // by its move icon. With nothing in it to move (shown whole, a photo with a motion): the box
+  const hasContent = !!picture || !!view
+  function start(e: React.PointerEvent, mode: 'move' | 'content' | BoxEdge) {
     if (e.button !== 0) return
     e.stopPropagation(); e.preventDefault()
     onSelect?.()
@@ -2813,10 +2832,10 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect, picture, view }
     const x0 = e.clientX, y0 = e.clientY
     // Moving the picture inside its box: how far (px) it reaches past the box each way
     const own = picture?.size ? picture.size() : natural
-    const pic = mode === 'move' && own && (full || e.altKey) ? picture : undefined
+    const pic = mode === 'content' && own ? picture : undefined
     const bw = sw * r.w, bh = sh * r.h
     // Moving the main video inside its box: the view it starts from, as it's drawn in this box's shape
-    const ar = mode === 'move' && (full || e.altKey) ? view?.videoAR() : null
+    const ar = mode === 'content' ? view?.videoAR() : null
     const v0 = view && ar && bh ? fitToAspect(view.read(), bw / bh / ar) : null
     const k = own ? Math.max(bw / own.w, bh / own.h) * pan.zoom : 1
     const overX = own ? own.w * k - bw : 0, overY = own ? own.h * k - bh : 0
@@ -2839,6 +2858,7 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect, picture, view }
         pic.onPan({ x, y, zoom: p0.zoom })
         return
       }
+      if (mode === 'content') return   // (the video's or photo's size isn't known yet)
       const dx = (ev.clientX - x0) / sw, dy = (ev.clientY - y0) / sh
       let { x, y, w, h } = r
       if (mode === 'move') {
@@ -2849,11 +2869,7 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect, picture, view }
         if (onH) y = cy - h / 2
         setGuides(onV || onH ? { ...(onV ? { v: row.x + row.w / 2 } : {}), ...(onH ? { h: row.y + row.h / 2 } : {}) } : null)
       } else {
-        const right = r.x + r.w, bottom = r.y + r.h
-        if (mode === 'nw' || mode === 'sw') { x = Math.max(0, Math.min(right - MIN_MAIN_BOX, r.x + dx)); w = right - x }
-        else w = Math.max(MIN_MAIN_BOX, Math.min(1 - r.x, r.w + dx))
-        if (mode === 'nw' || mode === 'ne') { y = Math.max(0, Math.min(bottom - MIN_MAIN_BOX, r.y + dy)); h = bottom - y }
-        else h = Math.max(MIN_MAIN_BOX, Math.min(1 - r.y, r.h + dy))
+        ({ x, y, w, h } = resizedBox(r, mode, dx, dy, MIN_MAIN_BOX, ev.shiftKey))
       }
       const q = (v: number) => Math.round(v * 1000) / 1000
       onChange({ x: q(x), y: q(y), w: q(w), h: q(h) })
@@ -2862,44 +2878,69 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect, picture, view }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
   }
-  const corner = (mode: 'nw' | 'ne' | 'sw' | 'se') => (
-    <span key={mode} onPointerDown={e => start(e, mode)} aria-hidden="true"
-      className="absolute rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-      style={{
-        width: 12, height: 12, background: '#c8ff00', boxShadow: '0 0 0 2px rgba(0,0,0,0.7)', touchAction: 'none',
-        cursor: mode === 'nw' || mode === 'se' ? 'nwse-resize' : 'nesw-resize',
-        ...(mode[0] === 'n' ? { top: -6 } : { bottom: -6 }), ...(mode[1] === 'w' ? { left: -6 } : { right: -6 }),
-        ...(active ? { opacity: 1 } : {}),
-      }} />
-  )
+  /** Back to filling its slot, and the picture as it starts out */
+  function reset() {
+    onChange(null)
+    if (picture?.pan) picture.onPan(null)
+    // The main video: back to the most of its picture this slot can show (a change only if it isn't already)
+    const ar = view?.videoAR(), wrap = boxRef.current?.parentElement?.getBoundingClientRect()
+    if (view && ar && wrap && wrap.height * row.h) {
+      const a = (wrap.width * row.w) / (wrap.height * row.h) / ar
+      const cur = fitToAspect(view.read(), a), whole = wholeView(framePicture(), a)
+      if (Math.abs(cur.x - whole.x) + Math.abs(cur.y - whole.y) + Math.abs(cur.w - whole.w) > 0.002) view.onChange(whole)
+    }
+  }
+  // Its handles, on top of a frame's bars (zIndex: a bar is 25). The top and bottom ones stand off the
+  // middle, where a bar has its grip and swap button
+  const handle = (mode: BoxEdge) => {
+    const side = mode.length === 1, tall = mode === 'e' || mode === 'w'
+    return (
+      <span key={mode} onPointerDown={e => start(e, mode)} onClick={e => { if (onSelect) e.stopPropagation() }} aria-hidden="true"
+        className="absolute rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{
+          width: side ? (tall ? 7 : 26) : 12, height: side ? (tall ? 26 : 7) : 12, background: '#c8ff00', boxShadow: '0 0 0 2px rgba(0,0,0,0.7)', touchAction: 'none', zIndex: 26,
+          cursor: !side ? (mode === 'nw' || mode === 'se' ? 'nwse-resize' : 'nesw-resize') : tall ? 'ew-resize' : 'ns-resize',
+          ...(side
+            ? (tall ? { top: 'calc(50% - 13px)', [mode === 'w' ? 'left' : 'right']: -4 } : { left: 'calc(25% - 13px)', [mode === 'n' ? 'top' : 'bottom']: -4 })
+            : { [mode[0] === 'n' ? 'top' : 'bottom']: -6, [mode[1] === 'w' ? 'left' : 'right']: -6 }),
+          ...(active || selected ? { opacity: 1 } : {}),
+        }} />
+    )
+  }
   return (
-    <div ref={boxRef} data-frame-main className="group absolute"
-      title={view
-        ? (full ? 'Drag to pick the part of the video that shows · scroll to zoom · drag a corner to resize · double-click to reset'
-          : 'Drag to move the video · Alt + drag to move the picture inside · scroll to zoom · double-click to reset')
-        : picture
-        ? (full ? `Drag to move the ${picture.size ? 'video' : 'photo'} inside · scroll to zoom · drag a corner to resize · double-click to reset`
-          : `Drag to move the box · Alt + drag to move the ${picture.size ? 'video' : 'photo'} inside · scroll to zoom · double-click to reset`)
-        : 'Drag to move the video · drag a corner to resize · double-click to fill the area'}
-      onPointerDown={e => start(e, 'move')}
-      onDoubleClick={e => {
-        e.stopPropagation(); onChange(null); if (picture?.pan) picture.onPan(null)
-        // The main video: back to the most of its picture this slot can show (a change only if it isn't already)
-        const ar = view?.videoAR(), wrap = boxRef.current?.parentElement?.getBoundingClientRect()
-        if (view && ar && wrap && wrap.height * row.h) {
-          const a = (wrap.width * row.w) / (wrap.height * row.h) / ar
-          const cur = fitToAspect(view.read(), a), whole = wholeView(framePicture(), a)
-          if (Math.abs(cur.x - whole.x) + Math.abs(cur.y - whole.y) + Math.abs(cur.w - whole.w) > 0.002) view.onChange(whole)
-        }
-      }}
+    // (the outer box has no layer of its own, so its handles can stand above a frame's bars while the box itself stays under them)
+    <div ref={boxRef} data-frame-main className="group absolute" style={{
+      left: `${(row.x + r.x * row.w) * 100}%`, top: `${(row.y + r.y * row.h) * 100}%`, width: `${r.w * row.w * 100}%`, height: `${r.h * row.h * 100}%`, touchAction: 'none',
+    }}>
+    <div className="absolute inset-0"
+      title={hasContent
+        ? `Drag to pick the part of the ${picture && !picture.size ? 'photo' : 'video'} that shows · scroll to zoom · drag an edge to resize`
+        : 'Drag to move · drag an edge to resize'}
+      onPointerDown={e => start(e, hasContent ? 'content' : 'move')}
+      onDoubleClick={e => e.stopPropagation()}
       style={{
-        left: `${(row.x + r.x * row.w) * 100}%`, top: `${(row.y + r.y * row.h) * 100}%`, width: `${r.w * row.w * 100}%`, height: `${r.h * row.h * 100}%`,
-        cursor: active ? 'grabbing' : (picture || view) && full ? 'grab' : 'move', touchAction: 'none', zIndex: 18,
+        cursor: active ? 'grabbing' : hasContent ? 'grab' : 'move', touchAction: 'none', zIndex: 18,
         boxShadow: active || selected ? 'inset 0 0 0 2px #c8ff00' : undefined,
       }}
       onClick={e => { if (onSelect) e.stopPropagation() }}>
       <span className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity" style={{ boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.8)' }} />
-      {(['nw', 'ne', 'sw', 'se'] as const).map(corner)}
+    </div>
+    {(['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'] as const).map(handle)}
+    {/* Moves the box itself; on the top border (just inside it at the slot's top, off a frame bar's grip and swap) */}
+    {!full && (
+      <span role="button" aria-label="Move the box" title="Drag to move the box · double-click to fill the area again"
+        onPointerDown={e => start(e, 'move')} onClick={e => { if (onSelect) e.stopPropagation() }}
+        onDoubleClick={e => { e.stopPropagation(); reset() }}
+        className="absolute flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{
+          left: 'calc(50% - 11px)', top: r.y <= 0.001 ? 5 : -11, width: 22, height: 22, background: '#c8ff00', color: '#000', boxShadow: '0 0 0 2px rgba(0,0,0,0.7)',
+          cursor: active ? 'grabbing' : 'move', touchAction: 'none', zIndex: 26, ...(active || selected ? { opacity: 1 } : {}),
+        }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M12 3v18M3 12h18M12 3L9 6M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" />
+        </svg>
+      </span>
+    )}
     </div>
   )
 }

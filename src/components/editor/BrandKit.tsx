@@ -294,7 +294,7 @@ function BrandOnSwitch({ kit, onKitId, onTurnOn, onTurnOff, compact = false }: B
         <span className={`${compact ? 'text-xs' : 'text-[13px]'} font-bold text-[var(--ed-text)]`}>{compact ? (on ? 'On this clip' : 'Off on this clip') : on ? 'Brand kit on' : 'Brand kit off'}</span>
         {!compact && (
           <span className="text-[11px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
-            {on ? 'On this clip and every frame you pick. Changed the kit? Switch off and on.'
+            {on ? 'On this clip and every frame you pick. Changes to the kit reach it by themselves.'
               : other ? 'Another kit is on: switching this one on swaps it.'
                 : 'Puts your logo, colours and style on this clip.'}
           </span>
@@ -523,7 +523,7 @@ function KitTeam({ kitId, lock, onLock }: { kitId: string; lock: boolean; onLock
   return (
     <div className="flex flex-col gap-3">
       <p className="text-[11px] -mt-1 leading-relaxed" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
-        Invite people by email. They accept it on their Brand kits page: copy the invite&rsquo;s link and send it to them. {used} of {state.seats} places used.
+        Invite people by email. They accept it in their Brand kits: copy the invite&rsquo;s link and send it to them. {used} of {state.seats} places used.
       </p>
       <div className="flex gap-2">
         <input value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') invite() }} type="email" maxLength={200}

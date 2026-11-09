@@ -389,6 +389,11 @@ export function brandCaptionStyle(c: BrandCaptions): Partial<CaptionStyle> {
   }
 }
 
+/** The caption style a kit gives captions styled `cur`: a kit that names no font leaves them the one they have */
+export function brandCaptionStyleOn(c: BrandCaptions, cur: Partial<CaptionStyle>): Partial<CaptionStyle> {
+  return { ...brandCaptionStyle(c), font: c.font ?? cur.font ?? null } as Partial<CaptionStyle>
+}
+
 /** When the logo shows on a clip `lengthMs` long: [start, end] ms */
 export function logoSpan(logo: BrandKitData['logo'], lengthMs: number): [number, number] {
   const len = Math.max(0, Math.round(lengthMs))

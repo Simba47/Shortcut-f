@@ -6,7 +6,7 @@ import type { SegmentLocal, TextOverlay, FrameItem, FrameHold, FrameLane } from 
 import type { TrackRef } from '@/modules/editor/tracks'
 import { Waveform } from '../Waveform'
 import { liveTime, usePlayerStore } from '@/modules/player/store'
-import { movedHold, isFrameLayout, FRAME_TEMPLATES, frameOf, laneItems, itemBounds, MIN_ITEM_MS, isTextLane } from '@/modules/editor/frames'
+import { isMainHold, sameLayer, movedHold, isFrameLayout, FRAME_TEMPLATES, frameOf, laneItems, itemBounds, MIN_ITEM_MS, isTextLane } from '@/modules/editor/frames'
 import { isShot } from '@/modules/editor/shots'
 import { isGapPart } from '@/modules/editor/visibility'
 import { goesAfterMain } from '@/modules/editor/inserts'
@@ -86,8 +86,10 @@ export interface TimelineProps {
   videoTitles?: Record<string, string>
   onSelectFrameItem?: (id: string | null) => void
   onUpdateFrameItem?: (id: string, patch: Partial<Pick<FrameItem, 'start_ms' | 'end_ms' | 'source_offset_ms' | 'holds' | 'dim'>>) => void
-  /** One of the frame's freezes changed on a bar: now `h`, or removed (null) */
-  onFrameFreeze?: (i: number, h: FrameHold | null) => void
+  /** Freeze `n` of a layer of the frame changed on its bar: now `h`, or removed (null) */
+  onFrameFreeze?: (layer: string, n: number, h: FrameHold | null) => void
+  /** One of a main video part's freezes changed on its block */
+  onPartFreeze?: (segId: string, i: number, h: FrameHold | null) => void
   /** `at`: an empty spot clicked (that frame, from that time); else the frame under the playhead, at it */
   onAddFrameItem?: (lane: FrameLane, anchor: DOMRect, at?: { segId: string; t: number }) => void
   onJumpToFrameItem?: (segId: string, itemId: string) => void
@@ -292,7 +294,7 @@ export function Timeline({
   textOverlays = [], photos = [], activePhotoId = null, onSelectPhoto, onPhotoTimeChange,
   musicTracks = [], onMusicMove, onMusicTrim, selectedMusicId = null, onSelectMusic,
   activeTextOverlayId, onSelectTextOverlay, onTextOverlayUpdate,
-  frameSeg, activeFrameItemId, laneHighlight, videoTitles = {}, onSelectFrameItem, onUpdateFrameItem, onFrameFreeze, onAddFrameItem, onJumpToFrameItem,
+  frameSeg, activeFrameItemId, laneHighlight, videoTitles = {}, onSelectFrameItem, onUpdateFrameItem, onFrameFreeze, onPartFreeze, onAddFrameItem, onJumpToFrameItem,
   viewMarkers = [], selectedViewT = null, onSelectView, onMoveView, onRemoveView, onDuplicateView,
   onBrollChange, videoUrls = {}, mediaLengths = {}, zoom: zoomProp, onZoomChange,
   onAddKind, cutJoins = [], isStock, onDropFiles, onDropStock, onDropMedia,
@@ -1546,7 +1548,7 @@ export function Timeline({
   function handleFreezeDown(e: React.PointerEvent, bar: FreezeBar, i: number, mode: 'move' | 'start' | 'end') {
     if (e.button !== 0) return
     e.stopPropagation(); e.preventDefault()
-    if (frameSeg?.locked || bar.locked) return
+    if (bar.locked) return
     const h0 = bar.holds[i]
     const lo = i ? bar.holds[i - 1].at_ms + bar.holds[i - 1].len_ms : bar.from - bar.origin
     const hi = bar.grows && mode === 'end' ? Infinity : i < bar.holds.length - 1 ? bar.holds[i + 1].at_ms : bar.to - bar.origin
@@ -1787,6 +1789,11 @@ export function Timeline({
           return <div key={grown.key} className="tl2-grow tl2-grown absolute inset-y-0 pointer-events-none" data-edge={grown.edge}
             style={{ width: `${w}%`, [grown.edge === 'start' ? 'left' : 'right']: 0, borderRadius: grown.edge === 'start' ? '8px 0 0 8px' : '0 8px 8px 0' }} />
         })()}
+        {/* its freezes (the time they add is in the part) */}
+        {!isInsert && !g && freezeRanges({
+          holds: (seg.frame?.freeze?.holds ?? []).filter(isMainHold), origin: seg.start_ms, from: seg.start_ms, to: seg.end_ms, on: sel, grows: true,
+          locked: !!seg.locked, set: (n, h) => onPartFreeze?.(seg.id, n, h),
+        })}
         {/* selected: a plain outline (the grips say it's selected) */}
         {sel && <div className="absolute inset-0 pointer-events-none" style={{ borderRadius: 8, boxShadow: `inset 0 0 0 2px ${ACCENT}` }} />}
         {sel && (['start', 'end'] as const).map(edge => grip(seg, i, edge))}
@@ -2260,8 +2267,8 @@ export function Timeline({
                       style={{ left: `${at(seg.start_ms)}%`, width: `${pct(seg.end_ms - seg.start_ms)}%`, borderRadius: 5, background: `${FRAME_ITEM_COLORS.main}${on ? '40' : '24'}`, boxShadow: on ? SELECTED_RING : `inset 2px 0 0 ${FRAME_ITEM_COLORS.main}`, zIndex: on ? 3 : undefined }}>
                       <span className="px-2 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>{row.label} · Main video</span>
                       {freezeRanges({
-                        holds: frame.freeze?.holds ?? [], origin: seg.start_ms, from: seg.start_ms, to: seg.end_ms, on, grows: true,
-                        locked: !!frame.main_locked?.[String(row.lane)], set: (i, h) => onFrameFreeze?.(i, h),
+                        holds: (frame.freeze?.holds ?? []).filter(isMainHold), origin: seg.start_ms, from: seg.start_ms, to: seg.end_ms, on, grows: true,
+                        locked: !!seg.locked || !!frame.main_locked?.[String(row.lane)], set: (i, h) => onFrameFreeze?.(mainId, i, h),
                       })}
                     </div>
                   )
@@ -2277,12 +2284,12 @@ export function Timeline({
                       style={{ left: `${at(from)}%`, width: `max(8px, ${pct(to - from)}%)`, borderRadius: 5, zIndex: on ? 3 : 2, background: it.freeze ? FROZEN_BLUE : `${color}${on ? '55' : '38'}`, boxShadow: on ? SELECTED_RING : `inset 0 0 0 1px ${color}88`, cursor: 'grab', touchAction: 'none' }}>
                       {/* Its freeze stretches: striped where it holds a still picture (it stays one piece) */}
                       {!it.freeze && it.kind === 'video' && freezeRanges({
-                        holds: frame.freeze?.holds ?? [], origin: seg.start_ms, from, to, on, grows: true, locked: !!it.locked,
-                        set: (i, h) => onFrameFreeze?.(i, h),
+                        holds: (frame.freeze?.holds ?? []).filter(h => sameLayer(h, it.id)), origin: seg.start_ms, from, to, on, grows: true, locked: !!seg.locked || !!it.locked,
+                        set: (i, h) => onFrameFreeze?.(it.id, i, h),
                       })}
                       {/* (a freeze from before they added time: it can still be changed or taken off) */}
                       {!it.freeze && freezeRanges({
-                        holds: it.holds ?? [], origin: it.start_ms, from, to, on, locked: !!it.locked,
+                        holds: it.holds ?? [], origin: it.start_ms, from, to, on, locked: !!seg.locked || !!it.locked,
                         set: (i, h) => {
                           const holds = (it.holds ?? []).flatMap((x, j) => (j !== i ? [x] : h ? [h] : []))
                           onUpdateFrameItem?.(it.id, holds.length ? { holds } : { holds: null, dim: false })
