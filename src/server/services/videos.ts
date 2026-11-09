@@ -210,111 +210,112 @@ export interface ClipSuggestion {
 }
 type Word = { word: string; start_ms: number; end_ms: number }
 
-export async function getVideoSuggestions(userId: string, videoId: string, extraExclude: Array<[number, number]> = []): Promise<{ suggestions: ClipSuggestion[]; model?: string }> {
-  const [video] = await sql`
-    SELECT id, user_id, duration_ms, status FROM videos WHERE id = ${videoId}
-  `
-  if (!video || video.user_id !== userId) {
-    throw Object.assign(new Error('Not found'), { status: 404 })
-  }
+// ── Best moments: removed 2026-11-09 (user), kept commented ──
+// export async function getVideoSuggestions(userId: string, videoId: string, extraExclude: Array<[number, number]> = []): Promise<{ suggestions: ClipSuggestion[]; model?: string }> {
+  // const [video] = await sql`
+    // SELECT id, user_id, duration_ms, status FROM videos WHERE id = ${videoId}
+  // `
+  // if (!video || video.user_id !== userId) {
+    // throw Object.assign(new Error('Not found'), { status: 404 })
+  // }
 
-  await needWholeTranscript(videoId)
-  const [transcriptRow] = await sql`
-    SELECT id FROM transcripts WHERE video_id = ${videoId} ORDER BY created_at DESC LIMIT 1
-  `
+  // await needWholeTranscript(videoId)
+  // const [transcriptRow] = await sql`
+    // SELECT id FROM transcripts WHERE video_id = ${videoId} ORDER BY created_at DESC LIMIT 1
+  // `
 
-  const words: Word[] = transcriptRow
-    ? await sql`SELECT word, start_ms, end_ms FROM transcript_words WHERE transcript_id = ${transcriptRow.id} ORDER BY start_ms`
-    : []
+  // const words: Word[] = transcriptRow
+    // ? await sql`SELECT word, start_ms, end_ms FROM transcript_words WHERE transcript_id = ${transcriptRow.id} ORDER BY start_ms`
+    // : []
 
-  const durationMs = video.duration_ms ?? 0
-  if (words.length === 0) return { suggestions: makeTimeChunks(durationMs) }
+  // const durationMs = video.duration_ms ?? 0
+  // if (words.length === 0) return { suggestions: makeTimeChunks(durationMs) }
 
-  // Plain chunks only when no AI can answer
-  if (!aiProvider()) return { suggestions: makeWordChunks(words, durationMs) }
+  // // Plain chunks only when no AI can answer
+  // if (!aiProvider()) return { suggestions: makeWordChunks(words, durationMs) }
 
-  // Skip what's already a clip, and moments already listed (so "View more" finds new ones)
-  const exclude = [...await clippedRanges(videoId, durationMs), ...extraExclude]
-  const model = CLIP_MODEL
-  try {
-    const suggestions = await detectBestMoments(words, durationMs, exclude)
-    logShown(userId, videoId, 'best_moments', model, suggestions)
-    return { suggestions, model }
-  } catch (e) {
-    console.error(`[suggestions] ${model} error:`, e)
-    return { suggestions: makeWordChunks(words, durationMs) }
-  }
-}
+  // // Skip what's already a clip, and moments already listed (so "View more" finds new ones)
+  // const exclude = [...await clippedRanges(videoId, durationMs), ...extraExclude]
+  // const model = CLIP_MODEL
+  // try {
+    // const suggestions = await detectBestMoments(words, durationMs, exclude)
+    // logShown(userId, videoId, 'best_moments', model, suggestions)
+    // return { suggestions, model }
+  // } catch (e) {
+    // console.error(`[suggestions] ${model} error:`, e)
+    // return { suggestions: makeWordChunks(words, durationMs) }
+  // }
+// }
 
-export interface AddedMoment extends ClipSuggestion {
-  /** The draft clip made for this moment (missing when the plan had no room left) */
-  clip_id?: string
-}
+// export interface AddedMoment extends ClipSuggestion {
+  // /** The draft clip made for this moment (missing when the plan had no room left) */
+  // clip_id?: string
+// }
 
-/**
- * "Find best moments": AI picks new moments (skipping ones already made into clips) and each one
- * is saved straight away as a draft clip in the Best moments section — no "Use" needed. Plain
- * fallback chunks (no AI, no score) are shown but not saved. On a plan with a clip limit, only
- * as many as there is room for are saved.
- */
-export async function addBestMoments(userId: string, videoId: string): Promise<{ moments: AddedMoment[]; notSaved: number; limitMessage: string | null }> {
-  const { suggestions, model } = await getVideoSuggestions(userId, videoId)
-  const picks = suggestions.filter(s => typeof s.score === 'number')
-  if (!picks.length) {
-    return {
-      moments: suggestions, notSaved: 0,
-      // Plain chunks: the AI didn't answer (not set up, or it failed), so nothing is saved
-      limitMessage: suggestions.length ? 'AI couldn\'t pick moments right now, so these are plain parts of the video and weren\'t added to your clips. Try again in a moment.' : null,
-    }
-  }
+// /**
+ // * "Find best moments": AI picks new moments (skipping ones already made into clips) and each one
+ // * is saved straight away as a draft clip in the Best moments section — no "Use" needed. Plain
+ // * fallback chunks (no AI, no score) are shown but not saved. On a plan with a clip limit, only
+ // * as many as there is room for are saved.
+ // */
+// export async function addBestMoments(userId: string, videoId: string): Promise<{ moments: AddedMoment[]; notSaved: number; limitMessage: string | null }> {
+  // const { suggestions, model } = await getVideoSuggestions(userId, videoId)
+  // const picks = suggestions.filter(s => typeof s.score === 'number')
+  // if (!picks.length) {
+    // return {
+      // moments: suggestions, notSaved: 0,
+      // // Plain chunks: the AI didn't answer (not set up, or it failed), so nothing is saved
+      // limitMessage: suggestions.length ? 'AI couldn\'t pick moments right now, so these are plain parts of the video and weren\'t added to your clips. Try again in a moment.' : null,
+    // }
+  // }
 
-  const { getUserPlanConfig } = await import('./quota')
-  const plan = await getUserPlanConfig(userId)
-  let room = picks.length
-  if (plan.maxClips) {
-    const [row] = await sql<{ count: string }[]>`
-      SELECT COUNT(*) AS count FROM clips c JOIN videos v ON v.id = c.video_id WHERE v.user_id = ${userId}
-    `
-    room = Math.max(0, Math.min(room, plan.maxClips - parseInt(row?.count ?? '0', 10)))
-  }
-  const toSave = picks.slice(0, room)
-  const rows = toSave.length
-    ? await sql<{ id: string; start_ms: number; end_ms: number }[]>`
-        INSERT INTO clips ${sql(toSave.map(s => ({
-          video_id: videoId, start_ms: Math.round(s.start_ms), end_ms: Math.round(s.end_ms), status: 'draft', title: s.title,
-        })))}
-        RETURNING id, start_ms, end_ms`
-    : []
-  // The account's default brand kit on them (services/brandKits.ts)
-  const { brandNewClips } = await import('./brandKits')
-  await brandNewClips(userId, rows.map(r => ({ id: r.id, lengthMs: r.end_ms - r.start_ms })))
-  // Pair each new clip with its moment by time (RETURNING order isn't guaranteed)
-  const clipIdOf = new Map<ClipSuggestion, string>()
-  for (const s of toSave) {
-    const row = rows.find(r => r.start_ms === Math.round(s.start_ms) && r.end_ms === Math.round(s.end_ms))
-    if (row) clipIdOf.set(s, row.id)
-  }
-  // Which section the clips belong to is read from this log (see the clip board page), so it is
-  // written before answering. "auto_added" tells these apart from clips a user picked with "Use".
-  if (clipIdOf.size) {
-    await sql`
-      INSERT INTO ai_suggestion_events ${sql([...clipIdOf].map(([s, clipId]) => ({
-        user_id: userId, video_id: videoId, clip_id: clipId, source: 'best_moments', event: 'used',
-        suggestion: sql.json({ start_ms: s.start_ms, end_ms: s.end_ms, title: s.title, score: s.score ?? null,
-          subscores: s.subscores ?? null, reason: s.reason ?? null, model: model ?? CLIP_MODEL, auto_added: true } as never),
-      })))}
-    `.catch(e => console.warn('[best-moments] section not recorded:', e instanceof Error ? e.message : e))
-  }
-  const saved = clipIdOf.size
-  const notSaved = picks.length - saved
-  return {
-    moments: picks.map(s => (clipIdOf.has(s) ? { ...s, clip_id: clipIdOf.get(s) } : s)),
-    notSaved,
-    limitMessage: notSaved > 0 && plan.maxClips
-      ? `Your ${plan.name} plan allows ${plan.maxClips} clips, so ${saved ? `only ${saved} of ${picks.length} were` : 'none were'} added. Upgrade to keep them all.`
-      : null,
-  }
-}
+  // const { getUserPlanConfig } = await import('./quota')
+  // const plan = await getUserPlanConfig(userId)
+  // let room = picks.length
+  // if (plan.maxClips) {
+    // const [row] = await sql<{ count: string }[]>`
+      // SELECT COUNT(*) AS count FROM clips c JOIN videos v ON v.id = c.video_id WHERE v.user_id = ${userId}
+    // `
+    // room = Math.max(0, Math.min(room, plan.maxClips - parseInt(row?.count ?? '0', 10)))
+  // }
+  // const toSave = picks.slice(0, room)
+  // const rows = toSave.length
+    // ? await sql<{ id: string; start_ms: number; end_ms: number }[]>`
+        // INSERT INTO clips ${sql(toSave.map(s => ({
+          // video_id: videoId, start_ms: Math.round(s.start_ms), end_ms: Math.round(s.end_ms), status: 'draft', title: s.title,
+        // })))}
+        // RETURNING id, start_ms, end_ms`
+    // : []
+  // // The account's default brand kit on them (services/brandKits.ts)
+  // const { brandNewClips } = await import('./brandKits')
+  // await brandNewClips(userId, rows.map(r => ({ id: r.id, lengthMs: r.end_ms - r.start_ms })))
+  // // Pair each new clip with its moment by time (RETURNING order isn't guaranteed)
+  // const clipIdOf = new Map<ClipSuggestion, string>()
+  // for (const s of toSave) {
+    // const row = rows.find(r => r.start_ms === Math.round(s.start_ms) && r.end_ms === Math.round(s.end_ms))
+    // if (row) clipIdOf.set(s, row.id)
+  // }
+  // // Which section the clips belong to is read from this log (see the clip board page), so it is
+  // // written before answering. "auto_added" tells these apart from clips a user picked with "Use".
+  // if (clipIdOf.size) {
+    // await sql`
+      // INSERT INTO ai_suggestion_events ${sql([...clipIdOf].map(([s, clipId]) => ({
+        // user_id: userId, video_id: videoId, clip_id: clipId, source: 'best_moments', event: 'used',
+        // suggestion: sql.json({ start_ms: s.start_ms, end_ms: s.end_ms, title: s.title, score: s.score ?? null,
+          // subscores: s.subscores ?? null, reason: s.reason ?? null, model: model ?? CLIP_MODEL, auto_added: true } as never),
+      // })))}
+    // `.catch(e => console.warn('[best-moments] section not recorded:', e instanceof Error ? e.message : e))
+  // }
+  // const saved = clipIdOf.size
+  // const notSaved = picks.length - saved
+  // return {
+    // moments: picks.map(s => (clipIdOf.has(s) ? { ...s, clip_id: clipIdOf.get(s) } : s)),
+    // notSaved,
+    // limitMessage: notSaved > 0 && plan.maxClips
+      // ? `Your ${plan.name} plan allows ${plan.maxClips} clips, so ${saved ? `only ${saved} of ${picks.length} were` : 'none were'} added. Upgrade to keep them all.`
+      // : null,
+  // }
+// }
 
 // Criteria-steered clip detection ("find me the funniest moments", "controversial takes", etc.) —
 // same transcript source as getVideoSuggestions, but the caller picks what to look for.
@@ -358,29 +359,30 @@ function toSuggestion(c: FoundClip, id: string): ClipSuggestion {
   }
 }
 
-/**
- * Moments of this video that are already clips (from "Use", Make my clips or made by hand), so
- * Best moments offers new ones instead of the same moments again. Long clips, like "Edit full
- * video", are editing sessions rather than a picked moment and don't count.
- */
-async function clippedRanges(videoId: string, durationMs: number): Promise<Array<[number, number]>> {
-  const rows = await sql<{ start_ms: number; end_ms: number }[]>`
-    SELECT start_ms, end_ms FROM clips WHERE video_id = ${videoId}
-  `
-  return rows
-    .filter(c => c.end_ms - c.start_ms <= 3 * 60_000 && (!durationMs || c.end_ms - c.start_ms < 0.9 * durationMs))
-    .map(c => [c.start_ms, c.end_ms])
-}
+// ── Best moments: removed 2026-11-09 (user), kept commented ──
+// /**
+ // * Moments of this video that are already clips (from "Use", Make my clips or made by hand), so
+ // * Best moments offers new ones instead of the same moments again. Long clips, like "Edit full
+ // * video", are editing sessions rather than a picked moment and don't count.
+ // */
+// async function clippedRanges(videoId: string, durationMs: number): Promise<Array<[number, number]>> {
+  // const rows = await sql<{ start_ms: number; end_ms: number }[]>`
+    // SELECT start_ms, end_ms FROM clips WHERE video_id = ${videoId}
+  // `
+  // return rows
+    // .filter(c => c.end_ms - c.start_ms <= 3 * 60_000 && (!durationMs || c.end_ms - c.start_ms < 0.9 * durationMs))
+    // .map(c => [c.start_ms, c.end_ms])
+// }
 
-// Best moments: the whole transcript in ~10-minute windows (see clipFinder.ts)
-async function detectBestMoments(words: Word[], durationMs: number, exclude: Array<[number, number]>): Promise<ClipSuggestion[]> {
-  const ask = (system: string, user: string, o?: { temperature?: number }) => askGemini(user, { model: CLIP_MODEL, system, ...o })
-  const clips = await findClips({
-    words, durationMs, mode: { kind: 'best' }, ask, exclude,
-    log: msg => console.error('[suggestions]', msg),
-  })
-  return clips.map((c, i) => toSuggestion(c, `ai-${i}`))
-}
+// // Best moments: the whole transcript in ~10-minute windows (see clipFinder.ts)
+// async function detectBestMoments(words: Word[], durationMs: number, exclude: Array<[number, number]>): Promise<ClipSuggestion[]> {
+  // const ask = (system: string, user: string, o?: { temperature?: number }) => askGemini(user, { model: CLIP_MODEL, system, ...o })
+  // const clips = await findClips({
+    // words, durationMs, mode: { kind: 'best' }, ask, exclude,
+    // log: msg => console.error('[suggestions]', msg),
+  // })
+  // return clips.map((c, i) => toSuggestion(c, `ai-${i}`))
+// }
 
 // Clip search: Gemini reads the whole transcript in windows and keeps only genuine matches.
 // Clips end on a line the model chose, so the old +5 s end padding is no longer needed.
@@ -395,31 +397,32 @@ async function detectClipsByCriteria(
   return clips.map((c, i) => toSuggestion(c, `ai-criteria-${i}`))
 }
 
-function makeWordChunks(words: Word[], durationMs: number): ClipSuggestion[] {
-  const TARGET_MS = 60_000
-  const suggestions: ClipSuggestion[] = []
-  let chunkStart = 0, chunkWords: string[] = [], idx = 0
-  for (const w of words) {
-    if (chunkWords.length === 0) chunkStart = w.start_ms
-    chunkWords.push(w.word)
-    if (w.end_ms - chunkStart >= TARGET_MS) {
-      suggestions.push({ id: `chunk-${idx++}`, title: chunkWords.slice(0, 6).join(' ').trim(), start_ms: chunkStart, end_ms: w.end_ms, summary: '' })
-      chunkWords = []
-    }
-  }
-  if (chunkWords.length > 0 && words.length > 0) {
-    suggestions.push({ id: `chunk-${idx}`, title: chunkWords.slice(0, 6).join(' ').trim(), start_ms: chunkStart, end_ms: words[words.length - 1].end_ms || durationMs, summary: '' })
-  }
-  return suggestions
-}
+// ── Best moments: removed 2026-11-09 (user), kept commented ──
+// function makeWordChunks(words: Word[], durationMs: number): ClipSuggestion[] {
+  // const TARGET_MS = 60_000
+  // const suggestions: ClipSuggestion[] = []
+  // let chunkStart = 0, chunkWords: string[] = [], idx = 0
+  // for (const w of words) {
+    // if (chunkWords.length === 0) chunkStart = w.start_ms
+    // chunkWords.push(w.word)
+    // if (w.end_ms - chunkStart >= TARGET_MS) {
+      // suggestions.push({ id: `chunk-${idx++}`, title: chunkWords.slice(0, 6).join(' ').trim(), start_ms: chunkStart, end_ms: w.end_ms, summary: '' })
+      // chunkWords = []
+    // }
+  // }
+  // if (chunkWords.length > 0 && words.length > 0) {
+    // suggestions.push({ id: `chunk-${idx}`, title: chunkWords.slice(0, 6).join(' ').trim(), start_ms: chunkStart, end_ms: words[words.length - 1].end_ms || durationMs, summary: '' })
+  // }
+  // return suggestions
+// }
 
-function makeTimeChunks(durationMs: number): ClipSuggestion[] {
-  const chunkMs = 60_000
-  return Array.from({ length: Math.max(1, Math.ceil(durationMs / chunkMs)) }, (_, i) => ({
-    id: `time-${i}`, title: `Segment ${i + 1}`,
-    start_ms: i * chunkMs, end_ms: Math.min((i + 1) * chunkMs, durationMs), summary: '',
-  }))
-}
+// function makeTimeChunks(durationMs: number): ClipSuggestion[] {
+  // const chunkMs = 60_000
+  // return Array.from({ length: Math.max(1, Math.ceil(durationMs / chunkMs)) }, (_, i) => ({
+    // id: `time-${i}`, title: `Segment ${i + 1}`,
+    // start_ms: i * chunkMs, end_ms: Math.min((i + 1) * chunkMs, durationMs), summary: '',
+  // }))
+// }
 
 // ── "Make my clips": the worker's AI Edit job picks, frames and exports clips on its own ──
 
@@ -564,10 +567,14 @@ export async function getAutoClips(userId: string, videoId: string) {
   // progress / ai_score / ai_reason are read through to_jsonb so this works before the worker adds them
   const [job] = await sql`
     SELECT id, status, error, clip_count, created_at, COALESCE((to_jsonb(j)->>'progress')::int, 0) AS progress,
-      (CASE WHEN jsonb_typeof(to_jsonb(j)->'found') = 'array' THEN jsonb_array_length(to_jsonb(j)->'found') ELSE 0 END) AS found_count
+      (CASE WHEN jsonb_typeof(to_jsonb(j)->'found') = 'array' THEN jsonb_array_length(to_jsonb(j)->'found') ELSE 0 END) AS found_count,
+      -- What the run is doing ({ text, to }: the worker's jobs/ai_edit.ts setProgress)
+      to_jsonb(j)->'stage' AS stage
     FROM ai_edit_jobs j WHERE video_id = ${videoId} ORDER BY created_at DESC LIMIT 1
   `
   if (!job) return { job: null, clips: [] as AutoClip[] }
+  const stage = job.stage && typeof job.stage.text === 'string' && typeof job.stage.to === 'number'
+    ? { text: job.stage.text as string, to: job.stage.to as number } : null
 
   const rows = await sql`
     SELECT c.id, c.title, c.start_ms, c.end_ms, c.status, c.output_storage_path,
@@ -587,7 +594,7 @@ export async function getAutoClips(userId: string, videoId: string) {
   })))
   return {
     // found_count: the good moments a run found before it stopped to ask about making fewer clips ('confirm')
-    job: { id: job.id, status: job.status, progress: job.progress, error: job.error, clip_count: job.clip_count, found_count: Number(job.found_count) || 0 },
+    job: { id: job.id, status: job.status, progress: job.progress, error: job.error, clip_count: job.clip_count, found_count: Number(job.found_count) || 0, stage },
     clips,
   }
 }

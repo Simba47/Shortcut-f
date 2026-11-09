@@ -872,6 +872,9 @@ export function EditorShellMobile({
     </div>
   )
 
+  // Captions being made: a scan over the video (CaptionScan)
+  const captionScan = transcribing || retranscribing ? (retranscribePlace ? 'Waiting its turn…' : 'Making captions…') : null
+
   // Video preview without touch overlay — used in landscape so the column can scroll
   const videoPreviewNoTouch = (
     <div ref={previewInnerRef} style={{ position: 'absolute', inset: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -881,6 +884,7 @@ export function EditorShellMobile({
         activeBoxId={activeBoxId ?? null}
         onSelectBox={(segId, boxId) => { setActiveSegmentId(segId); setActiveBoxId(boxId) }}
         onBoxChange={moveView}
+        captionScan={captionScan}
       />
       {activeSegment?.crop_boxes[0]?.source_video_id && (
         <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 20, background: 'rgba(249,115,22,0.85)', color: '#fff', fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 6, pointerEvents: 'none' }}>B-roll</div>
@@ -897,6 +901,7 @@ export function EditorShellMobile({
         activeBoxId={activeBoxId ?? null}
         onSelectBox={(segId, boxId) => { setActiveSegmentId(segId); setActiveBoxId(boxId) }}
         onBoxChange={moveView}
+        captionScan={captionScan}
       />
       <div style={{ position: 'absolute', inset: 0, zIndex: 10, touchAction: 'none' }}
         onTouchStart={onCropTouchStart} onTouchMove={onCropTouchMove} onTouchEnd={onCropTouchEnd}
