@@ -40,6 +40,19 @@ const SPEED_WINDOW_MS = 8000
 const SPEED_MIN_MS = 3000
 /** How far the time left moves towards each new estimate (4 reports a second: settles in ~1 s) */
 const LEFT_EASE = 0.3
+/** The bar before the speed is known: this share of the file a second at most (the first second's
+ *  count is the browser filling its buffers, not bytes gone) */
+const START_SHARE_PER_SEC = 0.005
+/** Behind what R2 has confirmed (all of a part in): the bar moves this much faster than the speed,
+ *  and closes the gap within CATCH_UP_SECS at least */
+const CATCH_UP_RATE = 1.6
+const CATCH_UP_SECS = 2
+/** The last upload's speed in this browser (bytes a second): where the bar starts before this one's is
+ *  measured — a small file goes into the browser's buffers whole, so its own speed never shows */
+const LAST_SPEED_KEY = 'upload.bytesPerSec'
+function lastSpeed(): number | null {
+  try { const v = Number(localStorage.getItem(LAST_SPEED_KEY)); return v > 0 ? v : null } catch { return null }
+}
 
 export type UploadPhase = 'idle' | 'uploading' | 'finishing' | 'failed'
 
@@ -233,6 +246,16 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
     // The time left shown: what is left at the measured speed, eased towards each new estimate
     // (follows the connection both ways, without jumping at every report)
     let shownLeft: number | null = null
+    // The bar (user, 2026-11-09: "linear progression"): the browser's count races ahead at the start —
+    // each part's bytes count as sent once they're in its buffers, 6 parts at once — and drops back
+    // when a part is sent again. So the bar moves at the measured speed instead, never past the count,
+    // never back; behind what R2 has confirmed (whole parts in) it catches up a little faster.
+    let shownBytes = before
+    let shownAt = began
+    // (the speed the bar moves at: the last measured while the browser still had bytes to take — once
+    // the whole file is in its buffers its count stops, though the last ~48 MB are still on their way)
+    let barSpeed: number | null = null
+    const prior = lastSpeed()
     const report = (now = false) => {
       const t = performance.now()
       if (!now && t - lastReport < REPORT_MS) {
@@ -242,18 +265,28 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
       if (pending) { clearTimeout(pending); pending = null }
       lastReport = t
       const done = sent.reduce((a, b) => a + b, 0)
-      samples.push({ t, done })
+      // (the speed from after the start's burst only: the first SPEED_MIN_MS fill buffers, they don't send)
+      if (t - began >= SPEED_MIN_MS) samples.push({ t, done })
       while (samples.length > 2 && t - samples[0].t > SPEED_WINDOW_MS) samples.shift()
-      const span = t - samples[0].t
-      const speed = t - began >= SPEED_MIN_MS && span > 0 ? Math.max(0, ((done - samples[0].done) * 1000) / span) : null
+      const span = samples.length > 1 ? t - samples[0].t : 0
+      const speed = span >= 1000 ? Math.max(0, ((done - samples[0].done) * 1000) / span) : null
       if (speed) {
         const estimate = (file.size - done) / speed
         shownLeft = shownLeft == null ? estimate : shownLeft + (estimate - shownLeft) * LEFT_EASE
       }
+      const confirmed = mp.etags.reduce((a, e, i) => a + (e ? Math.min(PART_SIZE, file.size - i * PART_SIZE) : 0), 0)
+      const dt = (t - shownAt) / 1000
+      shownAt = t
+      if (speed != null && done < file.size) barSpeed = speed
+      // (else: the pace of the parts R2 has confirmed, else the last upload's, else a slow start)
+      const confirmedRate = confirmed > before && t - began > 1000 ? ((confirmed - before) * 1000) / (t - began) : null
+      const base = barSpeed ?? confirmedRate ?? (prior ? prior * 0.8 : file.size * START_SHARE_PER_SEC)
+      const rate = shownBytes < confirmed ? Math.max(base * CATCH_UP_RATE, (confirmed - shownBytes) / CATCH_UP_SECS) : base
+      shownBytes = Math.max(shownBytes, Math.min(done, shownBytes + rate * dt))
       setState(s => (s.phase === 'uploading' ? {
         ...s,
-        progress: Math.min(99, Math.round((done / file.size) * 100)),
-        loaded: done,
+        progress: Math.min(99, Math.floor((shownBytes / file.size) * 100)),
+        loaded: shownBytes,
         total: file.size,
         bytesPerSec: speed,
         secondsLeft: shownLeft,
@@ -333,6 +366,8 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
     const secs = (performance.now() - began) / 1000
     const bytes = file.size - before
     if (bytes > 0 && secs > 0) console.info(`[upload] ${formatBytes(bytes)} in ${Math.round(secs)} s — ${(bytes / (1024 * 1024) / secs).toFixed(1)} MB/s (${((bytes * 8) / 1e6 / secs).toFixed(0)} Mbit/s)`)
+    // (kept for the next upload's bar to start from: only an upload long enough to say)
+    if (bytes > 16 * 1024 * 1024 && secs > 2) { try { localStorage.setItem(LAST_SPEED_KEY, String(Math.round(bytes / secs))) } catch { /* storage blocked */ } }
   }
 
   /** All parts are in: R2 joins them into the file */
