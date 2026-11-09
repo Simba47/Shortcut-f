@@ -2183,9 +2183,16 @@ export function Timeline({
                       onPointerDown={e => handleFrameItemDown(e, it, 'move')}
                       title={`${itemName(it)} · ${msToLabel(from)}–${msToLabel(to)} · drag to move, drag the ends to trim`}
                       style={{ left: `${at(from)}%`, width: `max(8px, ${pct(to - from)}%)`, borderRadius: 5, zIndex: on ? 3 : 2, background: `${it.freeze ? FROZEN_STRIPES + ', ' : ''}${color}${on ? '55' : '38'}`, boxShadow: on ? SELECTED_RING : `inset 0 0 0 1px ${color}88`, cursor: 'grab', touchAction: 'none' }}>
+                      {/* Its freeze stretches: striped where it holds a still picture (it stays one piece) */}
+                      {!it.freeze && it.holds?.map((h, i) => {
+                        const hs = Math.max(from, it.start_ms + h.at_ms), he = Math.min(to, it.start_ms + h.at_ms + h.len_ms)
+                        if (he <= hs) return null
+                        return <div key={i} className="absolute inset-y-0 pointer-events-none" title={`Frozen ${msToLabel(hs)}–${msToLabel(he)}`}
+                          style={{ left: `${((hs - from) / (to - from)) * 100}%`, width: `${((he - hs) / (to - from)) * 100}%`, background: FROZEN_STRIPES, boxShadow: 'inset 1px 0 0 #7dd3fc, inset -1px 0 0 #7dd3fc' }} />
+                      })}
                       <div className="absolute left-0 inset-y-0 w-2 cursor-col-resize z-10" style={{ background: 'rgba(0,0,0,0.25)' }} onPointerDown={e => handleFrameItemDown(e, it, 'start')} />
                       {it.kind === 'photo' && it.image_url && <img src={it.image_url} alt="" crossOrigin="anonymous" className="h-full w-7 object-cover shrink-0 pointer-events-none" style={{ marginLeft: 8, opacity: 0.9 }} />}
-                      <span className="px-2.5 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.92)' }}>{it.kind === 'text' && !it.captions ? 'T · ' : ''}{it.freeze ? '❄ ' : ''}{itemName(it)}</span>
+                      <span className="px-2.5 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.92)' }}>{it.kind === 'text' && !it.captions ? 'T · ' : ''}{it.freeze || it.holds?.length ? '❄ ' : ''}{itemName(it)}</span>
                       <span className="shrink-0 pr-2.5 pointer-events-none"><StateBadges st={it} /></span>
                       <div className="absolute right-0 inset-y-0 w-2 cursor-col-resize z-10" style={{ background: 'rgba(0,0,0,0.25)' }} onPointerDown={e => handleFrameItemDown(e, it, 'end')} />
                     </div>

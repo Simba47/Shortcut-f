@@ -17,7 +17,7 @@ import { applyCase, loadVideoFonts } from './CaptionStyler'
 import { captionCaseOf } from '@/modules/captions/store'
 import { normalizedSlotAspect, fitToAspect } from '@/modules/editor/utils'
 import { backgroundPixels, frameBackgroundOf, type FrameBackground } from '@/lib/shared/brandCard'
-import { isFrameLayout, frameSlotLabels, frameLanesFor, frameBandShown, frameOf, itemAt, captionBandAt, cornerGeometry, MIN_ROW_H, CAPTION_CLOSE_H, mainRect, boxRect, MIN_BOX as MIN_MAIN_BOX, frameAreas, frameBase, areaRadius, frameSlotSize, isTextLane, frameRows, validRowOrder, slotOffers, BLUR_SOURCE_SLOT, FRAME_TEMPLATES, barAt, barFlipped, MIN_MOVABLE_W } from '@/modules/editor/frames'
+import { isFrameLayout, frameSlotLabels, frameLanesFor, frameBandShown, frameOf, itemAt, captionBandAt, cornerGeometry, MIN_ROW_H, CAPTION_CLOSE_H, mainRect, boxRect, MIN_BOX as MIN_MAIN_BOX, frameAreas, frameBase, areaRadius, frameSlotSize, isTextLane, frameRows, validRowOrder, slotOffers, BLUR_SOURCE_SLOT, FRAME_TEMPLATES, barAt, barFlipped, MIN_MOVABLE_W, itemSourceAt } from '@/modules/editor/frames'
 import type { FrameMediaPool } from '@/modules/editor/frameMedia'
 import { useLiveTimeMs, liveTime, usePlayerStore, LIVE_REDRAW_MS } from '@/modules/player/store'
 import { addedVideoBox, isGapPart } from '@/modules/editor/visibility'
@@ -26,6 +26,7 @@ import { drawWatermark } from './watermark'
 import { isBrandFont } from '@/lib/shared/brandKit'
 import { VIDEO_FONTS } from '@/lib/shared/videoFonts'
 import { ensureBrandFont } from './brandFonts'
+import { CaptionScan } from './CaptionScan'
 
 const BOX_COLORS = ['#22c55e', '#3b82f6', '#f59e0b']
 /** The layout's name on its frames' tag (user, 2026-10-31: the corners in the layout's colour, as on the timeline, so it's plain which format it is) */
@@ -75,12 +76,14 @@ interface VideoPreviewProps {
   onMark?: (x: number, y: number) => void
   /** Subjects tool: where each tracked person's face is at the playhead (fractions of the frame) */
   subjectsAt?: (clipMs: number) => Array<{ id: string; label: string; color: string; box: BoxPosition }>
+  /** While the clip's captions are made: the line shown under the scan over the picture (CaptionScan); null: none */
+  captionScan?: string | null
 }
 
 export function VideoPreview({
   videoRef, videoUrl, currentTimeMs: timeProp, live = false, activeSegment: segmentProp, segmentAt,
   overlaySource, mainVideoId, getPositionAt, activeBoxId, onSelectBox, onBoxChange,
-  marking = false, onMark, subjectsAt,
+  marking = false, onMark, subjectsAt, captionScan = null,
 }: VideoPreviewProps) {
   // (redrawn at most ~30 times a second: the picture itself is drawn every frame, from the live time)
   const liveMs = useLiveTimeMs(live, LIVE_REDRAW_MS)
@@ -242,6 +245,9 @@ export function VideoPreview({
           <span className="absolute left-1/2 -translate-x-1/2 top-2 px-2.5 py-1 rounded-md text-[11px] font-semibold pointer-events-none"
             style={{ zIndex: 30, background: 'rgba(0,0,0,0.75)', color: '#fbbf24' }}>A video on top is showing here — move to the main video to mark</span>
         )}
+
+        {/* Captions being made: a scan goes over the picture (clicks go through it) */}
+        <CaptionScan label={captionScan} />
       </div>
     </div>
   )
@@ -811,8 +817,8 @@ function paintFrame(
     const v = pool?.video(it)
     if (v && v.readyState >= 2) {
       const draw = put(v, v.videoWidth, v.videoHeight)
-      // Frozen and dimmed: the picture at 55% brightness (render.py: black at 45% over it)
-      const dimmed = it.freeze && it.dim
+      // Frozen (or in a freeze stretch) and dimmed: the picture at 55% brightness (render.py: black at 45% over it)
+      const dimmed = it.dim && itemSourceAt(it, tMs).held
         ? (dx: number, dy: number, dw: number, dh: number) => { ctx.save(); ctx.filter = 'brightness(0.55)'; draw(dx, dy, dw, dh); ctx.restore() }
         : draw
       inSlot(ctx, it.corners, a, dimmed, boxRect(it.rect), contain ? fill : ring, contain ? { w: v.videoWidth, h: v.videoHeight } : true)

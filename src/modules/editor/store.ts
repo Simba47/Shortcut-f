@@ -6,7 +6,7 @@ import { LAYOUT_SLOT_COUNT } from '@chai-cut/shared'
 import { getBoxPositionAtLerp, type BoxPosition } from '@/lib/interpolation'
 import { makeBox, defaultCropForSlot } from './utils'
 import { inFramePicture } from './framePicture'
-import { isFrameLayout, DEFAULT_BAND, defaultFrame, frameOf, placeNewItem, MIN_ITEM_MS } from './frames'
+import { isFrameLayout, DEFAULT_BAND, defaultFrame, frameOf, placeNewItem, MIN_ITEM_MS, fitHolds, withItemStart, cutItem, addHold } from './frames'
 import { setViewAt, recordMotionAt, removeViewChangeAt, moveViewChange, duplicateViewChange, type ViewKeyframe } from './views'
 import { isShot } from './shots'
 import { useMediaStore } from '@/modules/media/store'
@@ -102,8 +102,8 @@ interface EditorActions {
   setFrameItemFreeze: (segId: string, itemId: string, on: boolean) => void
   /**
    * Freeze a video item from `from` to `to` (clip time): it plays up to `from`, holds that picture
-   * until `to` (silent), then plays on from that same picture — as if paused there. Ends closer
-   * than MIN_ITEM_MS to its own edges snap to them
+   * until `to` (silent), then plays on from that same picture — as if paused there. It stays one
+   * item (a stretch in FrameItem.holds). Ends closer than MIN_ITEM_MS to its own edges snap to them
    */
   freezeFrameItemRange: (segId: string, itemId: string, from: number, to: number) => void
   /** Move one edge of a format. Formats are independent: the neighbour never moves, the edge
@@ -161,6 +161,23 @@ function withStart(seg: SegmentLocal, start_ms: number): SegmentLocal {
 // Frame items that reach an edge of their frame stay attached to it when that edge is dragged
 // (a ◆ key or a join), so a video filling "the rest of the frame" keeps filling it. A video's
 // start in its source moves too, so what's on screen doesn't jump.
+/**
+ * A frame item with `patch` in. A video's freeze stretches (holds) stay on their pictures: its start
+ * trimmed (the patch moves where it starts in its video too) keeps them where they were, they're cut
+ * at its end, and they go when another video or a photo takes its place.
+ */
+function patchItem(it: FrameItem, patch: Partial<Omit<FrameItem, 'id'>>): FrameItem {
+  if (it.kind !== 'video' || !it.holds?.length) return { ...it, ...patch }
+  if ((patch.source_video_id !== undefined && patch.source_video_id !== it.source_video_id) || (patch.kind && patch.kind !== it.kind)) return { ...it, ...patch, holds: null }
+  const { start_ms, source_offset_ms, ...rest } = patch
+  const trimmed = start_ms != null && start_ms !== it.start_ms && source_offset_ms !== undefined
+  const out: FrameItem = trimmed
+    ? { ...withItemStart(it, start_ms), ...rest }
+    : { ...it, ...(start_ms != null ? { start_ms } : {}), ...(source_offset_ms !== undefined ? { source_offset_ms } : {}), ...rest }
+  const holds = fitHolds(out.holds, out.end_ms - out.start_ms)
+  return { ...out, holds: holds.length ? holds : null }
+}
+
 function withFrameEdges(prev: SegmentLocal, next: SegmentLocal): SegmentLocal {
   const items = next.frame?.items
   if (!items?.length || (prev.start_ms === next.start_ms && prev.end_ms === next.end_ms)) return next
@@ -170,11 +187,8 @@ function withFrameEdges(prev: SegmentLocal, next: SegmentLocal): SegmentLocal {
       ...next.frame,
       items: items.map(it => {
         let out = it
-        if (next.start_ms !== prev.start_ms && it.start_ms <= prev.start_ms + 1 && it.end_ms > prev.start_ms) {
-          const d = next.start_ms - it.start_ms
-          out = { ...out, start_ms: next.start_ms, ...(it.kind === 'video' ? { source_offset_ms: Math.max(0, (it.source_offset_ms ?? 0) + d) } : {}) }
-        }
-        if (next.end_ms !== prev.end_ms && it.end_ms >= prev.end_ms - 1 && it.start_ms < prev.end_ms) out = { ...out, end_ms: next.end_ms }
+        if (next.start_ms !== prev.start_ms && it.start_ms <= prev.start_ms + 1 && it.end_ms > prev.start_ms) out = withItemStart(out, next.start_ms)
+        if (next.end_ms !== prev.end_ms && it.end_ms >= prev.end_ms - 1 && it.start_ms < prev.end_ms) out = patchItem(out, { end_ms: next.end_ms })
         return out
       }),
     },
@@ -517,12 +531,10 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     const end = maxLenMs ? Math.min(spot.end_ms, spot.start_ms + Math.max(MIN_ITEM_MS, maxLenMs)) : spot.end_ms
     // Shorter than the item it lands on: that item goes on after it (from where it would be by then)
     const under = (frame.items ?? []).find(it => it.id === (spot.replace ?? spot.trim?.id))
-    const rest: FrameItem | null = under && under.end_ms - end >= MIN_ITEM_MS
-      ? { ...under, id: crypto.randomUUID(), start_ms: end, ...(under.kind === 'video' ? { source_offset_ms: (under.source_offset_ms ?? 0) + (end - under.start_ms) } : {}) }
-      : null
+    const rest: FrameItem | null = under && under.end_ms - end >= MIN_ITEM_MS ? withItemStart({ ...under, id: crypto.randomUUID() }, end) : null
     const items = (frame.items ?? [])
       .filter(it => it.id !== spot.replace)
-      .map(it => it.id === spot.trim?.id ? { ...it, end_ms: spot.trim.end_ms } : it)
+      .map(it => it.id === spot.trim?.id ? patchItem(it, { end_ms: spot.trim.end_ms }) : it)
     items.push({ ...item, id, lane, start_ms: spot.start_ms, end_ms: end })
     if (rest) items.push(rest)
     set(s => ({ segments: s.segments.map(x => x.id === segId ? { ...x, frame: { ...frame, items } } : x) }))
@@ -533,7 +545,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     segments: s.segments.map(seg => {
       if (seg.id !== segId) return seg
       const frame = frameOf(seg)
-      return { ...seg, frame: { ...frame, items: (frame.items ?? []).map(it => it.id === itemId ? { ...it, ...patch } : it) } }
+      return { ...seg, frame: { ...frame, items: (frame.items ?? []).map(it => it.id === itemId ? patchItem(it, patch) : it) } }
     }),
   })),
 
@@ -543,10 +555,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
       const frame = frameOf(seg)
       return { ...seg, frame: { ...frame, items: (frame.items ?? []).flatMap(it => {
         if (it.id !== itemId || t <= it.start_ms || t >= it.end_ms) return [it]
-        const right: FrameItem = { ...it, id: crypto.randomUUID(), start_ms: t }
-        // (a frozen video's right part holds the same picture)
-        if (it.kind === 'video' && !it.freeze) right.source_offset_ms = (it.source_offset_ms ?? 0) + (t - it.start_ms)
-        return [{ ...it, end_ms: t }, right]
+        // (a frozen video's right part holds the same picture; a freeze stretch cut goes on in it)
+        return cutItem(it, t, crypto.randomUUID())
       }) } }
     }),
   })),
@@ -575,19 +585,10 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     segments: s.segments.map(seg => {
       if (seg.id !== segId) return seg
       const frame = frameOf(seg)
-      return { ...seg, frame: { ...frame, items: (frame.items ?? []).flatMap((it): FrameItem[] => {
-        if (it.id !== itemId || it.kind !== 'video' || it.freeze) return [it]
-        let a = Math.max(it.start_ms, Math.round(from)), b = Math.min(it.end_ms, Math.round(to))
-        if (a - it.start_ms < MIN_ITEM_MS) a = it.start_ms
-        if (it.end_ms - b < MIN_ITEM_MS) b = it.end_ms
-        if (b - a < MIN_ITEM_MS) return [it]
-        // The picture at `from`: held, then where it plays on from
-        const off = (it.source_offset_ms ?? 0) + (a - it.start_ms)
-        const out: FrameItem[] = []
-        if (a > it.start_ms) out.push({ ...it, end_ms: a })
-        out.push({ ...it, id: a > it.start_ms ? crypto.randomUUID() : it.id, start_ms: a, end_ms: b, source_offset_ms: off, freeze: true })
-        if (b < it.end_ms) out.push({ ...it, id: crypto.randomUUID(), start_ms: b, source_offset_ms: off, freeze: false, dim: false })
-        return out
+      return { ...seg, frame: { ...frame, items: (frame.items ?? []).map(it => {
+        if (it.id !== itemId || it.kind !== 'video' || it.freeze) return it
+        const holds = addHold(it, from, to)
+        return holds ? { ...it, holds } : it
       }) } }
     }),
   })),

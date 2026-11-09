@@ -180,10 +180,12 @@ export function BrandAllBar({ b, total, selected = [] }: { b: ClipBrands; total:
   if (!total) return null
   if (!b.kits.length) {
     return (
-      <div className="cbb-bar">
-        <span className="cbb-label">Brand</span>
-        <span className="text-[11px] flex-1 min-w-0" style={{ color: 'rgb(var(--cb-fg) / 0.55)' }}>Put your logo, colours and caption look on every clip.</span>
-        <button type="button" className="cbb-btn" onClick={() => openBrandKits()}>Make a brand kit</button>
+      <div className="cbb-card">
+        <div className="cbb-bar">
+          <span className="cbb-label">Brand</span>
+          <span className="text-[11px] flex-1 min-w-0" style={{ color: 'rgb(var(--cb-fg) / 0.55)' }}>Put your logo, colours and caption look on every clip.</span>
+          <button type="button" className="cbb-btn" onClick={() => openBrandKits()}>Make a brand kit</button>
+        </div>
       </div>
     )
   }
@@ -193,10 +195,23 @@ export function BrandAllBar({ b, total, selected = [] }: { b: ClipBrands; total:
   // Select, else all of them
   const some = selected.length > 0
   const brandedPicked = some ? selected.filter(id => !!b.kitOf(id)).length : b.branded
+  // One card (user, 2026-11-09: the count floated on its own): "Brand" and how many have it on a small
+  // line at the top, the kit and its button under it with the whole width
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="cbb-bar">
+    <div className="cbb-card">
+      <div className="cbb-meta">
         <span className="cbb-label">Brand</span>
+        <span className="cbb-meta-end">
+          <span className="text-[10.5px] tabular-nums" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>
+            {some ? `${brandedPicked} of ${selected.length} selected branded` : `${b.branded} of ${total} branded`}
+          </span>
+          {brandedPicked > 0 && (
+            <button type="button" className="text-[10.5px] font-semibold hover:underline" disabled={!!b.busy} onClick={() => (some ? b.applyTo(selected, null) : b.applyAll(null))}
+              style={{ color: 'rgb(var(--cb-fg) / 0.55)' }}>{some ? 'Take off selected' : 'Take off all'}</button>
+          )}
+        </span>
+      </div>
+      <div className="cbb-bar">
         <KitPick kits={b.kits} value={b.pick} onChange={b.setPick} disabled={!!b.busy} />
         {/* (no Edit here — editing is the top bar's Brand kits; this bar is which kit, on which clips) */}
         <button type="button" className="cbb-btn" data-primary disabled={!!b.busy || !kit} onClick={() => (some ? b.applyTo(selected, b.pick) : b.applyAll(b.pick))}
@@ -205,16 +220,7 @@ export function BrandAllBar({ b, total, selected = [] }: { b: ClipBrands; total:
           {b.busy === 'all' ? 'Working…' : some ? `Put on ${selected.length} selected` : `Put on all ${total}`}
         </button>
       </div>
-      <div className="flex items-center gap-2 px-1">
-        <span className="text-[10.5px] tabular-nums" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>
-          {some ? `${brandedPicked} of ${selected.length} selected branded` : `${b.branded} of ${total} branded`}
-        </span>
-        {brandedPicked > 0 && (
-          <button type="button" className="text-[10.5px] font-semibold hover:underline" disabled={!!b.busy} onClick={() => (some ? b.applyTo(selected, null) : b.applyAll(null))}
-            style={{ color: 'rgb(var(--cb-fg) / 0.55)' }}>{some ? 'Take off selected' : 'Take off all'}</button>
-        )}
-        {b.note && <span role={b.note.bad ? 'alert' : 'status'} className="text-[10.5px] truncate" style={{ color: b.note.bad ? '#f87171' : '#c8ff00' }}>{b.note.text}</span>}
-      </div>
+      {b.note && <span role={b.note.bad ? 'alert' : 'status'} className="cbb-note text-[10.5px]" style={{ color: b.note.bad ? '#f87171' : '#c8ff00' }}>{b.note.text}</span>}
     </div>
   )
 }

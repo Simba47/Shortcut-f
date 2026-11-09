@@ -6840,10 +6840,8 @@ export function EditorShell({
                 onUpdateFrame={(segId, patch) => { if (!sectionBlocked(segId)) updateFrame(segId, patch) }}
                 onReplaceMedia={(segId, id, kind) => { if (sectionBlocked(segId)) return; pause(); setFramePicker({ segId, kind, replaceId: id }) }}
                 onChangePart={(segId, id) => { void changeItemPart(segId, id) }}
-                // Freeze — parked (user, 2026-11-06: "we will work on it later"). Without these two the
-                // Frames panel shows no Freeze box; the rest (store, preview, export) stays in and is inert
-                // onFreeze={(segId, id, on) => { if (!frameItemBlocked(segId, id)) useEditorStore.getState().setFrameItemFreeze(segId, id, on) }}
-                // onFreezeRange={(segId, id, from, to) => { if (!frameItemBlocked(segId, id)) { pause(); useEditorStore.getState().freezeFrameItemRange(segId, id, from, to) } }}
+                onFreeze={(segId, id, on) => { if (!frameItemBlocked(segId, id)) useEditorStore.getState().setFrameItemFreeze(segId, id, on) }}
+                onFreezeRange={(segId, id, from, to) => { if (!frameItemBlocked(segId, id)) { pause(); useEditorStore.getState().freezeFrameItemRange(segId, id, from, to) } }}
                 onSwapBroll={(segId, id, index) => { if (!frameItemBlocked(segId, id)) void swapBroll(segId, id, index) }}
                 swappingBroll={swappingBroll}
                 onRemoveFrame={askRemoveFrame}
@@ -7279,6 +7277,7 @@ export function EditorShell({
                 onSelectBox={(segId, boxId) => { setActiveSegmentId(segId); setActiveBoxId(boxId) }}
                 onBoxChange={handleBoxChange}
                 marking={marking} onMark={(x, y) => markSubject(x, y, undefined, true)} subjectsAt={subjectsAt}
+                captionScan={transcribing || retranscribing ? (retranscribePlace ? 'Waiting its turn…' : 'Making captions…') : null}
               />
               {playingAdded && !playingAdded.hidden && (playingSegment && isInsert(playingSegment, mainVideoId)
                 // (a quiet see-through tag; its dot says which: lime = a video put in between, as on the film strip; orange = B-roll)
