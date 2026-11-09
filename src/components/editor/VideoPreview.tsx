@@ -16,6 +16,8 @@ import type { TextCase } from './CaptionStyler'
 import { applyCase, loadVideoFonts } from './CaptionStyler'
 import { captionCaseOf } from '@/modules/captions/store'
 import { normalizedSlotAspect, fitToAspect } from '@/modules/editor/utils'
+import { framePicture } from '@/modules/editor/framePicture'
+import { draggedView, zoomedView, wholeView } from '@/modules/editor/frameView'
 import { backgroundPixels, frameBackgroundOf, type FrameBackground } from '@/lib/shared/brandCard'
 import { isFrameLayout, frameSlotLabels, frameLanesFor, frameBandShown, frameOf, itemAt, captionBandAt, cornerGeometry, MIN_ROW_H, CAPTION_CLOSE_H, mainRect, boxRect, MIN_BOX as MIN_MAIN_BOX, frameAreas, frameBase, areaRadius, frameSlotSize, isTextLane, frameRows, validRowOrder, slotOffers, BLUR_SOURCE_SLOT, FRAME_TEMPLATES, barAt, barFlipped, MIN_MOVABLE_W, itemSourceAt } from '@/modules/editor/frames'
 import type { FrameMediaPool } from '@/modules/editor/frameMedia'
@@ -816,7 +818,8 @@ function paintFrame(
     }
     const v = pool?.video(it)
     if (v && v.readyState >= 2) {
-      const draw = put(v, v.videoWidth, v.videoHeight)
+      // (the part of it picked: dragged / zoomed in the preview, as a photo)
+      const draw = put(v, v.videoWidth, v.videoHeight, it.pan ? Math.max(1, it.pan.zoom ?? 1) : 1, 0, it.pan)
       // Frozen (or in a freeze stretch) and dimmed: the picture at 55% brightness (render.py: black at 45% over it)
       const dimmed = it.dim && itemSourceAt(it, tMs).held
         ? (dx: number, dy: number, dw: number, dh: number) => { ctx.save(); ctx.filter = 'brightness(0.55)'; draw(dx, dy, dw, dh); ctx.restore() }
@@ -1999,6 +2002,8 @@ interface OutputCanvasProps {
   onFrameFaceChange?: (box: { x: number; y: number; w: number } | null) => void
   /** The main video's box in a slot resized or moved (shares of the slot; null = fill the slot again) */
   onFrameMainRectChange?: (slot: number, rect: { x: number; y: number; w: number; h: number } | null) => void
+  /** The main video's view in a frame slot, moved in the preview (its crop box; from the playhead on, as any view change) */
+  onFrameMainViewChange?: (slot: number, boxId: string, pos: BoxPosition) => void
 }
 
 export function OutputCanvas({
@@ -2007,7 +2012,7 @@ export function OutputCanvas({
   className, style, skipTransitionRef,
   words, captionStyle, captionParts, captionTextCase: textCaseProp, showCaptions = false, captionsOffAt,
   textOverlays = [], activeTextOverlayId, onTextOverlayChange, onSelectTextOverlay, onDeleteTextOverlay, editTextOverlayId, onEditTextDone,
-  onCaptionPositionChange, onCaptionSizeChange, onCaptionTap, transitionCuts, watermark, timelineToVideo, clock, frameMedia, onFrameLaneClick, onFrameItemClick, activeFrameItemId, onFrameItemChange, onDeleteFrameItem, onFrameRowsChange, onFrameRowsSwap, onFrameBarChange, onFrameFaceChange, onFrameMainRectChange,
+  onCaptionPositionChange, onCaptionSizeChange, onCaptionTap, transitionCuts, watermark, timelineToVideo, clock, frameMedia, onFrameLaneClick, onFrameItemClick, activeFrameItemId, onFrameItemChange, onDeleteFrameItem, onFrameRowsChange, onFrameRowsSwap, onFrameBarChange, onFrameFaceChange, onFrameMainRectChange, onFrameMainViewChange,
 }: OutputCanvasProps) {
   // The fonts texts and frame texts are in, as soon as the picture shows (the export always has its
   // own): they used to load only with the Text, Captions or Brand kit panel, so a clip opened on
@@ -2619,10 +2624,18 @@ export function OutputCanvas({
           // (not the movable circle: dragging it moves the circle itself — its view is set by its view box)
           .filter(r => typeof r.lane === 'number' && main.includes(r.lane) && r.lane !== FRAME_TEMPLATES[activeSegment.layout as FrameLayout].movable && !frame.main_hidden?.[String(r.lane)] && !itemAt(frame, r.lane, currentTimeMs, activeSegment)
             && frameSlotSize(activeSegment.layout as FrameLayout, true, r.lane, activeSegment.frame) !== null)
-          .map(r => (
-            <FrameMainBox key={`main-${r.lane}`} row={r} rect={mainRect(frame, r.lane as number)}
-              onChange={rect => onFrameMainRectChange(r.lane as number, rect)} />
-          ))
+          .map(r => {
+            const box = activeSegment.crop_boxes.find(b => b.slot_index === r.lane)
+            return (
+              <FrameMainBox key={`main-${r.lane}`} row={r} rect={mainRect(frame, r.lane as number)}
+                onChange={rect => onFrameMainRectChange(r.lane as number, rect)}
+                view={box && onFrameMainViewChange ? {
+                  read: () => getPositionAtRef.current(box.id, liveTime.get()),
+                  videoAR: () => { const v = videoRef.current; return v && v.videoWidth && v.videoHeight ? v.videoWidth / v.videoHeight : null },
+                  onChange: pos => onFrameMainViewChange(r.lane as number, box.id, pos),
+                } : undefined} />
+            )
+          })
       })()}
       {/* Resizable frame: drag the line between two rows to make one bigger and the other smaller */}
       {/* The same box for a video or photo put in a slot (clicking it also selects it) */}
@@ -2630,9 +2643,12 @@ export function OutputCanvas({
         <FrameMainBox key={`box-${r.item.id}`} row={r} rect={boxRect(r.item.rect)}
           selected={r.item.id === activeFrameItemId} onSelect={() => onFrameItemClick?.(r.item.id)}
           onChange={rect => onFrameItemChange(r.item.id, { rect })}
-          picture={r.item.kind === 'photo' && r.item.image_url && (!r.item.motion || r.item.motion === 'none') && activeSegment
+          picture={activeSegment && ((r.item.kind === 'photo' && r.item.image_url && (!r.item.motion || r.item.motion === 'none')) || r.item.kind === 'video')
             && !frameAreas(activeSegment.layout as FrameLayout, true, activeSegment.frame).some(a => a.kind === 'slot' && a.slot === r.lane && a.fit === 'contain')
-            ? { url: r.item.image_url, pan: r.item.pan ?? null, onPan: pan => onFrameItemChange(r.item.id, { pan }) } : undefined} />
+            ? {
+              url: r.item.image_url ?? undefined, pan: r.item.pan ?? null, onPan: pan => onFrameItemChange(r.item.id, { pan }),
+              size: r.item.kind === 'video' ? () => { const v = frameMedia?.video(r.item); return v?.videoWidth ? { w: v.videoWidth, h: v.videoHeight } : null } : undefined,
+            } : undefined} />
       ))}
       {onFrameRowsChange && activeSegment && isFrameLayout(activeSegment.layout)
         && <FrameRowHandles seg={activeSegment} onChange={onFrameRowsChange} onSwap={onFrameRowsSwap} />}
@@ -2704,7 +2720,7 @@ function snapTo(centre: number, target: number, tol = GUIDE_SNAP): [number, bool
  * The main video's box inside its slot: drag it to move, a corner to resize (the picture is cut
  * from the source to the box's new shape). Double-click fills the slot again.
  */
-function FrameMainBox({ row, rect, onChange, selected, onSelect, picture }: {
+function FrameMainBox({ row, rect, onChange, selected, onSelect, picture, view }: {
   /** Its slot's area of the frame (shares of the frame) */
   row: { x: number; y: number; w: number; h: number }
   rect: { x: number; y: number; w: number; h: number } | null
@@ -2713,10 +2729,16 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect, picture }: {
   selected?: boolean
   onSelect?: () => void
   /**
-   * A still photo filling its box (user, 2026-11-05): drag it to pick which part shows (with the
-   * box smaller than the slot: Alt + drag, a plain drag moves the box), scroll to zoom in
+   * A still photo filling its box (user, 2026-11-05), or a video added to the slot (2026-11-09): drag
+   * it to pick which part shows (with the box smaller than the slot: Alt + drag, a plain drag moves
+   * the box), scroll to zoom in. `size`: a video's own size, read when it's dragged
    */
-  picture?: { url: string; pan: FrameItem['pan']; onPan: (pan: FrameItem['pan']) => void }
+  picture?: { url?: string; pan: FrameItem['pan']; onPan: (pan: FrameItem['pan']) => void; size?: () => { w: number; h: number } | null }
+  /**
+   * The main video (user, 2026-11-09): the same in the preview as a photo, but on its view — so it
+   * goes in from the playhead on, like any view change, and the export needs nothing new
+   */
+  view?: { read: () => BoxPosition; videoAR: () => number | null; onChange: (pos: BoxPosition) => void }
 }) {
   const [active, setActive] = useState(false)
   const setGuides = useContext(GuideContext)
@@ -2738,12 +2760,24 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect, picture }: {
   // Scroll over a picked photo: zoom in or out (1–4×), around the part showing
   const onPanRef = useRef(picture?.onPan)
   onPanRef.current = picture?.onPan
-  const canZoom = !!picture && !!selected
+  const viewRef = useRef(view)
+  viewRef.current = view
+  const canZoom = (!!picture && !!selected) || !!view
   useEffect(() => {
     const el = boxRef.current
     if (!el || !canZoom) return
     const wheel = (e: WheelEvent) => {
       e.preventDefault(); e.stopPropagation()
+      const v = viewRef.current
+      if (v) {
+        const b = el.getBoundingClientRect(), ar = v.videoAR()
+        if (!ar || !b.height) return
+        const a = b.width / b.height / ar
+        const cur = fitToAspect(v.read(), a)
+        const next = zoomedView(cur, Math.exp(-e.deltaY * 0.0015), framePicture(), a)
+        if (Math.abs(next.w - cur.w) > 1e-4) v.onChange(next)
+        return
+      }
       const p = panRef.current
       const zoom = Math.round(Math.max(1, Math.min(4, p.zoom * Math.exp(-e.deltaY * 0.0015))) * 1000) / 1000
       if (zoom !== p.zoom) onPanRef.current?.({ x: p.x, y: p.y, zoom })
@@ -2759,13 +2793,25 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect, picture }: {
     const sw = wrap.width * row.w, sh = wrap.height * row.h          // the slot in px
     const x0 = e.clientX, y0 = e.clientY
     // Moving the picture inside its box: how far (px) it reaches past the box each way
-    const pic = mode === 'move' && natural && (full || e.altKey) ? picture : undefined
+    const own = picture?.size ? picture.size() : natural
+    const pic = mode === 'move' && own && (full || e.altKey) ? picture : undefined
     const bw = sw * r.w, bh = sh * r.h
-    const k = natural ? Math.max(bw / natural.w, bh / natural.h) * pan.zoom : 1
-    const overX = natural ? natural.w * k - bw : 0, overY = natural ? natural.h * k - bh : 0
+    // Moving the main video inside its box: the view it starts from, as it's drawn in this box's shape
+    const ar = mode === 'move' && (full || e.altKey) ? view?.videoAR() : null
+    const v0 = view && ar && bh ? fitToAspect(view.read(), bw / bh / ar) : null
+    const k = own ? Math.max(bw / own.w, bh / own.h) * pan.zoom : 1
+    const overX = own ? own.w * k - bw : 0, overY = own ? own.h * k - bh : 0
     const p0 = pan
+    let viewMoved = false
     setActive(true)
     const move = (ev: PointerEvent) => {
+      if (v0) {
+        // (a click isn't a drag: it mustn't add a view change)
+        if (!viewMoved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 3) return
+        viewMoved = true
+        view?.onChange(draggedView(v0, (ev.clientX - x0) / bw, (ev.clientY - y0) / bh, framePicture()))
+        return
+      }
       if (pic) {
         // (dragged right, the picture moves right: more of its left side shows)
         const q = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 1000) / 1000
@@ -2809,15 +2855,27 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect, picture }: {
   )
   return (
     <div ref={boxRef} data-frame-main className="group absolute"
-      title={picture
-        ? (full ? 'Drag to move the photo inside · scroll to zoom · drag a corner to resize · double-click to reset'
-          : 'Drag to move the box · Alt + drag to move the photo inside · scroll to zoom · double-click to reset')
+      title={view
+        ? (full ? 'Drag to pick the part of the video that shows · scroll to zoom · drag a corner to resize · double-click to reset'
+          : 'Drag to move the video · Alt + drag to move the picture inside · scroll to zoom · double-click to reset')
+        : picture
+        ? (full ? `Drag to move the ${picture.size ? 'video' : 'photo'} inside · scroll to zoom · drag a corner to resize · double-click to reset`
+          : `Drag to move the box · Alt + drag to move the ${picture.size ? 'video' : 'photo'} inside · scroll to zoom · double-click to reset`)
         : 'Drag to move the video · drag a corner to resize · double-click to fill the area'}
       onPointerDown={e => start(e, 'move')}
-      onDoubleClick={e => { e.stopPropagation(); onChange(null); if (picture?.pan) picture.onPan(null) }}
+      onDoubleClick={e => {
+        e.stopPropagation(); onChange(null); if (picture?.pan) picture.onPan(null)
+        // The main video: back to the most of its picture this slot can show (a change only if it isn't already)
+        const ar = view?.videoAR(), wrap = boxRef.current?.parentElement?.getBoundingClientRect()
+        if (view && ar && wrap && wrap.height * row.h) {
+          const a = (wrap.width * row.w) / (wrap.height * row.h) / ar
+          const cur = fitToAspect(view.read(), a), whole = wholeView(framePicture(), a)
+          if (Math.abs(cur.x - whole.x) + Math.abs(cur.y - whole.y) + Math.abs(cur.w - whole.w) > 0.002) view.onChange(whole)
+        }
+      }}
       style={{
         left: `${(row.x + r.x * row.w) * 100}%`, top: `${(row.y + r.y * row.h) * 100}%`, width: `${r.w * row.w * 100}%`, height: `${r.h * row.h * 100}%`,
-        cursor: active ? 'grabbing' : picture && full ? 'grab' : 'move', touchAction: 'none', zIndex: 18,
+        cursor: active ? 'grabbing' : (picture || view) && full ? 'grab' : 'move', touchAction: 'none', zIndex: 18,
         boxShadow: active || selected ? 'inset 0 0 0 2px #c8ff00' : undefined,
       }}
       onClick={e => { if (onSelect) e.stopPropagation() }}>

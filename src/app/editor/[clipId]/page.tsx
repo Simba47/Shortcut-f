@@ -2,7 +2,7 @@ import { withSavedStyle } from '@/modules/editor/textStyle'
 import { redirect, notFound } from 'next/navigation'
 import { headers } from 'next/headers'
 import { requireUser } from '@/server/auth'
-import { EditorShell } from './EditorShell'
+import { EditorShell, type AiMade } from './EditorShell'
 import { EditorShellMobile } from './EditorShellMobile'
 import sql from '@/lib/db'
 import { cleanBrandOn } from '@/lib/shared/brandOn'
@@ -163,7 +163,8 @@ export default async function EditorPage({
   // Download link of the last export: a fresh one on every load. The link stored with the clip
   // expires after 7 days; the file path doesn't.
   const outputUrl = clip.status === 'done' && clip.output_storage_path ? (await sign(clip.output_storage_path)) ?? null : null
-  await Promise.all(segments.flatMap(seg => [
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const signSegments = (list: any[]) => Promise.all(list.flatMap(seg => [
     ...(seg.crop_boxes ?? []).map(async (box: { image_path?: string | null; image_url?: string }) => {
       if (box.image_path) box.image_url = await sign(box.image_path)
     }),
@@ -171,9 +172,10 @@ export default async function EditorPage({
       if (it.image_path) it.image_url = (await sign(it.image_path)) ?? null
     }),
   ]))
+  await signSegments(segments)
 
   // Sign overlay image URLs (fast local operation, run in parallel)
-  const overlays: Overlay[] = await Promise.all((overlaysRaw as unknown as Overlay[]).map(async ov => {
+  const signOverlays = (list: Overlay[]): Promise<Overlay[]> => Promise.all(list.map(async ov => {
     if (ov.type === 'image' && ov.storage_path) {
       const preview_url = await getSignedUrl(
         r2, new GetObjectCommand({ Bucket: R2_BUCKET, Key: ov.storage_path }), { expiresIn: 43200 }
@@ -182,6 +184,23 @@ export default async function EditorPage({
     }
     return ov
   }))
+  const overlays = await signOverlays(overlaysRaw as unknown as Overlay[])
+
+  // A Make my clips clip as the AI made it, for Reset (the worker's clip_ai_made; none before it kept one,
+  // or before the worker made the table). The desktop editor is the one with Reset
+  const [madeRow] = clip.ai_edit_job_id && !isMobile
+    ? await sql<{ made: AiMade }[]>`SELECT made FROM clip_ai_made WHERE clip_id = ${clipId}`.catch(() => [])
+    : []
+  let aiMade: AiMade | null = null
+  if (madeRow?.made) {
+    const m = madeRow.made
+    await signSegments(m.segments)
+    aiMade = {
+      ...m, brand: cleanBrandOn(m.brand),
+      overlays: await signOverlays(m.overlays),
+      text_overlays: m.text_overlays.map(withSavedStyle),
+    }
+  }
 
   const shellProps = {
     clip: {
@@ -206,5 +225,5 @@ export default async function EditorPage({
     initialOverlays: overlays ?? [],
   }
 
-  return isMobile ? <EditorShellMobile {...shellProps} /> : <EditorShell {...shellProps} backStart={backStart} />
+  return isMobile ? <EditorShellMobile {...shellProps} /> : <EditorShell {...shellProps} backStart={backStart} aiMade={aiMade} />
 }

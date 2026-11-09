@@ -2094,9 +2094,9 @@ export function Timeline({
   const frameLanes = () => {
     const seg = frameSeg && isFrameLayout(frameSeg.layout) ? frameSeg : null
     if (!seg || !visibleLanes(seg).length) return null
-    // The other frames only as plain grey bars on the rows they have too (user, 2026-11-06: as
-    // before — where they are shows, what's in them doesn't); a row only another frame has stays
-    // too, grey, with no buttons
+    // The other frames on the rows they have too, with what's in them (user, 2026-11-09: display
+    // everything — they were blank grey bars): quieter, and only to see; a click there moves the
+    // playhead onto that frame, which picks it. A row only another frame has stays too, with no buttons
     const others = mains.filter(s => s.id !== seg.id && isFrameLayout(s.layout))
     const rows = [...visibleLanes(seg)]
     for (const o of others) for (const r of visibleLanes(o)) if (!rows.some(x => x.lane === r.lane)) rows.push(r)
@@ -2154,8 +2154,27 @@ export function Timeline({
             <div key={laneKey} data-lane={`frame:${laneKey}`} className="group/lane relative" style={{ height: FRAME_LANE_H }}
               onPointerDown={e => { onSelectFrameItem?.(null); handleScrubDown(e) }}>
               {others.filter(o => visibleLanes(o).some(r => r.lane === lane.lane)).map(o => (
-                <div key={o.id} className="absolute inset-y-0.5 pointer-events-none" title={formatTag(o)}
-                  style={{ left: `${at(o.start_ms)}%`, width: `${pct(o.end_ms - o.start_ms)}%`, borderRadius: 5, background: 'rgb(var(--ed-fg) / 0.045)' }} />
+                <Fragment key={o.id}>
+                  <div className="absolute inset-y-0.5 pointer-events-none" title={formatTag(o)}
+                    style={{ left: `${at(o.start_ms)}%`, width: `${pct(o.end_ms - o.start_ms)}%`, borderRadius: 5, background: 'rgb(var(--ed-fg) / 0.045)' }} />
+                  {isMainLane(o, lane.lane) && (
+                    <div className="absolute inset-y-0.5 flex items-center overflow-hidden pointer-events-none"
+                      style={{ left: `${at(o.start_ms)}%`, width: `${pct(o.end_ms - o.start_ms)}%`, borderRadius: 5, background: `${FRAME_ITEM_COLORS.main}18` }}>
+                      <span className="px-2 truncate text-[10px] font-semibold" style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>{lane.label} · Main video</span>
+                    </div>
+                  )}
+                  {laneItems(frameOf(o), lane.lane, o).map(it => {
+                    const from = Math.max(it.start_ms, o.start_ms), to = Math.min(it.end_ms, o.end_ms)
+                    if (to <= from) return null
+                    return (
+                      <div key={it.id} className="absolute inset-y-0.5 flex items-center overflow-hidden pointer-events-none"
+                        style={{ left: `${at(from)}%`, width: `max(8px, ${pct(to - from)}%)`, borderRadius: 5, zIndex: 1, background: `${it.freeze ? FROZEN_STRIPES + ', ' : ''}${frameItemColor(it)}28`, boxShadow: `inset 2px 0 0 ${frameItemColor(it)}88` }}>
+                        {it.kind === 'photo' && it.image_url && <img src={it.image_url} alt="" crossOrigin="anonymous" className="h-full w-7 object-cover shrink-0" style={{ marginLeft: 2, opacity: 0.75 }} />}
+                        <span className="px-2 truncate text-[10px] font-semibold" style={{ color: 'rgb(var(--ed-fg) / 0.72)' }}>{it.kind === 'text' && !it.captions ? 'T · ' : ''}{it.freeze || it.holds?.length ? '❄ ' : ''}{itemName(it)}</span>
+                      </div>
+                    )
+                  })}
+                </Fragment>
               ))}
               {frame && row && (<>
                 <div className="absolute inset-y-0.5 pointer-events-none" style={{
@@ -2199,7 +2218,8 @@ export function Timeline({
                   )
                 })}
                 {(() => {
-                  const taken = laneItems(frame, row.lane, seg).some(it => it.start_ms <= plusAt && plusAt < it.end_ms)
+                  // (the main video fills its row too: no + on something already there)
+                  const taken = isMain || laneItems(frame, row.lane, seg).some(it => it.start_ms <= plusAt && plusAt < it.end_ms)
                   if (taken && !pulsing) return null
                   return (
                     <button ref={el => { if (el) plusRefs.current.set(laneKey, el); else plusRefs.current.delete(laneKey) }}

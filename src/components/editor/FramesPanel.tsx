@@ -27,6 +27,8 @@ interface Props {
   /** Selected lane item id, or `main:<slot>` */
   selected: string | null
   onApply: (layout: FrameLayout) => void
+  /** The gallery's None: the frame comes off the part it's on (it goes back to Vertical) */
+  onNoFrame: () => void
   /** Go to a frame (seeks to its start) */
   onOpenFrame: (segId: string) => void
   /** Select something in a frame and show it at `atMs` (text opens in the Text tool) */
@@ -204,7 +206,7 @@ function Chevron({ open }: { open: boolean }) {
 
 export function FramesPanel({
   frames, segment, targetLabel, currentTimeMs, videoTitles, selected, onToggleLock,
-  onApply, onOpenFrame, onSelectItem, onUpdateItem, onRemoveItem, onUpdateFrame, onReplaceMedia, onChangePart, onFreeze, onFreezeRange, onRemoveFrame, onRemoveMain, brandFrames = [],
+  onApply, onNoFrame, onOpenFrame, onSelectItem, onUpdateItem, onRemoveItem, onUpdateFrame, onReplaceMedia, onChangePart, onFreeze, onFreezeRange, onRemoveFrame, onRemoveMain, brandFrames = [],
   onSwapBroll, swappingBroll = null,
 }: Props) {
   const current = segment && isFrameLayout(segment.layout) ? segment.layout : null
@@ -231,6 +233,17 @@ export function FramesPanel({
             <section key={n} className="flex flex-col gap-1.5" aria-label={mediaGroupLabel(n)}>
               <h3 className="text-[11px] font-medium" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>{mediaGroupLabel(n)}</h3>
               <div className="grid grid-cols-4 gap-1.5">
+                {/* None (user, 2026-11-09): take the frame off again, first of the one-video frames */}
+                {n === 1 && (
+                  <button key="none" onClick={onNoFrame} disabled={!targetLabel} aria-pressed={!!segment && !current} title="No frame: this part goes back to plain Vertical"
+                    className="min-w-0 flex flex-col items-center gap-1 px-0.5 py-1.5 rounded-lg text-center transition-colors disabled:opacity-40 hover:bg-[rgb(var(--ed-fg)/0.05)]"
+                    style={{ background: segment && !current ? 'rgb(var(--ed-fg) / 0.08)' : 'rgb(var(--ed-fg) / 0.02)', boxShadow: `inset 0 0 0 ${segment && !current ? 1.5 : 1}px ${segment && !current ? ACCENT : 'rgb(var(--ed-fg) / 0.08)'}` }}>
+                    <div className="flex items-center justify-center rounded-[7px]" style={{ width: 40, height: 71, border: '1px dashed rgb(var(--ed-fg) / 0.25)', color: 'rgb(var(--ed-fg) / 0.5)' }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M5.7 5.7l12.6 12.6" /></svg>
+                    </div>
+                    <span className="w-full text-[9.5px] font-semibold leading-[1.15]" style={{ color: segment && !current ? 'var(--ed-text)' : 'rgb(var(--ed-fg) / 0.75)' }}>None</span>
+                  </button>
+                )}
                 {all.filter(id => frameSlotCount(id) === n).map(id => {
                   const t = FRAME_TEMPLATES[id]
                   const on = current === id
