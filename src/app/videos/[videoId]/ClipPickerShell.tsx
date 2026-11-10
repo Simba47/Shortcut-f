@@ -509,7 +509,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const isEdited = (c: { layout: string | null; origin: ClipOrigin }) => c.layout != null && (!manualOnly || c.origin === 'yours')
   // (brand kit Phase 2) each clip's kit, for its tag, and "Put on all"
   // ("Put on all": this board's own clips — the AI's here, the ones cut by hand on Manual edit — never the other board's)
-  const brands = useClipBrands(initialVideo.id, boardClips.map(c => c.id))
+  // (a brand put on or taken off: those clips' previews are loaded again — previewClip below)
+  const brandChangedRef = useRef<(ids: string[]) => void>(() => {})
+  const brands = useClipBrands(initialVideo.id, boardClips.map(c => c.id), ids => brandChangedRef.current(ids))
   const tabClips = clipTab === 'all' ? boardClips : clipTab === 'fav' ? boardClips.filter(c => c.favorite) : clipTab === 'edited' ? byTime.filter(isEdited) : byTime.filter(c => c.origin === clipTab)
   // Filters on the tab's clips (user, 2026-11-05: "get the clips easily", no search): their length, exported
   // or not, and the order — newest first (as before), oldest first, as they come in the video. (Length is
@@ -550,17 +552,27 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // An Ask AI / Best moments result shown in Preview before it's a clip (framed as a new clip would be)
   type MomentSource = 'best_moments' | 'clip_search'
   const [momentPreview, setMomentPreview] = useState<{ s: Suggestion; source: MomentSource } | null>(null)
+  /** A clip's preview read (again) from the server */
+  function loadPreview(id: string) {
+    setPreviews(p => ({ ...p, [id]: 'loading' }))
+    fetch(`/api/clips/${id}/preview`)
+      .then(async r => (r.ok ? r.json() : Promise.reject(new Error((await r.json().catch(() => ({}))).error ?? 'Could not load the preview'))))
+      .then((d: ClipPreviewData) => setPreviews(p => ({ ...p, [id]: d })))
+      .catch((e: unknown) => setPreviews(p => ({ ...p, [id]: { error: e instanceof Error ? e.message : 'Could not load the preview' } })))
+  }
   function previewClip(id: string) {
     videoRef.current?.pause()
     setViewMode('preview')
     setMomentPreview(null)
     setPreviewId(id)
     if (previews[id] && previews[id] !== 'loading' && !('error' in (previews[id] as object))) return
-    setPreviews(p => ({ ...p, [id]: 'loading' }))
-    fetch(`/api/clips/${id}/preview`)
-      .then(async r => (r.ok ? r.json() : Promise.reject(new Error((await r.json().catch(() => ({}))).error ?? 'Could not load the preview'))))
-      .then((d: ClipPreviewData) => setPreviews(p => ({ ...p, [id]: d })))
-      .catch((e: unknown) => setPreviews(p => ({ ...p, [id]: { error: e instanceof Error ? e.message : 'Could not load the preview' } })))
+    loadPreview(id)
+  }
+  // Their brand changed (user, 2026-11-10: a preview kept the look it was loaded with): the one showing
+  // loads again at once, the others when next opened
+  brandChangedRef.current = ids => {
+    setPreviews(p => { const next = { ...p }; for (const id of ids) delete next[id]; return next })
+    if (previewId && viewMode === 'preview' && ids.includes(previewId)) loadPreview(previewId)
   }
   // Click a clip: an edited one plays in Clip preview; one not edited yet shows in the source Video at its start
   function openClip(clip: { id: string; start_ms: number; layout: string | null; origin: ClipOrigin }) {
@@ -777,7 +789,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // Parsed form range, for the live duration readout
   const formStartMs = parseTime(formStart)
   const formEndMs = parseTime(formEnd)
-  const formRangeValid = formStartMs !== null && formEndMs !== null && formEndMs > formStartMs
 
   /** `open`: open the new clip in the editor (Create & edit); otherwise just add it to the board */
   function submitForm(open = true) {
@@ -1339,11 +1350,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           </button>}
         </div>
       </div>
-      {/* (the "Type hours, minutes and seconds" hint: out, user 2026-11-09 — only the length or a problem shows) */}
-      {(formError || formRangeValid) && (
-        <p className="text-xs" style={{ color: formError ? '#f87171' : 'rgb(var(--cb-fg) / 0.45)' }}>
-          {formError ?? `Length: ${durLabel(formStartMs!, formEndMs!)}`}
-        </p>
+      {/* (only a problem shows: the hint went 2026-11-09, the "Length: 2m" line 2026-11-10 — the badge between Start and End says it) */}
+      {formError && (
+        <p className="text-xs" style={{ color: '#f87171' }}>{formError}</p>
       )}
     </form>
   ) : (

@@ -37,8 +37,11 @@ async function json<T>(res: Response): Promise<T> {
   return body as T
 }
 
-/** The user's kits and each clip's kit, read again when the clips change (Make my clips adds some) */
-export function useClipBrands(videoId: string, clipIds: string[]): ClipBrands {
+/**
+ * The user's kits and each clip's kit, read again when the clips change (Make my clips adds some).
+ * `onChanged`: the clips whose brand was just put on, swapped or taken off (their previews are out of date)
+ */
+export function useClipBrands(videoId: string, clipIds: string[], onChanged?: (clipIds: string[]) => void): ClipBrands {
   const [kits, setKits] = useState<KitLite[]>([])
   const [of, setOf] = useState<Record<string, string | null>>({})
   const [pick, setPick] = useState('')
@@ -74,6 +77,7 @@ export function useClipBrands(videoId: string, clipIds: string[]): ClipBrands {
       const r = await fetch(`/api/videos/${videoId}/brand`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kit_id: kitId, clip_ids: clipIds }) })
         .then(res => json<{ changed: number; skipped: number }>(res))
       await loadClips()
+      onChanged?.(clipIds)
       const kit = kits.find(k => k.id === kitId)
       setNote({
         bad: false,
@@ -96,6 +100,7 @@ export function useClipBrands(videoId: string, clipIds: string[]): ClipBrands {
       } catch { failed++ }
     }
     await loadClips()
+    onChanged?.(clipIds)
     const kit = kits.find(k => k.id === kitId)
     setNote({
       bad: failed > 0,
@@ -109,6 +114,7 @@ export function useClipBrands(videoId: string, clipIds: string[]): ClipBrands {
       await fetch(`/api/clips/${clipId}/brand`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kit_id: kitId }) })
         .then(res => json<{ on: boolean }>(res))
       setOf(o => ({ ...o, [clipId]: kitId }))
+      onChanged?.([clipId])
     } catch (e) {
       setNote({ text: e instanceof Error ? e.message : String(e), bad: true })
     } finally { setBusy(null) }
