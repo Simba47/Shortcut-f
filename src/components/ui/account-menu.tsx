@@ -6,6 +6,7 @@ import { useSession, signOut } from 'next-auth/react'
 import { privacyCards, PRIVACY_DOC } from '@/components/legal/privacyDoc'
 import { termsCards, TERMS_DOC } from '@/components/legal/termsDoc'
 import { COMPANY } from '@/lib/company'
+import { BrandTeamDialog } from '@/components/brand/BrandTeamDialog'
 
 /**
  * Profile button and menu. The button: a small profile photo and the name on a black rounded rectangle. The menu:
@@ -89,6 +90,7 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
 
   const [open, setOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [teamOpen, setTeamOpen] = useState(false)
   // Privacy or Terms, read in a popup over the page (user, 2026-11-05: not a jump to their pages)
   const [legal, setLegal] = useState<LegalDoc | null>(null)
   const ref = useRef<HTMLDivElement>(null)
@@ -167,6 +169,12 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
             <a href="/pricing" onClick={go('/pricing')} className="am-item" role="menuitem">
               <Icon d={<><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /></>} /><span className="flex-1">Plans &amp; billing</span>
             </a>
+            {/* (the top plan: its brand kits shared with a team — user, 2026-11-10) */}
+            {topPlan && (
+              <button className="am-item" role="menuitem" onClick={() => { setOpen(false); setTeamOpen(true) }}>
+                <Icon d={<><circle cx="9" cy="8" r="4" /><path d="M2 21a7 7 0 0114 0M16 4a4 4 0 010 8M18 15a6 6 0 014 6" /></>} /><span className="flex-1">Team</span>
+              </button>
+            )}
           </div>
 
           {/* Help */}
@@ -198,6 +206,7 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
       )}
 
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
+      {teamOpen && <BrandTeamDialog onClose={() => setTeamOpen(false)} />}
       {legal && <LegalDialog doc={legal} onDoc={setLegal} onClose={() => setLegal(null)} />}
     </div>
   )

@@ -110,7 +110,7 @@ function BrandKitDialog({ start, onClose }: { start: Start; onClose: () => void 
           </span>
           <span className="flex-1 min-w-0 flex flex-col">
             <span className="bkd-kit-name">{k.name}</span>
-            <span className="bkd-kit-meta">{k.shared_by ? `By ${k.shared_by} · ${ROLE_NAMES[k.role ?? 'use']}` : handle ?? 'No @handle yet'}</span>
+            {(k.shared_by || handle) && <span className="bkd-kit-meta">{k.shared_by ? `By ${k.shared_by} · ${ROLE_NAMES[k.role ?? 'use']}` : handle}</span>}
           </span>
           <span className="bkd-dots" aria-hidden="true"><i style={{ background: d.colors.main }} /><i style={{ background: d.colors.accent }} /></span>
         </button>

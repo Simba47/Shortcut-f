@@ -7,7 +7,7 @@ import { brandKitLimit, cleanBrandKitData, DEFAULT_BRAND_KIT, isBrandFont, brand
 import { cleanRole, INVITE_DAYS, TEAM_PLANS, teamSeats, type KitInviteIn, type KitInviteOut, type KitMember, type KitRole, type KitTeam } from '@/lib/shared/brandTeam'
 import { hasColumn } from './clips'
 import { pictureColours } from './brandStyle'
-import { cleanBrandWords, type BrandWords } from '@/lib/brandWords'
+import { BRAND_WORDS_ON, cleanBrandWords, type BrandWords } from '@/lib/brandWords'
 
 /**
  * Brand kits (lib/shared/brandKit.ts): a user's saved looks, kept in brand_kits (the backend creates
@@ -399,6 +399,7 @@ export async function defaultBrandKit(userId: string): Promise<BrandKitData | nu
  * the user's default kit's. Null: none — or no table yet, or a hiccup: the words are then shown as they are.
  */
 export async function brandWordsFor(userId: string, clipId: string | null): Promise<BrandWords | null> {
+  if (!BRAND_WORDS_ON) return null
   try {
     if (!clipId) {
       const [row] = await sql<{ words: unknown }[]>`

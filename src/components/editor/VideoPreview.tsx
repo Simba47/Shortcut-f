@@ -1370,6 +1370,34 @@ function exportFont(id?: string | null) {
   return f
 }
 
+/** What a family's full height is, in em, once its file is in (libass sizes a caption so its full height is the size) */
+const familyEms = new Map<string, number>()
+function familyEm(family: string): number {
+  const known = familyEms.get(family)
+  if (known) return known
+  const ctx = measurer()
+  if (!ctx || !document.fonts.check(`700 20px "${family}"`)) return 0.75
+  ctx.save()
+  ctx.font = `700 100px "${family}"`
+  const m = ctx.measureText('Hg')
+  ctx.restore()
+  const tall = m.fontBoundingBoxAscent + m.fontBoundingBoxDescent
+  if (!(tall > 0)) return 0.75
+  familyEms.set(family, 100 / tall)
+  return 100 / tall
+}
+
+/**
+ * A caption's font as the export draws it (render.py _ass_font_name): a bundled one's file, else an editor
+ * font or a brand kit's own by its family. (Roboto stood in for those here while the export drew them, so
+ * picking a font changed nothing on the preview — user, 2026-11-10.)
+ */
+function captionFont(id?: string | null): { family: string; em: number } {
+  if (!id || EXPORT_FONTS[id] || id === 'sans-serif') return exportFont(id)
+  if (isBrandFont(id)) { ensureBrandFont(id); return { family: id, em: familyEm(id) } }
+  return VIDEO_FONTS.some(f => f.family === id) ? { family: id, em: familyEm(id) } : exportFont(id)
+}
+
 /**
  * After a text's own font, for the letters it doesn't have: the Indian scripts' Noto fonts, then Roboto
  * for the English letters those have none of — as the export picks them (text_style.py font_runs).
@@ -1465,7 +1493,7 @@ function drawPresetCaptions(
   // Indic fonts have no Latin letters, so Roman-letter captions use Roboto (as render.py), and
   // these are drawn bold (libass thickens them: the style asks for bold)
   const latin = style.language === 'roman' || isLatinText(chunk.map(w => w.word).join(' '))
-  const plain = exportFont(style.language === 'roman' ? 'roboto' : style.font)
+  const plain = captionFont(style.language === 'roman' ? 'roboto' : style.font)
   const baseFont: DrawFont = (tpl && latin ? templateFont(tpl.font) : null) ?? { family: plain.family, em: plain.em, weight: 700, italic: false }
   const liveFont = tpl?.liveFont && latin ? templateFont(tpl.liveFont) : null
   // The caption size as libass takes it: every font is sized so its full height is this
@@ -1646,7 +1674,7 @@ function drawCaptionsCentred(
   // (in its own script with no font picked: Noto Sans Telugu, as the export's default. Roboto has no
   // Telugu or Hindi letters, so the browser drew them in a font of the PC's own, ~1.8× the export's
   // size — user, 2026-11-04; the export's Noto fonts follow any font for letters it doesn't have)
-  const font       = exportFont(style.language === 'roman' ? 'roboto' : (style.font ?? 'noto-sans-telugu'))
+  const font       = captionFont(style.language === 'roman' ? 'roboto' : (style.font ?? 'noto-sans-telugu'))
   const scriptFonts = style.language === 'roman' ? '' : SCRIPT_FALLBACKS.map(id => `"${exportFont(id).family}", `).join('')
   const fontSize   = Math.round((style.size ?? 52) * k * font.em)
   const lineHeight = Math.round(fontSize * 1.4)
@@ -2351,9 +2379,12 @@ export function OutputCanvas({
         // Paused: the editor's playhead itself — what the editor shows on top (the slots' buttons,
         // the bars, the boxes) is of that moment, and so is the format or frame just put there. The
         // player's own time isn't: a seek lands on the video frame just before the playhead, which
-        // at a section's edge is in the section before (its picture showed under the next one's buttons)
+        // at a section's edge is in the section before (its picture showed under the next one's buttons).
+        // The playhead being dragged: the frame on screen's own time again, so the framing and captions
+        // are always of the picture drawn, never of a moment it hasn't reached yet
         const videoMs = !video.paused && shownMs != null && Math.abs(shownMs - clockMs) < 300 ? shownMs : clockMs
-        const clipMsNow = video.paused && currentTimeMsRef.current != null
+        const dragged = usePlayerStore.getState().scrubbing && !clockRef.current
+        const clipMsNow = video.paused && !dragged && currentTimeMsRef.current != null
           ? Math.max(0, currentTimeMsRef.current)
           : Math.max(0, clockRef.current ? clockRef.current() : toTimeline ? toTimeline(videoMs) : videoMs - clipStartMsRef.current)
         const seg    = segmentAtRef.current
@@ -2390,7 +2421,8 @@ export function OutputCanvas({
           const liveMs = toTimeline ? clipStartMsRef.current + clipRelativeMs : videoMs
 
           // Keep frame slots' own videos in step with the main player, then draw
-          frameMediaRef.current?.sync(seg, clipRelativeMs, !video.paused, video)
+          // (paused, after drawing: moved first, a slot's video is seeking again before its new frame is drawn)
+          if (!video.paused) frameMediaRef.current?.sync(seg, clipRelativeMs, true, video)
           // A B-roll shot whose video is still seeking keeps the last frame (never flashes the main video)
           const other = sourceForRef.current?.(seg)
           // Inside a transition: the section before the join and the one after it, both drawn,
@@ -2548,6 +2580,8 @@ export function OutputCanvas({
 
           // The Free plan's watermark, over everything (as the export does)
           if (watermarkRef.current) drawWatermark(ctx, canvas.width, canvas.height, clipRelativeMs)
+
+          if (video.paused) frameMediaRef.current?.sync(seg, clipRelativeMs, false, video)
         }
       }
 

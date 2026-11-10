@@ -1,10 +1,10 @@
 'use client'
 
-import { useBrandPalette, useBrandLock } from './brandPalette'
+import { useBrandPalette, useBrandLock, KitColoursContext } from './brandPalette'
 import { useBrandFonts, ensureBrandFont } from './brandFonts'
 import { CAPTION_TEMPLATE_LIST, TEMPLATE_FONTS, TEMPLATE_GROUPS, applyTemplate, templateFontFamily, templateOf, usesKeyWords, type CaptionTemplate } from '@/modules/captions/templates'
 import { CaptionKeyWords } from './CaptionKeyWords'
-import { useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import type { AnimationType, CaptionStyle } from '@chai-cut/shared'
 import { SARVAM_LANGUAGES, DEFAULT_CAPTION_STYLE } from '@chai-cut/shared'
 import { VIDEO_FONTS } from '@/lib/shared/videoFonts'
@@ -405,7 +405,16 @@ function ColourChooser({ text, highlight, showHighlight, highlightLabel, onText,
   sample?: boolean
 }) {
   const [open, setOpen] = useState<'text' | 'highlight' | null>(null)
-  const theme = COLOUR_THEMES.find(t => sameHex(t.text, text) && (!showHighlight || sameHex(t.highlight, highlight)))?.name
+  // In a brand kit's settings: both colours from its Primary and Secondary, in one click (user, 2026-11-10)
+  const kit = useContext(KitColoursContext)
+  const brandThemes = kit ? [
+    { name: 'Primary first', text: kit.primary, highlight: kit.secondary },
+    { name: 'Secondary first', text: kit.secondary, highlight: kit.primary },
+    { name: 'White + primary', text: '#ffffff', highlight: kit.primary },
+    { name: 'White + secondary', text: '#ffffff', highlight: kit.secondary },
+  ] : []
+  const brandTheme = brandThemes.find(t => sameHex(t.text, text) && (!showHighlight || sameHex(t.highlight, highlight)))?.name
+  const theme = brandTheme ? undefined : COLOUR_THEMES.find(t => sameHex(t.text, text) && (!showHighlight || sameHex(t.highlight, highlight)))?.name
   return (
     <div className="flex flex-col gap-3">
       {/* Live sample of the two colours together */}
@@ -413,6 +422,24 @@ function ColourChooser({ text, highlight, showHighlight, highlightLabel, onText,
         <span style={{ color: text }}>Hey there </span>
         <span style={{ color: showHighlight ? highlight : text }}>friend</span>
       </div>}
+
+      {brandThemes.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <span className="cap-label">From your brand</span>
+          <div className="grid grid-cols-4 gap-1.5">
+            {brandThemes.map(t => (
+              <button key={t.name} type="button" className="cp-theme" data-on={brandTheme === t.name || undefined}
+                onClick={() => { onText(t.text); if (showHighlight) onHighlight(t.highlight) }}
+                aria-pressed={brandTheme === t.name} title={`${t.name}: ${colourName(t.text)} text, ${colourName(t.highlight)} ${highlightLabel.toLowerCase()}`}>
+                <span className="cp-theme-dots" aria-hidden="true">
+                  <span style={{ background: t.text }} /><span style={{ background: t.highlight }} />
+                </span>
+                <span className="cp-theme-name">{t.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Themes: both colours in one click */}
       <div className="flex flex-col gap-2">
@@ -612,9 +639,11 @@ export function CaptionStyler({
         sample={!section}
       />
 
-      {/* Font */}
+      {/* Font; beside it on a wide page, Size and Capitals (user, 2026-11-10) */}
+      <div className="cap-font-row">
       <FontPicker value={style.font ?? null} onChange={family => onChange({ font: family })} />
 
+      <div className="cap-font-rest">
       {/* Size */}
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between">
@@ -640,6 +669,8 @@ export function CaptionStyler({
             </button>
           ))}
         </div>
+      </div>
+      </div>
       </div>
       </section>}
 

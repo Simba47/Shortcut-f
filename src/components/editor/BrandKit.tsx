@@ -1,20 +1,21 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useConfirm } from './ConfirmDialog'
 import { CaptionStyler, FontPicker, loadVideoFonts, type TextCase } from './CaptionStyler'
 import { PlatformOverlay, PLATFORM_SAFE, type Platform } from './PlatformOverlay'
-import { ensureBrandFont } from './brandFonts'
+import { ensureBrandFont, KitFontsContext } from './brandFonts'
+import { KitColoursContext } from './brandPalette'
 import { openBrandKits, BRAND_KITS_CLOSED } from '@/components/brand/brandKitsEvents'
 import { InteractiveHoverButton } from '@/components/ui/interactive-hover-button'
 import { BrandStart, BrandCard, type Found } from '@/components/brand/BrandMaker'
-import { KitWords, WordsPreview } from '@/components/brand/BrandWordsEditor'
-import { inviteLink, ROLE_NAMES, type KitInviteIn, type KitInviteOut, type KitMember, type KitRole, type KitTeam as KitTeamState } from '@/lib/shared/brandTeam'
-import { cardAreas, cardBackgroundPixels, CARD_PATTERNS, CARD_PATTERN_SCALE, CARD_VIDEO_WIDTH, type CardPattern } from '@/lib/shared/brandCard'
+import type { KitInviteIn } from '@/lib/shared/brandTeam'
 import { templateOf, templateFontFamily } from '@/modules/captions/templates'
 import {
-  LOGO_SIZE, LOGO_SECONDS, MAX_BRAND_FONTS, CARD_TEXT_SIZE, type BrandCardSettings,
-  brandCaptionStyle, logoBox, showHandle, WATERMARK, isWatermark, END_CARD_SECONDS, MAX_END_VIDEO_MS, brandTextStyle, MAX_MORE_CAPTIONS, DEFAULT_BRAND_KIT, type LinkBrand, type BrandTextStyle, type BrandCaptionLook,
-  type BrandKit, type BrandKitData, type BrandCaptions, type LogoCorner, type LogoShow,
+  MAX_BRAND_FONTS,
+  brandCaptionStyle, logoBox, showHandle, brandTextStyle, DEFAULT_BRAND_KIT, type LinkBrand,
+  type BrandKit, type BrandKitData, type BrandCaptions,
 } from '@/lib/shared/brandKit'
 
 /**
@@ -43,6 +44,8 @@ export interface BrandKits {
   create: () => Promise<BrandKit>
   /** logo_url: the new logo's link, for showing it (not saved) */
   update: (id: string, patch: KitPatch) => void
+  /** What's waiting for a kit sent now, and waited for: null once it's saved, else why it isn't */
+  saveNow: (id: string) => Promise<string | null>
   remove: (id: string) => Promise<void>
   /** Stop using a kit someone shared with you */
   leave: (id: string) => Promise<void>
@@ -60,7 +63,7 @@ export interface BrandKits {
   reload: () => void
 }
 
-async function json<T>(res: Response): Promise<T> {
+export async function json<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => ({}))
   if (!res.ok) throw Object.assign(new Error((body as { error?: string }).error ?? 'Something went wrong. Please try again.'), { status: res.status })
   return body as T
@@ -100,6 +103,8 @@ export function useBrandKits(): BrandKits {
   const sending = useRef(new Map<string, Promise<void>>())
   /** How many times in a row a kit's save hasn't landed (it waits longer before each try) */
   const tries = useRef(new Map<string, number>())
+  /** Why the server turned a kit's last save down */
+  const turnedDown = useRef(new Map<string, string>())
   const flushRef = useRef<(id: string, keepalive?: boolean) => void>(() => {})
 
   const load = useCallback(() => {
@@ -152,6 +157,7 @@ export function useBrandKits(): BrandKits {
       // (the saved kit's logo link; what's on screen stays as typed meanwhile)
       .then(d => {
         tries.current.delete(id)
+        turnedDown.current.delete(id)
         setKits(ks => ks.map(k => (k.id !== id ? k : {
           ...k, logo_url: d.kit.logo_url ?? k.logo_url,
           // (someone who can edit a team's kit: the logo they uploaded is kept in the owner's folder now)
@@ -165,6 +171,7 @@ export function useBrandKits(): BrandKits {
         if (refused(e)) {
           tries.current.delete(id)
           setSaveState('error'); setSaveError(e instanceof Error ? e.message : String(e))
+          turnedDown.current.set(id, e instanceof Error ? e.message : String(e))
           return
         }
         // Not saved (no connection, the server busy): the change is kept — under anything changed
@@ -211,11 +218,18 @@ export function useBrandKits(): BrandKits {
     const { name, ...rest } = patch
     const send = name !== undefined && !name.trim() ? rest : patch
     pending.current.set(id, { ...pending.current.get(id), ...send })
+    turnedDown.current.delete(id)
     setSaveError(null)
     const t = timers.current.get(id)
     if (t) clearTimeout(t)
     timers.current.set(id, setTimeout(() => flush(id), SAVE_AFTER_MS))
     setSaveState('saving')
+  }, [flush])
+
+  const saveNow = useCallback(async (id: string) => {
+    if (pending.current.has(id)) flush(id)
+    await sending.current.get(id)
+    return turnedDown.current.get(id) ?? (pending.current.has(id) ? 'Not saved yet: check your connection. It keeps trying by itself.' : null)
   }, [flush])
 
   const select = useCallback((id: string) => {
@@ -271,7 +285,7 @@ export function useBrandKits(): BrandKits {
   }, [select])
 
   const current = kits.find(k => k.id === currentId) ?? null
-  return { kits, limit, plan, loading, error, current, select, create, update, remove, leave, invites, answerInvite, uploadLogo, fromLink, saveState, saveError, reload: load }
+  return { kits, limit, plan, loading, error, current, select, create, update, saveNow, remove, leave, invites, answerInvite, uploadLogo, fromLink, saveState, saveError, reload: load }
 }
 
 /**
@@ -284,22 +298,12 @@ export interface BrandSwitchProps {
   onTurnOff: () => void
 }
 
-function BrandOnSwitch({ kit, onKitId, onTurnOn, onTurnOff, compact = false }: BrandSwitchProps & { kit: BrandKit; compact?: boolean }) {
+function BrandOnSwitch({ kit, onKitId, onTurnOn, onTurnOff }: BrandSwitchProps & { kit: BrandKit }) {
   const on = onKitId === kit.id
-  const other = onKitId !== null && !on
   return (
-    <label className={`flex items-center gap-3 rounded-xl cursor-pointer select-none ${compact ? 'h-9 px-3' : 'p-3'}`}
+    <label className="flex items-center gap-3 rounded-xl cursor-pointer select-none h-9 px-3"
       style={{ background: on ? 'rgba(200,255,0,0.05)' : 'rgb(var(--ed-fg) / 0.05)', boxShadow: `inset 0 0 0 1px ${on ? 'rgba(200,255,0,0.275)' : 'rgb(var(--ed-fg) / 0.12)'}` }}>
-      <span className="flex-1 min-w-0 flex flex-col">
-        <span className={`${compact ? 'text-xs' : 'text-[13px]'} font-bold text-[var(--ed-text)]`}>{compact ? (on ? 'On this clip' : 'Off on this clip') : on ? 'Brand kit on' : 'Brand kit off'}</span>
-        {!compact && (
-          <span className="text-[11px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
-            {on ? 'On this clip and every frame you pick. Changes to the kit reach it by themselves.'
-              : other ? 'Another kit is on: switching this one on swaps it.'
-                : 'Puts your logo, colours and style on this clip.'}
-          </span>
-        )}
-      </span>
+      <span className="flex-1 min-w-0 text-xs font-bold text-[var(--ed-text)]">{on ? 'On this clip' : 'Off on this clip'}</span>
       <Switch on={on} label={on ? 'Switch the brand kit off for this clip' : 'Switch this brand kit on for this clip'}
         onChange={v => (v ? onTurnOn(kit) : onTurnOff())} />
     </label>
@@ -308,12 +312,9 @@ function BrandOnSwitch({ kit, onKitId, onTurnOn, onTurnOff, compact = false }: B
 
 // ── Options panel: the kits, a new one, Apply ────────────────────────────────
 
-export function BrandKitPanel({ brand, onKitId, onTurnOn, onTurnOff, onDelete, editing, onEdit }: BrandSwitchProps & {
+export function BrandKitPanel({ brand, onEdit }: {
   brand: BrandKits
-  /** Asks first, then deletes */
-  onDelete: (kit: BrandKit) => void
-  /** The kit's workshop is open (in the video's place); Edit kit opens it */
-  editing?: boolean
+  /** Opens the kit's workshop (in the video's place) */
   onEdit?: () => void
 }) {
   const [busy, setBusy] = useState(false)
@@ -338,7 +339,7 @@ export function BrandKitPanel({ brand, onKitId, onTurnOn, onTurnOff, onDelete, e
     )
   }
   return (
-    <div className="p-4 flex flex-col gap-4">
+    <div className="min-h-full p-4 flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h3 className="cap-heading">Your kits</h3>
         <span className="text-[11px] tabular-nums" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}
@@ -351,7 +352,7 @@ export function BrandKitPanel({ brand, onKitId, onTurnOn, onTurnOff, onDelete, e
         {brand.kits.map(k => {
           const on = k.id === brand.current?.id
           return (
-            <button key={k.id} type="button" role="option" aria-selected={on} onClick={() => brand.select(k.id)}
+            <button key={k.id} type="button" role="option" aria-selected={on} onClick={() => { brand.select(k.id); onEdit?.() }}
               className="flex items-center gap-3 p-2.5 rounded-xl text-left transition-colors"
               style={{ background: on ? 'rgba(200,255,0,0.04)' : 'rgb(var(--ed-fg) / 0.04)', boxShadow: `inset 0 0 0 1px ${on ? 'rgba(200,255,0,0.275)' : 'rgb(var(--ed-fg) / 0.08)'}` }}>
               <KitBadge kit={k} />
@@ -363,9 +364,7 @@ export function BrandKitPanel({ brand, onKitId, onTurnOn, onTurnOff, onDelete, e
                       style={{ background: 'rgba(200,255,0,0.07)', color: 'var(--ed-accent-text)' }}>Default</span>
                   )}
                 </span>
-                <span className="text-[11px] truncate" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
-                  {k.shared_by ? `Shared by ${k.shared_by}${k.role === 'edit' ? ' · can edit' : ''}${k.data.lock ? ' · brand lock' : ''}` : showHandle(k.data.handle) || 'No @handle yet'}
-                </span>
+                {(k.shared_by || k.data.handle) && <span className="text-[11px] truncate" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>{k.shared_by ? `Shared by ${k.shared_by}${k.role === 'edit' ? ' · can edit' : ''}${k.data.lock ? ' · brand lock' : ''}` : showHandle(k.data.handle)}</span>}
               </span>
               <span className="flex gap-1 shrink-0" aria-hidden="true">
                 {[k.data.colors.main, k.data.colors.accent].map((c, i) => <span key={i} className="w-3.5 h-3.5 rounded-full" style={{ background: c, boxShadow: '0 0 0 1px rgb(var(--ed-fg) / 0.2)' }} />)}
@@ -375,54 +374,25 @@ export function BrandKitPanel({ brand, onKitId, onTurnOn, onTurnOff, onDelete, e
         })}
         {!brand.kits.length && (
           <p className="text-xs leading-relaxed" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
-            Make a kit with your colours, logo and @handle, then put it on any clip in one click.
+            Make a kit with your colours and logo, then put it on any clip in one click.
           </p>
         )}
       </div>
 
-      <button type="button" onClick={newKit} disabled={busy || full}
-        title={full ? `Your ${planName} plan has room for ${brand.limit} brand kit${brand.limit === 1 ? '' : 's'}. Upgrade for more.` : 'Make a new brand kit'}
-        className="flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40"
-        style={{ color: 'var(--ed-text)', background: 'rgb(var(--ed-fg) / 0.06)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.12)' }}>
-        <span aria-hidden="true">+</span> {busy ? 'Making…' : 'New brand kit'}
-      </button>
-      {full && <p className="-mt-2 text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>That&rsquo;s all your plan has room for. <a href="/pricing" className="font-semibold hover:underline" style={{ color: 'var(--ed-accent-text)' }}>Upgrade</a> for more.</p>}
       {/* All of them, outside the editor (a new tab: this clip stays open) */}
       <button type="button" onClick={() => openBrandKits()} className="-mt-1 self-center text-[11px] font-semibold hover:underline" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
         All your brand kits</button>
-      {note && <p role="alert" className="-mt-2 text-[11px]" style={{ color: '#fca5a5' }}>{note}</p>}
-
-      {brand.current && (
-        <div className="flex flex-col gap-3 pt-3" style={{ borderTop: '1px solid rgb(var(--ed-fg) / 0.08)' }}>
-          <BrandOnSwitch kit={brand.current} onKitId={onKitId} onTurnOn={onTurnOn} onTurnOff={onTurnOff} />
-          {onEdit && (
-            <button type="button" onClick={onEdit} aria-pressed={!!editing}
-              className="h-9 flex items-center justify-center gap-2 rounded-lg text-xs font-semibold transition-colors"
-              style={editing
-                ? { color: 'rgb(var(--ed-fg) / 0.55)', background: 'transparent', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)' }
-                : { color: '#0a0a0a', background: '#c8ff00' }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
-              {editing ? 'Editing it on the right' : brand.current.shared_by && brand.current.role !== 'edit' ? 'See the kit' : 'Edit kit'}
-            </button>
-          )}
-          <details className="rounded-lg">
-            <summary className="px-1 cursor-pointer select-none text-[11px] font-medium list-none" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>More…</summary>
-            <div className="flex flex-col gap-1.5 pt-2 px-1">
-              {brand.current.shared_by ? (
-                <button type="button" onClick={() => { brand.leave(brand.current!.id).catch(e => setNote(e instanceof Error ? e.message : String(e))) }}
-                  className="self-start text-[11px] font-medium hover:underline" style={{ color: '#fca5a5' }}>
-                  Stop using this shared kit
-                </button>
-              ) : (
-                <button type="button" onClick={() => onDelete(brand.current!)}
-                  className="self-start text-[11px] font-medium hover:underline" style={{ color: '#fca5a5' }}>
-                  Delete this kit
-                </button>
-              )}
-            </div>
-          </details>
-        </div>
-      )}
+      {/* At the bottom of the panel, however many kits there are (user, 2026-11-10) */}
+      <div className="mt-auto flex flex-col gap-2">
+        {full && <p className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>That&rsquo;s all your plan has room for. <a href="/pricing" className="font-semibold hover:underline" style={{ color: 'var(--ed-accent-text)' }}>Upgrade</a> for more.</p>}
+        {note && <p role="alert" className="text-[11px]" style={{ color: '#fca5a5' }}>{note}</p>}
+        <button type="button" onClick={newKit} disabled={busy || full}
+          title={full ? `Your ${planName} plan has room for ${brand.limit} brand kit${brand.limit === 1 ? '' : 's'}. Upgrade for more.` : 'Make a new brand kit'}
+          className="flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40"
+          style={{ color: 'var(--ed-text)', background: 'rgb(var(--ed-fg) / 0.06)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.12)' }}>
+          <span aria-hidden="true">+</span> {busy ? 'Making…' : 'New brand kit'}
+        </button>
+      </div>
     </div>
   )
 }
@@ -439,229 +409,10 @@ export function urlRatio(url: string): Promise<number | null> {
 }
 
 
-/** Who the kit is shared with (Agency) and as what, the invites out, and its brand lock (Phase 6) */
-function KitTeam({ kitId, lock, onLock }: { kitId: string; lock: boolean; onLock: (on: boolean) => void }) {
-  const [state, setState] = useState<KitTeamState | null>(null)
-  const [email, setEmail] = useState('')
-  const [role, setRole] = useState<KitRole>('use')
-  const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState<string | null>(null)
-  const [done, setDone] = useState<string | null>(null)
-  const [copied, setCopied] = useState<string | null>(null)
-  const url = `/api/brand-kits/${kitId}/share`
-  function send<T>(method: string, body: unknown): Promise<T> {
-    return fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => json<T>(r))
-  }
-  useEffect(() => {
-    let live = true
-    setState(null); setNote(null); setDone(null)
-    fetch(url).then(r => json<KitTeamState>(r))
-      .then(s => { if (live) setState(s) }).catch(e => { if (live) setNote(e instanceof Error ? e.message : String(e)) })
-    return () => { live = false }
-  }, [url])
-  const fail = (e: unknown) => setNote(e instanceof Error ? e.message : String(e))
-  async function copyLink(id: string) {
-    const link = inviteLink(window.location.origin, id)
-    try {
-      await navigator.clipboard.writeText(link)
-      setCopied(id)
-      setTimeout(() => setCopied(c => (c === id ? null : c)), 1600)
-    } catch { setNote(`Copy is blocked by the browser — the link: ${link}`) }
-  }
-  async function invite(to = email.trim(), as: KitRole = role) {
-    if (!to || busy) return
-    setBusy(true); setNote(null); setDone(null)
-    try {
-      const r = await send<{ person?: KitMember; invite?: KitInviteOut }>('POST', { email: to, role: as })
-      setState(s => s && {
-        ...s,
-        people: r.person ? s.people.map(p => (p.user_id === r.person!.user_id ? r.person! : p)) : s.people,
-        invites: r.invite ? [...s.invites.filter(i => i.email !== r.invite!.email), r.invite] : s.invites,
-      })
-      setDone(r.person
-        ? `${r.person.name || r.person.email} ${r.person.role === 'edit' ? 'can edit it' : 'can use it'} now.`
-        : `Invite ready for ${to}. Its link is copied — send it to them.`)
-      if (r.invite) await copyLink(r.invite.id)
-      setEmail('')
-    } catch (e) { fail(e) } finally { setBusy(false) }
-  }
-  async function changeRole(userId: string, r: KitRole) {
-    setNote(null); setDone(null)
-    try {
-      await send('PATCH', { user_id: userId, role: r })
-      setState(s => s && { ...s, people: s.people.map(p => (p.user_id === userId ? { ...p, role: r } : p)) })
-    } catch (e) { fail(e) }
-  }
-  async function removePerson(userId: string) {
-    setNote(null); setDone(null)
-    try {
-      await send('DELETE', { user_id: userId })
-      setState(s => s && { ...s, people: s.people.filter(p => p.user_id !== userId) })
-    } catch (e) { fail(e) }
-  }
-  async function takeBack(id: string) {
-    setNote(null); setDone(null)
-    try {
-      await send('DELETE', { invite_id: id })
-      setState(s => s && { ...s, invites: s.invites.filter(i => i.id !== id) })
-    } catch (e) { fail(e) }
-  }
-  if (!state) return <p className="text-[11px]" style={{ color: note ? '#fca5a5' : 'rgb(var(--ed-fg) / 0.45)' }}>{note ?? 'Loading…'}</p>
-  if (!state.can_share) {
-    return (
-      <p className="text-[11px] leading-relaxed" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
-        Share this kit with your team so everyone&rsquo;s clips look the same — on the Agency plan.
-        {state.people.length > 0 && ` The ${state.people.length === 1 ? 'person' : `${state.people.length} people`} you shared it with can use it again once your plan shares kits.`}{' '}
-        <a href="/pricing" className="font-semibold hover:underline" style={{ color: 'var(--ed-accent-text)' }}>Upgrade</a>
-      </p>
-    )
-  }
-  const open = state.invites.filter(i => !i.expired).length
-  const used = state.people.length + open
-  const full = used >= state.seats
-  const muted = { color: 'rgb(var(--ed-fg) / 0.45)' }
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="text-[11px] -mt-1 leading-relaxed" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
-        Invite people by email. They accept it in their Brand kits: copy the invite&rsquo;s link and send it to them. {used} of {state.seats} places used.
-      </p>
-      <div className="flex gap-2">
-        <input value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') invite() }} type="email" maxLength={200}
-          placeholder="Their email" aria-label="Email to invite"
-          className="flex-1 min-w-0 h-9 px-3 rounded-lg text-sm text-[var(--ed-text)] outline-none"
-          style={{ background: 'rgb(var(--ed-fg) / 0.06)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)' }} />
-        <RolePick value={role} onChange={setRole} label="What they can do" />
-        <button type="button" onClick={() => invite()} disabled={busy || !email.trim() || full} className="bw-add">
-          {busy ? 'Inviting…' : 'Invite'}
-        </button>
-      </div>
-      <p className="text-[11px] leading-relaxed -mt-1" style={muted}>Can use: puts the kit on their clips. Can edit: changes the kit too — not its team or brand lock.</p>
-      {full && <p className="text-[11px]" style={{ color: '#fbbf24' }}>All {state.seats} places are taken: remove someone or take back an invite first.</p>}
-      {note && <p role="alert" className="text-[11px] break-words" style={{ color: '#fca5a5' }}>{note}</p>}
-      {done && !note && <p role="status" className="text-[11px]" style={{ color: 'var(--ed-accent-text)' }}>{done}</p>}
-      {state.people.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <span className="cap-label">Team</span>
-          <ul className="flex flex-col gap-1.5" aria-label="Shared with">
-            {state.people.map(p => (
-              <li key={p.user_id} className="flex items-center gap-2 text-xs">
-                <span className="flex-1 min-w-0 truncate text-[var(--ed-text)]">{p.name || p.email}{p.name && p.email ? <span style={muted}> · {p.email}</span> : null}</span>
-                <RolePick value={p.role} onChange={r => changeRole(p.user_id, r)} label={`What ${p.name || p.email} can do`} />
-                <button type="button" onClick={() => removePerson(p.user_id)} aria-label={`Remove ${p.email ?? p.name}`}
-                  className="text-[11px] shrink-0 hover:underline" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>Remove</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {state.invites.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <span className="cap-label">Invited</span>
-          <ul className="flex flex-col gap-1.5" aria-label="Invited">
-            {state.invites.map(i => (
-              <li key={i.id} className="flex items-center gap-2 text-xs">
-                <span className="flex-1 min-w-0 truncate text-[var(--ed-text)]">{i.email}<span style={muted}> · {ROLE_NAMES[i.role]} · {i.expired ? 'expired' : 'waiting'}</span></span>
-                {i.expired
-                  ? <button type="button" className="text-[11px] font-semibold shrink-0 hover:underline" style={{ color: 'var(--ed-accent-text)' }} onClick={() => invite(i.email, i.role)}>Invite again</button>
-                  : <button type="button" className="text-[11px] font-semibold shrink-0 hover:underline" style={{ color: copied === i.id ? '#4ade80' : 'var(--ed-accent-text)' }} onClick={() => copyLink(i.id)}>{copied === i.id ? 'Link copied' : 'Copy link'}</button>}
-                <button type="button" onClick={() => takeBack(i.id)} aria-label={`Take back the invite to ${i.email}`}
-                  className="text-[11px] shrink-0 hover:underline" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>Take back</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <label className="cap-row cursor-pointer select-none">
-        <span className="flex flex-col min-w-0">
-          <span className="cap-label">Brand lock</span>
-          <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>
-            {lock
-              ? 'On clips with this kit, people who can use it keep to its colours and fonts, and can’t take it off'
-              : 'Off: your team picks any colour and font'}
-          </span>
-        </span>
-        <Switch on={lock} label="Brand lock" onChange={onLock} />
-      </label>
-    </div>
-  )
-}
-
-/** "Can use" or "Can edit" */
-function RolePick({ value, onChange, label }: { value: KitRole; onChange: (r: KitRole) => void; label: string }) {
-  return (
-    <select value={value} onChange={e => onChange(e.target.value === 'edit' ? 'edit' : 'use')} aria-label={label}
-      className="h-9 px-2 rounded-lg text-xs text-[var(--ed-text)] outline-none shrink-0"
-      style={{ background: 'rgb(var(--ed-fg) / 0.06)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)' }}>
-      <option value="use">{ROLE_NAMES.use}</option>
-      <option value="edit">{ROLE_NAMES.edit}</option>
-    </select>
-  )
-}
-
 /** A kit's settings with the ones added in Phases 4 and 5 filled in, should they be missing (the server fills them in as it reads a kit) */
 const withNewFields = (d: BrandKitData): BrandKitData =>
   d.ends && d.words ? d
     : { ...d, ends: d.ends ?? DEFAULT_BRAND_KIT.ends, words: d.words ?? DEFAULT_BRAND_KIT.words }
-
-/** A video of the library that can open or close clips: one of the user's own, short enough */
-type EndVideoChoice = { id: string; title: string; ms: number }
-
-/**
- * A kit's intro and outro (Phase 4): a short video of the user's library put in before their clips,
- * and one after them (the brand engine: modules/brand/bookends.ts)
- */
-function KitBookends({ d, onChange }: { d: BrandKitData; onChange: (ends: Partial<BrandKitData['ends']>) => void }) {
-  const [list, setList] = useState<EndVideoChoice[] | null>(null)
-  const [failed, setFailed] = useState(false)
-  useEffect(() => {
-    let live = true
-    fetch('/api/videos?assets=1')
-      .then(r => (r.ok ? r.json() : Promise.reject(new Error())))
-      .then((j: { videos: Array<{ id: string; title?: string | null; duration_ms?: number | null; status?: string; index?: number; is_asset?: boolean; is_upload_asset?: boolean }> }) => {
-        if (!live) return
-        // (the user's own videos, ready, short enough — not stock footage saved for B-roll)
-        setList(j.videos
-          .filter(v => (!v.is_asset || v.is_upload_asset) && (v.status ?? 'done') === 'done' && v.duration_ms && v.duration_ms >= 300 && v.duration_ms <= MAX_END_VIDEO_MS)
-          .map(v => ({ id: v.id, title: v.title?.trim() || `Video ${v.index ?? ''}`.trim(), ms: v.duration_ms! })))
-      })
-      .catch(() => { if (live) setFailed(true) })
-    return () => { live = false }
-  }, [])
-  const row = (which: 'intro' | 'outro', label: string, hint: string) => {
-    const cur = d.ends[which]
-    // (the one picked stays listed even when the list can't show it: renamed, or the list not read yet)
-    const options = [...(list ?? []), ...(cur && !list?.some(v => v.id === cur.id) ? [{ id: cur.id, title: cur.title || 'Your video', ms: cur.ms }] : [])]
-    return (
-      <div className="cap-row">
-        <span className="flex flex-col min-w-0">
-          <span className="cap-label">{label}</span>
-          <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>{hint}</span>
-        </span>
-        <select value={cur?.id ?? ''} aria-label={label}
-          onChange={e => {
-            const v = options.find(x => x.id === e.target.value)
-            onChange({ [which]: v ? { id: v.id, ms: Math.min(MAX_END_VIDEO_MS, v.ms), title: v.title.slice(0, 80) } : null })
-          }}
-          className="h-9 px-2 rounded-lg text-xs text-[var(--ed-text)] outline-none max-w-[55%]"
-          style={{ background: 'rgb(var(--ed-fg) / 0.06)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)' }}>
-          <option value="">None</option>
-          {options.map(v => <option key={v.id} value={v.id}>{v.title} · {Math.round(v.ms / 100) / 10} s</option>)}
-        </select>
-      </div>
-    )
-  }
-  return (
-    <>
-      {row('intro', 'Intro', 'Plays before each clip')}
-      {row('outro', 'Outro', 'Plays after each clip, after the end card')}
-      <p className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>
-        {failed ? 'Your videos couldn’t be listed — try again in a moment.'
-          : list && !list.length ? `Upload a short video (up to ${MAX_END_VIDEO_MS / 1000} s) to use it here.`
-          : `Your own videos up to ${MAX_END_VIDEO_MS / 1000} s. Clips with videos on top get them when opened in the editor.`}
-      </p>
-    </>
-  )
-}
 
 export function KitBadge({ kit }: { kit: BrandKit }) {
   return (
@@ -680,15 +431,13 @@ export function KitBadge({ kit }: { kit: BrandKit }) {
 // taken out then came back in brand kit Phase 4 (2026-10-27), through the brand engine; the progress bar
 // came back then too, and was taken out for good (user, 2026-11-05);
 // names & spellings came back in Phase 5 (2026-10-28) as the kit's Words, with no paid AI behind them
+// Words and Team left the steps (user, 2026-11-10): Words is off (BRAND_WORDS_ON), Team is in the profile menu on the top plan
+// The Branded card step went too (user, 2026-11-10): its card, end card, intro and outro (BRAND_ENDS_ON)
 
-type StepId = 'basics' | 'text' | 'captions' | 'words' | 'card' | 'team'
-const STEPS: Array<{ id: StepId; name: string; short: string; about: string }> = [
-  { id: 'basics', name: 'Basics', short: 'Logo, colours, @handle', about: 'What everything else uses: your logo, your colours and your @handle. Start from a link, your logo or a few words, then change anything.' },
-  { id: 'text', name: 'Text & fonts', short: 'Titles, fonts, corners', about: 'How text on your clips looks, your own fonts, and how round your videos are in frames.' },
-  { id: 'captions', name: 'Captions', short: 'Caption style', about: 'The caption look your clips get with the brand kit on.' },
-  { id: 'words', name: 'Words', short: 'Spellings, lines, hashtags', about: 'How your brand writes: names spelled your way in captions, words you never show, your tone, your lines and hashtags. On clips with this kit on (your default kit’s: on clips with none).' },
-  { id: 'card', name: 'Branded card', short: 'Card, end card, intro', about: 'Your own frame — its background, where the video sits, your title and @handle — and how your clips start and end.' },
-  { id: 'team', name: 'Team', short: 'Share with your team', about: 'Share this kit with your team, and lock its colours and fonts for them.' },
+type StepId = 'basics' | 'style'
+const STEPS: Array<{ id: StepId; name: string }> = [
+  { id: 'basics', name: 'Basics' },
+  { id: 'style', name: 'Text & captions' },
 ]
 
 /** The Brand kit's Next / Done: lime, a dark dot that fills it on hover, the label back in lime with an arrow */
@@ -708,12 +457,16 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
   clipMock?: boolean
 }) {
   const kit = brand.current
-  // What the last way in (a link, a logo, a few words) found: the card offers its colours and styles
+  // What the last way in (a link, a logo) found: the card offers its colours
   const [found, setFound] = useState<Found | null>(null)
   // The app's buttons over the preview: where the logo is safe from them
   const [platform, setPlatform] = useState<Platform>('instagram')
   const latest = useRef<{ id: string; data: BrandKitData; pending: boolean } | null>(null)
   const [step, setStep] = useState<StepId>('basics')
+  const [saving, setSaving] = useState(false)
+  const [notSaved, setNotSaved] = useState<string | null>(null)
+  const nameRef = useRef<HTMLInputElement>(null)
+  const { confirm, dialog: confirmDialog } = useConfirm()
   useEffect(() => { loadVideoFonts() }, [])
 
   if (!kit) {
@@ -721,7 +474,7 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
       <div className="h-full flex flex-col items-center justify-center gap-3 p-8 text-center">
         <p className="text-sm font-semibold text-[var(--ed-text)]">{brand.loading ? 'Loading your brand kits…' : brand.error ? brand.error : 'No brand kit yet'}</p>
         {!brand.loading && !brand.error && (
-          <p className="text-xs max-w-xs" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>Make one with &ldquo;New brand kit&rdquo; on the left: your colours, logo, @handle and title style, ready for every clip.</p>
+          <p className="text-xs max-w-xs" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>Make one with &ldquo;New brand kit&rdquo; on the left: your colours, logo and title style, ready for every clip.</p>
         )}
         <button type="button" onClick={onClose} className="text-xs font-semibold hover:underline" style={{ color: 'var(--ed-accent-text)' }}>{closeLabel}</button>
       </div>
@@ -737,29 +490,60 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
     brand.update(kit.id, { data, ...extra })
   }
   const now = () => (latest.current?.id === kit.id ? withNewFields(latest.current.data) : d)
-  const setCaptions = (c: Partial<BrandCaptions>) => { const cur = now(); set({ ...cur, captions: { ...cur.captions, ...c } }) }
   // A kit someone shared with this user: shown, not changed — unless they can edit it (Phase 6: then all
   // but its team, brand lock, default mark and intro / outro, which are the owner's)
   const shared = !!kit.shared_by
   const readOnly = shared && kit.role !== 'edit'
 
-  const steps = STEPS.filter(x => x.id !== 'team' || !shared)
+  const steps = STEPS
   const at = Math.max(0, steps.findIndex(x => x.id === step))
   const cur = steps[at]
+  const go = (id: StepId) => { setNotSaved(null); setStep(id) }
+  /** Save & next (user, 2026-11-10): what's changed is saved first, then `then`; not saved, it stays here and says why */
+  async function saveThen(then: () => void) {
+    if (saving) return
+    setSaving(true); setNotSaved(null)
+    const why = await brand.saveNow(kit!.id)
+    setSaving(false)
+    if (why) setNotSaved(why); else then()
+  }
+  const nextLabel = saving ? 'Saving…' : readOnly ? (at < steps.length - 1 ? 'Next' : 'Done') : at < steps.length - 1 ? 'Save & next' : 'Save & finish'
   return (
     <div className="h-full flex flex-col min-h-0">
       {/* Its name, whether it's saved, the switch for this clip, back to the video */}
       <div className="shrink-0 flex items-center gap-3 px-5" style={{ minHeight: 60, borderBottom: '1px solid rgb(var(--ed-fg) / 0.06)' }}>
         <KitBadge kit={kit} />
-        <input value={kit.name} onChange={e => brand.update(kit.id, { name: e.target.value })} maxLength={40} aria-label="Brand kit name" readOnly={readOnly}
-          onBlur={e => { if (!readOnly && !e.target.value.trim()) brand.update(kit.id, { name: 'Brand kit' }) }}
-          className="flex-1 min-w-0 bg-transparent text-base font-bold text-[var(--ed-text)] outline-none rounded-md px-1.5 py-1 focus:bg-[rgb(var(--ed-fg)/0.06)]" />
+        {/* Its name, as wide as it is, then rename and delete right beside it (user, 2026-11-10) */}
+        <div className="flex-1 min-w-0 flex items-center gap-1">
+          <span className="kit-name">
+            <span className="kit-name-fit" aria-hidden="true">{kit.name || ' '}</span>
+            <input ref={nameRef} value={kit.name} onChange={e => brand.update(kit.id, { name: e.target.value })} maxLength={40} size={1} aria-label="Brand kit name" readOnly={readOnly}
+              onBlur={e => { if (!readOnly && !e.target.value.trim()) brand.update(kit.id, { name: 'Brand kit' }) }}
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }} />
+          </span>
+          {!readOnly && (
+            <button type="button" className="kit-name-btn" aria-label="Rename this kit" title="Rename"
+              onClick={() => { nameRef.current?.focus(); nameRef.current?.select() }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 00-4-4L4 16v4z" /><path d="M13.5 6.5l4 4" /></svg>
+            </button>
+          )}
+          {!shared && (
+            <button type="button" className="kit-name-btn" data-danger aria-label="Delete this kit" title="Delete"
+              onClick={() => confirm({
+                title: `Delete “${kit.name}”?`,
+                body: 'The kit goes from your account. Clips it was put on keep their look.',
+                confirmLabel: 'Delete kit',
+              }, () => { brand.remove(kit.id).catch(e => setNotSaved(e instanceof Error ? e.message : String(e))) })}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 002 2h8a2 2 0 002-2l1-12M9 7V4h6v3" /></svg>
+            </button>
+          )}
+        </div>
         {readOnly
           ? <span className="text-[11px] shrink-0" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>Shared by {kit.shared_by}{d.lock ? ' · brand lock' : ''}</span>
           : <span role="status" className="text-[11px] shrink-0" style={{ color: brand.saveState === 'error' ? '#fca5a5' : 'rgb(var(--ed-fg) / 0.45)' }}>
             {saveLabel(brand)}
           </span>}
-        {onTurnOn && onTurnOff && <div className="shrink-0"><BrandOnSwitch kit={kit} onKitId={onKitId} onTurnOn={onTurnOn} onTurnOff={onTurnOff} compact /></div>}
+        {onTurnOn && onTurnOff && <div className="shrink-0"><BrandOnSwitch kit={kit} onKitId={onKitId} onTurnOn={onTurnOn} onTurnOff={onTurnOff} /></div>}
         {/* (a clear way out: "Done", and Esc in the editor — user, 2026-10-28) */}
         <button type="button" onClick={onClose} aria-label={closeLabel} title={`${closeLabel} (Esc)`}
           className="h-8 px-3.5 flex items-center gap-1.5 rounded-lg shrink-0 text-xs font-bold transition-colors hover:brightness-95"
@@ -770,254 +554,63 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
       </div>
 
       <div className="flex-1 min-h-0 flex">
-        {/* The steps: one page each */}
-        <nav aria-label="Brand kit steps" className="shrink-0 w-[184px] p-3 flex flex-col gap-1 overflow-y-auto" style={{ borderRight: '1px solid rgb(var(--ed-fg) / 0.06)' }}>
-          {steps.map((x, i) => {
-            const on = x.id === cur.id
-            return (
-              <button key={x.id} type="button" onClick={() => setStep(x.id)} aria-current={on ? 'step' : undefined}
-                className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors hover:bg-[rgb(var(--ed-fg)/0.05)]"
-                // (the step you're on: a lime edge, no lime fill — user, 2026-10-29)
-                style={on ? { background: 'rgb(var(--ed-fg) / 0.05)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.325)' } : undefined}>
-                <span className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold tabular-nums"
-                  style={on ? { background: 'rgb(var(--ed-fg) / 0.06)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.375)' } : { background: 'rgb(var(--ed-fg) / 0.08)', color: 'rgb(var(--ed-fg) / 0.7)' }}>{i + 1}</span>
-                <span className="flex-1 min-w-0 flex flex-col">
-                  <span className="text-[12.5px] font-semibold leading-snug" style={{ color: on ? 'var(--ed-text)' : 'rgb(var(--ed-fg) / 0.8)' }}>{x.name}</span>
-                  <span className="text-[10.5px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>{x.short}</span>
-                </span>
-              </button>
-            )
-          })}
-        </nav>
-
-        {/* This step's settings */}
-        <div className="flex-1 min-w-0 overflow-y-auto">
-          <div className="max-w-[540px] mx-auto px-6 py-5 flex flex-col gap-5">
-            <div className="flex flex-col gap-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'rgb(var(--ed-fg) / 0.4)' }}>Step {at + 1} of {steps.length}</span>
-              <h2 className="text-lg font-bold text-[var(--ed-text)]">{cur.name}</h2>
-              <p className="text-xs leading-relaxed" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>{cur.about}</p>
-            </div>
+        {/* This step: the steps on top and the buttons below stay in view, only what's between scrolls */}
+        <div className="bk-work flex-1 min-w-0 flex flex-col">
+          <div className="shrink-0 w-full max-w-[960px] mx-auto px-5 pt-3 pb-2">
+            {/* The steps, one page each: 1 → 2 → 3 (user, 2026-11-10: a row, not a column — more room) */}
+          <nav aria-label="Brand kit steps">
+            <ol className="bs-steps">
+              {steps.map((x, i) => (
+                <li key={x.id}>
+                  {i > 0 && <span className="bs-step-line" data-on={i <= at || undefined} aria-hidden="true" />}
+                  <button type="button" onClick={() => go(x.id)} className="bs-step" data-on={i === at || undefined} data-done={i < at || undefined} aria-current={i === at ? 'step' : undefined}>
+                    <span className="bs-step-n">{i < at ? '✓' : i + 1}</span>{x.name}
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </nav>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="max-w-[960px] mx-auto px-5 flex flex-col gap-3">
             {shared && (
               <p className="text-xs leading-relaxed p-3 rounded-lg" style={{ background: 'rgb(var(--ed-fg) / 0.05)', color: 'rgb(var(--ed-fg) / 0.75)' }}>
                 {readOnly
                   ? <>{kit.shared_by} shared this kit with you: {onTurnOn ? 'switch it on for your clips' : 'pick it for a clip in the editor'}. Only they can change it.
                     {d.lock && ' Brand lock is on: on clips with this kit, your colours and fonts are its own, and only they can take it off.'}</>
-                  : <>{kit.shared_by} shared this kit with you, and you can edit it: changes reach everyone&rsquo;s clips with it. Its team, brand lock and intro / outro stay theirs.</>}
+                  : <>{kit.shared_by} shared this kit with you, and you can edit it: changes reach everyone&rsquo;s clips with it. Its team and brand lock stay theirs.</>}
               </p>
             )}
             <div className="flex flex-col gap-5" inert={readOnly || undefined} style={readOnly ? { opacity: 0.6 } : undefined}>
             {cur.id === 'basics' && (
-              <>
-                {!readOnly && (
-                  <Section title="Start from">
-                    <BrandStart compact kit={kit} brand={brand} now={now} set={set} onFound={setFound} />
-                  </Section>
-                )}
-                <BrandCard kit={kit} brand={brand} now={now} set={set} found={found} readOnly={readOnly} />
-                <Section title="Logo on the clip">
-                  <div className="cap-row">
-                    <span className="flex flex-col min-w-0">
-                      <span className="cap-label">Place</span>
-                      <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>
-                        {d.logo.x !== null ? 'Placed by hand — pick a corner to snap it back' : 'A corner, or drag it anywhere on the preview'}
-                      </span>
-                    </span>
-                    <CornerSwitch value={d.logo.x !== null ? null : d.logo.corner} onChange={corner => set({ ...now(), logo: { ...now().logo, corner, x: null, y: null } })} />
-                  </div>
-                  <label className="cap-row cursor-pointer select-none">
-                    <span className="flex flex-col min-w-0">
-                      <span className="cap-label">Keep clear of app buttons</span>
-                      <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>Away from the header, likes and caption Reels and Shorts put on top</span>
-                    </span>
-                    <Switch on={d.logo.safe} label="Keep clear of app buttons" onChange={safe => set({ ...now(), logo: { ...now().logo, safe } })} />
-                  </label>
-                  <label className="cap-row cursor-pointer select-none">
-                    <span className="flex flex-col min-w-0">
-                      <span className="cap-label">Move off faces and captions</span>
-                      <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>
-                        {d.logo.x !== null ? 'Placed by hand: it stays where you put it' : 'On each clip, the clearest corner — yours first'}
-                      </span>
-                    </span>
-                    <Switch on={d.logo.smart} label="Move off faces and captions" onChange={smart => set({ ...now(), logo: { ...now().logo, smart } })} />
-                  </label>
-                  <div className="cap-row">
-                    <span className="cap-label">Shows</span>
-                    <div role="radiogroup" aria-label="When the logo shows" className="cap-seg">
-                      {([['all', 'Whole clip'], ['start', 'At the start'], ['end', 'At the end']] as const).map(([v, label]) => (
-                        <button key={v} type="button" role="radio" aria-checked={d.logo.show === v} onClick={() => set({ ...now(), logo: { ...now().logo, show: v as LogoShow } })}
-                          className="cap-seg-btn" data-on={d.logo.show === v || undefined}>{label}</button>
-                      ))}
-                    </div>
-                  </div>
-                  {d.logo.show !== 'all' && (
-                    <RangeRow label="For" min={LOGO_SECONDS[0]} max={LOGO_SECONDS[1]} step={1} value={d.logo.seconds} text={`${d.logo.seconds} s`}
-                      onChange={seconds => set({ ...now(), logo: { ...now().logo, seconds } })} />
-                  )}
-                  <RangeRow label="Size" min={LOGO_SIZE[0]} max={LOGO_SIZE[1]} step={0.01} value={d.logo.size} text={`${Math.round(d.logo.size * 100)}%`}
-                    onChange={size => set({ ...now(), logo: { ...now().logo, size } })} />
-                  <RangeRow label="Opacity" min={0.1} max={1} step={0.05} value={d.logo.opacity} text={`${Math.round(d.logo.opacity * 100)}%`}
-                    onChange={opacity => set({ ...now(), logo: { ...now().logo, opacity } })} />
-                  <div className="cap-row">
-                    <span className="flex flex-col min-w-0">
-                      <span className="cap-label">Watermark</span>
-                      <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>Small and faint, on the whole clip</span>
-                    </span>
-                    {isWatermark(d.logo)
-                      ? <span className="text-xs" style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>It’s a watermark</span>
-                      : <button type="button" className="text-xs font-semibold hover:underline" style={{ color: 'var(--ed-accent-text)' }}
-                          onClick={() => set({ ...now(), logo: { ...now().logo, ...WATERMARK } })}>Make it a watermark</button>}
-                  </div>
-                </Section>
-                {!shared && (
-                  <Section title="New clips">
-                    <DefaultSwitch kit={kit} onChange={on => set({ ...now(), is_default: on })} />
-                  </Section>
-                )}
-              </>
+              <BrandCard kit={kit} brand={brand} now={now} set={set} found={found} readOnly={readOnly}
+                start={readOnly ? undefined : <BrandStart kit={kit} brand={brand} now={now} set={set} onFound={setFound} />} />
             )}
-            {cur.id === 'text' && (
-              <>
-                <Section title="Title style">
-                  <p className="text-[11px] -mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
-                    For text on the clip, frame titles and the Branded card: new text starts in it.
-                  </p>
-                  <FontPicker stayOpen value={d.title.font} onChange={font => set({ ...now(), title: { ...now().title, font: font === 'sans-serif' ? null : font } })} />
-                  <ColorRow label="Colour" value={d.title.color} onChange={color => set({ ...now(), title: { ...now().title, color } })} />
-                  <RangeRow label="Size" min={24} max={160} step={2} value={d.title.size} text={`${d.title.size}`}
-                    onChange={size => set({ ...now(), title: { ...now().title, size } })} />
-                </Section>
-                {/* (brand kit Phase 3) the other ready styles: "+ Subtitle" and "+ Call to action" in the editor's Text tool */}
-                <Section title="Subtitle style">
-                  <TextStyleEditor kind="subtitle" d={d} value={d.styles?.subtitle ?? DEFAULT_BRAND_KIT.styles.subtitle}
-                    onChange={v => set({ ...now(), styles: { ...DEFAULT_BRAND_KIT.styles, ...now().styles, subtitle: v } })} />
-                </Section>
-                <Section title="Call to action style">
-                  <TextStyleEditor kind="cta" d={d} value={d.styles?.cta ?? DEFAULT_BRAND_KIT.styles.cta}
-                    onChange={v => set({ ...now(), styles: { ...DEFAULT_BRAND_KIT.styles, ...now().styles, cta: v } })} />
-                </Section>
-                <Section title="Fonts">
-                  <BrandFonts fonts={d.fonts} onChange={fonts => set({ ...now(), fonts })} />
-                </Section>
-                <Section title="Corners">
-                  <label className="cap-row cursor-pointer select-none">
-                    <span className="flex flex-col min-w-0">
-                      <span className="cap-label">Brand corners</span>
-                      <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>
-                        {d.frames.corners !== null ? 'While the brand kit is on, every frame’s video is rounded like this' : 'Off: frames keep their own corners'}
-                      </span>
-                    </span>
-                    <Switch on={d.frames.corners !== null} label="Brand corners" onChange={on => set({ ...now(), frames: { ...now().frames, corners: on ? 80 : null } })} />
-                  </label>
-                  {d.frames.corners !== null && (
-                    <RangeRow label="Rounding" min={0} max={100} step={5} value={d.frames.corners} text={`${d.frames.corners}%`}
-                      onChange={corners => set({ ...now(), frames: { ...now().frames, corners } })} />
-                  )}
-                </Section>
-              </>
-            )}
-            {cur.id === 'captions' && (
-              <>
-                <Section title="Captions">
-                  <label className="cap-row cursor-pointer select-none">
-                    <span className="flex flex-col min-w-0">
-                      <span className="cap-label">Brand captions</span>
-                      <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>
-                        {d.captions.on ? 'New clips and the brand kit switch use this caption style' : 'Off: clips keep the caption style they have'}
-                      </span>
-                    </span>
-                    <Switch on={d.captions.on} label="Brand captions" onChange={on => setCaptions({ on })} />
-                  </label>
-                  {d.captions.on && (
-                    <div className="-mx-4 -mb-4">
-                      <CaptionStyler
-                        style={brandCaptionStyle(d.captions)} textCase={d.captions.uppercase ? 'upper' : 'title'}
-                        onChange={u => setCaptions(captionPatch(u))}
-                        onTextCaseChange={(c: TextCase) => setCaptions({ uppercase: c === 'upper' })}
-                        onEditCaptions={() => {}} onRetranscribe={() => {}} retranscribing={false} hasWords={false} />
-                    </div>
-                  )}
-                </Section>
-                {/* (brand kit Phase 3) more looks, switched to in one tap in the editor's Captions tool */}
-                <Section title="More caption looks">
-                  <MoreCaptionLooks d={d} onChange={more_captions => set({ ...now(), more_captions })} />
-                </Section>
-              </>
-            )}
-            {cur.id === 'words' && (
-              <KitWords w={d.words} onChange={words => set({ ...now(), words })} />
-            )}
-            {cur.id === 'card' && (
-              <>
-                <Section title="Branded card">
-                  <p className="text-[11px] -mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
-                    Your own frame: pick &ldquo;Branded card&rdquo; in Frames, or use it as the end card, and it looks like this.
-                  </p>
-                  <input value={d.card_title} onChange={e => set({ ...now(), card_title: e.target.value })} maxLength={80} disabled={readOnly}
-                    placeholder="Card title — e.g. your show's name" aria-label="Branded card title"
-                    className="h-9 px-3 rounded-lg text-sm text-[var(--ed-text)] outline-none"
-                    style={{ background: 'rgb(var(--ed-fg) / 0.06)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)' }} />
-                  <CardFields value={d.card} onChange={card => set({ ...now(), card })} />
-                </Section>
-                <Section title="End card">
-                  <label className="cap-row cursor-pointer select-none">
-                    <span className="flex flex-col min-w-0">
-                      <span className="cap-label">End clips on this card</span>
-                      <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>The last seconds become this card, the video still playing in it</span>
-                    </span>
-                    <Switch on={d.ends.card} label="End clips on the Branded card" onChange={card => set({ ...now(), ends: { ...now().ends, card } })} />
-                  </label>
-                  {d.ends.card && (
-                    <RangeRow label="For" min={END_CARD_SECONDS[0]} max={END_CARD_SECONDS[1]} step={1} value={d.ends.seconds} text={`${d.ends.seconds} s`}
-                      onChange={seconds => set({ ...now(), ends: { ...now().ends, seconds } })} />
-                  )}
-                </Section>
-                {!shared && (
-                  <Section title="Intro and outro">
-                    <KitBookends d={d} onChange={ends => set({ ...now(), ends: { ...now().ends, ...ends } })} />
-                  </Section>
-                )}
-              </>
-            )}
-            {cur.id === 'team' && !shared && (
-              <>
-                  <Section title="Team">
-                    <KitTeam kitId={kit.id} lock={d.lock} onLock={lock => set({ ...now(), lock })} />
-                  </Section>
-              </>
-            )}
+            {cur.id === 'style' && <TextAndCaptions d={d} now={now} set={set} />}
             </div>
-            {/* Back / Next */}
-            <div className="flex items-center justify-between pt-1 pb-6">
+            {/* Back / Save & next: right under the boxes (user, 2026-11-10) */}
+            <div className="kit-step-bar flex items-center justify-between gap-3">
               {at > 0 ? (
-                <button type="button" onClick={() => setStep(steps[at - 1].id)} className="h-9 px-4 rounded-lg text-xs font-semibold"
+                <button type="button" onClick={() => go(steps[at - 1].id)} className="h-9 px-4 rounded-lg text-xs font-semibold shrink-0"
                   style={{ color: 'var(--ed-text)', background: 'rgb(var(--ed-fg) / 0.06)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)' }}>
                   ← {steps[at - 1].name}
                 </button>
               ) : <span />}
-              {/* Next / Done (user, 2026-10-31): on hover the label slides away, a dot grows to fill the button dark,
-                  and the label comes back in lime with an arrow (components/ui/interactive-hover-button) */}
-              {at < steps.length - 1 ? (
-                <InteractiveHoverButton type="button" onClick={() => setStep(steps[at + 1].id)} text={`Next: ${steps[at + 1].name}`}
-                  className={KIT_NEXT_BTN} fillClassName={KIT_NEXT_FILL} hoverTextClassName={KIT_NEXT_HOVER_TEXT} />
-              ) : (
-                <InteractiveHoverButton type="button" onClick={onClose} text="Done"
-                  className={KIT_NEXT_BTN} fillClassName={KIT_NEXT_FILL} hoverTextClassName={KIT_NEXT_HOVER_TEXT} />
-              )}
+              <div className="flex items-center gap-3 min-w-0">
+                {notSaved && <span role="alert" className="text-[11px] min-w-0" style={{ color: '#fca5a5' }}>{notSaved}</span>}
+                {/* (on hover the label slides away, a dot grows to fill the button dark, and it comes back in lime with an arrow) */}
+                <InteractiveHoverButton type="button" disabled={saving} text={nextLabel}
+                  onClick={() => saveThen(() => (at < steps.length - 1 ? go(steps[at + 1].id) : onClose()))}
+                  className={`${KIT_NEXT_BTN} shrink-0 disabled:opacity-60`} fillClassName={KIT_NEXT_FILL} hoverTextClassName={KIT_NEXT_HOVER_TEXT} />
+              </div>
             </div>
+          </div>
           </div>
         </div>
 
         {/* How it looks, for the step (the clip's look only where there's no preview of the clip itself) */}
-        {(clipMock || cur.id === 'card' || cur.id === 'words') && (
-        <aside aria-label="How it looks" className="shrink-0 w-[244px] p-4 overflow-y-auto flex flex-col items-center gap-2" style={{ borderLeft: '1px solid rgb(var(--ed-fg) / 0.06)' }}>
-          {cur.id === 'card' ? (
-            <Mock label="Branded card">
-              <CardMock kit={kit} />
-            </Mock>
-          ) : cur.id === 'words' ? (
-            <WordsPreview w={d.words} />
-          ) : (
+        {clipMock && (
+        <aside aria-label="How it looks" className="shrink-0 w-[244px] p-4 overflow-y-auto flex flex-col items-center gap-2 max-[860px]:hidden" style={{ borderLeft: '1px solid rgb(var(--ed-fg) / 0.06)' }}>
             <>
               <Mock label="On your clip">
                 <ClipMock kit={kit} platform={platform} onPlace={readOnly ? undefined : (x, y) => set({ ...now(), logo: { ...now().logo, x, y } })} />
@@ -1029,18 +622,16 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
                 </p>
               )}
             </>
-          )}
           <p className="text-[10.5px] text-center max-w-[200px] mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.4)' }}>Changes save by themselves.</p>
         </aside>
         )}
       </div>
+      {confirmDialog && createPortal(<div style={{ position: 'relative', zIndex: 400 }}>{confirmDialog}</div>, document.body)}
     </div>
   )
 }
 
 const MOCK_W = 200, MOCK_H = (MOCK_W * 16) / 9, K = MOCK_W / 1080
-/** Frame text is drawn in Montserrat Bold (render.py _frame_text_font) */
-const FRAME_FONT = 'Montserrat, sans-serif'
 
 export function Mock({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -1151,20 +742,6 @@ export function captionPatch(u: Partial<import('@/lib/shared/types').CaptionStyl
   return out
 }
 
-/** "Use for new clips": the account's default kit (at most one) */
-function DefaultSwitch({ kit, compact = false, onChange }: { kit: BrandKit; compact?: boolean; onChange: (on: boolean) => void }) {
-  const on = kit.data.is_default
-  return (
-    <label className={`flex items-center gap-2 cursor-pointer select-none ${compact ? 'shrink-0' : ''}`}
-      title="New clips — made by hand, from Best moments or Ask AI, and by Make my clips — get this kit by themselves">
-      <Switch on={on} label="Use for new clips" onChange={onChange} />
-      <span className="text-[11.5px] font-semibold" style={{ color: on ? 'var(--ed-accent-text)' : 'rgb(var(--ed-fg) / 0.6)' }}>
-        {compact ? 'Default' : 'Use for every new clip'}
-      </span>
-    </label>
-  )
-}
-
 export function Switch({ on, label, onChange }: { on: boolean; label: string; onChange: (on: boolean) => void }) {
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={e => { e.preventDefault(); onChange(!on) }}
@@ -1253,108 +830,6 @@ function TextRow({ label, placeholder, value, max, onChange, commitOnBlur = fals
 }
 
 
-/** The Branded card as it starts: the video as a rounded card on the main colour, the title above, the @handle below */
-/** The Branded card as the editor and the export draw it (lib/shared/brandCard.ts): its background, video, title and @handle */
-function CardMock({ kit }: { kit: BrandKit }) {
-  const d = kit.data, c = d.card
-  const places = cardAreas(c)
-  const bgRef = useRef<HTMLCanvasElement>(null)
-  const bgKey = JSON.stringify(c.bg)
-  useEffect(() => {
-    const el = bgRef.current
-    if (!el) return
-    const W = Math.round(MOCK_W), H = Math.round(MOCK_H)
-    el.width = W; el.height = H
-    el.getContext('2d')?.putImageData(new ImageData(cardBackgroundPixels(c, W, H), W, H), 0, 0)
-  }, [bgKey]) // eslint-disable-line react-hooks/exhaustive-deps
-  const box = (a: { x: number; y: number; w: number; h: number }) => ({ left: `${a.x * 100}%`, top: `${a.y * 100}%`, width: `${a.w * 100}%`, height: `${a.h * 100}%` })
-  return (
-    <div className="absolute inset-0">
-      <canvas ref={bgRef} className="absolute inset-0 w-full h-full" />
-      <div className="absolute" style={{ ...box(places.video), borderRadius: (places.video.radius ?? 0) * K, background: 'linear-gradient(160deg, #3a4150 0%, #1d2129 60%, #2c2a24 100%)' }} />
-      {c.title.show && (
-        <div className="absolute flex items-center justify-center text-center px-2" style={{ ...box(places.title), fontFamily: d.title.font ? `"${d.title.font}", ${FRAME_FONT}` : FRAME_FONT, fontWeight: 700, fontSize: c.title.size * K, color: c.title.color, lineHeight: 1.1 }}>
-          {d.card_title || kit.name}
-        </div>
-      )}
-      {c.handle.show && (
-        <div className="absolute flex items-center justify-center" style={{ ...box(places.handle), fontFamily: d.title.font ? `"${d.title.font}", ${FRAME_FONT}` : FRAME_FONT, fontWeight: 700, fontSize: c.handle.size * K, color: c.handle.color }}>
-          {showHandle(d.handle) || '@yourchannel'}
-        </div>
-      )}
-    </div>
-  )
-}
-
-const PATTERN_NAMES: Record<CardPattern, string> = { dots: 'Dots', grid: 'Grid', stripes: 'Stripes', checker: 'Checks', waves: 'Waves' }
-
-/** Everything about the Branded card: background, video, title and @handle */
-function CardFields({ value: c, onChange }: { value: BrandCardSettings; onChange: (c: BrandCardSettings) => void }) {
-  const seg = <T extends string>(label: string, options: Array<[T, string]>, v: T, pick: (v: T) => void) => (
-    <div className="cap-row">
-      <span className="cap-label">{label}</span>
-      <div className="cap-seg" role="radiogroup" aria-label={label}>
-        {options.map(([id, name]) => (
-          <button key={id} type="button" role="radio" aria-checked={v === id} data-on={v === id || undefined} className="cap-seg-btn" onClick={() => pick(id)}>{name}</button>
-        ))}
-      </div>
-    </div>
-  )
-  const sub = (t: string) => <span className="text-[11px] font-semibold uppercase tracking-wide pt-1" style={{ color: 'rgb(var(--ed-fg) / 0.4)' }}>{t}</span>
-  const text = (key: 'title' | 'handle', name: string, at: 'title_at' | 'handle_at') => (
-    <>
-      <div className="cap-row">
-        {sub(name)}
-        <Switch on={c[key].show} label={`Show the ${name.toLowerCase()}`} onChange={show => onChange({ ...c, [key]: { ...c[key], show } })} />
-      </div>
-      {c[key].show && (
-        <>
-          {seg('Position', [['top', 'Above the video'], ['bottom', 'Below']], c[at], v => onChange({ ...c, [at]: v }))}
-          <ColorRow label="Colour" value={c[key].color} onChange={color => onChange({ ...c, [key]: { ...c[key], color } })} />
-          <RangeRow label="Size" min={CARD_TEXT_SIZE[0]} max={CARD_TEXT_SIZE[1]} step={2} value={c[key].size} text={`${c[key].size}`}
-            onChange={size => onChange({ ...c, [key]: { ...c[key], size } })} />
-        </>
-      )}
-    </>
-  )
-  return (
-    <>
-      {sub('Background')}
-      {seg('Style', [['solid', 'Colour'], ['gradient', 'Gradient'], ['pattern', 'Pattern']], c.bg.style, style => onChange({ ...c, bg: { ...c.bg, style } }))}
-      <ColorRow label={c.bg.style === 'solid' ? 'Colour' : c.bg.style === 'gradient' ? 'From' : 'Ground'} value={c.bg.color}
-        onChange={color => onChange({ ...c, bg: { ...c.bg, color } })} />
-      {c.bg.style !== 'solid' && (
-        <ColorRow label={c.bg.style === 'gradient' ? 'To' : 'Pattern colour'} value={c.bg.color2} onChange={color2 => onChange({ ...c, bg: { ...c.bg, color2 } })} />
-      )}
-      {c.bg.style === 'gradient' && seg('Direction', [['down', 'Top to bottom'], ['diagonal', 'Diagonal']], c.bg.direction, direction => onChange({ ...c, bg: { ...c.bg, direction } }))}
-      {c.bg.style === 'pattern' && (
-        <>
-          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Pattern">
-            {CARD_PATTERNS.map(pt => (
-              <button key={pt} type="button" role="radio" aria-checked={c.bg.pattern === pt} onClick={() => onChange({ ...c, bg: { ...c.bg, pattern: pt } })}
-                className="h-8 px-3 rounded-lg text-xs font-semibold transition-colors"
-                style={{ color: 'var(--ed-text)', background: c.bg.pattern === pt ? 'rgba(200,255,0,0.06)' : 'rgb(var(--ed-fg) / 0.06)', boxShadow: `inset 0 0 0 1px ${c.bg.pattern === pt ? 'rgba(200,255,0,0.5)' : 'rgb(var(--ed-fg) / 0.1)'}` }}>
-                {PATTERN_NAMES[pt]}
-              </button>
-            ))}
-          </div>
-          <RangeRow label="Pattern size" min={CARD_PATTERN_SCALE[0]} max={CARD_PATTERN_SCALE[1]} step={4} value={c.bg.scale} text={`${c.bg.scale}`}
-            onChange={scale => onChange({ ...c, bg: { ...c.bg, scale } })} />
-        </>
-      )}
-      {sub('Video')}
-      <RangeRow label="Width" min={CARD_VIDEO_WIDTH[0] * 100} max={CARD_VIDEO_WIDTH[1] * 100} step={1} value={Math.round(c.video.width * 100)} text={`${Math.round(c.video.width * 100)}%`}
-        onChange={w => onChange({ ...c, video: { ...c.video, width: w / 100 } })} />
-      <RangeRow label="Up / down" min={0} max={100} step={1} value={Math.round(c.video.y * 100)} text={`${Math.round(c.video.y * 100)}%`}
-        onChange={y => onChange({ ...c, video: { ...c.video, y: y / 100 } })} />
-      <RangeRow label="Corners" min={0} max={100} step={5} value={c.video.corners} text={`${c.video.corners}`}
-        onChange={corners => onChange({ ...c, video: { ...c.video, corners } })} />
-      {text('title', 'Title', 'title_at')}
-      {text('handle', '@handle', 'handle_at')}
-    </>
-  )
-}
-
 export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-3 p-4 rounded-2xl" style={{ background: 'rgb(var(--ed-fg) / 0.03)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.08)' }}>
@@ -1364,105 +839,169 @@ export function Section({ title, children }: { title: string; children: React.Re
   )
 }
 
-/**
- * A kit's subtitle or call-to-action style (brand kit Phase 3): its font ("Same as title" when it has
- * none of its own), colour, size, a background box (a call to action's is the accent colour until
- * one is picked), capitals — and how it looks
- */
-function TextStyleEditor({ kind, d, value, onChange }: { kind: 'subtitle' | 'cta'; d: BrandKitData; value: BrandTextStyle; onChange: (v: BrandTextStyle) => void }) {
-  const shown = brandTextStyle(d, kind)
-  const boxOn = value.bg !== null
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="bts-sample" style={{
-        fontFamily: shown.font ? `"${shown.font}", sans-serif` : undefined, color: shown.color, background: shown.bg ?? 'transparent',
-        textTransform: shown.uppercase ? 'uppercase' : undefined, fontSize: Math.max(14, Math.min(26, shown.size / 2.6)),
-      }}>{kind === 'cta' ? 'Follow for more' : 'Your subtitle here'}</div>
-      <label className="cap-row cursor-pointer select-none">
-        <span className="cap-label">Same font as the title</span>
-        <Switch on={value.font === null} label="Same font as the title" onChange={on => onChange({ ...value, font: on ? null : d.title.font ?? 'Inter' })} />
-      </label>
-      {value.font !== null && <FontPicker stayOpen value={value.font} onChange={font => onChange({ ...value, font: font === 'sans-serif' ? 'Inter' : font })} />}
-      <ColorRow label="Colour" value={value.color} onChange={color => onChange({ ...value, color })} />
-      <RangeRow label="Size" min={20} max={120} step={2} value={value.size} text={`${value.size}`} onChange={size => onChange({ ...value, size })} />
-      <label className="cap-row cursor-pointer select-none">
-        <span className="flex flex-col min-w-0">
-          <span className="cap-label">Box behind it</span>
-          {value.bg === 'accent' && <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>Your accent colour</span>}
-        </span>
-        <Switch on={boxOn} label="Box behind it" onChange={on => onChange({ ...value, bg: on ? 'accent' : null })} />
-      </label>
-      {boxOn && <ColorRow label="Box colour" value={shown.bg ?? d.colors.accent} onChange={bg => onChange({ ...value, bg })} />}
-      <label className="cap-row cursor-pointer select-none">
-        <span className="cap-label">Capitals</span>
-        <Switch on={value.uppercase} label="Capitals" onChange={uppercase => onChange({ ...value, uppercase })} />
-      </label>
-    </div>
-  )
-}
+/** A kit's colour offered by name */
+interface KitChip { name: string; hex: string }
+
+// (only when the step is open: it brings the editor's drawing code with it)
+const CaptionPreview = lazy(() => import('./CaptionPreview').then(m => ({ default: m.CaptionPreview })))
+
+type KitTab = 'captions' | 'style' | 'look' | 'text' | 'fonts'
+const KIT_TABS: Array<{ id: KitTab; label: string; tip: string }> = [
+  { id: 'captions', label: 'Captions', tip: 'Brand captions on or off' },
+  { id: 'style', label: 'Style', tip: 'How the captions look and move' },
+  { id: 'look', label: 'Look', tip: 'Colours, font, size and capitals' },
+  { id: 'text', label: 'Text', tip: 'The title style, and frame corners' },
+  { id: 'fonts', label: 'Fonts', tip: 'Your own font files' },
+]
 
 /**
- * A kit's caption looks besides its main one (brand kit Phase 3, up to MAX_MORE_CAPTIONS): each named
- * ("Bold for hooks"), changed with the editor's own caption choices, or removed; a new one starts as
- * a copy of the main look
+ * Text and captions as one step (user, 2026-11-10), built like the editor's Captions panel: the look on
+ * a sample pinned over a bar of tabs, one kind of setting at a time. The kit's Primary and Secondary are
+ * the colours offered first.
  */
-function MoreCaptionLooks({ d, onChange }: { d: BrandKitData; onChange: (v: BrandCaptionLook[]) => void }) {
-  const [open, setOpen] = useState<string | null>(null)
-  const looks = d.more_captions ?? []
-  const put = (id: string, patch: Partial<BrandCaptionLook>) => onChange(looks.map(l => (l.id === id ? { ...l, ...patch } : l)))
+function TextAndCaptions({ d, now, set }: { d: BrandKitData; now: () => BrandKitData; set: (data: BrandKitData) => void }) {
+  const [picked, setPicked] = useState<KitTab>('style')
+  useEffect(() => { d.fonts.forEach(f => { ensureBrandFont(f.family) }) }, [d.fonts])
+  const setCaptions = (c: Partial<BrandCaptions>) => { const cur = now(); set({ ...cur, captions: { ...cur.captions, ...c } }) }
+  // (captions off: their Style and Look wait, as in the Captions panel)
+  const tab: KitTab = !d.captions.on && (picked === 'style' || picked === 'look') ? 'captions' : picked
+  const isText = tab === 'text' || tab === 'fonts'
+  const style = brandCaptionStyle(d.captions)
+  const textCase: TextCase = d.captions.uppercase ? 'upper' : 'title'
+  const suggest: KitChip[] = [
+    { name: 'Primary', hex: d.colors.main }, { name: 'Secondary', hex: d.colors.accent },
+    ...d.colors.extra.map((hex, i) => ({ name: `Colour ${i + 3}`, hex })),
+  ]
+  const sample = brandTextStyle(d, 'title')
+  const styler = (section: 'style' | 'look') => (
+    <div role="tabpanel" aria-label={section === 'style' ? 'Style' : 'Look'} className="kit-cc -mx-4">
+      <CaptionStyler section={section} style={style} textCase={textCase}
+        onChange={u => setCaptions(captionPatch(u))}
+        onTextCaseChange={(c: TextCase) => setCaptions({ uppercase: c === 'upper' })}
+        onEditCaptions={() => {}} onRetranscribe={() => {}} retranscribing={false} hasWords={false} />
+    </div>
+  )
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-[11px] -mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
-        Keep a few looks (one for hooks, one for talking) and switch any clip&rsquo;s captions in one tap in the editor.
-      </p>
-      {looks.map(l => (
-        <div key={l.id} className="mcl-row">
-          <div className="flex items-center gap-2">
-            <i className="mcl-dot" style={{ background: l.captions.color }} /><i className="mcl-dot" style={{ background: l.captions.highlight_color }} />
-            <input value={l.name} maxLength={30} onChange={e => put(l.id, { name: e.target.value })} aria-label="Look name"
-              onBlur={e => { if (!e.target.value.trim()) put(l.id, { name: 'Look' }) }}
-              className="flex-1 min-w-0 h-8 px-2 rounded-md text-xs text-[var(--ed-text)] outline-none" style={{ background: 'rgb(var(--ed-fg) / 0.06)' }} />
-            <button type="button" className="mcl-btn" onClick={() => setOpen(o => (o === l.id ? null : l.id))} aria-expanded={open === l.id}>{open === l.id ? 'Done' : 'Edit'}</button>
-            <button type="button" className="mcl-btn" onClick={() => onChange(looks.filter(x => x.id !== l.id))} aria-label={`Remove ${l.name}`}>Remove</button>
-          </div>
-          {open === l.id && (
-            <div className="-mx-3 -mb-3 mt-2">
-              <CaptionStyler
-                style={brandCaptionStyle(l.captions)} textCase={l.captions.uppercase ? 'upper' : 'title'}
-                onChange={u => put(l.id, { captions: { ...l.captions, ...captionPatch(u), on: true } })}
-                onTextCaseChange={(c: TextCase) => put(l.id, { captions: { ...l.captions, uppercase: c === 'upper' } })}
-                onEditCaptions={() => {}} onRetranscribe={() => {}} retranscribing={false} hasWords={false} />
+    <KitFontsContext.Provider value={d.fonts}>
+    <KitColoursContext.Provider value={{ primary: d.colors.main, secondary: d.colors.accent, extra: d.colors.extra }}>
+      {/* Pinned while the step scrolls, as in the Captions panel: the sample and the tabs */}
+      <div className="kit-cc-top">
+        <div className="kit-cc-preview">
+          {isText ? (
+            <div className="cap-preview kit-text-sample">
+              <span style={{
+                fontFamily: sample.font ? `"${sample.font}", sans-serif` : undefined, color: sample.color, background: sample.bg ?? 'transparent',
+                textTransform: sample.uppercase ? 'uppercase' : undefined, fontSize: Math.max(14, Math.min(26, sample.size / 2.6)),
+              }}>Your title here</span>
             </div>
+          ) : (
+            <Suspense fallback={<div className="cap-preview kit-text-sample" />}>
+              <CaptionPreview style={style} textCase={textCase} dim={!d.captions.on} />
+            </Suspense>
           )}
         </div>
-      ))}
-      {looks.length < MAX_MORE_CAPTIONS && (
-        <button type="button" className="mcl-add" onClick={() => {
-          const id = `look-${Date.now().toString(36)}`
-          onChange([...looks, { id, name: `Look ${looks.length + 2}`, captions: { ...d.captions, on: true } }])
-          setOpen(id)
-        }}>+ Add a look</button>
+        <div role="tablist" aria-label="Text and caption settings" className="kit-cc-tabs grid gap-0.5 p-0.5 rounded-lg"
+          style={{ gridTemplateColumns: `repeat(${KIT_TABS.length}, minmax(0, 1fr))`, background: 'rgb(var(--ed-fg) / 0.06)', border: '1px solid rgb(var(--ed-fg) / 0.07)' }}>
+          {KIT_TABS.map(t => {
+            const on = tab === t.id
+            const off = !d.captions.on && (t.id === 'style' || t.id === 'look')
+            return (
+              <button key={t.id} type="button" role="tab" aria-selected={on} disabled={off} onClick={() => setPicked(t.id)}
+                title={off ? 'Turn on Brand captions first' : t.tip}
+                className="h-8 px-1 rounded-md text-[12px] font-semibold whitespace-nowrap transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                style={on ? { background: 'rgb(var(--ed-fg) / 0.12)', color: 'var(--ed-accent-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.08)' } : { color: 'rgb(var(--ed-fg) / 0.6)' }}>
+                {t.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {tab === 'captions' && (
+        <div role="tabpanel" aria-label="Captions" className="flex flex-col gap-3">
+          <div className="cap-card flex items-center justify-between gap-3">
+            <div className="min-w-0 flex items-center gap-2.5">
+              <span className="cap-card-icon" data-on={d.captions.on || undefined} aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="3" /><path d="M10 10.5a2 2 0 100 3M16 10.5a2 2 0 100 3" /></svg>
+              </span>
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold text-[var(--ed-text)]">Brand captions</p>
+                <p className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>
+                  {d.captions.on ? 'New clips and the brand kit switch use this caption style' : 'Off: clips keep the caption style they have'}
+                </p>
+              </div>
+            </div>
+            <Switch on={d.captions.on} label="Brand captions" onChange={on => setCaptions({ on })} />
+          </div>
+        </div>
       )}
-    </div>
+      {tab === 'style' && styler('style')}
+      {tab === 'look' && styler('look')}
+      {tab === 'text' && (
+        <div role="tabpanel" aria-label="Text" className="flex flex-col gap-3">
+            <Section title="Title style">
+              <p className="text-[11px] -mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>For text on the clip and frame titles: new text starts in it.</p>
+              <FontPicker stayOpen value={d.title.font} onChange={font => set({ ...now(), title: { ...now().title, font: font === 'sans-serif' ? null : font } })} />
+              <ColorRow label="Colour" value={d.title.color} onChange={color => set({ ...now(), title: { ...now().title, color } })} suggest={suggest} />
+              <RangeRow label="Size" min={24} max={160} step={2} value={d.title.size} text={`${d.title.size}`}
+                onChange={size => set({ ...now(), title: { ...now().title, size } })} />
+            </Section>
+          <Section title="Corners">
+            <label className="cap-row cursor-pointer select-none">
+              <span className="flex flex-col min-w-0">
+                <span className="cap-label">Brand corners</span>
+                <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>
+                  {d.frames.corners !== null ? 'While the brand kit is on, every frame’s video is rounded like this' : 'Off: frames keep their own corners'}
+                </span>
+              </span>
+              <Switch on={d.frames.corners !== null} label="Brand corners" onChange={on => set({ ...now(), frames: { ...now().frames, corners: on ? 80 : null } })} />
+            </label>
+            {d.frames.corners !== null && (
+              <RangeRow label="Rounding" min={0} max={100} step={5} value={d.frames.corners} text={`${d.frames.corners}%`}
+                onChange={corners => set({ ...now(), frames: { ...now().frames, corners } })} />
+            )}
+          </Section>
+        </div>
+      )}
+      {tab === 'fonts' && (
+        <div role="tabpanel" aria-label="Fonts">
+          <Section title="Your fonts">
+            <BrandFonts fonts={d.fonts} onChange={fonts => set({ ...now(), fonts })} />
+          </Section>
+        </div>
+      )}
+    </KitColoursContext.Provider>
+    </KitFontsContext.Provider>
   )
 }
 
-export function ColorRow({ label, hint, value, onChange }: { label: string; hint?: string; value: string; onChange: (v: string) => void }) {
+export function ColorRow({ label, hint, value, onChange, suggest }: { label: string; hint?: string; value: string; onChange: (v: string) => void; suggest?: KitChip[] }) {
   const [draft, setDraft] = useState(value)
   useEffect(() => { setDraft(value) }, [value])
   return (
-    <div className="cap-row">
-      <span className="flex flex-col min-w-0">
-        <span className="cap-label">{label}</span>
-        {hint && <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>{hint}</span>}
-      </span>
-      <span className="flex items-center gap-2 shrink-0">
-        <input value={draft} onChange={e => { setDraft(e.target.value); if (/^#[0-9a-f]{6}$/i.test(e.target.value)) onChange(e.target.value.toLowerCase()) }}
-          onBlur={() => setDraft(value)} aria-label={`${label} (hex)`} maxLength={7}
-          className="w-20 h-8 px-2 rounded-md text-xs font-mono text-[var(--ed-text)] outline-none" style={{ background: 'rgb(var(--ed-fg) / 0.06)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)' }} />
-        <input type="color" value={value} onChange={e => onChange(e.target.value.toLowerCase())} aria-label={label}
-          className="w-8 h-8 rounded-md cursor-pointer bg-transparent" style={{ border: 'none', padding: 0 }} />
-      </span>
+    <div className="flex flex-col gap-2">
+      <div className="cap-row">
+        <span className="flex flex-col min-w-0">
+          <span className="cap-label">{label}</span>
+          {hint && <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>{hint}</span>}
+        </span>
+        <span className="flex items-center gap-2 shrink-0">
+          <input value={draft} onChange={e => { setDraft(e.target.value); if (/^#[0-9a-f]{6}$/i.test(e.target.value)) onChange(e.target.value.toLowerCase()) }}
+            onBlur={() => setDraft(value)} aria-label={`${label} (hex)`} maxLength={7}
+            className="w-20 h-8 px-2 rounded-md text-xs font-mono text-[var(--ed-text)] outline-none" style={{ background: 'rgb(var(--ed-fg) / 0.06)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)' }} />
+          <input type="color" value={value} onChange={e => onChange(e.target.value.toLowerCase())} aria-label={label}
+            className="w-8 h-8 rounded-md cursor-pointer bg-transparent" style={{ border: 'none', padding: 0 }} />
+        </span>
+      </div>
+      {suggest && suggest.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={`${label}: your brand colours`}>
+          {suggest.map(c => (
+            <button key={c.name} type="button" className="bm-chip" data-on={c.hex.toLowerCase() === value.toLowerCase() || undefined} onClick={() => onChange(c.hex.toLowerCase())} title={`${c.name} ${c.hex}`}>
+              <i className="bm-chip-dot" style={{ background: c.hex }} />{c.name}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -1479,25 +1018,3 @@ function RangeRow({ label, min, max, step, value, text, onChange }: { label: str
   )
 }
 
-const CORNERS: { id: LogoCorner; label: string }[] = [
-  { id: 'tl', label: 'Top left' }, { id: 'tr', label: 'Top right' }, { id: 'bl', label: 'Bottom left' }, { id: 'br', label: 'Bottom right' },
-]
-
-/** Which corner the logo goes in: a little frame with a spot in each corner */
-function CornerSwitch({ value, onChange }: { value: LogoCorner | null; onChange: (v: LogoCorner) => void }) {
-  return (
-    <div role="radiogroup" aria-label="Logo corner" className="relative rounded-md" style={{ width: 44, height: 70, boxShadow: 'inset 0 0 0 1.5px rgb(var(--ed-fg) / 0.25)' }}>
-      {CORNERS.map(c => {
-        const on = c.id === value
-        return (
-          <button key={c.id} type="button" role="radio" aria-checked={on} aria-label={c.label} title={c.label} onClick={() => onChange(c.id)}
-            className="absolute rounded-[3px] transition-colors"
-            style={{
-              width: 14, height: 10, [c.id.startsWith('t') ? 'top' : 'bottom']: 5, [c.id.endsWith('l') ? 'left' : 'right']: 5,
-              background: on ? '#c8ff00' : 'rgb(var(--ed-fg) / 0.18)',
-            }} />
-        )
-      })}
-    </div>
-  )
-}

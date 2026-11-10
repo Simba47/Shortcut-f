@@ -50,9 +50,9 @@ import { putBrandOn, takeBrandOff, brandNewFrames, updateBrand, brandChanged, fi
 import { EditorBrandMenu } from '@/components/brand/EditorBrandMenu'
 import { CleanupPanel, type CleanupRow } from '@/components/editor/CleanupPanel'
 import { cleanupCards, isDeleted } from '@/modules/editor/cleanup'
-import { brandPalette, brandLockOf, brandTextStyle, brandCaptionLooks, brandCaptionStyleOn, captionBand, sameEndVideo, type FrameRect, type BrandKit, type BrandTextKind } from '@/lib/shared/brandKit'
+import { BRAND_ENDS_ON, brandPalette, brandLockOf, brandTextStyle, brandCaptionLooks, brandCaptionStyleOn, captionBand, sameEndVideo, type FrameRect, type BrandKit, type BrandTextKind } from '@/lib/shared/brandKit'
 import { brandTextLook } from '@/modules/editor/textStyle'
-import { brandCaptionWords, type BrandWords } from '@/lib/brandWords'
+import { brandCaptionWords, BRAND_WORDS_ON, type BrandWords } from '@/lib/brandWords'
 import { lockClipLook, lockHolds, lockSetOf, type LockSet } from '@/lib/shared/brandTeam'
 import { BrandCaptionLooks } from '@/components/brand/BrandCaptionLooks'
 import { setBrandPalette, setBrandLock } from '@/components/editor/brandPalette'
@@ -170,9 +170,13 @@ const TIMELINE_PAD_Y = 28
 // How wide the side columns can be dragged
 const OPTIONS_RANGE: [number, number] = [220, 520]
 const PREVIEW_RANGE: [number, number] = [260, 620]
+/** The Preview column never takes more of the window than this, so a narrow or tall window keeps room for the video panel */
+const PREVIEW_MAX_VW = 40
 const DEFAULT_SEG_ID = '__default-format'
 const DEFAULT_BOX_ID = '__default-box'
 const ACCENT = '#c8ff00'
+/** A choice in the Reset popup: plain, red only under the mouse or the keyboard (user, 2026-11-10) */
+const RESET_CHOICE = 'rounded-lg text-left transition-colors bg-[rgb(var(--ed-fg)/0.08)] text-[var(--ed-text)] hover:bg-[#ef4444] hover:text-white focus-visible:bg-[#ef4444] focus-visible:text-white'
 
 const TOOLS: { id: Tool; label: string; title: string; hint: string; icon: React.ReactNode }[] = [
   {
@@ -229,7 +233,7 @@ const TOOLS: { id: Tool; label: string; title: string; hint: string; icon: React
   {
     // (user, 2026-10-17) Its workshop takes the video's place in the middle, for more room
     id: 'brand', label: 'Brand kit', title: 'Brand kit',
-    hint: 'Your colours, logo, @handle and title style, saved for every clip. Set a kit up, then Apply it to this clip.',
+    hint: 'Your colours, logo and title style, saved for every clip. Set a kit up, then Apply it to this clip.',
     icon: <><path d="M12 21a9 9 0 110-18 8.5 8.5 0 018.5 8.2c0 2.6-1.8 3.8-3.8 3.8h-1.9a1.9 1.9 0 00-1 3.5A1.9 1.9 0 0112 21z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" fill="none" /><circle cx="7.6" cy="11" r="1.3" fill="currentColor" /><circle cx="10.4" cy="7" r="1.3" fill="currentColor" /><circle cx="15.2" cy="7.6" r="1.3" fill="currentColor" /></>,
   },
 ]
@@ -485,7 +489,8 @@ export function EditorShell({
   // The brand kit's workshop (in the video's place): open when the tool opens; its X or Done closes it, Edit kit
   // opens it again. Closing the options sidebar leaves it open
   const [kitStudio, setKitStudio] = useState(true)
-  useEffect(() => { if (tool === 'brand') setKitStudio(true) }, [tool])
+  // (and its sidebar — your kits, the switch — open with it: user, 2026-11-10)
+  useEffect(() => { if (tool === 'brand') { setKitStudio(true); setOptionsOpen(true) } }, [tool])
   // What was open before the Brand kit (user, 2026-10-28: closing it goes back there — Brand kit isn't on
   // the rail any more, so nothing else would close its panel)
   const beforeBrandRef = useRef<{ tool: Tool; open: boolean }>({ tool: 'subjects', open: false })
@@ -533,6 +538,7 @@ export function EditorShell({
   // The Preview column follows its height (the phone fills it, no gap above or below) until its edge is
   // dragged; a double-click on the edge goes back to that
   const [previewFit, setPreviewFit] = useState(true)
+  const shownPreviewW = `min(${previewW}px, ${PREVIEW_MAX_VW}vw)`
   const previewBodyRef = useRef<HTMLDivElement>(null)
   const [resizing, setResizing] = useState<'options' | 'preview' | 'timeline' | null>(null)
   // The timeline's height, dragged at the line above the play bar (null = its usual size; this visit only)
@@ -567,8 +573,10 @@ export function EditorShell({
     if (e.button !== 0) return
     e.preventDefault(); e.stopPropagation()
     const x0 = e.clientX
-    const w0 = which === 'options' ? optionsW : previewW
-    const [lo, hi] = which === 'options' ? OPTIONS_RANGE : PREVIEW_RANGE
+    const previewCap = window.innerWidth * PREVIEW_MAX_VW / 100
+    const w0 = which === 'options' ? optionsW : Math.min(previewW, previewCap)
+    const lo = (which === 'options' ? OPTIONS_RANGE : PREVIEW_RANGE)[0]
+    const hi = which === 'options' ? OPTIONS_RANGE[1] : Math.min(PREVIEW_RANGE[1], previewCap)
     let w = w0
     setResizing(which)
     if (which === 'preview') setPreviewFit(false)
@@ -3561,7 +3569,7 @@ export function EditorShell({
   function brandTarget(): BrandTarget {
     const m = useMediaStore.getState(), c = useCaptionStore.getState()
     return {
-      clipId: clip.id, lengthMs: clipLengthMs, mainVideoId: mainVideoId ?? null,
+      clipId: clip.id, lengthMs: clipLengthMs, mainVideoId: mainVideoId ?? null, ends: BRAND_ENDS_ON,
       overlays: m.overlays, texts: m.textOverlays, caption: c.captionStyle, textCase: c.captionTextCase,
       segments: useEditorStore.getState().segments, avoid: brandAvoid(),
       keyframes: useEditorStore.getState().keyframes, transitions: m.transitions, timelineEdits: true,
@@ -3669,13 +3677,12 @@ export function EditorShell({
   // on this clip, else the account's default one
   const styleKit = (brandOn ? brand.kits.find(k => k.id === brandOn.kit_id) : undefined) ?? brand.kits.find(k => k.data.is_default) ?? null
   // (its words on the captions: the same kit — brandedWords above)
-  const styleWordsKey = JSON.stringify(styleKit?.data.words ?? null)
-  useEffect(() => { setCaptionBrandWords(styleKit?.data.words ?? null) }, [styleWordsKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const styleWordsNow = BRAND_WORDS_ON ? styleKit?.data.words ?? null : null
+  const styleWordsKey = JSON.stringify(styleWordsNow)
+  useEffect(() => { setCaptionBrandWords(styleWordsNow) }, [styleWordsKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const BRAND_TEXT: Array<{ id: BrandTextKind; name: string; text: string }> = [
+    // (only the title: the kit's subtitle and call to action went, user 2026-11-10)
     { id: 'title', name: 'Title', text: 'Your title' },
-    { id: 'subtitle', name: 'Subtitle', text: 'Your subtitle' },
-    // (the kit's own main line, brand kit Phase 5)
-    { id: 'cta', name: 'Call to action', text: styleKit?.data.words?.lines[0] ?? 'Follow for more' },
   ]
   const brandTextStyles = styleKit ? BRAND_TEXT.map(x => ({ ...x, look: brandTextLook(brandTextStyle(styleKit.data, x.id)) })) : null
   /** The kit's title font on every text and frame text of this clip (locked ones stay): one undo step */
@@ -3726,14 +3733,6 @@ export function EditorShell({
     if (r.note) notifyLocked(r.note)
     brandNeedsPieces(kitOn, r.applied)
   }, [kitOn, trimmed]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  function askDeleteBrandKit(kit: BrandKit) {
-    confirm({
-      title: `Delete “${kit.name}”?`,
-      body: 'The kit goes from your account. Clips it was put on keep their look.',
-      confirmLabel: 'Delete kit',
-    }, () => { brand.remove(kit.id).catch(() => brand.reload()) })
-  }
 
   /**
    * Cut timeline [a, b) out of the clip and close the gap (trimState.ts rippleDelete): that part
@@ -7095,7 +7094,7 @@ export function EditorShell({
                   {/* (brand kit Phase 3) the kit's caption looks, one tap each */}
                   {captionTab === 'style' && styleKit && (
                     <BrandCaptionLooks kitName={styleKit.name} current={panelCaptionStyle}
-                      looks={brandCaptionLooks(styleKit.data).filter(l => l.id !== 'main' || styleKit.data.captions.on)}
+                      looks={brandCaptionLooks(styleKit.data).filter(l => l.id === 'main' && styleKit.data.captions.on)}
                       onPick={l => { changeCaptionStyle(brandCaptionStyleOn(l.captions, panelCaptionStyle)); setCaptionTextCase(l.captions.uppercase ? 'upper' : 'title') }} />
                   )}
                   {captionTab !== 'captions' && (
@@ -7126,8 +7125,7 @@ export function EditorShell({
                 onUndo={undo} />
             )}
             {tool === 'brand' && (
-              <BrandKitPanel brand={brand} onKitId={brandOn?.kit_id ?? null} onTurnOn={turnBrandOn} onTurnOff={turnBrandOff} onDelete={askDeleteBrandKit}
-                editing={kitStudio} onEdit={() => setKitStudio(true)} />
+              <BrandKitPanel brand={brand} onEdit={() => setKitStudio(true)} />
             )}
 
             {tool === 'post' && (
@@ -7410,7 +7408,7 @@ export function EditorShell({
           </div>
         )}
         <aside data-tour="export" data-layout-panel="Preview" aria-hidden={!previewOpen} className="ed-preview-col relative shrink-0 flex flex-col min-h-0 overflow-hidden" data-open={previewOpen || undefined} data-resizing={resizing === 'preview' || undefined}
-          style={{ width: previewOpen ? previewW : 0, background: 'var(--ed-panel)' }}
+          style={{ width: previewOpen ? shownPreviewW : 0, background: 'var(--ed-panel)' }}
           {...(!previewOpen ? { inert: true } : {})}>
           {/* Its left edge: drag to make the preview wider or narrower */}
           {previewOpen && (
@@ -7418,7 +7416,7 @@ export function EditorShell({
               title="Drag to resize · double-click to reset" className="ed-col-handle" style={{ left: 0 }} data-on={resizing === 'preview' || undefined}
               onPointerDown={e => startColumnResize(e, 'preview')} onDoubleClick={() => resetColumn('preview')} />
           )}
-          <div className="ed-preview-inner flex flex-col min-h-0 h-full" style={{ width: previewW }}>
+          <div className="ed-preview-inner flex flex-col min-h-0 h-full" style={{ width: shownPreviewW }}>
           {/* One row (user, 2026-10-29: more room for the phone): close · how it looks inside each app · Export */}
           <div className="ed-pv-head shrink-0 px-3 flex items-center gap-2" style={{ height: 52, borderBottom: '1px solid rgb(var(--ed-fg) / 0.06)' }}>
             <span className="flex items-center shrink-0">
@@ -7457,7 +7455,7 @@ export function EditorShell({
                   title={exporting ? 'Starting…' : `Exporting · ${formatElapsed(renderElapsed)}`}>
                   <span className="sbb-beam" aria-hidden="true" />
                   <span className="sbb-surface gap-1.5 h-8 px-3.5 text-xs font-bold">
-                    <ExportIcon /> Exporting
+                    <ExportIcon /> <span className="ed-pv-act-word">Exporting</span>
                   </span>
                 </span>
                 {/* (once the export is on its way: while it starts there is nothing to stop yet) */}
@@ -7482,10 +7480,10 @@ export function EditorShell({
                       <path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7" />
                     </svg>
                   </button>
-                  <a href={`/api/clips/${clip.id}/download`} download
+                  <a href={`/api/clips/${clip.id}/download`} download aria-label="Download" title="Download"
                     className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold transition-opacity hover:opacity-90"
                     style={{ background: ACCENT, color: '#000' }}>
-                    <DownloadIcon /> Download
+                    <DownloadIcon /> <span className="ed-pv-act-word">Download</span>
                   </a>
                 </>
               ) : (
@@ -7587,6 +7585,14 @@ export function EditorShell({
               {!rendering && <PlatformOverlay platform={platform} />}
               </div>
               </div>
+              {/* Full view: in the video's bottom-right corner (user, 2026-11-10) */}
+              {!fullView && !rendering && (
+                <button onClick={openFullView} aria-label="Full view: see the preview big" title="Full view (Esc to leave)" className="ed-pv-fullview">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+                  </svg>
+                </button>
+              )}
             </div>
             {fullView && (
               <FullViewBar playing={playing} onTogglePlay={togglePlay} onSeek={seekToMs} lengthMs={clipDurationMs} onClose={closeFullView} />
@@ -7742,13 +7748,13 @@ export function EditorShell({
                   {/* A Make my clips clip: only my edits, or the AI's too */}
                   {aiMade && (
                     <div className="flex flex-col gap-2">
-                      <button onClick={() => handleResetAll(true)} className="px-3 py-2 rounded-lg text-left transition-colors hover:bg-[rgb(var(--ed-fg)/0.14)]" style={{ background: 'rgb(var(--ed-fg) / 0.08)', color: 'var(--ed-text)' }}>
-                        <span className="block text-xs font-bold">Reset AI edit</span>
-                        <span className="block text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>Back to how AI made it</span>
+                      <button onClick={() => handleResetAll(true)} className={`group px-3 py-2 ${RESET_CHOICE}`}>
+                        <span className="block text-xs font-bold">Reset manual edit</span>
+                        <span className="block text-[11px] opacity-[.55] group-hover:opacity-[.85] group-focus-visible:opacity-[.85]">Back to how AI made it</span>
                       </button>
-                      <button onClick={() => handleResetAll()} className="px-3 py-2 rounded-lg text-left transition-opacity hover:opacity-90" style={{ background: '#ef4444', color: '#fff' }}>
-                        <span className="block text-xs font-bold">Reset everything</span>
-                        <span className="block text-[11px]" style={{ opacity: 0.85 }}>Back to the original clip</span>
+                      <button onClick={() => handleResetAll()} className={`group px-3 py-2 ${RESET_CHOICE}`}>
+                        <span className="block text-xs font-bold">Reset AI edit</span>
+                        <span className="block text-[11px] opacity-[.55] group-hover:opacity-[.85] group-focus-visible:opacity-[.85]">Back to the original clip</span>
                       </button>
                     </div>
                   )}
@@ -7757,22 +7763,13 @@ export function EditorShell({
                       className="h-8 px-3 rounded-lg text-xs font-medium transition-colors hover:bg-[rgb(var(--ed-fg)/0.08)]"
                       style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>Cancel</button>
                     {!aiMade && (
-                      <button onClick={() => handleResetAll()} className="h-8 px-3 rounded-lg text-xs font-bold transition-opacity hover:opacity-90"
-                        style={{ background: '#ef4444', color: '#fff' }}>Reset everything</button>
+                      <button onClick={() => handleResetAll()} className={`h-8 px-3 text-xs font-bold ${RESET_CHOICE}`}>Reset everything</button>
                     )}
                   </div>
                 </div>
               </>
             )}
           </div>
-          {/* Full view: here under the preview, so the video gets all of its column and nothing covers it (user, 2026-11-10) */}
-          {previewOpen && !rendering && (
-            <button onClick={openFullView} aria-label="Full view: see the preview big" title="Full view (Esc to leave)" data-tip="Full view" className="ed-tl-btn ed-tip">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
-              </svg>
-            </button>
-          )}
           <span className="ed-tl-sep" aria-hidden="true" />
           <ZoomSlider zoom={timelineZoom} onZoom={setTimelineZoom} />
         </div>

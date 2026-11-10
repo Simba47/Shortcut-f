@@ -130,6 +130,8 @@ export interface BrandKitData {
 export interface BrandEnds { card: boolean; seconds: number; intro: BrandEndVideo | null; outro: BrandEndVideo | null }
 /** An intro or outro: a video of the library, its length (ms) and its name as picked */
 export interface BrandEndVideo { id: string; ms: number; title: string }
+/** Whether a kit's end card, intro and outro are added to clips. Off (user, 2026-11-10: their step is gone): what a kit saved stays with it, and what's on a clip stays until the brand comes off */
+export const BRAND_ENDS_ON = false
 /** How long an end card is (s) */
 export const END_CARD_SECONDS: [number, number] = [2, 8]
 /** The longest video an intro or outro can be (ms) */
@@ -488,7 +490,7 @@ export interface LinkBrand {
 }
 
 /**
- * What one way of making a kit found — a link, an uploaded logo, or a few words (brandStyles.ts) —
+ * What one way of making a kit found — a link or an uploaded logo —
  * each part only when it was found
  */
 export interface FoundBrand {

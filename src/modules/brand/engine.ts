@@ -52,6 +52,8 @@ export interface BrandTarget {
    * one with parts played faster or slower (where the main video is at a moment is the editor's to say)
    */
   canInsert: boolean
+  /** false: the kit's end card, intro and outro aren't added or changed here (BRAND_ENDS_ON); ones already on the clip stay */
+  ends?: boolean
   /** Where the main video is at timeline `t` (clip ms of it); by default as the videos put in between say */
   videoAt?: (t: number) => number
   /** What the logo keeps off on this clip (Phase 4, kit logo.smart): its captions, the faces in it */
@@ -174,7 +176,7 @@ function mainSpan(t: BrandTarget, b: BrandBefore | null): [number, number] {
  */
 function syncBookends(t: BrandTarget, kit: Pick<BrandKit, 'data'>, before: BrandBefore):
   { target: BrandTarget; before: BrandBefore; note?: string } {
-  if (!t.canInsert) return { target: t, before }
+  if (!t.canInsert || t.ends === false) return { target: t, before }
   let target = t, b = before, note: string | undefined
   for (const which of ['outro', 'intro'] as const) {
     const want = kit.data.ends[which], rec = b[which] ?? null
@@ -220,7 +222,7 @@ const withTimeline = (t: BrandTarget, tl: CardTimeline): BrandTarget =>
  */
 function syncEndCard(t: BrandTarget, kit: Pick<BrandKit, 'name' | 'data'>, before: BrandBefore, old: BrandKitData | null):
   { target: BrandTarget; before: BrandBefore; note?: string } {
-  if (!t.timelineEdits) return { target: t, before }
+  if (!t.timelineEdits || t.ends === false) return { target: t, before }
   const want = kit.data.ends.card, rec = before.end_card
   let target = t, b = before
   if (rec) {
@@ -252,6 +254,7 @@ function syncEndCard(t: BrandTarget, kit: Pick<BrandKit, 'name' | 'data'>, befor
  * opened, the editor sees the kit has changed and does it
  */
 function appliedOf(t: BrandTarget, d: BrandKitData, old: BrandKitData | null): BrandKitData {
+  if (t.ends === false) return d
   let ends = d.ends
   if (!t.timelineEdits) ends = { ...ends, card: old ? old.ends.card : false, seconds: old ? old.ends.seconds : d.ends.seconds }
   if (!t.canInsert) ends = { ...ends, intro: old ? old.ends.intro : null, outro: old ? old.ends.outro : null }

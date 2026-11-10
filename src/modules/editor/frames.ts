@@ -305,11 +305,11 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
  * clips that already use them still show, edit and export as before; they just aren't offered for
  * new frames. Branded card is back with the brand kit (user, 2026-10-17): picked, it starts with the
  * kit's colour, title and @handle (EditorShell fillBrandCard). Side by side taken out the same way, and
- * Pic + Video, which Video + Media covers (user, 2026-11-04).
+ * Pic + Video, which Video + Media covers (user, 2026-11-04), and the Branded card (user, 2026-11-10).
  */
 export const FRAME_LAYOUTS: FrameLayout[] = [
   'frame_title_caption', 'frame_blur_fill', 'frame_dual', 'frame_video_photo', 'frame_triple',
-  'frame_trio_main', 'frame_screen_face', 'frame_brand_card',
+  'frame_trio_main', 'frame_screen_face',
 ]
 /** How a new frame of this template is laid out (its starting row order), for the gallery's picture */
 export const startLayout = (layout: FrameLayout): RowLayout => {

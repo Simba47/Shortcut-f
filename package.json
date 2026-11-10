@@ -9,7 +9,7 @@
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "test:auto-format": "npx tsx --test src/modules/editor/autoFormat.test.ts",
-    "test:brand": "npx tsx --test src/lib/brandWords.test.ts src/lib/shared/brandTeam.test.ts src/modules/brand/engine.test.ts src/modules/brand/endCard.test.ts src/modules/brand/bookends.test.ts src/lib/shared/brandStyles.test.ts",
+    "test:brand": "npx tsx --test src/lib/brandWords.test.ts src/lib/shared/brandTeam.test.ts src/modules/brand/engine.test.ts src/modules/brand/endCard.test.ts src/modules/brand/bookends.test.ts",
     "test:brand-style": "npx tsx --test src/server/services/brandStyle.test.ts"
   },
   "dependencies": {

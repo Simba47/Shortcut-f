@@ -416,7 +416,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   }, [savedClips])
   // Download from Preview: an exported clip saves straight away; one AI only edited (Make my clips
   // saves edits, not files) is exported first and saves by itself once ready
-  const [dlState, setDlState] = useState<Record<string, 'exporting' | { error: string }>>({})
+  const [dlState, setDlState] = useState<Record<string, 'exporting' | 'stopping' | { error: string }>>({})
+  // (Stop pressed before the export has been asked for: it waits for that, or the export would start after it)
+  const exportAsks = useRef(new Map<string, Promise<unknown>>())
   function saveFile(id: string) {
     const a = document.createElement('a')
     // (a clip with no name of its own is saved under the one on its card: "Clip 3")
@@ -432,9 +434,12 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     if (c?.status === 'done' && c.output_url) { saveFile(id); return }
     setDlState(d => ({ ...d, [id]: 'exporting' }))
     if (c?.status !== 'rendering') {
-      const res = await fetch('/api/export', {
+      const ask = fetch('/api/export', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clip_id: id, quality: '1080p' }),
       }).catch(() => null)
+      exportAsks.current.set(id, ask)
+      const res = await ask
+      exportAsks.current.delete(id)
       // 409: it's already exporting — just wait for it
       if (!res || (!res.ok && res.status !== 409)) {
         const error = res ? (await res.json().catch(() => ({}))).error ?? 'Could not export' : 'Could not export'
@@ -443,6 +448,22 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       }
     }
     setClips(cs => cs.map(x => x.id === id ? { ...x, status: 'rendering', output_url: null } : x))
+  }
+  /** Stop on a card while it exports (user, 2026-11-10): the export stops, nothing is saved, the clip as it was before */
+  async function stopDownload(id: string) {
+    setDlState(d => ({ ...d, [id]: 'stopping' }))
+    setClipError(null)
+    try {
+      await exportAsks.current.get(id)
+      const res = await fetch(`/api/clips/${id}/cancel-export`, { method: 'POST' })
+      const d = await res.json().catch(() => null) as { status?: string; output_url?: string | null; error?: string } | null
+      if (!res.ok || !d?.status) throw new Error(d?.error ?? 'Couldn’t stop the export. Try again.')
+      setClips(cs => cs.map(x => x.id === id ? { ...x, status: d.status!, output_url: d.output_url ?? null } : x))
+      setDlState(s => { const n = { ...s }; delete n[id]; return n })
+    } catch (e) {
+      setDlState(s => ({ ...s, [id]: 'exporting' }))
+      setClipError(e instanceof Error ? e.message : 'Couldn’t stop the export. Try again.')
+    }
   }
   // While a download waits on its export, check (usePolling's rhythm); save it the moment it's done
   // (a hidden tab saves it the moment it is shown again)
@@ -2028,9 +2049,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 open={previewId === clip.id}
                 onClose={() => { setPreviewId(null); setViewMode('video') }}
                 onDownload={() => downloadClip(clip.id)}
+                onStopDownload={() => stopDownload(clip.id)}
                 manual={manualOnly}
                 edited={manualOnly && isEdited(clip)}
-                download={dlState[clip.id] === 'exporting' || clip.status === 'rendering' ? 'preparing'
+                download={dlState[clip.id] === 'stopping' ? 'stopping'
+                  : dlState[clip.id] === 'exporting' || clip.status === 'rendering' ? 'preparing'
                   : typeof dlState[clip.id] === 'object' ? 'failed' : 'ready'}
                 disabled={!!busy}
                 selecting={selecting}
@@ -2732,7 +2755,7 @@ function SubEditOverlay({ startedAt, estimate, ahead, onStop }: { startedAt: num
   )
 }
 
-function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, download, onSubEdited, manual, edited, brandTag, onRename, defaultTitle }: {
+function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, onStopDownload, download, onSubEdited, manual, edited, brandTag, onRename, defaultTitle }: {
   id: string
   /** Renamed from its card (✎ or a double-click on the name): the new name, or null for `defaultTitle` again */
   onRename?: (title: string | null) => void
@@ -2748,8 +2771,10 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
   onSubEdited?: () => void
   /** Download: saves the file, exporting it first if it isn't exported yet (e.g. AI's clips) */
   onDownload: () => void
-  /** preparing: exporting, saves by itself when ready · failed: the last try didn't work */
-  download: 'ready' | 'preparing' | 'failed'
+  /** Stop, in the Download button's place while it exports */
+  onStopDownload: () => void
+  /** preparing: exporting, saves by itself when ready (the button is Stop) · failed: the last try didn't work */
+  download: 'ready' | 'preparing' | 'stopping' | 'failed'
   videoUrl: string
   favorite: boolean
   /** Why AI picked it (Make my clips), when we have it */
@@ -2809,6 +2834,11 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
   // Rename's icon, a text field with a typing cursor (the pencil is Edit's): on the labelled Rename button beside
   // Edit and Download (user, 2026-11-05: an icon alone at the top wasn't clear)
   const renameIcon = (size: number) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 4h1a3 3 0 013 3 3 3 0 013-3h1" /><path d="M13 20h-1a3 3 0 01-3-3 3 3 0 01-3 3H5" /><path d="M5 16H4a2 2 0 01-2-2v-4a2 2 0 012-2h1" /><path d="M13 8h7a2 2 0 012 2v4a2 2 0 01-2 2h-7" /><path d="M9 7v10" /></svg>
+  // Download's button: Stop while the clip exports
+  const exporting = download === 'preparing' || download === 'stopping'
+  const downloadLabel = download === 'preparing' ? 'Stop' : download === 'stopping' ? 'Stopping…' : download === 'failed' ? 'Retry' : 'Download'
+  const tapDownload = (e: React.MouseEvent) => { e.stopPropagation(); if (download === 'preparing') onStopDownload(); else onDownload() }
+  const stopIcon = (size: number) => <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
   const sub = useSubEdit(id, onSubEdited)
   // Opened: a click anywhere outside the card closes it again (not while picking clips, nor in its
   // own pop-ups, nor on the centre panel where it is being previewed: data-keep-clip-open)
@@ -2876,6 +2906,8 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
                 <span className="cb-edited px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide" style={{ color: ACCENT, background: 'rgba(200,255,0,0.12)' }}>Edited</span>
               )}
               {status === 'rendering' && <span className="flex items-center gap-1" style={{ color: ACCENT }}>· <Spinner /> Exporting</span>}
+              {/* Which brand kit is on it, at a glance (user, 2026-11-10: the slim cards didn't say) */}
+              {brandTag}
               {sub.busy && <SubEditInline startedAt={sub.startedAt} estimate={sub.estimate} ahead={sub.ahead} onStop={sub.stop} />}
             </span>
           </span>
@@ -2894,12 +2926,12 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
                   Edit
                 </button>
-                <button type="button" onClick={e => { e.stopPropagation(); onDownload() }} disabled={download === 'preparing'} className="cb-act justify-center"
-                  data-tone={download === 'failed' ? 'danger' : undefined}>
-                  {download === 'preparing' ? <Spinner /> : (
+                <button type="button" onClick={tapDownload} disabled={download === 'stopping'} className="cb-act justify-center"
+                  data-tone={download === 'failed' || exporting ? 'danger' : undefined}>
+                  {exporting ? stopIcon(11) : (
                     <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   )}
-                  {download === 'preparing' ? 'Preparing' : download === 'failed' ? 'Retry' : 'Download'}
+                  {downloadLabel}
                 </button>
                 {onRename && (
                   <button type="button" onClick={startRename} className="cb-act justify-center" data-on={renaming ? '' : undefined}>
@@ -3005,13 +3037,13 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
             Edit
           </button>
-          <button onClick={e => { e.stopPropagation(); onDownload() }} disabled={download === 'preparing'}
+          <button onClick={tapDownload} disabled={download === 'stopping'}
             className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-90 disabled:opacity-70"
-            style={download === 'failed' ? { color: '#f87171', border: '1px solid rgba(239,68,68,0.45)' } : { background: ACCENT, color: '#000' }}>
-            {download === 'preparing' ? <Spinner /> : (
+            style={download === 'failed' || exporting ? { color: '#f87171', border: '1px solid rgba(239,68,68,0.45)' } : { background: ACCENT, color: '#000' }}>
+            {exporting ? stopIcon(12) : (
               <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
             )}
-            {download === 'preparing' ? 'Preparing' : download === 'failed' ? 'Retry' : 'Download'}
+            {downloadLabel}
           </button>
           {onRename && (
             <button onClick={startRename}

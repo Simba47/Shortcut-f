@@ -1,6 +1,6 @@
 import sql from '@/lib/db'
 import type { AudioTrack, BoxKeyframe, CaptionStyle, Overlay, SegmentLocal, TextOverlay, Transition } from '@chai-cut/shared'
-import { captionBand, cleanBrandKitData, type BrandKit } from '@/lib/shared/brandKit'
+import { BRAND_ENDS_ON, captionBand, cleanBrandKitData, type BrandKit } from '@/lib/shared/brandKit'
 import { cleanBrandOn, type BrandOn } from '@/lib/shared/brandOn'
 import { lockHolds } from '@/lib/shared/brandTeam'
 import { brandChanged, putBrandOn, takeBrandOff, updateBrand, type BrandTarget } from '@/modules/brand/engine'
@@ -83,7 +83,7 @@ async function load(clipId: string): Promise<Loaded | null> {
   const timelineEdits = !(Array.isArray(noted) && noted.length) && !segments.some(s => isShot(s, clip.video_id))
   return {
     target: {
-      clipId, lengthMs: clip.end_ms - clip.start_ms + inserted + Math.max(0, slower), mainVideoId: clip.video_id,
+      clipId, lengthMs: clip.end_ms - clip.start_ms + inserted + Math.max(0, slower), mainVideoId: clip.video_id, ends: BRAND_ENDS_ON,
       overlays: overlays as unknown as Overlay[], texts: texts as unknown as TextOverlay[],
       caption, textCase: caption.uppercase ? 'upper' : 'title', segments,
       keyframes, transitions: transitions as unknown as Transition[],
