@@ -11,9 +11,17 @@
  * on:     a spend the balance cannot cover is refused with 402
  */
 export type CreditsMode = 'off' | 'shadow' | 'on'
+let warnedOff = false
 export function creditsMode(env: Record<string, string | undefined> = process.env): CreditsMode {
   const v = (env.CREDITS_MODE ?? '').trim().toLowerCase()
-  return v === 'shadow' || v === 'on' ? v : 'off'
+  const mode = v === 'shadow' || v === 'on' ? v : 'off'
+  // Off when not set, so a site without it (a developer's copy) works as before. On the live site
+  // that would mean every limit and charge is off without anyone noticing: said loudly, once.
+  if (mode === 'off' && env === process.env && env.NODE_ENV === 'production' && !warnedOff) {
+    warnedOff = true
+    console.error(`[credits] CREDITS_MODE is ${env.CREDITS_MODE === undefined ? 'not set' : `"${env.CREDITS_MODE}"`}: credits and plan limits are OFF. Set CREDITS_MODE=on on the live site.`)
+  }
+  return mode
 }
 
 /** (what Free's limits use: 45 for 30 minutes read, 15 for 3 AI clips, 21 for 3 Ask AI, 4 for 20 rewrites; and 10 to export) */
