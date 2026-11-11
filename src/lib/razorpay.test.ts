@@ -97,6 +97,13 @@ test('mode: off without keys; test or live by the key; mock only with RAZORPAY_M
   assert.equal(razorpayMode({ ...DUMMY, RAZORPAY_MOCK: '1', NODE_ENV: 'production' }), 'test')
 })
 
+test('a deployed site mocks only with a second switch set on purpose, and never with a live key', () => {
+  const deployed = { ...DUMMY, NODE_ENV: 'production', RAZORPAY_MOCK_ON_DEPLOYED_SITE: '1' }
+  assert.equal(razorpayMode({ ...deployed, RAZORPAY_MOCK: '1' }), 'mock')
+  assert.equal(razorpayMode(deployed), 'test')
+  assert.equal(razorpayMode({ ...deployed, RAZORPAY_MOCK: '1', RAZORPAY_KEY_ID: 'rzp_live_abc' }), 'live')
+})
+
 test('the API address is Razorpay, or our own fake one in mock mode', () => {
   assert.equal(razorpayApiBase({ ...DUMMY }), 'https://api.razorpay.com/v1')
   assert.equal(razorpayApiBase({ ...DUMMY, RAZORPAY_MOCK: '1', APP_URL: 'http://localhost:3100/' }), 'http://localhost:3100/api/dev/razorpay/v1')

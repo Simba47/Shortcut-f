@@ -15,7 +15,10 @@ type Env = Record<string, string | undefined>
  * How Razorpay is reached, decided by the keys alone so swapping them is the whole change:
  *   off   no keys: nothing is sold
  *   mock  RAZORPAY_MOCK=1 with a test key, never in production: our own fake Razorpay (api/dev/razorpay)
- *         answers, so the whole flow runs with dummy keys and no account
+ *         answers, so the whole flow runs with dummy keys and no account. A deployed site (always
+ *         production) mocks only with RAZORPAY_MOCK_ON_DEPLOYED_SITE=1 as well: anyone signed in can
+ *         then buy a plan for nothing, so it is for a site with no real customers (own-model, the
+ *         user's call 2026-11-11, "on until I say off")
  *   test  a real Razorpay test key (rzp_test_...): Razorpay's test mode, test cards and UPI
  *   live  a live key (rzp_live_...): real money
  */
@@ -23,7 +26,8 @@ export type RazorpayMode = 'off' | 'mock' | 'test' | 'live'
 export function razorpayMode(env: Env = process.env): RazorpayMode {
   const id = env.RAZORPAY_KEY_ID, secret = env.RAZORPAY_KEY_SECRET
   if (!id || !secret) return 'off'
-  if (id.startsWith('rzp_test_') && env.RAZORPAY_MOCK === '1' && env.NODE_ENV !== 'production') return 'mock'
+  const mockAllowed = env.NODE_ENV !== 'production' || env.RAZORPAY_MOCK_ON_DEPLOYED_SITE === '1'
+  if (id.startsWith('rzp_test_') && env.RAZORPAY_MOCK === '1' && mockAllowed) return 'mock'
   return id.startsWith('rzp_live_') ? 'live' : 'test'
 }
 
