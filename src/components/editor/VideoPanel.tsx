@@ -301,7 +301,7 @@ function EdgeField({ label, value, disabled, onNudge, onPlayhead }: { label: str
  * A small timeline: a bar `total` ms long with the part [from, to) bright. Drag the part to move
  * it, its ends to change one side. Changes are sent live while dragging (rounded to 0.1 s).
  */
-function RangeTrack({ label, total, from, to, now, minLen, disabled, thumbs, color = VIDEO_COLOR, onChange, onDone }: {
+export function RangeTrack({ label, total, from, to, now, minLen, disabled, thumbs, color = VIDEO_COLOR, onChange, onDone }: {
   label: string
   total: number
   from: number

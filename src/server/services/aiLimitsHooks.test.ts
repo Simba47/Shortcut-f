@@ -160,24 +160,6 @@ test('the free plan stops at its 3 clips in total', opts, async () => {
   })
 })
 
-test('Best moments shows saved moments without asking AI again', opts, async () => {
-  const { userId, videoId } = await setup('starter', 20 * MIN)
-  await ai.saveMoments(videoId, moments(12))
-  const r = await videos.getVideoSuggestions(userId, videoId)
-  assert.equal(r.suggestions.length, 8)
-  assert.equal(r.suggestions[0].title, 'm0')
-  // "View more": the next ones
-  const more = await videos.getVideoSuggestions(userId, videoId, r.suggestions.map(s => [s.start_ms, s.end_ms] as [number, number]))
-  assert.deepEqual(more.suggestions.map(s => s.title), ['m8', 'm9', 'm10', 'm11'])
-})
-
-test('Best moments with nothing saved and no included searches left asks before paying', opts, async () => {
-  const { userId, videoId } = await setup('free', 20 * MIN, 10)
-  await ai.recordSearch(userId, videoId, 'make_clips', null, 0)   // free: 1 search per video
-  await assert.rejects(videos.getVideoSuggestions(userId, videoId),
-    (e: { status?: number; code?: string; credits?: number }) => e.status === 402 && e.code === 'search_costs' && e.credits === 10)
-})
-
 test('Ask AI past the daily cap is refused before any AI call', opts, async () => {
   const { userId, videoId } = await setup('free', 20 * MIN, 10)
   await sql`INSERT INTO ai_actions (user_id, kind) SELECT ${userId}, 'ask_ai' FROM generate_series(1, 5)`

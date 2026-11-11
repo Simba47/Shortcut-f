@@ -1,6 +1,6 @@
 'use client'
 
-import { TEMPLATE_FONTS, templateFontFamily, templateOf, isLatinText } from '@/modules/captions/templates'
+import { TEMPLATE_FONTS, templateFontFamily, templateOf, isLatinText, PRESET_ANIMATIONS } from '@/modules/captions/templates'
 import { drawCreatorCaptions, CREATOR_DEFAULT_Y } from '@/modules/captions/creator'
 import { personMask } from '@/modules/captions/personMask'
 import { useCaptionStore } from '@/modules/captions/store'
@@ -16,16 +16,19 @@ import type { TextCase } from './CaptionStyler'
 import { applyCase, loadVideoFonts } from './CaptionStyler'
 import { captionCaseOf } from '@/modules/captions/store'
 import { normalizedSlotAspect, fitToAspect } from '@/modules/editor/utils'
+import { framePicture } from '@/modules/editor/framePicture'
+import { draggedView, zoomedView, wholeView, resizedBox, type BoxEdge } from '@/modules/editor/frameView'
 import { backgroundPixels, frameBackgroundOf, type FrameBackground } from '@/lib/shared/brandCard'
-import { isFrameLayout, frameSlotLabels, frameLanesFor, frameBandShown, frameOf, itemAt, captionBandAt, cornerGeometry, MIN_ROW_H, mainRect, boxRect, MIN_BOX as MIN_MAIN_BOX, frameAreas, frameBase, areaRadius, frameSlotSize, isTextLane, frameRows, validRowOrder, slotOffers, BLUR_SOURCE_SLOT, FRAME_TEMPLATES, barAt, barFlipped, MIN_MOVABLE_W } from '@/modules/editor/frames'
+import { frameHeldAt, isMediaFrame, mediaFrameItemAt, isFrameLayout, frameSlotLabels, frameLanesFor, frameBandShown, frameOf, itemAt, captionBandAt, cornerGeometry, MIN_ROW_H, CAPTION_CLOSE_H, mainRect, boxRect, MIN_BOX as MIN_MAIN_BOX, frameAreas, frameBase, areaRadius, frameSlotSize, isTextLane, frameRows, validRowOrder, slotOffers, BLUR_SOURCE_SLOT, FRAME_TEMPLATES, barAt, barFlipped, MIN_MOVABLE_W, itemSourceAt } from '@/modules/editor/frames'
 import type { FrameMediaPool } from '@/modules/editor/frameMedia'
 import { useLiveTimeMs, liveTime, usePlayerStore, LIVE_REDRAW_MS } from '@/modules/player/store'
 import { addedVideoBox, isGapPart } from '@/modules/editor/visibility'
 import { trackPresentedFrame } from '@/modules/player/presentedFrame'
 import { drawWatermark } from './watermark'
-import { isBrandFont, type ProgressBar } from '@/lib/shared/brandKit'
+import { isBrandFont } from '@/lib/shared/brandKit'
 import { VIDEO_FONTS } from '@/lib/shared/videoFonts'
 import { ensureBrandFont } from './brandFonts'
+import { CaptionScan } from './CaptionScan'
 
 const BOX_COLORS = ['#22c55e', '#3b82f6', '#f59e0b']
 /** The layout's name on its frames' tag (user, 2026-10-31: the corners in the layout's colour, as on the timeline, so it's plain which format it is) */
@@ -64,6 +67,8 @@ interface VideoPreviewProps {
    * the main video (useBrollSources). While one shows, this view shows it, with its crop box on it.
    */
   overlaySource?: (seg: SegmentLocal | null) => HTMLVideoElement | null
+  /** The frame media players: a frame made on media (frameOnMedia.ts) shows that media here */
+  frameMedia?: FrameMediaPool | null
   /** The clip's own video (a part showing another video is a video on top) */
   mainVideoId?: string | null
   getPositionAt: (boxId: string, t_ms: number) => BoxPosition
@@ -75,12 +80,14 @@ interface VideoPreviewProps {
   onMark?: (x: number, y: number) => void
   /** Subjects tool: where each tracked person's face is at the playhead (fractions of the frame) */
   subjectsAt?: (clipMs: number) => Array<{ id: string; label: string; color: string; box: BoxPosition }>
+  /** While the clip's captions are made: the line shown under the scan over the picture (CaptionScan); null: none */
+  captionScan?: string | null
 }
 
 export function VideoPreview({
   videoRef, videoUrl, currentTimeMs: timeProp, live = false, activeSegment: segmentProp, segmentAt,
-  overlaySource, mainVideoId, getPositionAt, activeBoxId, onSelectBox, onBoxChange,
-  marking = false, onMark, subjectsAt,
+  overlaySource, frameMedia, mainVideoId, getPositionAt, activeBoxId, onSelectBox, onBoxChange,
+  marking = false, onMark, subjectsAt, captionScan = null,
 }: VideoPreviewProps) {
   // (redrawn at most ~30 times a second: the picture itself is drawn every frame, from the live time)
   const liveMs = useLiveTimeMs(live, LIVE_REDRAW_MS)
@@ -97,25 +104,36 @@ export function VideoPreview({
 
   // ── A video on top playing here: this view shows it (and its crop box is framed on it) ──
   // (a hidden one isn't here: shownSegment puts the main video in its place)
+  // (or a frame made on media: the main video isn't in it, its media is shown the same way)
   const overlayBox = activeSegment && overlaySource ? addedVideoBox(activeSegment, mainVideoId) : null
-  const showsOverlay = !!overlayBox
+  const mediaFrame = isMediaFrame(activeSegment)
+  const frameItem = mediaFrame && activeSegment ? mediaFrameItemAt(activeSegment, currentTimeMs) : null
+  const showsOverlay = !!overlayBox || !!frameItem
   const [overlayAR, setOverlayAR] = useState<number | null>(null)
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
   const overlaySegRef = useRef(activeSegment)
   overlaySegRef.current = activeSegment
   const overlaySourceRef = useRef(overlaySource)
   overlaySourceRef.current = overlaySource
+  const frameItemRef = useRef(frameItem)
+  frameItemRef.current = frameItem
+  const frameMediaRef = useRef(frameMedia)
+  frameMediaRef.current = frameMedia
   useEffect(() => {
     if (!showsOverlay) return
     let raf = 0
     // Every frame: the overlay video's picture (the same element the preview draws, kept in step)
     const draw = () => {
-      const el = overlaySourceRef.current?.(overlaySegRef.current)
+      const it = frameItemRef.current
+      const el = !it ? overlaySourceRef.current?.(overlaySegRef.current)
+        : it.kind === 'photo' ? (it.image_url ? frameMediaRef.current?.image(it.image_url) : null) : frameMediaRef.current?.video(it)
       const c = overlayCanvasRef.current
-      if (el && c && el.readyState >= 2 && el.videoWidth && el.videoHeight) {
-        const ar = el.videoWidth / el.videoHeight
+      const photo = el instanceof HTMLImageElement
+      const ew = !el ? 0 : photo ? el.naturalWidth : el.videoWidth, eh = !el ? 0 : photo ? el.naturalHeight : el.videoHeight
+      if (el && c && (photo ? el.complete : el.readyState >= 2) && ew && eh) {
+        const ar = ew / eh
         setOverlayAR(prev => (prev && Math.abs(prev - ar) < 0.001 ? prev : ar))
-        const w = Math.min(1280, el.videoWidth), h = Math.round(w / ar)
+        const w = Math.min(1280, ew), h = Math.round(w / ar)
         if (c.width !== w || c.height !== h) { c.width = w; c.height = h }
         c.getContext('2d')?.drawImage(el, 0, 0, w, h)
       }
@@ -125,7 +143,7 @@ export function VideoPreview({
     return () => cancelAnimationFrame(raf)
   }, [showsOverlay])
   // A gap left by a deleted part, with nothing on top: nothing to show or frame here (black)
-  const gapHere = !!activeSegment && !showsOverlay && isGapPart(activeSegment, mainVideoId)
+  const gapHere = !!activeSegment && !showsOverlay && (isGapPart(activeSegment, mainVideoId) || mediaFrame)
   // The shape of what this view shows: the overlay video's while it shows, else the main video's
   const videoAR = showsOverlay ? overlayAR ?? mainAR : mainAR
 
@@ -164,7 +182,7 @@ export function VideoPreview({
 
         {/* Crop boxes — each is locked to the shape of its slot in the output, so what's
             inside the box is exactly what gets exported */}
-        {activeSegment && !gapHere && (() => {
+        {activeSegment && !gapHere && !mediaFrame && (() => {
           const layout = activeSegment.layout
           const aspect = normalizedSlotAspect(layout, videoAR ?? undefined, frameBandShown(activeSegment))
           const frame = isFrameLayout(layout)
@@ -242,6 +260,9 @@ export function VideoPreview({
           <span className="absolute left-1/2 -translate-x-1/2 top-2 px-2.5 py-1 rounded-md text-[11px] font-semibold pointer-events-none"
             style={{ zIndex: 30, background: 'rgba(0,0,0,0.75)', color: '#fbbf24' }}>A video on top is showing here — move to the main video to mark</span>
         )}
+
+        {/* Captions being made: a scan goes over the picture (clicks go through it) */}
+        <CaptionScan label={captionScan} />
       </div>
     </div>
   )
@@ -282,14 +303,22 @@ function coverSource(
   src: CanvasImageSource, sw: number, sh: number,
   dx: number, dy: number, dw: number, dh: number,
   zoom = 1, panX = 0,
+  /** The part picked (FrameItem.pan: shares of the room to spare each way); render.py _scale_cover_at the same */
+  pan?: { x: number; y: number } | null,
 ) {
   if (!sw || !sh) return
   const scale = Math.max(dw / sw, dh / sh) * zoom
   const w = dw / scale, h = dh / scale
-  const spareX = sw - w
-  const sx = Math.max(0, Math.min(spareX, spareX / 2 + panX * spareX / 2))
-  const sy = (sh - h) / 2
+  const spareX = sw - w, spareY = sh - h
+  const sx = pan ? spareX * Math.max(0, Math.min(1, pan.x)) : Math.max(0, Math.min(spareX, spareX / 2 + panX * spareX / 2))
+  const sy = pan ? spareY * Math.max(0, Math.min(1, pan.y)) : spareY / 2
   ctx.drawImage(src, sx, sy, w, h, dx, dy, dw, dh)
+}
+
+type DrawIn = (dx: number, dy: number, dw: number, dh: number) => void
+/** `draw` at 55% brightness when `on` (render.py _dim_filter) */
+function dimWhen(ctx: CanvasRenderingContext2D, on: boolean, draw: DrawIn): DrawIn {
+  return on ? (dx, dy, dw, dh) => { ctx.save(); ctx.filter = 'brightness(0.55)'; draw(dx, dy, dw, dh); ctx.restore() } : draw
 }
 
 /** Zoom and pan of a photo slot at progress p (0–1) through its format */
@@ -372,12 +401,26 @@ function clipArea(ctx: CanvasRenderingContext2D, a: AreaPx) {
  * A text item: its background filling its area ('none': see-through), its text centred on its
  * spot (turned, when rotated). A ticker's one line scrolls in from the right, over and over.
  */
-function paintFrameText(ctx: CanvasRenderingContext2D, it: FrameItem, fallbackBg: string, a: AreaPx, ticker = false, elapsedMs = 0) {
+function paintFrameText(ctx: CanvasRenderingContext2D, it: FrameItem, fallbackBg: string, a: AreaPx, ticker = false, elapsedMs = 0, later?: Array<() => void>) {
   const W = ctx.canvas.width
   ctx.save()
   clipArea(ctx, a)
   const bg = it.bg || fallbackBg
   if (bg && bg !== 'none') { ctx.fillStyle = bg; ctx.fillRect(a.x, a.y, a.w, a.h) }
+  // A ticker runs inside its band. Any other frame text can be dragged anywhere in the frame (user,
+  // 2026-11-06): its words go on top of everything (`later`), not cut at its area's edge — its
+  // area's colour stays where the area is
+  if (!ticker && later) {
+    ctx.restore()
+    later.push(() => { ctx.save(); paintFrameWords(ctx, it, a, false, elapsedMs); ctx.restore() })
+    return
+  }
+  paintFrameWords(ctx, it, a, ticker, elapsedMs)
+  ctx.restore()
+}
+
+function paintFrameWords(ctx: CanvasRenderingContext2D, it: FrameItem, a: AreaPx, ticker: boolean, elapsedMs: number) {
+  const W = ctx.canvas.width
   const lines = it.id === frameTextEditing ? [] : frameTextLines(it, a.w / W, ticker)
   if (lines.length) {
     const size = Math.round(((it.size ?? 64) / 1080) * W)
@@ -399,7 +442,6 @@ function paintFrameText(ctx: CanvasRenderingContext2D, it: FrameItem, fallbackBg
       lines.forEach((ln, i) => ctx.fillText(ln, 0, (i - (lines.length - 1) / 2) * lh))
     }
   }
-  ctx.restore()
 }
 
 /**
@@ -450,7 +492,6 @@ function FrameTextBox({ row, item, selected, editing, onSelect, onChange, onDele
   const lines = frameTextLines(item, row.w)
   // The box's width as a share of the frame; its place (x, y) is a share of its area
   const boxW = item.w ?? FRAME_TEXT_W * row.w
-  const bw = boxW / row.w
   // The text's height, as a share of the frame's (1080×1920); the box is at least that tall (taller
   // when its top or bottom was dragged: the text stays in its middle)
   const textH = (Math.max(1, lines.length) * size * FRAME_TEXT_LINE) / 1920
@@ -462,10 +503,17 @@ function FrameTextBox({ row, item, selected, editing, onSelect, onChange, onDele
   const face = frameTextFont(item.text ?? '', item.font)
   const fontFamily = `${emojiFamily()}, "${face.family}", sans-serif`
   const r3 = (v: number) => Math.round(v * 1000) / 1000
-  // The whole box stays inside its area
-  const clampX = (v: number) => bw >= 1 ? 0.5 : Math.max(bw / 2, Math.min(1 - bw / 2, v))
-  const halfH = boxH / 2 / row.h
-  const clampY = (v: number) => halfH >= 0.5 ? 0.5 : Math.max(halfH, Math.min(1 - halfH, v))
+  // The whole box stays inside the frame — anywhere in it, over the videos too (user, 2026-11-06:
+  // it used to be kept inside its own area). Its place is still a share of its area (below 0 or
+  // over 1 when it's moved out of it), so texts placed before stay where they are
+  const clampX = (v: number) => {
+    const c = boxW >= 1 ? 0.5 : Math.max(boxW / 2, Math.min(1 - boxW / 2, row.x + row.w * v))
+    return (c - row.x) / row.w
+  }
+  const clampY = (v: number) => {
+    const c = boxH >= 1 ? 0.5 : Math.max(boxH / 2, Math.min(1 - boxH / 2, row.y + row.h * v))
+    return (c - row.y) / row.h
+  }
 
   // Typing on the preview: the cursor goes in with the words selected; Enter makes a new line
   useEffect(() => {
@@ -491,17 +539,19 @@ function FrameTextBox({ row, item, selected, editing, onSelect, onChange, onDele
     if (editing) return
     const x0 = clampX(x), y0 = clampY(y)
     drag(e, (dx, dy) => {
-      // Centre guides: its area's middle, each way
-      const [nx, onV] = snapTo(clampX(x0 + dx / row.w), 0.5, GUIDE_SNAP / row.w)
-      const [ny, onH] = snapTo(clampY(y0 + dy / row.h), 0.5, GUIDE_SNAP / row.h)
-      setGuides(onV || onH ? { ...(onV ? { v: row.x + row.w / 2 } : {}), ...(onH ? { h: row.y + row.h / 2 } : {}) } : null)
-      onChange({ x: r3(nx), y: r3(ny) })
+      // Centre guides: the frame's middle left to right; top to bottom its area's middle or the frame's
+      const fx = row.x + row.w * clampX(x0 + dx / row.w), fy = row.y + row.h * clampY(y0 + dy / row.h)
+      const [gx, onV] = snapTo(fx, 0.5)
+      let [gy, onH] = snapTo(fy, row.y + row.h / 2)
+      if (!onH) [gy, onH] = snapTo(fy, 0.5)
+      setGuides(onV || onH ? { ...(onV ? { v: 0.5 } : {}), ...(onH ? { h: gy } : {}) } : null)
+      onChange({ x: r3((gx - row.x) / row.w), y: r3((gy - row.y) / row.h) })
     })
   }
   /** Drag a side: the box's width (the text wraps inside it). The other side stays where it is. */
   function startWidth(e: React.MouseEvent, side: 'left' | 'right') {
-    // In frame shares; the box stays inside its area
-    const lo = row.x, hi = row.x + row.w
+    // In frame shares; the box stays inside the frame
+    const lo = 0, hi = 1
     const left0 = Math.max(lo, cx - boxW / 2), right0 = Math.min(hi, cx + boxW / 2)
     drag(e, dx => {
       const left = side === 'left' ? Math.max(lo, Math.min(right0 - MIN_TEXT_W, left0 + dx)) : left0
@@ -511,8 +561,8 @@ function FrameTextBox({ row, item, selected, editing, onSelect, onChange, onDele
   }
   /** Drag the top or bottom: the box's height (the text stays its size, in the middle of the box). The other side stays where it is. */
   function startHeight(e: React.MouseEvent, side: 'top' | 'bottom') {
-    // In frame shares; the box stays inside its area and never gets shorter than its text
-    const lo = row.y, hi = row.y + row.h
+    // In frame shares; the box stays inside the frame and never gets shorter than its text
+    const lo = 0, hi = 1
     const top0 = Math.max(lo, cy - boxH / 2), bottom0 = Math.min(hi, cy + boxH / 2)
     const least = Math.max(textH, MIN_TEXT_H / 2)
     drag(e, (_dx, dy) => {
@@ -552,6 +602,8 @@ function FrameTextBox({ row, item, selected, editing, onSelect, onChange, onDele
         background: editing ? 'rgba(0,0,0,0.25)' : selected ? 'rgba(255,255,255,0.08)' : 'transparent',
         boxShadow: selected ? '0 0 0 2.5px rgba(255,255,255,0.22)' : 'none',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
+        // (over the videos' and photos' boxes, the bars and the face circle: it can be moved onto them)
+        zIndex: 27,
       }}>
       {editing ? (
         <textarea
@@ -721,6 +773,8 @@ function paintFrame(
       ctx.restore()
     }
   }
+  // Frame texts' words, drawn last: on top of every area (they can be dragged anywhere)
+  const words: Array<() => void> = []
   for (const area of frameAreas(layout, frameBandShown(seg), seg.frame)) {
     const a = px(area)
     if (area.kind === 'caption') {
@@ -738,7 +792,7 @@ function paintFrame(
       const bg = area.bg ?? bandBg
       const elapsed = it ? tMs - Math.max(it.start_ms, seg.start_ms) : 0
       // Captions on the band are drawn with the other captions, positioned here
-      if (it?.kind === 'text' && !it.captions) paintFrameText(ctx, it, bg, a, !!area.ticker, elapsed)
+      if (it?.kind === 'text' && !it.captions) paintFrameText(ctx, it, bg, a, !!area.ticker, elapsed, words)
       else if (bg !== 'none') { ctx.save(); clipArea(ctx, a); ctx.fillStyle = bg; ctx.fillRect(a.x, a.y, a.w, a.h); ctx.restore() }
       continue
     }
@@ -755,33 +809,43 @@ function paintFrame(
     if (fill !== 'none' && ring !== 'none') { ctx.save(); clipArea(ctx, a); ctx.fillStyle = fill; ctx.fillRect(a.x, a.y, a.w, a.h); ctx.restore() }
     if (main.has(area.slot) && !frame.main_hidden?.[String(area.slot)] && vW && vH && !coveredHere) {
       const box = seg.crop_boxes.find(b => b.slot_index === area.slot)
+      const dimMain = !!frame.freeze?.dim && frameHeldAt(seg, tMs, `main:${area.slot}`)
       // Shown whole: the video isn't cropped here — unless the slot crops the main video to its own
       // view (mainCrop: Screen + face cam's Screen, with Same video)
       if (contain && !(area.kind === 'slot' && area.mainCrop)) {
-        inSlot(ctx, frame.main_corners?.[String(area.slot)], a, (dx, dy, dw, dh) => containSource(ctx, video, vW, vH, dx, dy, dw, dh), mainRect(frame, area.slot), 'none', { w: vW, h: vH })
+        inSlot(ctx, frame.main_corners?.[String(area.slot)], a, dimWhen(ctx, dimMain, (dx, dy, dw, dh) => containSource(ctx, video, vW, vH, dx, dy, dw, dh)), mainRect(frame, area.slot), 'none', { w: vW, h: vH })
       } else if (box) {
         const p = getPositionAt(box.id, tMs)
         inSlot(ctx, frame.main_corners?.[String(area.slot)], a,
-          (dx, dy, dw, dh) => coverCrop(ctx, video, p.x * vW, p.y * vH, p.w * vW, p.h * vH, dx, dy, dw, dh),
+          dimWhen(ctx, dimMain, (dx, dy, dw, dh) => coverCrop(ctx, video, p.x * vW, p.y * vH, p.w * vW, p.h * vH, dx, dy, dw, dh)),
           mainRect(frame, area.slot), ring)
       }
     }
     if (!it) continue
-    if (it.kind === 'text') { paintFrameText(ctx, it, '#000000', a); continue }
-    const put = (src: CanvasImageSource, sw: number, sh: number, zoom = 1, panX = 0) => (dx: number, dy: number, dw: number, dh: number) =>
-      contain ? containSource(ctx, src, sw, sh, dx, dy, dw, dh) : coverSource(ctx, src, sw, sh, dx, dy, dw, dh, zoom, panX)
+    if (it.kind === 'text') { paintFrameText(ctx, it, '#000000', a, false, 0, words); continue }
+    const put = (src: CanvasImageSource, sw: number, sh: number, zoom = 1, panX = 0, pan?: FrameItem['pan']) => (dx: number, dy: number, dw: number, dh: number) =>
+      contain ? containSource(ctx, src, sw, sh, dx, dy, dw, dh) : coverSource(ctx, src, sw, sh, dx, dy, dw, dh, zoom, panX, pan)
     if (it.kind === 'photo') {
       const img = it.image_url ? pool?.image(it.image_url) : null
       if (img && img.complete && img.naturalWidth) {
         const from = Math.max(it.start_ms, seg.start_ms), to = Math.min(it.end_ms, seg.end_ms)
         const m = photoMotion(it.motion, (tMs - from) / Math.max(1, to - from))
-        inSlot(ctx, it.corners, a, put(img, img.naturalWidth, img.naturalHeight, m.zoom, m.panX), boxRect(it.rect), contain ? fill : ring, contain ? { w: img.naturalWidth, h: img.naturalHeight } : true)
+        // The part of it picked (dragged / zoomed in the preview), unless a motion moves it
+        const pz = (!it.motion || it.motion === 'none') && it.pan ? it.pan : null
+        inSlot(ctx, it.corners, a, put(img, img.naturalWidth, img.naturalHeight, pz ? Math.max(1, pz.zoom ?? 1) : m.zoom, m.panX, pz), boxRect(it.rect), contain ? fill : ring, contain ? { w: img.naturalWidth, h: img.naturalHeight } : true)
       }
       continue
     }
     const v = pool?.video(it)
-    if (v && v.readyState >= 2) inSlot(ctx, it.corners, a, put(v, v.videoWidth, v.videoHeight), boxRect(it.rect), contain ? fill : ring, contain ? { w: v.videoWidth, h: v.videoHeight } : true)
+    if (v && v.readyState >= 2) {
+      // (the part of it picked: dragged / zoomed in the preview, as a photo)
+      const draw = put(v, v.videoWidth, v.videoHeight, it.pan ? Math.max(1, it.pan.zoom ?? 1) : 1, 0, it.pan)
+      // Frozen (or in a freeze stretch) and dimmed: the picture at 55% brightness (render.py _dim_filter)
+      const dimmed = dimWhen(ctx, (!!it.dim && itemSourceAt(it, tMs).held) || (!!frame.freeze?.dim && frameHeldAt(seg, tMs, it.id)), draw)
+      inSlot(ctx, it.corners, a, dimmed, boxRect(it.rect), contain ? fill : ring, contain ? { w: v.videoWidth, h: v.videoHeight } : true)
+    }
   }
+  for (const w of words) w()
 }
 
 /** A small canvas for Pixelate, kept between frames (only resized) */
@@ -1256,7 +1320,8 @@ function findCaptionChunk(chunks: FlatWord[][], tMs: number) {
 //   glow      — words glow in highlight_color; the spoken word bright, the others dimmed
 // Emphasised words (style.emphasis, keyed by the word's start_ms) are highlight_color and 15% larger.
 
-export const PRESET_ANIMATIONS = ['pop', 'highlight', 'bounce', 'word', 'hormozi', 'box', 'glow'] as const
+// (the list: modules/captions/templates.ts, so the Captions panel reads it without this file)
+export { PRESET_ANIMATIONS }
 const isPreset = (a?: string | null) => (PRESET_ANIMATIONS as readonly string[]).includes(a ?? '')
 const POP_MS = 150
 const BOUNCE_MS = 180
@@ -1303,6 +1368,52 @@ function exportFont(id?: string | null) {
       .catch(() => loadedExportFonts.delete(f.family))
   }
   return f
+}
+
+/** What a family's full height is, in em, once its file is in (libass sizes a caption so its full height is the size) */
+const familyEms = new Map<string, number>()
+function familyEm(family: string): number {
+  const known = familyEms.get(family)
+  if (known) return known
+  const ctx = measurer()
+  if (!ctx || !document.fonts.check(`700 20px "${family}"`)) return 0.75
+  ctx.save()
+  ctx.font = `700 100px "${family}"`
+  const m = ctx.measureText('Hg')
+  ctx.restore()
+  const tall = m.fontBoundingBoxAscent + m.fontBoundingBoxDescent
+  if (!(tall > 0)) return 0.75
+  familyEms.set(family, 100 / tall)
+  return 100 / tall
+}
+
+/**
+ * A caption's font as the export draws it (render.py _ass_font_name): a bundled one's file, else an editor
+ * font or a brand kit's own by its family. (Roboto stood in for those here while the export drew them, so
+ * picking a font changed nothing on the preview — user, 2026-11-10.)
+ */
+function captionFont(id?: string | null): { family: string; em: number } {
+  if (!id || EXPORT_FONTS[id] || id === 'sans-serif') return exportFont(id)
+  if (isBrandFont(id)) { ensureBrandFont(id); return { family: id, em: familyEm(id) } }
+  return VIDEO_FONTS.some(f => f.family === id) ? { family: id, em: familyEm(id) } : exportFont(id)
+}
+
+/**
+ * After a text's own font, for the letters it doesn't have: the Indian scripts' Noto fonts, then Roboto
+ * for the English letters those have none of — as the export picks them (text_style.py font_runs).
+ * Empty for a text with nothing to fall back for.
+ */
+function letterFallbacks(text: string, font?: string | null): string {
+  if (!SCRIPT_FALLBACKS.includes(font ?? '') && !FRAME_SCRIPTS.some(([lo, hi]) => [...text].some(c => c >= lo && c <= hi))) return ''
+  return [...SCRIPT_FALLBACKS, 'roboto'].map(id => `"${exportFont(id).family}", `).join('')
+}
+
+/** A text's font list for the canvas: `bundled`, its export font when it has one */
+function textFamily(o: Pick<TextOverlayType, 'text' | 'font'>, bundled: { family: string } | null): string {
+  const more = letterFallbacks(o.text ?? '', o.font)
+  if (bundled) return `"${bundled.family}", ${more}sans-serif`
+  if (!more) return o.font ?? 'sans-serif'
+  return `${o.font && o.font !== 'sans-serif' ? `${o.font}, ` : ''}${more}sans-serif`
 }
 
 /**
@@ -1382,7 +1493,7 @@ function drawPresetCaptions(
   // Indic fonts have no Latin letters, so Roman-letter captions use Roboto (as render.py), and
   // these are drawn bold (libass thickens them: the style asks for bold)
   const latin = style.language === 'roman' || isLatinText(chunk.map(w => w.word).join(' '))
-  const plain = exportFont(style.language === 'roman' ? 'roboto' : style.font)
+  const plain = captionFont(style.language === 'roman' ? 'roboto' : style.font)
   const baseFont: DrawFont = (tpl && latin ? templateFont(tpl.font) : null) ?? { family: plain.family, em: plain.em, weight: 700, italic: false }
   const liveFont = tpl?.liveFont && latin ? templateFont(tpl.liveFont) : null
   // The caption size as libass takes it: every font is sized so its full height is this
@@ -1503,7 +1614,7 @@ function drawPresetCaptions(
   ctx.restore()
 }
 
-function drawCaptions(
+export function drawCaptions(
   ctx: CanvasRenderingContext2D,
   chunks: FlatWord[][],
   tMs: number,
@@ -1513,14 +1624,17 @@ function drawCaptions(
   band?: { y: number; h: number } | null,
   /** Filled in with where the captions were drawn */
   out?: CaptionRectOut,
+  /** "Behind" finds the person in the picture (false: the Captions panel's preview, no picture —
+   *  the cut-out keeps one frame at a time, the video preview's) */
+  person = true,
 ) {
   // Moved left or right (position_x): drawn centred there, as the export does (render.py
   // _caption_x); in a frame's text band they stay in its middle
   const dx = band ? 0 : (Math.min(1, Math.max(0, style.position_x ?? 0.5)) - 0.5) * ctx.canvas.width
-  if (!dx) { drawCaptionsCentred(ctx, chunks, tMs, style, textCase, band, out); return }
+  if (!dx) { drawCaptionsCentred(ctx, chunks, tMs, style, textCase, band, out, person); return }
   ctx.save()
   ctx.translate(dx, 0)
-  try { drawCaptionsCentred(ctx, chunks, tMs, style, textCase, band, out) } finally { ctx.restore() }
+  try { drawCaptionsCentred(ctx, chunks, tMs, style, textCase, band, out, person) } finally { ctx.restore() }
   if (out?.rect) out.rect = { ...out.rect, x: out.rect.x + dx / ctx.canvas.width }
 }
 
@@ -1533,6 +1647,7 @@ function drawCaptionsCentred(
   textCase: TextCase,
   band?: { y: number; h: number } | null,
   out?: CaptionRectOut,
+  withPerson = true,
 ) {
   const W = ctx.canvas.width, H = ctx.canvas.height
   const chunk = findCaptionChunk(chunks, tMs)
@@ -1541,7 +1656,7 @@ function drawCaptionsCentred(
   // (any script: a line in Telugu, Hindi… in its Noto font, as the export does)
   const tpl = templateOf(style)
   if (tpl?.look) {
-    const person = tpl.look === 'behind' ? personMask(ctx.canvas, tMs) : null
+    const person = tpl.look === 'behind' && withPerson ? personMask(ctx.canvas, tMs) : null
     const rect = drawCreatorCaptions(ctx, chunk, chunks.indexOf(chunk), chunk[chunk.length - 1].end_ms, tMs, style, tpl, person)
     if (out) out.rect = rect
     return
@@ -1559,7 +1674,7 @@ function drawCaptionsCentred(
   // (in its own script with no font picked: Noto Sans Telugu, as the export's default. Roboto has no
   // Telugu or Hindi letters, so the browser drew them in a font of the PC's own, ~1.8× the export's
   // size — user, 2026-11-04; the export's Noto fonts follow any font for letters it doesn't have)
-  const font       = exportFont(style.language === 'roman' ? 'roboto' : (style.font ?? 'noto-sans-telugu'))
+  const font       = captionFont(style.language === 'roman' ? 'roboto' : (style.font ?? 'noto-sans-telugu'))
   const scriptFonts = style.language === 'roman' ? '' : SCRIPT_FALLBACKS.map(id => `"${exportFont(id).family}", `).join('')
   const fontSize   = Math.round((style.size ?? 52) * k * font.em)
   const lineHeight = Math.round(fontSize * 1.4)
@@ -1683,7 +1798,7 @@ export function textOverlayLines(o: Pick<TextOverlayType, 'text' | 'uppercase' |
   if (!ctx) return full.split('\n')
   const f = exportFont(o.font)
   ctx.save()
-  ctx.font = `400 ${(o.size ?? 72) * frameW / 1080}px ${emojiFamily()}, "${f.family}", sans-serif`
+  ctx.font = `400 ${(o.size ?? 72) * frameW / 1080}px ${emojiFamily()}, "${f.family}", ${letterFallbacks(full, o.font)}sans-serif`
   if ('letterSpacing' in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = '0px'
   const lines = wrapTextLines(full, o.w * frameW, s => ctx.measureText(s).width)
   ctx.restore()
@@ -1702,7 +1817,7 @@ function drawStyledText(ctx: CanvasRenderingContext2D, o: TextOverlayType, elaps
   const fontSize = Math.max(8, Math.round((o.size ?? 72) * k))
   // A bundled font id (e.g. 'roboto') draws with the export's own file, as drawtext does
   const bundled = EXPORT_FONTS[o.font ?? ''] ? exportFont(o.font) : null
-  const fontFamily = `${emojiFamily()}, ${bundled ? `"${bundled.family}", sans-serif` : (o.font ?? 'sans-serif')}`
+  const fontFamily = `${emojiFamily()}, ${textFamily(o, bundled)}`
   const weight = o.weight ?? (bundled ? 400 : 700)
   const full = shownText(o)
 
@@ -1828,7 +1943,7 @@ function drawStyledText(ctx: CanvasRenderingContext2D, o: TextOverlayType, elaps
 function drawCenteredText(ctx: CanvasRenderingContext2D, o: TextOverlayType) {
   const W = ctx.canvas.width, H = ctx.canvas.height
   const font = EXPORT_FONTS[o.font ?? ''] ? exportFont(o.font) : null
-  const family = `${emojiFamily()}, ${font ? `"${font.family}", sans-serif` : (o.font ?? 'sans-serif')}`
+  const family = `${emojiFamily()}, ${textFamily(o, font)}`
   const weight = font ? 400 : 700                      // drawtext uses the font file as it is
   let px = (o.size ?? 48) * W / 1080
   ctx.save()
@@ -1911,6 +2026,8 @@ interface OutputCanvasProps {
   onCaptionPositionChange?: (y: number, x: number) => void
   /** The captions' corner handles dragged on the preview: their new size (as the Size slider) */
   onCaptionSizeChange?: (size: number) => void
+  /** The captions tapped in the preview (not dragged): their settings open (user, 2026-11-06) */
+  onCaptionTap?: () => void
   /**
    * The clip's transitions, where each join of sections has one. Given (the editor), a change of
    * section with none is a hard cut, as in the export — not the soft blend shown otherwise.
@@ -1918,8 +2035,6 @@ interface OutputCanvasProps {
   transitionCuts?: TransitionCut[]
   /** The Free plan's watermark: drawn last, over everything, where the export puts it (watermark.ts) */
   watermark?: boolean
-  /** The clip's progress bar (a brand kit's) and the clip's length it fills over; null = none */
-  progressBar?: (ProgressBar & { lengthMs: number }) | null
   /** Clip time → the main video's own time (ms), when parts of the clip were removed or videos put in (else clipStartMs + t) */
   timelineToVideo?: (t: number) => number
   /**
@@ -1935,7 +2050,7 @@ interface OutputCanvasProps {
   onFrameItemClick?: (id: string | null) => void
   activeFrameItemId?: string | null
   /** A frame text dragged, resized, turned or typed in on the preview */
-  onFrameItemChange?: (id: string, patch: Partial<Pick<FrameItem, 'x' | 'y' | 'size' | 'rect' | 'w' | 'rotation' | 'text'>>) => void
+  onFrameItemChange?: (id: string, patch: Partial<Pick<FrameItem, 'x' | 'y' | 'size' | 'rect' | 'pan' | 'w' | 'rotation' | 'text'>>) => void
   /** A frame text's delete button on the preview */
   onDeleteFrameItem?: (id: string) => void
   /** The line between two rows of a resizable frame dragged: the frame's new row heights (null = back to the template's) */
@@ -1951,6 +2066,8 @@ interface OutputCanvasProps {
   onFrameFaceChange?: (box: { x: number; y: number; w: number } | null) => void
   /** The main video's box in a slot resized or moved (shares of the slot; null = fill the slot again) */
   onFrameMainRectChange?: (slot: number, rect: { x: number; y: number; w: number; h: number } | null) => void
+  /** The main video's view in a frame slot, moved in the preview (its crop box; from the playhead on, as any view change) */
+  onFrameMainViewChange?: (slot: number, boxId: string, pos: BoxPosition) => void
 }
 
 export function OutputCanvas({
@@ -1959,7 +2076,7 @@ export function OutputCanvas({
   className, style, skipTransitionRef,
   words, captionStyle, captionParts, captionTextCase: textCaseProp, showCaptions = false, captionsOffAt,
   textOverlays = [], activeTextOverlayId, onTextOverlayChange, onSelectTextOverlay, onDeleteTextOverlay, editTextOverlayId, onEditTextDone,
-  onCaptionPositionChange, onCaptionSizeChange, transitionCuts, watermark, progressBar, timelineToVideo, clock, frameMedia, onFrameLaneClick, onFrameItemClick, activeFrameItemId, onFrameItemChange, onDeleteFrameItem, onFrameRowsChange, onFrameRowsSwap, onFrameBarChange, onFrameFaceChange, onFrameMainRectChange,
+  onCaptionPositionChange, onCaptionSizeChange, onCaptionTap, transitionCuts, watermark, timelineToVideo, clock, frameMedia, onFrameLaneClick, onFrameItemClick, activeFrameItemId, onFrameItemChange, onDeleteFrameItem, onFrameRowsChange, onFrameRowsSwap, onFrameBarChange, onFrameFaceChange, onFrameMainRectChange, onFrameMainViewChange,
 }: OutputCanvasProps) {
   // The fonts texts and frame texts are in, as soon as the picture shows (the export always has its
   // own): they used to load only with the Text, Captions or Brand kit panel, so a clip opened on
@@ -2008,8 +2125,6 @@ export function OutputCanvas({
   const transitionCutsRef = useRef(transitionCuts)
   const watermarkRef = useRef(!!watermark)
   watermarkRef.current = !!watermark
-  const progressBarRef = useRef(progressBar)
-  progressBarRef.current = progressBar
   const timelineToVideoRef = useRef(timelineToVideo)
   timelineToVideoRef.current = timelineToVideo
   const clockRef = useRef(clock)
@@ -2264,9 +2379,12 @@ export function OutputCanvas({
         // Paused: the editor's playhead itself — what the editor shows on top (the slots' buttons,
         // the bars, the boxes) is of that moment, and so is the format or frame just put there. The
         // player's own time isn't: a seek lands on the video frame just before the playhead, which
-        // at a section's edge is in the section before (its picture showed under the next one's buttons)
+        // at a section's edge is in the section before (its picture showed under the next one's buttons).
+        // The playhead being dragged: the frame on screen's own time again, so the framing and captions
+        // are always of the picture drawn, never of a moment it hasn't reached yet
         const videoMs = !video.paused && shownMs != null && Math.abs(shownMs - clockMs) < 300 ? shownMs : clockMs
-        const clipMsNow = video.paused && currentTimeMsRef.current != null
+        const dragged = usePlayerStore.getState().scrubbing && !clockRef.current
+        const clipMsNow = video.paused && !dragged && currentTimeMsRef.current != null
           ? Math.max(0, currentTimeMsRef.current)
           : Math.max(0, clockRef.current ? clockRef.current() : toTimeline ? toTimeline(videoMs) : videoMs - clipStartMsRef.current)
         const seg    = segmentAtRef.current
@@ -2303,7 +2421,8 @@ export function OutputCanvas({
           const liveMs = toTimeline ? clipStartMsRef.current + clipRelativeMs : videoMs
 
           // Keep frame slots' own videos in step with the main player, then draw
-          frameMediaRef.current?.sync(seg, clipRelativeMs, !video.paused, video)
+          // (paused, after drawing: moved first, a slot's video is seeking again before its new frame is drawn)
+          if (!video.paused) frameMediaRef.current?.sync(seg, clipRelativeMs, true, video)
           // A B-roll shot whose video is still seeking keeps the last frame (never flashes the main video)
           const other = sourceForRef.current?.(seg)
           // Inside a transition: the section before the join and the one after it, both drawn,
@@ -2440,7 +2559,7 @@ export function OutputCanvas({
             capOut.current.rect = null
             // (in parts: the part playing now, its own lines and look)
             const cap = captionsAt(captionLookupMs)
-            drawCaptions(ctx, cap.chunks, captionLookupMs, cap.style, captionCaseRef.current, captionBandAt(seg, clipRelativeMs), capOut.current)
+            drawCaptions(ctx, cap.chunks, captionLookupMs, cap.style, captionCaseRef.current, captionBandAt(seg, clipRelativeMs, cap.style.position_y == null), capOut.current)
             // The line on screen, for the Captions panel's key words (only when it changes)
             const onScreen = findCaptionChunk(cap.chunks, captionLookupMs)
             if (onScreen !== liveLineRef.current) {
@@ -2459,19 +2578,10 @@ export function OutputCanvas({
             drawTextOverlays(ctx, editingTextRef.current ? textOverlaysRef.current.filter(t => t.id !== editingTextRef.current) : textOverlaysRef.current, clipRelativeMs, video.paused)
           }
 
-          // The progress bar, filling from the left as the clip plays (as the export: render.py)
-          const pb = progressBarRef.current
-          if (pb && pb.lengthMs > 0) {
-            const h = Math.max(2, Math.round((pb.height * canvas.height) / 1920))
-            ctx.save()
-            ctx.globalAlpha = 1
-            ctx.fillStyle = pb.color
-            ctx.fillRect(0, pb.position === 'top' ? 0 : canvas.height - h, canvas.width * Math.min(1, Math.max(0, clipRelativeMs / pb.lengthMs)), h)
-            ctx.restore()
-          }
-
           // The Free plan's watermark, over everything (as the export does)
           if (watermarkRef.current) drawWatermark(ctx, canvas.width, canvas.height, clipRelativeMs)
+
+          if (video.paused) frameMediaRef.current?.sync(seg, clipRelativeMs, false, video)
         }
       }
 
@@ -2584,17 +2694,31 @@ export function OutputCanvas({
           // (not the movable circle: dragging it moves the circle itself — its view is set by its view box)
           .filter(r => typeof r.lane === 'number' && main.includes(r.lane) && r.lane !== FRAME_TEMPLATES[activeSegment.layout as FrameLayout].movable && !frame.main_hidden?.[String(r.lane)] && !itemAt(frame, r.lane, currentTimeMs, activeSegment)
             && frameSlotSize(activeSegment.layout as FrameLayout, true, r.lane, activeSegment.frame) !== null)
-          .map(r => (
-            <FrameMainBox key={`main-${r.lane}`} row={r} rect={mainRect(frame, r.lane as number)}
-              onChange={rect => onFrameMainRectChange(r.lane as number, rect)} />
-          ))
+          .map(r => {
+            const box = activeSegment.crop_boxes.find(b => b.slot_index === r.lane)
+            return (
+              <FrameMainBox key={`main-${r.lane}`} row={r} rect={mainRect(frame, r.lane as number)} selected={activeFrameItemId === `main:${r.lane}`}
+                onChange={rect => onFrameMainRectChange(r.lane as number, rect)}
+                view={box && onFrameMainViewChange ? {
+                  read: () => getPositionAtRef.current(box.id, liveTime.get()),
+                  videoAR: () => { const v = videoRef.current; return v && v.videoWidth && v.videoHeight ? v.videoWidth / v.videoHeight : null },
+                  onChange: pos => onFrameMainViewChange(r.lane as number, box.id, pos),
+                } : undefined} />
+            )
+          })
       })()}
       {/* Resizable frame: drag the line between two rows to make one bigger and the other smaller */}
       {/* The same box for a video or photo put in a slot (clicking it also selects it) */}
       {onFrameItemChange && itemRows.filter(r => (r.item.kind === 'video' || r.item.kind === 'photo') && !r.item.hidden).map(r => (
         <FrameMainBox key={`box-${r.item.id}`} row={r} rect={boxRect(r.item.rect)}
           selected={r.item.id === activeFrameItemId} onSelect={() => onFrameItemClick?.(r.item.id)}
-          onChange={rect => onFrameItemChange(r.item.id, { rect })} />
+          onChange={rect => onFrameItemChange(r.item.id, { rect })}
+          picture={activeSegment && ((r.item.kind === 'photo' && r.item.image_url && (!r.item.motion || r.item.motion === 'none')) || r.item.kind === 'video')
+            && !frameAreas(activeSegment.layout as FrameLayout, true, activeSegment.frame).some(a => a.kind === 'slot' && a.slot === r.lane && a.fit === 'contain')
+            ? {
+              url: r.item.image_url ?? undefined, pan: r.item.pan ?? null, onPan: pan => onFrameItemChange(r.item.id, { pan }),
+              size: r.item.kind === 'video' ? () => { const v = frameMedia?.video(r.item); return v?.videoWidth ? { w: v.videoWidth, h: v.videoHeight } : null } : undefined,
+            } : undefined} />
       ))}
       {onFrameRowsChange && activeSegment && isFrameLayout(activeSegment.layout)
         && <FrameRowHandles seg={activeSegment} onChange={onFrameRowsChange} onSwap={onFrameRowsSwap} />}
@@ -2638,9 +2762,12 @@ export function OutputCanvas({
           rect={capRect}
           position_y={captionStyle?.position_y ?? captionDefaultY(captionStyleNow ?? {})}
           position_x={captionStyle?.position_x ?? 0.5}
+          inBand={!!captionBandAt(activeSegment, currentTimeMs, false)}
+          inStrip={captionStyleNow?.position_y == null && !!captionBandAt(activeSegment, currentTimeMs)}
           size={captionStyleNow?.size ?? 52}
           onMove={onCaptionPositionChange}
           onSize={onCaptionSizeChange}
+          onTap={onCaptionTap}
         />
       )}
     </div>
@@ -2663,7 +2790,7 @@ function snapTo(centre: number, target: number, tol = GUIDE_SNAP): [number, bool
  * The main video's box inside its slot: drag it to move, a corner to resize (the picture is cut
  * from the source to the box's new shape). Double-click fills the slot again.
  */
-function FrameMainBox({ row, rect, onChange, selected, onSelect }: {
+export function FrameMainBox({ row, rect, onChange, selected, onSelect, picture, view }: {
   /** Its slot's area of the frame (shares of the frame) */
   row: { x: number; y: number; w: number; h: number }
   rect: { x: number; y: number; w: number; h: number } | null
@@ -2671,19 +2798,101 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect }: {
   /** A video / photo item: picked when pressed, outlined while it is */
   selected?: boolean
   onSelect?: () => void
+  /**
+   * A still photo in its box (user, 2026-11-05), or a video added to the slot (2026-11-09): drag it to
+   * pick which part shows, scroll to zoom in. `size`: a video's own size, read when it's dragged
+   */
+  picture?: { url?: string; pan: FrameItem['pan']; onPan: (pan: FrameItem['pan']) => void; size?: () => { w: number; h: number } | null }
+  /**
+   * The main video (user, 2026-11-09): the same in the preview as a photo, but on its view — so it
+   * goes in from the playhead on, like any view change, and the export needs nothing new
+   */
+  view?: { read: () => BoxPosition; videoAR: () => number | null; onChange: (pos: BoxPosition) => void }
 }) {
   const [active, setActive] = useState(false)
   const setGuides = useContext(GuideContext)
   const r = rect ?? { x: 0, y: 0, w: 1, h: 1 }
-  function start(e: React.PointerEvent, mode: 'move' | 'nw' | 'ne' | 'sw' | 'se') {
+  const full = r.w >= 0.999 && r.h >= 0.999
+  // The photo's own size: how far it reaches past its box
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
+  const pictureUrl = picture?.url
+  useEffect(() => {
+    if (!pictureUrl) return
+    const img = new Image()
+    img.onload = () => setNatural({ w: img.naturalWidth, h: img.naturalHeight })
+    img.src = pictureUrl
+  }, [pictureUrl])
+  const pan = { x: picture?.pan?.x ?? 0.5, y: picture?.pan?.y ?? 0.5, zoom: Math.max(1, picture?.pan?.zoom ?? 1) }
+  const panRef = useRef(pan)
+  panRef.current = pan
+  const boxRef = useRef<HTMLDivElement>(null)
+  // Scroll over a picked photo: zoom in or out (1–4×), around the part showing
+  const onPanRef = useRef(picture?.onPan)
+  onPanRef.current = picture?.onPan
+  const viewRef = useRef(view)
+  viewRef.current = view
+  const canZoom = (!!picture && !!selected) || !!view
+  useEffect(() => {
+    const el = boxRef.current
+    if (!el || !canZoom) return
+    const wheel = (e: WheelEvent) => {
+      e.preventDefault(); e.stopPropagation()
+      const v = viewRef.current
+      if (v) {
+        const b = el.getBoundingClientRect(), ar = v.videoAR()
+        if (!ar || !b.height) return
+        const a = b.width / b.height / ar
+        const cur = fitToAspect(v.read(), a)
+        const next = zoomedView(cur, Math.exp(-e.deltaY * 0.0015), framePicture(), a)
+        if (Math.abs(next.w - cur.w) > 1e-4) v.onChange(next)
+        return
+      }
+      const p = panRef.current
+      const zoom = Math.round(Math.max(1, Math.min(4, p.zoom * Math.exp(-e.deltaY * 0.0015))) * 1000) / 1000
+      if (zoom !== p.zoom) onPanRef.current?.({ x: p.x, y: p.y, zoom })
+    }
+    el.addEventListener('wheel', wheel, { passive: false })
+    return () => el.removeEventListener('wheel', wheel)
+  }, [canZoom])
+  // Dragged inside, the box moves what's in it (user, 2026-11-10: at any size); the box itself moves
+  // by its move icon. With nothing in it to move (shown whole, a photo with a motion): the box
+  const hasContent = !!picture || !!view
+  function start(e: React.PointerEvent, mode: 'move' | 'content' | BoxEdge) {
     if (e.button !== 0) return
     e.stopPropagation(); e.preventDefault()
     onSelect?.()
     const wrap = (e.currentTarget.closest('[data-frame-main]') as HTMLElement).parentElement!.getBoundingClientRect()
     const sw = wrap.width * row.w, sh = wrap.height * row.h          // the slot in px
     const x0 = e.clientX, y0 = e.clientY
+    // Moving the picture inside its box: how far (px) it reaches past the box each way
+    const own = picture?.size ? picture.size() : natural
+    const pic = mode === 'content' && own ? picture : undefined
+    const bw = sw * r.w, bh = sh * r.h
+    // Moving the main video inside its box: the view it starts from, as it's drawn in this box's shape
+    const ar = mode === 'content' ? view?.videoAR() : null
+    const v0 = view && ar && bh ? fitToAspect(view.read(), bw / bh / ar) : null
+    const k = own ? Math.max(bw / own.w, bh / own.h) * pan.zoom : 1
+    const overX = own ? own.w * k - bw : 0, overY = own ? own.h * k - bh : 0
+    const p0 = pan
+    let viewMoved = false
     setActive(true)
     const move = (ev: PointerEvent) => {
+      if (v0) {
+        // (a click isn't a drag: it mustn't add a view change)
+        if (!viewMoved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 3) return
+        viewMoved = true
+        view?.onChange(draggedView(v0, (ev.clientX - x0) / bw, (ev.clientY - y0) / bh, framePicture()))
+        return
+      }
+      if (pic) {
+        // (dragged right, the picture moves right: more of its left side shows)
+        const q = (v: number) => Math.round(Math.max(0, Math.min(1, v)) * 1000) / 1000
+        const x = overX > 1 ? q(p0.x - (ev.clientX - x0) / overX) : p0.x
+        const y = overY > 1 ? q(p0.y - (ev.clientY - y0) / overY) : p0.y
+        pic.onPan({ x, y, zoom: p0.zoom })
+        return
+      }
+      if (mode === 'content') return   // (the video's or photo's size isn't known yet)
       const dx = (ev.clientX - x0) / sw, dy = (ev.clientY - y0) / sh
       let { x, y, w, h } = r
       if (mode === 'move') {
@@ -2694,11 +2903,7 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect }: {
         if (onH) y = cy - h / 2
         setGuides(onV || onH ? { ...(onV ? { v: row.x + row.w / 2 } : {}), ...(onH ? { h: row.y + row.h / 2 } : {}) } : null)
       } else {
-        const right = r.x + r.w, bottom = r.y + r.h
-        if (mode === 'nw' || mode === 'sw') { x = Math.max(0, Math.min(right - MIN_MAIN_BOX, r.x + dx)); w = right - x }
-        else w = Math.max(MIN_MAIN_BOX, Math.min(1 - r.x, r.w + dx))
-        if (mode === 'nw' || mode === 'ne') { y = Math.max(0, Math.min(bottom - MIN_MAIN_BOX, r.y + dy)); h = bottom - y }
-        else h = Math.max(MIN_MAIN_BOX, Math.min(1 - r.y, r.h + dy))
+        ({ x, y, w, h } = resizedBox(r, mode, dx, dy, MIN_MAIN_BOX, ev.shiftKey))
       }
       const q = (v: number) => Math.round(v * 1000) / 1000
       onChange({ x: q(x), y: q(y), w: q(w), h: q(h) })
@@ -2707,29 +2912,69 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect }: {
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
   }
-  const corner = (mode: 'nw' | 'ne' | 'sw' | 'se') => (
-    <span key={mode} onPointerDown={e => start(e, mode)} aria-hidden="true"
-      className="absolute rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-      style={{
-        width: 12, height: 12, background: '#c8ff00', boxShadow: '0 0 0 2px rgba(0,0,0,0.7)', touchAction: 'none',
-        cursor: mode === 'nw' || mode === 'se' ? 'nwse-resize' : 'nesw-resize',
-        ...(mode[0] === 'n' ? { top: -6 } : { bottom: -6 }), ...(mode[1] === 'w' ? { left: -6 } : { right: -6 }),
-        ...(active ? { opacity: 1 } : {}),
-      }} />
-  )
+  /** Back to filling its slot, and the picture as it starts out */
+  function reset() {
+    onChange(null)
+    if (picture?.pan) picture.onPan(null)
+    // The main video: back to the most of its picture this slot can show (a change only if it isn't already)
+    const ar = view?.videoAR(), wrap = boxRef.current?.parentElement?.getBoundingClientRect()
+    if (view && ar && wrap && wrap.height * row.h) {
+      const a = (wrap.width * row.w) / (wrap.height * row.h) / ar
+      const cur = fitToAspect(view.read(), a), whole = wholeView(framePicture(), a)
+      if (Math.abs(cur.x - whole.x) + Math.abs(cur.y - whole.y) + Math.abs(cur.w - whole.w) > 0.002) view.onChange(whole)
+    }
+  }
+  // Its handles, on top of a frame's bars (zIndex: a bar is 25). The top and bottom ones stand off the
+  // middle, where a bar has its grip and swap button
+  const handle = (mode: BoxEdge) => {
+    const side = mode.length === 1, tall = mode === 'e' || mode === 'w'
+    return (
+      <span key={mode} onPointerDown={e => start(e, mode)} onClick={e => { if (onSelect) e.stopPropagation() }} aria-hidden="true"
+        className="absolute rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{
+          width: side ? (tall ? 7 : 26) : 12, height: side ? (tall ? 26 : 7) : 12, background: '#c8ff00', boxShadow: '0 0 0 2px rgba(0,0,0,0.7)', touchAction: 'none', zIndex: 26,
+          cursor: !side ? (mode === 'nw' || mode === 'se' ? 'nwse-resize' : 'nesw-resize') : tall ? 'ew-resize' : 'ns-resize',
+          ...(side
+            ? (tall ? { top: 'calc(50% - 13px)', [mode === 'w' ? 'left' : 'right']: -4 } : { left: 'calc(25% - 13px)', [mode === 'n' ? 'top' : 'bottom']: -4 })
+            : { [mode[0] === 'n' ? 'top' : 'bottom']: -6, [mode[1] === 'w' ? 'left' : 'right']: -6 }),
+          ...(active || selected ? { opacity: 1 } : {}),
+        }} />
+    )
+  }
   return (
-    <div data-frame-main className="group absolute"
-      title="Drag to move the video · drag a corner to resize · double-click to fill the area"
-      onPointerDown={e => start(e, 'move')}
-      onDoubleClick={e => { e.stopPropagation(); onChange(null) }}
+    // (the outer box has no layer of its own, so its handles can stand above a frame's bars while the box itself stays under them)
+    <div ref={boxRef} data-frame-main className="group absolute" style={{
+      left: `${(row.x + r.x * row.w) * 100}%`, top: `${(row.y + r.y * row.h) * 100}%`, width: `${r.w * row.w * 100}%`, height: `${r.h * row.h * 100}%`, touchAction: 'none',
+    }}>
+    <div className="absolute inset-0"
+      title={hasContent
+        ? `Drag to pick the part of the ${picture && !picture.size ? 'photo' : 'video'} that shows · scroll to zoom · drag an edge to resize`
+        : 'Drag to move · drag an edge to resize'}
+      onPointerDown={e => start(e, hasContent ? 'content' : 'move')}
+      onDoubleClick={e => e.stopPropagation()}
       style={{
-        left: `${(row.x + r.x * row.w) * 100}%`, top: `${(row.y + r.y * row.h) * 100}%`, width: `${r.w * row.w * 100}%`, height: `${r.h * row.h * 100}%`,
-        cursor: active ? 'grabbing' : 'move', touchAction: 'none', zIndex: 18,
+        cursor: active ? 'grabbing' : hasContent ? 'grab' : 'move', touchAction: 'none', zIndex: 18,
         boxShadow: active || selected ? 'inset 0 0 0 2px #c8ff00' : undefined,
       }}
       onClick={e => { if (onSelect) e.stopPropagation() }}>
       <span className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity" style={{ boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.8)' }} />
-      {(['nw', 'ne', 'sw', 'se'] as const).map(corner)}
+    </div>
+    {(['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'] as const).map(handle)}
+    {/* Moves the box itself; on the top border (just inside it at the slot's top, off a frame bar's grip and swap) */}
+    {!full && (
+      <span role="button" aria-label="Move the box" title="Drag to move the box · double-click to fill the area again"
+        onPointerDown={e => start(e, 'move')} onClick={e => { if (onSelect) e.stopPropagation() }}
+        onDoubleClick={e => { e.stopPropagation(); reset() }}
+        className="absolute flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{
+          left: 'calc(50% - 11px)', top: r.y <= 0.001 ? 5 : -11, width: 22, height: 22, background: '#c8ff00', color: '#000', boxShadow: '0 0 0 2px rgba(0,0,0,0.7)',
+          cursor: active ? 'grabbing' : 'move', touchAction: 'none', zIndex: 26, ...(active || selected ? { opacity: 1 } : {}),
+        }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M12 3v18M3 12h18M12 3L9 6M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" />
+        </svg>
+      </span>
+    )}
     </div>
   )
 }
@@ -2743,27 +2988,34 @@ function FrameMainBox({ row, rect, onChange, selected, onSelect }: {
  */
 function FrameRowHandles({ seg, onChange, onSwap }: { seg: SegmentLocal; onChange: (heights: number[] | null) => void; onSwap?: (order: number[]) => void }) {
   const layout = seg.layout as Parameters<typeof frameRows>[0]
-  const rows = frameRows(layout, true, seg.frame)
+  // (a closed caption strip too: its bar sits on the frame's edge, to pull it open again)
+  const rows = frameRows(layout, true, seg.frame, true)
   // The rows on screen, top to bottom, as template row numbers (row_h is kept per template row)
   const order = validRowOrder(layout, seg.frame) ?? rows.map((_, i) => i)
   /** Heights in screen order → per template row, as saved */
   const toTemplate = (hs: number[]) => { const out: number[] = []; order.forEach((t, k) => { out[t] = hs[k] }); return out }
   const [dragging, setDragging] = useState<number | null>(null)
+  /** Row i's new height `a` against row i + 1 (the pair's total stays): kept to their smallest — a
+   *  caption strip can close, dragged thinner than CAPTION_CLOSE_H (user, 2026-11-06: Title's bottom bar) */
+  function resize(hs: number[], i: number, a: number): number[] {
+    const pair = hs[i] + hs[i + 1]
+    const lo = (r: (typeof rows)[number]) => (r.kind === 'caption' ? 0 : MIN_ROW_H)
+    a = Math.max(lo(rows[i]), Math.min(pair - lo(rows[i + 1]), a))
+    if (rows[i].kind === 'caption' && a < CAPTION_CLOSE_H) a = 0
+    if (rows[i + 1].kind === 'caption' && pair - a < CAPTION_CLOSE_H) a = pair
+    const next = [...hs]
+    next[i] = Math.round(a * 1000) / 1000
+    next[i + 1] = Math.round((pair - a) * 1000) / 1000
+    return next
+  }
   function down(e: React.PointerEvent, i: number) {
     if (e.button !== 0) return
     e.stopPropagation(); e.preventDefault()
     const box = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect()
     const y0 = e.clientY
     const hs = rows.map(r => r.h)
-    const pair = hs[i] + hs[i + 1]
     setDragging(i)
-    const move = (ev: PointerEvent) => {
-      const a = Math.max(MIN_ROW_H, Math.min(pair - MIN_ROW_H, hs[i] + (ev.clientY - y0) / box.height))
-      const next = [...hs]
-      next[i] = Math.round(a * 1000) / 1000
-      next[i + 1] = Math.round((pair - a) * 1000) / 1000
-      onChange(toTemplate(next))
-    }
+    const move = (ev: PointerEvent) => onChange(toTemplate(resize(hs, i, hs[i] + (ev.clientY - y0) / box.height)))
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); setDragging(null) }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -2778,23 +3030,24 @@ function FrameRowHandles({ seg, onChange, onSwap }: { seg: SegmentLocal; onChang
     <>
       {rows.slice(0, -1).map((r, i) => {
         const on = dragging === i
+        // A closed caption strip's bar, on the frame's top or bottom edge: drag it in to open the strip
+        const closed = (rows[i + 1].kind === 'caption' && rows[i + 1].h === 0) || (r.kind === 'caption' && r.h === 0)
+        const edge = r.y + r.h
         return (
           <div key={i} role="separator" aria-orientation="horizontal" tabIndex={0}
-            aria-label="Drag to resize the areas above and below. Double-click to reset."
-            title="Drag to resize · double-click to reset"
+            aria-label={closed ? 'Drag to open a strip for the captions. Double-click to reset.' : 'Drag to resize the areas above and below. Double-click to reset.'}
+            title={closed ? 'Drag to open a strip for the captions · double-click to reset' : 'Drag to resize · double-click to reset'}
             onPointerDown={e => down(e, i)}
             onDoubleClick={e => { e.stopPropagation(); onChange(null) }}
             onClick={e => e.stopPropagation()}
             onKeyDown={e => {
               if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
               e.preventDefault(); e.stopPropagation()
-              const hs = rows.map(x => x.h), pair = hs[i] + hs[i + 1]
-              const a = Math.max(MIN_ROW_H, Math.min(pair - MIN_ROW_H, hs[i] + (e.key === 'ArrowDown' ? 0.01 : -0.01)))
-              hs[i] = a; hs[i + 1] = pair - a
-              onChange(toTemplate(hs))
+              const hs = rows.map(x => x.h)
+              onChange(toTemplate(resize(hs, i, hs[i] + (e.key === 'ArrowDown' ? 0.01 : -0.01))))
             }}
             className="group absolute left-0 right-0 flex items-center justify-center focus-visible:outline-none"
-            style={{ top: `calc(${(r.y + r.h) * 100}% - 6px)`, height: 12, cursor: 'row-resize', touchAction: 'none', zIndex: 25 }}>
+            style={{ top: edge > 0.999 ? 'calc(100% - 12px)' : edge < 0.001 ? 0 : `calc(${edge * 100}% - 6px)`, height: 12, cursor: 'row-resize', touchAction: 'none', zIndex: 25 }}>
             <span className="absolute left-0 right-0 transition-opacity opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
               style={{ top: 5.5, height: 1, background: '#c8ff00', opacity: on ? 1 : undefined }} />
             <span className="relative flex items-center justify-center rounded-full transition-transform group-hover:scale-110"
@@ -2802,7 +3055,7 @@ function FrameRowHandles({ seg, onChange, onSwap }: { seg: SegmentLocal; onChang
               <span style={{ width: 10, height: 1.5, borderRadius: 1, background: on ? '#000' : '#fff' }} />
             </span>
             {/* Swap: the areas above and below trade places */}
-            {onSwap && (
+            {onSwap && !closed && (
               <button type="button" data-handle="1"
                 aria-label={`Swap ${name(r)} and ${name(rows[i + 1])}`} title="Swap the areas above and below"
                 onPointerDown={e => e.stopPropagation()}
@@ -3201,13 +3454,19 @@ const CAPTION_SIZE_MIN = 20, CAPTION_SIZE_MAX = 100
  * moves the captions anywhere (saved as where they're centred, position_x / position_y; the export
  * puts them there), snapping to the middle; dragging a corner makes them bigger or smaller (the Size slider).
  */
-function CaptionBox({ rect, position_y, position_x, size, onMove, onSize }: {
+function CaptionBox({ rect, position_y, position_x, inBand, inStrip, size, onMove, onSize, onTap }: {
   rect: CaptionRect | null
   position_y: number
   position_x: number
+  /** Put in a frame's title area (its "Captions" text): they sit there, so they only resize */
+  inBand?: boolean
+  /** In a frame's caption strip, not moved yet: the first drag takes them from where they're drawn */
+  inStrip?: boolean
   size: number
   onMove: (y: number, x: number) => void
   onSize?: (size: number) => void
+  /** Tapped (let go without moving): their settings open */
+  onTap?: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const setGuides = useContext(GuideContext)
@@ -3228,9 +3487,22 @@ function CaptionBox({ rect, position_y, position_x, size, onMove, onSize }: {
     e.stopPropagation()
     e.preventDefault()
     setPicked(true)
+    const sy = e.clientY, sx = e.clientX
+    // (let go within a few px of where it was pressed: a tap, not a drag)
+    let dragged = false
+    if (inBand) {
+      const tapUp = (ev: MouseEvent) => {
+        window.removeEventListener('mouseup', tapUp)
+        if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) onTap?.()
+      }
+      window.addEventListener('mouseup', tapUp)
+      return
+    }
     setMoving(true)
-    const sy = e.clientY, oy = position_y, sx = e.clientX, ox = position_x
+    const oy = inStrip && rect ? rect.y + rect.h / 2 : position_y, ox = inStrip ? 0.5 : position_x
     function move(ev: MouseEvent) {
+      if (!dragged && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return
+      dragged = true
       const r = area()
       if (!r) return
       let y = Math.max(0.05, Math.min(0.95, oy + (ev.clientY - sy) / r.height))
@@ -3245,6 +3517,7 @@ function CaptionBox({ rect, position_y, position_x, size, onMove, onSize }: {
     function up() {
       window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up)
       setGuides(null); setMoving(false)
+      if (!dragged) onTap?.()
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
@@ -3257,7 +3530,8 @@ function CaptionBox({ rect, position_y, position_x, size, onMove, onSize }: {
     if (!onSize) return
     const r = area()
     if (!r) return
-    const cx = r.left + r.width * position_x
+    // (in a title area or the caption strip they're drawn in the middle)
+    const cx = r.left + r.width * (inBand || inStrip ? 0.5 : position_x)
     const d0 = Math.max(8, Math.abs(e.clientX - cx))
     const s0 = size
     function move(ev: MouseEvent) {
@@ -3285,7 +3559,9 @@ function CaptionBox({ rect, position_y, position_x, size, onMove, onSize }: {
       ref={ref}
       onMouseDown={startMove}
       onClick={e => e.stopPropagation()}
-      title="Captions: drag to move them, drag a corner to resize"
+      title={inBand
+        ? 'Captions in the title area stay there: drag a corner to resize. To move them, pick "Use your own text instead" on that band in Frames'
+        : 'Captions: click to change how they look, drag to move them, drag a corner to resize'}
       className="cap-box"
       data-picked={picked || undefined}
       style={{
@@ -3293,7 +3569,7 @@ function CaptionBox({ rect, position_y, position_x, size, onMove, onSize }: {
         left: `${(left * 100) - PAD}%`, width: `${r.w * 100 + PAD * 2}%`,
         top: `${(midY - r.h / 2) * 100 - PAD / 2}%`, height: `${r.h * 100 + PAD}%`,
         minHeight: 18,
-        cursor: 'move', userSelect: 'none',
+        cursor: inBand ? 'default' : 'move', userSelect: 'none',
         borderRadius: 4,
         border: `1.5px solid ${picked ? accent : 'transparent'}`,
         background: picked ? 'rgba(200,255,0,0.1)' : 'transparent',

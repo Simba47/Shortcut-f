@@ -115,7 +115,7 @@ function clip(over: Partial<BrandTarget> = {}): BrandTarget {
   const tl = timeline([part('p1', 0, LEN)])
   return {
     clipId: 'c1', lengthMs: LEN, mainVideoId: MAIN, overlays: [], texts: [], caption: {}, textCase: 'title',
-    segments: tl.segments, keyframes: tl.keyframes, transitions: [], progressBar: null, timelineEdits: true, audioTracks: [], canInsert: true, ...over,
+    segments: tl.segments, keyframes: tl.keyframes, transitions: [], timelineEdits: true, audioTracks: [], canInsert: true, ...over,
   }
 }
 const cardOf = (t: BrandTarget) => t.segments.find(s => s.layout === 'frame_brand_card')
@@ -142,6 +142,22 @@ test('the server with a video on top: no end card yet, and the clip keeps the ki
   const later = updateBrand({ ...on.target, timelineEdits: true }, on.applied, kit({ ends: CARD_ON }), on.before)
   assert.ok(cardOf(later.target))
   assert.ok(later.before!.end_card)
+})
+
+test('with ends off (their step is gone, 2026-11-10): none made from a saved kit; one already on the clip stays until the brand comes off', () => {
+  const k = kit({ ends: CARD_ON })
+  const off = { ends: false } as Partial<BrandTarget>
+  const put = putBrandOn(clip(off), k)
+  assert.equal(cardOf(put.target), undefined)
+  assert.equal(put.before.end_card, null)
+  // (the version the clip took is the kit's, so nothing keeps asking for a card)
+  assert.deepEqual(put.applied.ends, k.data.ends)
+  // a clip that already has one: a change to the kit doesn't take it away
+  const had = putBrandOn(clip(), k)
+  const none = kit({ ends: { ...CARD_ON, card: false } })
+  assert.ok(cardOf(updateBrand({ ...had.target, ...off }, k.data, none, had.before).target))
+  // the brand switched off: it goes, as before
+  assert.equal(cardOf(takeBrandOff({ ...had.target, ...off }, k.data, had.before)), undefined)
 })
 
 test('live: switched on later it goes on; a new length makes it again; switched off it comes off; one taken out stays out', () => {

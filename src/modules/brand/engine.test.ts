@@ -28,7 +28,7 @@ const frame = (id: string): SegmentLocal => ({
 function clip(over: Partial<BrandTarget> = {}): BrandTarget {
   return {
     clipId: 'c1', lengthMs: LEN, mainVideoId: 'v1', overlays: [], texts: [text('t1'), text('t2')],
-    caption: { template: 'plain', color: '#eeeeee', size: 52, animation: 'karaoke' }, textCase: 'title', segments: [frame('f1')], progressBar: null, keyframes: {}, transitions: [], timelineEdits: true, audioTracks: [], canInsert: true, ...over,
+    caption: { template: 'plain', color: '#eeeeee', size: 52, animation: 'karaoke' }, textCase: 'title', segments: [frame('f1')], keyframes: {}, transitions: [], timelineEdits: true, audioTracks: [], canInsert: true, ...over,
   }
 }
 /** The kit changed: the clip as it follows (the record of what the brand changed left aside) */
@@ -58,6 +58,47 @@ test('a clip with no caption style yet: its capitals are kept as off, never empt
   // a look kept before the fix, its capitals empty: off as it comes back
   const old = { ...on.before, caption: { ...on.before.caption!, uppercase: null as unknown as boolean } }
   assert.equal(takeBrandOff(on.target, kit().data, old).caption.uppercase, false)
+})
+
+const TELUGU = 'పెద్ద సేల్'
+
+test('text in Telugu letters keeps its own font: a kit font has none of those letters', () => {
+  const on = putBrandOn(clip({ texts: [text('t1', { text: TELUGU, font: 'noto-sans-telugu' }), text('t2')] }), kit())
+  assert.deepEqual([on.target.texts[0].font, on.target.texts[0].color, on.target.texts[0].size], ['noto-sans-telugu', '#ffcc00', 80])
+  assert.equal(on.target.texts[1].font, 'Poppins')
+  // a kit with no title font doesn't leave it with none either
+  const plain = kit({ title: { font: null, color: '#ffcc00', size: 80 } })
+  assert.equal(putBrandOn(clip({ texts: [text('t1', { text: TELUGU, font: 'noto-sans-telugu' })] }), plain).target.texts[0].font, 'noto-sans-telugu')
+  // off: its colour and size go back, its font was never changed
+  const off = takeBrandOff(on.target, kit().data, on.before)
+  assert.deepEqual([off.texts[0].font, off.texts[0].color, off.texts[0].size], ['noto-sans-telugu', '#ffffff', 40])
+})
+
+test('text in Telugu letters: a kit change never gives it the new font; off gives back one the kit put on before', () => {
+  const k2 = kit({ title: { font: 'Anton', color: '#ffcc00', size: 80 } })
+  const t = clip({ texts: [text('t1', { text: TELUGU, font: 'noto-sans-telugu', color: '#ffcc00', size: 80 })] })
+  assert.equal(upd(t, kit().data, k2).texts[0].font, 'noto-sans-telugu')
+  // (branded before this rule: it has the kit's font; the kit's new font doesn't follow, and off takes it away)
+  const before = clip({ texts: [text('t1', { text: TELUGU, font: 'Poppins', color: '#ffcc00', size: 80 })] })
+  assert.equal(upd(before, kit().data, k2).texts[0].font, 'Poppins')
+  const off = takeBrandOff(before, kit().data, { texts: { t1: { font: 'noto-sans-telugu', color: '#ffffff', size: 40 } }, caption: null, text_case: null, frames: {}, end_card: null })
+  assert.equal(off.texts[0].font, 'noto-sans-telugu')
+})
+
+test('a kit with no caption font keeps the font the captions have', () => {
+  const k = kit()   // (its captions name no font)
+  const t = clip({ caption: { template: 'plain', color: '#eeeeee', size: 52, animation: 'karaoke', font: 'roboto' } })
+  assert.equal(putBrandOn(t, k).target.caption.font, 'roboto')
+  const named = kit({ captions: { ...k.data.captions, font: 'Poppins' } })
+  assert.equal(putBrandOn(t, named).target.caption.font, 'Poppins')
+  // the kit later names one: the captions take it; it names none again: they keep what they have
+  const on = putBrandOn(t, k)
+  const followed = updateBrand(on.target, k.data, named, on.before).target
+  assert.equal(followed.caption.font, 'Poppins')
+  assert.equal(updateBrand(followed, named.data, k, on.before).target.caption.font, 'Poppins')
+  // a font the user picked while the kit named none stays theirs
+  const mine = { ...on.target, caption: { ...on.target.caption, font: 'Lato' } }
+  assert.equal(updateBrand(mine, k.data, named, on.before).target.caption.font, 'Lato')
 })
 
 test('off: everything goes back, except what the user changed while it was on', () => {
@@ -229,38 +270,10 @@ test('watermark: small, faint, the whole clip', () => {
 
 function pick(o: { x: number; y: number; w: number; h: number }) { return { x: o.x, y: o.y, w: o.w, h: o.h } }
 
-// ── Brand kit Phase 4: the kit's progress bar ─────────
-import { brandProgressBar } from '@/lib/shared/brandKit'
-
-const BAR_ON = { on: true, color: 'accent', height: 10, position: 'bottom' as const }
-const mineBar = { color: '#123456', height: 20, position: 'top' as const }
-
-test("progress bar: on in the kit's accent; off puts the clip's own back", () => {
-  const k = kit({ progress_bar: BAR_ON })
-  const on = putBrandOn(clip({ progressBar: mineBar }), k)
-  assert.deepEqual(on.target.progressBar, { color: '#ff5500', height: 10, position: 'bottom' })
-  assert.deepEqual(takeBrandOff(on.target, k.data, on.before).progressBar, mineBar)
-  // (a bar the user changed while it was on stays)
-  const changed = { ...on.target, progressBar: { ...on.target.progressBar!, height: 30 } }
-  assert.equal(takeBrandOff(changed, k.data, on.before).progressBar!.height, 30)
-})
-
-test("progress bar: a kit without one leaves the clip's own alone, on and off", () => {
-  const k = kit(), on = putBrandOn(clip({ progressBar: mineBar }), k)
-  assert.deepEqual(on.target.progressBar, mineBar)
-  assert.deepEqual(takeBrandOff(on.target, k.data, on.before).progressBar, mineBar)
-})
-
-test("progress bar live: a new colour reaches it; switched on later it goes on; switched off it comes off; the user's own stays", () => {
-  const k1 = kit({ progress_bar: BAR_ON }), on = putBrandOn(clip(), k1)
-  const k2 = kit({ progress_bar: BAR_ON, colors: { main: '#112233', accent: '#00ff00', extra: [] } })
-  assert.equal(upd(on.target, k1.data, k2).progressBar!.color, '#00ff00')
-  assert.equal(upd(on.target, k1.data, kit()).progressBar, null)
-  const k0 = kit(), plain = putBrandOn(clip(), k0)
-  assert.deepEqual(upd(plain.target, k0.data, k1).progressBar, brandProgressBar(k1.data))
-  assert.deepEqual(upd({ ...plain.target, progressBar: mineBar }, k0.data, k1).progressBar, mineBar)
-})
-
-test("a kit's old `progress` (hidden since 2026-10-20) doesn't come back on", () => {
-  assert.equal(cleanBrandKitData({ progress: { on: true, color: '#ff0000' } }).progress_bar.on, false)
+// ── The progress bar, taken out 2026-11-05 (user) ─────────
+test("a kit saved with a progress bar loses it; putting the kit on adds none", () => {
+  const d = cleanBrandKitData({ progress_bar: { on: true, color: 'accent', height: 10, position: 'bottom' }, progress: { on: true } })
+  assert.equal('progress_bar' in d || 'progress' in d, false)
+  const on = putBrandOn(clip(), kit({ progress_bar: { on: true } } as never))
+  assert.equal('progressBar' in on.target || 'progress_bar' in on.before, false)
 })

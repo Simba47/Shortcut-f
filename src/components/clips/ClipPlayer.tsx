@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CaptionStyle, SegmentLocal, TextOverlay, TranscriptWord } from '@chai-cut/shared'
+import type { CaptionStyle, Overlay, SegmentLocal, TextOverlay, TranscriptWord } from '@chai-cut/shared'
 import { OutputCanvas } from '@/components/editor/VideoPreview'
 import { getBoxPositionAtLerp } from '@/lib/interpolation'
 import { BorrowedPool, isBorrowedSlot } from '@/modules/editor/brollSources'
@@ -20,6 +20,10 @@ import { cleanTrims, trimMap } from '@/lib/trims'
 import { toTimelineState } from '@/modules/editor/trimState'
 
 const NO_TRIMS: [number, number][] = []
+const NO_OVERLAYS: Overlay[] = []
+
+/** The card playing now: starting another pauses it (a gallery plays one reel at a time) */
+let playingNow: { stop: () => void } | null = null
 
 /**
  * A clip played in 9:16 without exporting it: the source video drawn through the clip's framing,
@@ -28,7 +32,7 @@ const NO_TRIMS: [number, number][] = []
  * Videos put in between (modules/editor/inserts.ts): the source video waits where one goes in
  * while a clock plays it, then carries on — the clip is that much longer.
  */
-export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, endMs, segments: savedSegments, words, captionStyle, textOverlays: savedTexts, trims = NO_TRIMS }: {
+export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, endMs, segments: savedSegments, words, captionStyle, textOverlays: savedTexts, trims = NO_TRIMS, overlays: savedOverlays = NO_OVERLAYS }: {
   videoUrl: string
   /** The clip's own video: split/trio slots naming it are borrowed reactions from another moment */
   mainVideoId?: string | null
@@ -42,6 +46,8 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
   textOverlays: TextOverlay[]
   /** Its removed parts (clips.trim_ranges, source ms) */
   trims?: [number, number][]
+  /** Its pictures on top (a brand kit's logo, photos), signed (preview_url), clip time */
+  overlays?: Overlay[]
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
@@ -56,22 +62,23 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
     if (!clean.length) return null
     const map = trimMap(clean, startMs, endMs)
     const keyframes = Object.fromEntries(savedSegments.flatMap(sg => sg.crop_boxes.map(b => [b.id, b.keyframes.map((k, i) => ({ ...k, id: `${b.id}-${i}`, box_id: b.id }))] as const)))
-    const st = toTimelineState({ segments: savedSegments, keyframes, overlays: [], textOverlays: savedTexts, audioTracks: [], transitions: [] }, map, startMs)
+    const st = toTimelineState({ segments: savedSegments, keyframes, overlays: savedOverlays, textOverlays: savedTexts, audioTracks: [], transitions: [] }, map, startMs)
     let at = 0
     const kept: Piece[] = map.kept.map(([a, b], i) => { const p = { id: `kept-${i}`, at, ms: b - a, from: a - startMs }; at += b - a; return p })
     return {
       segments: st.segments.map(sg => ({ ...sg, crop_boxes: sg.crop_boxes.map(b => ({ ...b, keyframes: st.keyframes[b.id]?.map(({ t_ms, x, y, w, h }) => ({ t_ms, x, y, w, h })) ?? b.keyframes })) })),
-      textOverlays: st.textOverlays, pieces: kept,
+      textOverlays: st.textOverlays, overlays: st.overlays, pieces: kept,
     }
-  }, [trims, startMs, endMs, savedSegments, savedTexts])
+  }, [trims, startMs, endMs, savedSegments, savedTexts, savedOverlays])
   const segments = removed?.segments ?? savedSegments
   const textOverlays = removed?.textOverlays ?? savedTexts
+  const overlays = removed?.overlays ?? savedOverlays
   // A clip of pieces (inserts.ts): each part from its own moment of the video (a part can skip
   // video), and during a video put in between the clip's own clock runs while the source waits
   const pieces = useMemo(() => {
     if (removed) return removed.pieces
     const all = piecesOf(segments, mainVideoId, s => isShot(s, mainVideoId))
-    return insertsOf(segments, mainVideoId).length || all.some(p => (p.from != null && Math.abs(p.from - p.at) > 1) || (p.speed ?? 1) !== 1) ? all : []
+    return insertsOf(segments, mainVideoId).length || all.some(p => p.hold != null || (p.from != null && Math.abs(p.from - p.at) > 1) || (p.speed ?? 1) !== 1) ? all : []
   }, [segments, mainVideoId, removed])
   const lengthMs = pieces.length ? piecesLength(pieces) : endMs - startMs
   const tRef = useRef(0)
@@ -83,6 +90,18 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
   // page can't go full screen (iPhone Safari), it fills the window instead. Esc / the button leave.
   const boxRef = useRef<HTMLDivElement>(null)
   const [full, setFull] = useState<'screen' | 'window' | null>(null)
+  // Loads only near the screen: a gallery's cards each play the whole video from their own moment,
+  // and all loading at once shared the connection until none had its moment (cards spinning for
+  // minutes). Once loaded a card keeps its video, so scrolling back plays at once.
+  const [near, setNear] = useState(false)
+  useEffect(() => {
+    const el = boxRef.current
+    if (near || !el) return
+    if (typeof IntersectionObserver === 'undefined') { setNear(true); return }
+    const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) setNear(true) }, { rootMargin: '300px 0px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [near])
   useEffect(() => {
     const onChange = () => setFull(f => (document.fullscreenElement === boxRef.current ? 'screen' : f === 'screen' ? null : f))
     document.addEventListener('fullscreenchange', onChange)
@@ -230,10 +249,22 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
     return () => cancelAnimationFrame(raf)
   }, [playing, startMs, lengthMs, pieces]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  function pause() {
+    videoRef.current?.pause(); holdRef.current = null; setPlaying(false); syncStock(tRef.current, false); syncBorrowed(tRef.current, false)
+  }
+  const stopRef = useRef({ stop: pause })
+  stopRef.current.stop = pause
+  useEffect(() => {
+    const me = stopRef.current
+    if (playing) { if (playingNow && playingNow !== me) playingNow.stop(); playingNow = me }
+    else if (playingNow === me) playingNow = null
+  }, [playing])
+  useEffect(() => { const me = stopRef.current; return () => { if (playingNow === me) playingNow = null } }, [])
+
   function toggle() {
     const v = videoRef.current
     if (!v) return
-    if (playing) { v.pause(); holdRef.current = null; setPlaying(false); syncStock(tRef.current, false); syncBorrowed(tRef.current, false); return }
+    if (playing) { pause(); return }
     if (tRef.current >= lengthMs - 1) tRef.current = 0
     const t = tRef.current
     const want = startMs + toVideo(t)
@@ -274,15 +305,16 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
       {/* The source video, drawn onto the 9:16 canvas below (kept in the page so it decodes) */}
       <video
         ref={videoRef}
-        src={`${videoUrl}#t=${startMs / 1000}`}
-        preload="auto"
+        src={near && videoUrl ? `${videoUrl}#t=${startMs / 1000}` : undefined}
+        preload={near ? 'auto' : 'none'}
         playsInline
         onLoadedData={() => setReady(true)}
         onSeeked={() => setReady(true)}
         style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
       />
-      {Object.entries(stockUrls).map(([id, url]) => (
-        <video key={id} ref={el => { stockRefs.current[id] = el }} src={url} muted playsInline preload="auto"
+      {/* (B-roll: only its first picture until the clip plays, then all of it) */}
+      {near && Object.entries(stockUrls).map(([id, url]) => (
+        <video key={id} ref={el => { stockRefs.current[id] = el }} src={url} muted playsInline preload={playing ? 'auto' : 'metadata'}
           style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />
       ))}
       <OutputCanvas
@@ -299,6 +331,18 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
         textOverlays={textOverlays}
         style={{ width: '100%', height: '100%', display: 'block' }}
       />
+      {/* Pictures on top (a brand kit's logo, photos): where, how big, how see-through and how turned
+          the export draws them (render.py image overlays), the higher z_index over the lower; only to
+          look at here (the editor moves them) */}
+      {overlays.filter(o => o.preview_url && o.start_ms <= tMs && tMs < o.end_ms).map(o => (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img key={o.id} src={o.preview_url} alt="" draggable={false} aria-hidden="true"
+          style={{
+            position: 'absolute', left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${o.w * 100}%`, height: `${o.h * 100}%`,
+            objectFit: 'fill', pointerEvents: 'none', opacity: o.opacity ?? 1,
+            ...(o.rotation ? { transform: `rotate(${o.rotation}deg)` } : {}),
+          }} />
+      ))}
       {/* Play / pause over the whole picture */}
       <button onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}
         className="absolute inset-0 flex items-center justify-center transition-opacity"

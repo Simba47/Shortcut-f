@@ -1,5 +1,5 @@
 import type { BoxKeyframe, CaptionStyle, CornerStyle, SegmentLocal, Transition } from './types'
-import { cleanBrandKitData, type BrandKitData, type ProgressBar } from './brandKit'
+import { cleanBrandKitData, type BrandKitData } from './brandKit'
 
 // A clip's brand kit, on or off (user, 2026-10-19): what the editor keeps (modules/editor/brandState.ts)
 // and the clip saves (clips.brand). Shared so the server can check what it saves.
@@ -24,7 +24,6 @@ export interface BrandBefore {
   texts: Record<string, { font: string | null; color: string | null; size?: number | null }>
   caption: Partial<CaptionStyle> | null
   text_case: string | null
-  progress_bar: ProgressBar | null
   frames: Record<string, FrameBefore>
   /** The end card the brand made, if it made one (modules/brand/endCard.ts) */
   end_card: EndCardBefore | null
@@ -96,7 +95,6 @@ export function cleanBrandOn(raw: unknown): BrandOn | null {
       texts: b.texts && typeof b.texts === 'object' ? b.texts : {},
       caption: b.caption && typeof b.caption === 'object' ? b.caption : null,
       text_case: typeof b.text_case === 'string' ? b.text_case : null,
-      progress_bar: b.progress_bar && typeof b.progress_bar === 'object' ? b.progress_bar as ProgressBar : null,
       frames: b.frames && typeof b.frames === 'object' ? b.frames : {},
       end_card: cleanEndCard(b.end_card),
       intro: cleanInsert(b.intro),

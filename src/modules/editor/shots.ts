@@ -87,8 +87,10 @@ function shareUnder(sections: SegmentLocal[], a: number, b: number, is: (s: Segm
  *
  * Stacked as the timeline shows them, as in Premiere / Resolve: a row higher up covers the ones under
  * it. `below` rows of videos sit under the main video (tracks 0 … below-1): the main video covers
- * them, and they show where it isn't — after its end, from the moment they've reached there. The
- * empty stretch after the main video (the editor's "tail") is under everything.
+ * them, and they show where it isn't — after its end, from the moment they've reached there, and
+ * through its parts that are hidden or deleted (a hidden part is see-through, as the eye on a track
+ * in Premiere: user, 2026-11-06 — where nothing is under it, it stays black). The empty stretch after
+ * the main video (the editor's "tail") is under everything.
  *
  * A part of the main video on a row (visibility.ts isMainShot) is a part of the main video again
  * where it shows: the main video from its moment (`mainStart`: where the clip starts in the video,
@@ -126,9 +128,12 @@ export function flattenShots(segments: SegmentLocal[], mainVideoId: Main, forSav
   // editor: what's under the main video shows through them), the videos under it, the main video,
   // the videos over it
   const gap = (s: SegmentLocal) => isGapPart(s, mainVideoId)
-  for (const sec of sections.filter(x => isTailSection(x) || gap(x))) lay(sec)
+  // (a part with the main video hidden, a deleted part among them: the rows under it show through;
+  // a frame is never hidden as a whole, and a part showing an added video shows that)
+  const seeThrough = (s: SegmentLocal) => gap(s) || (!!s.hidden && !isFrameLayout(s.layout) && !addedVideoBox(s, mainVideoId))
+  for (const sec of sections.filter(x => isTailSection(x) || seeThrough(x))) lay(sec)
   for (const shot of under) lay(shot)
-  for (const sec of sections.filter(x => !isTailSection(x) && !gap(x))) lay(sec)
+  for (const sec of sections.filter(x => !isTailSection(x) && !seeThrough(x))) lay(sec)
   for (const shot of over) lay(shot)
 
   const groups = new Map<string, typeof parts>()

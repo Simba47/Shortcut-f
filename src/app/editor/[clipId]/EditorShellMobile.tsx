@@ -115,7 +115,7 @@ export function EditorShellMobile({
     const vid = (clip as unknown as { video_id: string }).video_id
     const all = piecesOf(mobileSegments, vid, s => isShot(s, vid))
     // (pieces only once the parts don't simply follow the video: a video put in between, or a part cut)
-    return insertsOf(mobileSegments, vid).length || all.some(p => (p.from != null && Math.abs(p.from - p.at) > 1) || (p.speed ?? 1) !== 1) ? all : []
+    return insertsOf(mobileSegments, vid).length || all.some(p => p.hold != null || (p.from != null && Math.abs(p.from - p.at) > 1) || (p.speed ?? 1) !== 1) ? all : []
   }, [mobileSegments, clip])
   const { videoRef, seekToMs, togglePlay, pause } = useVideoSync(clip.start_ms, clip.end_ms, mobileInserts)
   const { currentTimeMs, durationMs, playing } = usePlayerStore()
@@ -475,7 +475,28 @@ export function EditorShellMobile({
     if (!credits || window.confirm(`Regenerate captions? All of this clip is read again, and words you corrected are replaced. ${price} credits. You have ${credits.balance}.`)) handleRetranscribe('unknown', true)
   }
 
-  async function handleRetranscribe(languageCode: string, readAll = false) {
+  // (`fresh`: Regenerate — read the clip again even where it has words; else only parts with none.
+  // Try again repeats what failed)
+  const lastFreshRef = useRef(false)
+  // The caption job being waited for, and which wait is current: Stop ends the wait and stops the job
+  // (user, 2026-11-06) — the worker writes nothing, the clip keeps its words
+  const retranscribeJobRef = useRef<string | null>(null)
+  const retranscribeRunRef = useRef(0)
+  const stopCaptionJob = (jobId: string) => {
+    fetch('/api/transcribe/retranscribe/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_id: jobId }) }).catch(() => {})
+  }
+  function stopRegenerate() {
+    const jobId = retranscribeJobRef.current
+    retranscribeRunRef.current++
+    retranscribeJobRef.current = null
+    if (retranscribeTimerRef.current) { clearInterval(retranscribeTimerRef.current); retranscribeTimerRef.current = null }
+    setRetranscribePlace(null); setRetranscribing(false); setRetranscribeError(null)
+    if (jobId) stopCaptionJob(jobId)
+  }
+  async function handleRetranscribe(languageCode: string, fresh = false) {
+    lastFreshRef.current = fresh
+    const run = ++retranscribeRunRef.current
+    retranscribeJobRef.current = null
     setRetranscribing(true); setRetranscribeElapsed(0); setRetranscribeError(null); setRetranscribePlace(null)
     if (retranscribeTimerRef.current) clearInterval(retranscribeTimerRef.current)
     const startedAt = Date.now()
@@ -489,17 +510,21 @@ export function EditorShellMobile({
     try {
       const res = await fetch('/api/transcribe/retranscribe', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clip_id: clip.id, language_code: languageCode, ...(readAll ? { read_all: true } : {}) }),
+        body: JSON.stringify({ clip_id: clip.id, language_code: languageCode, ...(fresh ? { fresh: true } : {}) }),
       })
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Retranscription failed')
       refreshCredits()
       const videoId = (clip as unknown as { video_id: string }).video_id
       const queuedAt = new Date().toISOString()
       const { job_id: jobId } = await res.json().catch(() => ({})) as { job_id?: string | null }
+      // (stopped before the job was made: it's stopped now)
+      if (retranscribeRunRef.current !== run) { if (jobId) stopCaptionJob(jobId); return }
+      retranscribeJobRef.current = jobId ?? null
       const poll = async () => {
         const deadline = Date.now() + 5 * 60 * 1000
         while (Date.now() < deadline) {
           await new Promise(r => setTimeout(r, 3000))
+          if (retranscribeRunRef.current !== run) return
           const r = await fetch(`/api/transcribe/words?video_id=${videoId}&since=${encodeURIComponent(queuedAt)}${jobId ? `&job=${jobId}` : ''}`)
           if (r.ok) {
             const { words: newWords, place } = await r.json()
@@ -512,6 +537,7 @@ export function EditorShellMobile({
       }
       poll()
     } catch (err) {
+      if (retranscribeRunRef.current !== run) return
       stopTimer(); setRetranscribing(false)
       setRetranscribeError(err instanceof Error ? err.message : 'Retranscription failed')
     }
@@ -729,6 +755,7 @@ export function EditorShellMobile({
                 textOverlays={textOverlays} activeTextOverlayId={activeTextOverlayId}
                 onTextOverlayChange={updateTextOverlay} onSelectTextOverlay={setActiveTextOverlayId} onDeleteTextOverlay={askDeleteTextOverlay}
                 onCaptionPositionChange={(y, x) => updateCaptionStyle({ position_y: y, position_x: x })}
+                onCaptionTap={() => setActiveTab('captions')}
                 style={{ width: '100%', height: '100%', display: 'block' }}
               />
             )}
@@ -801,8 +828,23 @@ export function EditorShellMobile({
           <>
             <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: showCaptions ? '#fff' : 'rgba(255,255,255,0.45)' }}>Auto-captions</span>
+              {/* Regenerate captions (was a link in the panel below until 2026-11-06, user) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {/* (while it runs: Stop in its place — the request stops, the words stay as they were) */}
+              {retranscribing ? (
+                <button type="button" onClick={stopRegenerate} aria-label="Stop making captions" title="Stop"
+                  style={{ width: 25, height: 25, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171' }}>
+                  <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor" /></svg>
+                </button>
+              ) : words.length > 0 && (
+                <button type="button" onClick={askRegenerate} disabled={transcribing} aria-label="Regenerate captions" title="Regenerate captions"
+                  style={{ width: 25, height: 25, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: 0, color: 'rgba(255,255,255,0.7)', opacity: transcribing ? 0.5 : 1 }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7" /></svg>
+                </button>
+              )}
               <div onClick={() => turnCaptions(!showCaptions)} style={{ width: 36, height: 20, borderRadius: 10, display: 'flex', alignItems: 'center', paddingLeft: 2, cursor: 'pointer', background: showCaptions ? '#c8ff00' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s' }}>
                 <div style={{ width: 16, height: 16, borderRadius: 8, background: '#fff', transition: 'transform 0.2s', transform: showCaptions ? 'translateX(16px)' : 'translateX(0)' }} />
+              </div>
               </div>
             </div>
             {(transcribing || retranscribing) && (
@@ -816,7 +858,7 @@ export function EditorShellMobile({
                 <CaptionStyler
                   style={captionStyle} textCase={captionTextCase}
                   onChange={updateCaptionStyle} onTextCaseChange={setCaptionTextCase}
-                  onEditCaptions={() => {}} onRetranscribe={askRegenerate}
+                  onEditCaptions={() => {}} onRetranscribe={l => (lastFreshRef.current ? askRegenerate() : handleRetranscribe(l, false))}
                   retranscribing={retranscribing} retranscribeElapsed={retranscribeElapsed} retranscribePlace={retranscribePlace} retranscribeError={retranscribeError}
                   hasWords={words.length > 0} hasRoman={hasRoman} romanize={romanize} romanizeLabel={scriptLabel} onRomanizeChange={setRomanize}
                 />
@@ -834,6 +876,9 @@ export function EditorShellMobile({
     </div>
   )
 
+  // Captions being made: a scan over the video (CaptionScan)
+  const captionScan = transcribing || retranscribing ? (retranscribePlace ? 'Waiting its turn…' : 'Making captions…') : null
+
   // Video preview without touch overlay — used in landscape so the column can scroll
   const videoPreviewNoTouch = (
     <div ref={previewInnerRef} style={{ position: 'absolute', inset: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -843,6 +888,7 @@ export function EditorShellMobile({
         activeBoxId={activeBoxId ?? null}
         onSelectBox={(segId, boxId) => { setActiveSegmentId(segId); setActiveBoxId(boxId) }}
         onBoxChange={moveView}
+        captionScan={captionScan}
       />
       {activeSegment?.crop_boxes[0]?.source_video_id && (
         <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 20, background: 'rgba(249,115,22,0.85)', color: '#fff', fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 6, pointerEvents: 'none' }}>B-roll</div>
@@ -859,6 +905,7 @@ export function EditorShellMobile({
         activeBoxId={activeBoxId ?? null}
         onSelectBox={(segId, boxId) => { setActiveSegmentId(segId); setActiveBoxId(boxId) }}
         onBoxChange={moveView}
+        captionScan={captionScan}
       />
       <div style={{ position: 'absolute', inset: 0, zIndex: 10, touchAction: 'none' }}
         onTouchStart={onCropTouchStart} onTouchMove={onCropTouchMove} onTouchEnd={onCropTouchEnd}
@@ -1006,8 +1053,22 @@ export function EditorShellMobile({
                   <>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: 'rgba(255,255,255,0.04)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.07)' }}>
                       <span style={{ fontSize: 14, fontWeight: 600, color: showCaptions ? '#fff' : 'rgba(255,255,255,0.45)' }}>Auto-captions</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {/* (while it runs: Stop in its place — the request stops, the words stay as they were) */}
+                      {retranscribing ? (
+                <button type="button" onClick={stopRegenerate} aria-label="Stop making captions" title="Stop"
+                  style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171' }}>
+                  <svg width="12" height="12" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor" /></svg>
+                </button>
+                      ) : words.length > 0 && (
+                <button type="button" onClick={askRegenerate} disabled={transcribing} aria-label="Regenerate captions" title="Regenerate captions"
+                  style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, background: 'transparent', border: 0, color: 'rgba(255,255,255,0.7)', opacity: transcribing ? 0.5 : 1 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7" /></svg>
+                </button>
+              )}
                       <div onClick={() => turnCaptions(!showCaptions)} style={{ width: 44, height: 24, borderRadius: 12, display: 'flex', alignItems: 'center', paddingLeft: 2, cursor: 'pointer', background: showCaptions ? '#c8ff00' : 'rgba(255,255,255,0.12)', transition: 'background 0.2s' }}>
                         <div style={{ width: 20, height: 20, borderRadius: 10, background: '#fff', transition: 'transform 0.2s', transform: showCaptions ? 'translateX(20px)' : 'translateX(0)' }} />
+                      </div>
                       </div>
                     </div>
                     {(transcribing || retranscribing) ? (
@@ -1024,7 +1085,7 @@ export function EditorShellMobile({
                       <CaptionStyler
                         style={captionStyle} textCase={captionTextCase}
                         onChange={updateCaptionStyle} onTextCaseChange={setCaptionTextCase}
-                        onEditCaptions={() => {}} onRetranscribe={askRegenerate}
+                        onEditCaptions={() => {}} onRetranscribe={l => (lastFreshRef.current ? askRegenerate() : handleRetranscribe(l, false))}
                         retranscribing={retranscribing} retranscribeElapsed={retranscribeElapsed} retranscribePlace={retranscribePlace} retranscribeError={retranscribeError}
                         hasWords={words.length > 0} hasRoman={hasRoman} romanize={romanize} romanizeLabel={scriptLabel} onRomanizeChange={setRomanize}
                       />
@@ -1085,6 +1146,7 @@ export function EditorShellMobile({
                       textOverlays={textOverlays} activeTextOverlayId={activeTextOverlayId}
                       onTextOverlayChange={updateTextOverlay} onSelectTextOverlay={setActiveTextOverlayId} onDeleteTextOverlay={askDeleteTextOverlay}
                       onCaptionPositionChange={(y, x) => updateCaptionStyle({ position_y: y, position_x: x })}
+                      onCaptionTap={() => setActiveTab('captions')}
                       style={{ width: '100%', height: 'auto', display: 'block' }}
                     />
                   )}

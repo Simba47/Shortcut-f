@@ -2,11 +2,11 @@
 
 import { useRef, useState, useEffect, useLayoutEffect, useCallback, Fragment } from 'react'
 import { createPortal } from 'react-dom'
-import type { SegmentLocal, TextOverlay, FrameItem, FrameLane } from '@chai-cut/shared'
+import type { SegmentLocal, TextOverlay, FrameItem, FrameHold, FrameLane } from '@chai-cut/shared'
 import type { TrackRef } from '@/modules/editor/tracks'
 import { Waveform } from '../Waveform'
 import { liveTime, usePlayerStore } from '@/modules/player/store'
-import { isFrameLayout, FRAME_TEMPLATES, frameOf, laneItems, itemBounds, MIN_ITEM_MS, isTextLane } from '@/modules/editor/frames'
+import { isMainHold, sameLayer, movedHold, isFrameLayout, FRAME_TEMPLATES, frameOf, laneItems, itemBounds, MIN_ITEM_MS, isTextLane } from '@/modules/editor/frames'
 import { isShot } from '@/modules/editor/shots'
 import { isGapPart } from '@/modules/editor/visibility'
 import { goesAfterMain } from '@/modules/editor/inserts'
@@ -20,6 +20,26 @@ import {
 
 /** How near a part's end a video on a row must start to be offered a transition there (ms) */
 const JOIN_REACH_MS = 500
+/** A frozen video piece on a frame lane: pale ice-blue stripes over its colour */
+/** A frozen stretch on a bar: see-through blue (user, 2026-11-10) */
+const FROZEN_BLUE = 'rgba(59,130,246,0.32)'
+
+/** A bar with freeze ranges on it (FrameSettings.freeze, or an older FrameItem.holds) */
+interface FreezeBar {
+  holds: FrameHold[]
+  /** Clip time its `at_ms` count from */
+  origin: number
+  /** What of it shows here, clip time */
+  from: number
+  to: number
+  /** Picked: the ranges can be dragged */
+  on: boolean
+  locked: boolean
+  /** Dragging its end adds time, rather than meeting what's next */
+  grows?: boolean
+  /** Freeze `i` is now `h` (null: removed) */
+  set: (i: number, h: FrameHold | null) => void
+}
 
 /**
  * The editor's timeline: the whole clip across the width, the playhead line moving over it. Press
@@ -65,8 +85,13 @@ export interface TimelineProps {
   laneHighlight?: { lane: FrameLane; n: number; focusPlus?: boolean; openMenu?: boolean } | null
   videoTitles?: Record<string, string>
   onSelectFrameItem?: (id: string | null) => void
-  onUpdateFrameItem?: (id: string, patch: Partial<Pick<FrameItem, 'start_ms' | 'end_ms' | 'source_offset_ms'>>) => void
-  onAddFrameItem?: (lane: FrameLane, anchor: DOMRect) => void
+  onUpdateFrameItem?: (id: string, patch: Partial<Pick<FrameItem, 'start_ms' | 'end_ms' | 'source_offset_ms' | 'holds' | 'dim'>>) => void
+  /** Freeze `n` of a layer of the frame changed on its bar: now `h`, or removed (null) */
+  onFrameFreeze?: (layer: string, n: number, h: FrameHold | null) => void
+  /** One of a main video part's freezes changed on its block */
+  onPartFreeze?: (segId: string, i: number, h: FrameHold | null) => void
+  /** `at`: an empty spot clicked (that frame, from that time); else the frame under the playhead, at it */
+  onAddFrameItem?: (lane: FrameLane, anchor: DOMRect, at?: { segId: string; t: number }) => void
   onJumpToFrameItem?: (segId: string, itemId: string) => void
   viewMarkers?: { t_ms: number; cut: boolean }[]
   selectedViewT?: number | null
@@ -199,6 +224,8 @@ const ROW_H = 30
 const VIS_ROW_H = BLOCK_H + 4
 const ROW_GAP = 3
 const FRAME_LANE_H = 26
+/** The picked frame's name and time over its rows */
+const FRAME_HEAD_H = 16
 const LEFT_W = 52
 /** With a row's buttons beside its icon (view, sound, lock: as in Resolve's track header) */
 const LEFT_W_CTL = 104
@@ -267,7 +294,7 @@ export function Timeline({
   textOverlays = [], photos = [], activePhotoId = null, onSelectPhoto, onPhotoTimeChange,
   musicTracks = [], onMusicMove, onMusicTrim, selectedMusicId = null, onSelectMusic,
   activeTextOverlayId, onSelectTextOverlay, onTextOverlayUpdate,
-  frameSeg, activeFrameItemId, laneHighlight, videoTitles = {}, onSelectFrameItem, onUpdateFrameItem, onAddFrameItem, onJumpToFrameItem,
+  frameSeg, activeFrameItemId, laneHighlight, videoTitles = {}, onSelectFrameItem, onUpdateFrameItem, onFrameFreeze, onPartFreeze, onAddFrameItem, onJumpToFrameItem,
   viewMarkers = [], selectedViewT = null, onSelectView, onMoveView, onRemoveView, onDuplicateView,
   onBrollChange, videoUrls = {}, mediaLengths = {}, zoom: zoomProp, onZoomChange,
   onAddKind, cutJoins = [], isStock, onDropFiles, onDropStock, onDropMedia,
@@ -1517,6 +1544,55 @@ export function Timeline({
       }
     })
   }
+  /** A freeze range pressed: its middle moves it, its ends resize it (never over the next one, or off the bar) */
+  function handleFreezeDown(e: React.PointerEvent, bar: FreezeBar, i: number, mode: 'move' | 'start' | 'end') {
+    if (e.button !== 0) return
+    e.stopPropagation(); e.preventDefault()
+    if (bar.locked) return
+    const h0 = bar.holds[i]
+    const lo = i ? bar.holds[i - 1].at_ms + bar.holds[i - 1].len_ms : bar.from - bar.origin
+    const hi = bar.grows && mode === 'end' ? Infinity : i < bar.holds.length - 1 ? bar.holds[i + 1].at_ms : bar.to - bar.origin
+    const sx = e.clientX, k = msPerPx()
+    let moved = false
+    setDragging(`freeze-${i}`)
+    track(ev => {
+      if (!moved && Math.abs(ev.clientX - sx) < 3) return
+      moved = true
+      bar.set(i, movedHold(h0, mode, (ev.clientX - sx) * k, lo, hi))
+    })
+  }
+  /** The blue ranges on a bar; picked, each has its handles and an ✕ */
+  function freezeRanges(bar: FreezeBar) {
+    return bar.holds.map((h, i) => {
+      const a = Math.max(bar.from, bar.origin + h.at_ms), b = Math.min(bar.to, bar.origin + h.at_ms + h.len_ms)
+      if (b <= a) return null
+      const handle = (mode: 'start' | 'end') => (
+        <div className="absolute inset-y-0 flex items-center justify-center cursor-col-resize" aria-hidden="true"
+          style={{ [mode === 'start' ? 'left' : 'right']: 0, width: 12, background: 'rgba(59,130,246,0.6)' }}
+          onPointerDown={e => handleFreezeDown(e, bar, i, mode)}>
+          <svg width="8" height="10" viewBox="0 0 8 10" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={mode === 'start' ? 'M5.5 1.5L2.5 5l3 3.5' : 'M2.5 1.5l3 3.5-3 3.5'} /></svg>
+        </div>
+      )
+      return (
+        <div key={i} className="absolute inset-y-0 overflow-hidden" title={`Frozen ${msToLabel(a)}–${msToLabel(b)}${bar.on ? ' · drag to move, drag its ends to change it' : ''}`}
+          onPointerDown={bar.on ? e => handleFreezeDown(e, bar, i, 'move') : undefined}
+          style={{
+            left: `${((a - bar.from) / (bar.to - bar.from)) * 100}%`, width: `${((b - a) / (bar.to - bar.from)) * 100}%`, background: FROZEN_BLUE, zIndex: 11,
+            boxShadow: 'inset 0 0 0 1.5px rgba(96,165,250,0.85)', borderRadius: 4, pointerEvents: bar.on ? 'auto' : 'none', cursor: 'grab', touchAction: 'none',
+          }}>
+          {bar.on && !bar.locked && (<>
+            {handle('start')}
+            {handle('end')}
+            <button type="button" aria-label={`Remove the freeze ${msToLabel(a)}–${msToLabel(b)}`} title="Let it play here again"
+              className="absolute top-1/2 left-1/2 flex items-center justify-center rounded-full"
+              style={{ transform: 'translate(-50%, -50%)', width: 14, height: 14, background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 9, lineHeight: 1 }}
+              onPointerDown={e => e.stopPropagation()}
+              onClick={e => { e.stopPropagation(); bar.set(i, null) }}>✕</button>
+          </>)}
+        </div>
+      )
+    })
+  }
   function handleViewDown(e: React.PointerEvent, t: number, first: boolean) {
     if (e.button !== 0) return
     e.stopPropagation(); e.preventDefault()
@@ -1713,6 +1789,11 @@ export function Timeline({
           return <div key={grown.key} className="tl2-grow tl2-grown absolute inset-y-0 pointer-events-none" data-edge={grown.edge}
             style={{ width: `${w}%`, [grown.edge === 'start' ? 'left' : 'right']: 0, borderRadius: grown.edge === 'start' ? '8px 0 0 8px' : '0 8px 8px 0' }} />
         })()}
+        {/* its freezes (the time they add is in the part) */}
+        {!isInsert && !g && freezeRanges({
+          holds: (seg.frame?.freeze?.holds ?? []).filter(isMainHold), origin: seg.start_ms, from: seg.start_ms, to: seg.end_ms, on: sel, grows: true,
+          locked: !!seg.locked, set: (n, h) => onPartFreeze?.(seg.id, n, h),
+        })}
         {/* selected: a plain outline (the grips say it's selected) */}
         {sel && <div className="absolute inset-0 pointer-events-none" style={{ borderRadius: 8, boxShadow: `inset 0 0 0 2px ${ACCENT}` }} />}
         {sel && (['start', 'end'] as const).map(edge => grip(seg, i, edge))}
@@ -2083,60 +2164,100 @@ export function Timeline({
       (edge, d) => { if (!m.locked) onMusicTrim?.(m.id, edge, Math.round((edge === 'start' ? m.start_ms : end) + d)) })
   }
 
-  // ── Frame lanes (the frame under the playhead: its slots and items) ──
+  // ── Frame lanes: only the frame picked (the one under the playhead) — its own rows, under its name
+  // and time, each with its own eye / sound / lock (user, 2026-11-06: rows shared by every frame
+  // didn't say which frame was shown, hidden or muted). Another frame picked: the rows switch to it ──
   const frameLanes = () => {
-    const frames = mains.filter(s => isFrameLayout(s.layout))
-    const active = frameSeg && isFrameLayout(frameSeg.layout) ? frameSeg : null
-    const rows: ReturnType<typeof visibleLanes> = []
-    for (const f of active ? [active, ...frames.filter(x => x.id !== active.id)] : frames) {
-      for (const r of visibleLanes(f)) if (!rows.some(x => x.lane === r.lane)) rows.push(r)
-    }
-    if (!rows.length) return null
-    const seg = active
+    const seg = frameSeg && isFrameLayout(frameSeg.layout) ? frameSeg : null
+    if (!seg || !visibleLanes(seg).length) return null
+    // The other frames on the rows they have too, with what's in them (user, 2026-11-09: display
+    // everything — they were blank grey bars): quieter, and only to see; a click there moves the
+    // playhead onto that frame, which picks it. A row only another frame has stays too, with no buttons
+    const others = mains.filter(s => s.id !== seg.id && isFrameLayout(s.layout))
+    const rows = [...visibleLanes(seg)]
+    for (const o of others) for (const r of visibleLanes(o)) if (!rows.some(x => x.lane === r.lane)) rows.push(r)
     const frame = seg ? frameOf(seg) : null
     const main = frame?.main_slots ?? [0]
     const inSection = !!seg && currentTimeMs >= seg.start_ms && currentTimeMs < seg.end_ms
     const plusAt = seg ? (inSection ? currentTimeMs : seg.start_ms) : 0
     const itemName = (it: FrameItem) => it.kind === 'video' ? (videoTitles[it.source_video_id ?? ''] ?? 'Video') : it.kind === 'photo' ? 'Photo' : it.captions ? 'Captions' : (it.text?.trim() || 'Text')
+    const isMainLane = (f: SegmentLocal, lane: FrameLane) => !isTextLane(lane) && (frameOf(f).main_slots ?? [0]).includes(lane as number)
+    // The empty spots of the frame's lane (user, 2026-11-06: named, dashed, "+ Add" on
+    // hover — a faint grey strip didn't say what it was). Clicked: the add menu for that spot there
+    const empties = (f: SegmentLocal, lane: FrameLane, label: string) => {
+      if (isMainLane(f, lane)) return null
+      const out: Array<{ from: number; to: number }> = []
+      let from = f.start_ms
+      for (const it of laneItems(frameOf(f), lane, f)) {
+        if (it.start_ms - from >= MIN_ITEM_MS) out.push({ from, to: it.start_ms })
+        from = Math.max(from, it.end_ms)
+      }
+      if (f.end_ms - from >= MIN_ITEM_MS) out.push({ from, to: f.end_ms })
+      const what = isTextLane(lane) ? 'text' : 'a photo or video'
+      return out.map(g => (
+        <button key={`empty-${f.id}-${g.from}`} type="button" className="group/empty absolute inset-y-0.5 flex items-center gap-1.5 overflow-hidden"
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => {
+            e.stopPropagation()
+            // (the menu opens at the pointer, not at the spot's far corner)
+            const r = e.currentTarget.getBoundingClientRect()
+            onAddFrameItem?.(lane, new DOMRect(e.clientX - 9, r.top, 18, r.height), { segId: f.id, t: g.from })
+          }}
+          aria-label={`${label}, empty ${msToLabel(g.from)}–${msToLabel(g.to)}: add ${what} here`}
+          title={`${label} is empty here · click to add ${what}`}
+          style={{ left: `${at(g.from)}%`, width: `${pct(g.to - g.from)}%`, borderRadius: 5, background: 'rgb(var(--ed-fg) / 0.035)', border: '1px dashed rgb(var(--ed-fg) / 0.25)' }}>
+          <span className="pl-2 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>{label} · empty</span>
+          <span className="shrink-0 pr-2 text-[10px] font-bold pointer-events-none opacity-0 group-hover/empty:opacity-100 transition-opacity" style={{ color: ACCENT }}>+ Add</span>
+        </button>
+      ))
+    }
     return (
       <div ref={lanesRef} className="relative flex flex-col" style={{ gap: 2, paddingTop: 4, paddingBottom: 2 }}>
+        {/* Whose rows these are: the frame's name and time, a bracket over its stretch */}
+        <div className="relative pointer-events-none" style={{ height: FRAME_HEAD_H }} aria-label={`Rows of ${formatTag(seg)}, ${msToLabel(seg.start_ms)}–${msToLabel(seg.end_ms)}`}>
+          <div className="absolute bottom-0.5 flex items-end gap-1.5 whitespace-nowrap" style={{ left: `${at(seg.start_ms)}%`, minWidth: `${pct(seg.end_ms - seg.start_ms)}%`, borderBottom: `1.5px solid ${LAYOUT_COLORS[seg.layout] ?? ACCENT}88` }}>
+            <span className="text-[10px] font-bold pl-1" style={{ color: LAYOUT_COLORS[seg.layout] ?? ACCENT }}>{formatTag(seg)}</span>
+            <span className="text-[10px] tabular-nums pb-px" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>{msToLabel(seg.start_ms)}–{msToLabel(seg.end_ms)}</span>
+          </div>
+        </div>
         {rows.map(lane => {
           const laneKey = String(lane.lane)
-          const row = seg ? visibleLanes(seg).find(r => r.lane === lane.lane) : undefined
+          const row = visibleLanes(seg).find(r => r.lane === lane.lane)
           const isMain = !!row && !isTextLane(row.lane) && main.includes(row.lane)
           const mainId = `main:${lane.lane}`
           const pulsing = pulseLane === lane.lane
           return (
             <div key={laneKey} data-lane={`frame:${laneKey}`} className="group/lane relative" style={{ height: FRAME_LANE_H }}
               onPointerDown={e => { onSelectFrameItem?.(null); handleScrubDown(e) }}>
-              {frames.filter(o => o.id !== seg?.id).map(o => {
-                const r2 = visibleLanes(o).find(r => r.lane === lane.lane)
-                if (!r2) return null
-                const of = frameOf(o)
-                return (
-                  <Fragment key={o.id}>
-                    <div className="absolute inset-y-0.5 pointer-events-none" style={{ left: `${at(o.start_ms)}%`, width: `${pct(o.end_ms - o.start_ms)}%`, borderRadius: 5, background: 'rgb(var(--ed-fg) / 0.045)' }} />
-                    {laneItems(of, r2.lane, o).map(it => {
-                      const from = Math.max(it.start_ms, o.start_ms), to = Math.min(it.end_ms, o.end_ms), color = frameItemColor(it)
-                      return (
-                        <button key={it.id} type="button" className="absolute inset-y-0.5 flex items-center overflow-hidden"
-                          aria-label={`${itemName(it)}, ${r2.label}, ${msToLabel(from)}–${msToLabel(to)}: go there and pick it`}
-                          onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onJumpToFrameItem?.(o.id, it.id) }}
-                          style={{ left: `${at(from)}%`, width: `max(8px, ${pct(to - from)}%)`, borderRadius: 5, background: `${color}38`, boxShadow: `inset 0 0 0 1px ${color}88` }}>
-                          <span className="px-2 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.9)' }}>{itemName(it)}</span>
-                        </button>
-                      )
-                    })}
-                  </Fragment>
-                )
-              })}
-              {seg && frame && row && (<>
+              {others.filter(o => visibleLanes(o).some(r => r.lane === lane.lane)).map(o => (
+                <Fragment key={o.id}>
+                  <div className="absolute inset-y-0.5 pointer-events-none" title={formatTag(o)}
+                    style={{ left: `${at(o.start_ms)}%`, width: `${pct(o.end_ms - o.start_ms)}%`, borderRadius: 5, background: 'rgb(var(--ed-fg) / 0.045)' }} />
+                  {isMainLane(o, lane.lane) && (
+                    <div className="absolute inset-y-0.5 flex items-center overflow-hidden pointer-events-none"
+                      style={{ left: `${at(o.start_ms)}%`, width: `${pct(o.end_ms - o.start_ms)}%`, borderRadius: 5, background: `${FRAME_ITEM_COLORS.main}18` }}>
+                      <span className="px-2 truncate text-[10px] font-semibold" style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>{lane.label} · Main video</span>
+                    </div>
+                  )}
+                  {laneItems(frameOf(o), lane.lane, o).map(it => {
+                    const from = Math.max(it.start_ms, o.start_ms), to = Math.min(it.end_ms, o.end_ms)
+                    if (to <= from) return null
+                    return (
+                      <div key={it.id} className="absolute inset-y-0.5 flex items-center overflow-hidden pointer-events-none"
+                        style={{ left: `${at(from)}%`, width: `max(8px, ${pct(to - from)}%)`, borderRadius: 5, zIndex: 1, background: it.freeze ? FROZEN_BLUE : `${frameItemColor(it)}28`, boxShadow: `inset 2px 0 0 ${frameItemColor(it)}88` }}>
+                        {it.kind === 'photo' && it.image_url && <img src={it.image_url} alt="" crossOrigin="anonymous" className="h-full w-7 object-cover shrink-0" style={{ marginLeft: 2, opacity: 0.75 }} />}
+                        <span className="px-2 truncate text-[10px] font-semibold" style={{ color: 'rgb(var(--ed-fg) / 0.72)' }}>{it.kind === 'text' && !it.captions ? 'T · ' : ''}{it.freeze || it.holds?.length ? '❄ ' : ''}{itemName(it)}</span>
+                      </div>
+                    )
+                  })}
+                </Fragment>
+              ))}
+              {frame && row && (<>
                 <div className="absolute inset-y-0.5 pointer-events-none" style={{
                   left: `${at(seg.start_ms)}%`, width: `${pct(seg.end_ms - seg.start_ms)}%`, borderRadius: 5,
                   background: pulsing ? 'rgba(200,255,0,0.12)' : 'rgb(var(--ed-fg) / 0.045)', boxShadow: pulsing ? `inset 0 0 0 1.5px ${ACCENT}` : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.06)',
-                }}>
-                  <span className="absolute top-1/2 -translate-y-1/2 text-[10px] font-semibold whitespace-nowrap" style={{ left: 8, color: 'rgb(var(--ed-fg) / 0.3)' }}>{row.label}</span>
-                </div>
+                }} />
+                {empties(seg, row.lane, row.label)}
                 {isMain && (() => {
                   const on = isSel(mainId, activeFrameItemId === mainId)
                   return (
@@ -2145,6 +2266,10 @@ export function Timeline({
                       title="Main video · select it to change its sound or take it out of this slot"
                       style={{ left: `${at(seg.start_ms)}%`, width: `${pct(seg.end_ms - seg.start_ms)}%`, borderRadius: 5, background: `${FRAME_ITEM_COLORS.main}${on ? '40' : '24'}`, boxShadow: on ? SELECTED_RING : `inset 2px 0 0 ${FRAME_ITEM_COLORS.main}`, zIndex: on ? 3 : undefined }}>
                       <span className="px-2 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>{row.label} · Main video</span>
+                      {freezeRanges({
+                        holds: (frame.freeze?.holds ?? []).filter(isMainHold), origin: seg.start_ms, from: seg.start_ms, to: seg.end_ms, on, grows: true,
+                        locked: !!seg.locked || !!frame.main_locked?.[String(row.lane)], set: (i, h) => onFrameFreeze?.(mainId, i, h),
+                      })}
                     </div>
                   )
                 })()}
@@ -2156,17 +2281,31 @@ export function Timeline({
                     <div key={it.id} className="absolute inset-y-0.5 flex items-center overflow-hidden"
                       onPointerDown={e => handleFrameItemDown(e, it, 'move')}
                       title={`${itemName(it)} · ${msToLabel(from)}–${msToLabel(to)} · drag to move, drag the ends to trim`}
-                      style={{ left: `${at(from)}%`, width: `max(8px, ${pct(to - from)}%)`, borderRadius: 5, zIndex: on ? 3 : 2, background: `${color}${on ? '55' : '38'}`, boxShadow: on ? SELECTED_RING : `inset 0 0 0 1px ${color}88`, cursor: 'grab', touchAction: 'none' }}>
+                      style={{ left: `${at(from)}%`, width: `max(8px, ${pct(to - from)}%)`, borderRadius: 5, zIndex: on ? 3 : 2, background: it.freeze ? FROZEN_BLUE : `${color}${on ? '55' : '38'}`, boxShadow: on ? SELECTED_RING : `inset 0 0 0 1px ${color}88`, cursor: 'grab', touchAction: 'none' }}>
+                      {/* Its freeze stretches: striped where it holds a still picture (it stays one piece) */}
+                      {!it.freeze && it.kind === 'video' && freezeRanges({
+                        holds: (frame.freeze?.holds ?? []).filter(h => sameLayer(h, it.id)), origin: seg.start_ms, from, to, on, grows: true, locked: !!seg.locked || !!it.locked,
+                        set: (i, h) => onFrameFreeze?.(it.id, i, h),
+                      })}
+                      {/* (a freeze from before they added time: it can still be changed or taken off) */}
+                      {!it.freeze && freezeRanges({
+                        holds: it.holds ?? [], origin: it.start_ms, from, to, on, locked: !!seg.locked || !!it.locked,
+                        set: (i, h) => {
+                          const holds = (it.holds ?? []).flatMap((x, j) => (j !== i ? [x] : h ? [h] : []))
+                          onUpdateFrameItem?.(it.id, holds.length ? { holds } : { holds: null, dim: false })
+                        },
+                      })}
                       <div className="absolute left-0 inset-y-0 w-2 cursor-col-resize z-10" style={{ background: 'rgba(0,0,0,0.25)' }} onPointerDown={e => handleFrameItemDown(e, it, 'start')} />
                       {it.kind === 'photo' && it.image_url && <img src={it.image_url} alt="" crossOrigin="anonymous" className="h-full w-7 object-cover shrink-0 pointer-events-none" style={{ marginLeft: 8, opacity: 0.9 }} />}
-                      <span className="px-2.5 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.92)' }}>{it.kind === 'text' && !it.captions ? 'T · ' : ''}{itemName(it)}</span>
+                      <span className="px-2.5 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.92)' }}>{it.kind === 'text' && !it.captions ? 'T · ' : ''}{it.freeze || it.holds?.length ? '❄ ' : ''}{itemName(it)}</span>
                       <span className="shrink-0 pr-2.5 pointer-events-none"><StateBadges st={it} /></span>
                       <div className="absolute right-0 inset-y-0 w-2 cursor-col-resize z-10" style={{ background: 'rgba(0,0,0,0.25)' }} onPointerDown={e => handleFrameItemDown(e, it, 'end')} />
                     </div>
                   )
                 })}
                 {(() => {
-                  const taken = laneItems(frame, row.lane, seg).some(it => it.start_ms <= plusAt && plusAt < it.end_ms)
+                  // (the main video fills its row too: no + on something already there)
+                  const taken = isMain || laneItems(frame, row.lane, seg).some(it => it.start_ms <= plusAt && plusAt < it.end_ms)
                   if (taken && !pulsing) return null
                   return (
                     <button ref={el => { if (el) plusRefs.current.set(laneKey, el); else plusRefs.current.delete(laneKey) }}
@@ -2323,9 +2462,12 @@ export function Timeline({
         )}
         {laneSpans.map(sp => {
           const meta = metaOf(sp.kind)
-          // (the main row keeps its own sound button: beside it, its lock)
-          const ctl = laneCtl && (sp.kind === 'main' || /^(track|audio)-\d+$/.test(sp.kind)) ? laneCtl(sp.kind) : null
+          // (the main row keeps its own sound button: beside it, its lock. A frame's rows: theirs, for
+          // that frame only — the frame picked, whose rows these are)
+          const ctl = laneCtl && (sp.kind === 'main' || /^(track|audio)-\d+$/.test(sp.kind) || sp.kind.startsWith('frame:')) ? laneCtl(sp.kind) : null
           if (!meta && !ctl) return null
+          const frameRow = sp.kind.startsWith('frame:') && frameSeg && isFrameLayout(frameSeg.layout)
+            ? visibleLanes(frameSeg).find(r => `frame:${r.lane}` === sp.kind) : undefined
           const mid = sp.kind === 'main' ? sp.top + MAIN_PAD + BLOCK_H / 2 : sp.top + sp.h / 2
           return (
             <Fragment key={sp.kind}>
@@ -2335,7 +2477,8 @@ export function Timeline({
                 </span>
               )}
               {/* (the main row has no icon: photos and frames go in it too — user, 2026-10-30) */}
-              {ctl && !ctl.empty && ctl.can.map(k => rowButton(sp.kind, k, !!ctl.state[k], mid, sp.kind === 'main' ? 'Main video' : meta?.label ?? 'Media', ctl.note))}
+              {ctl && !ctl.empty && ctl.can.map(k => rowButton(sp.kind, k, !!ctl.state[k], mid,
+                sp.kind === 'main' ? 'Main video' : frameRow && frameSeg ? `${frameRow.label} in ${formatTag(frameSeg)}` : meta?.label ?? 'Media', ctl.note))}
             </Fragment>
           )
         })}

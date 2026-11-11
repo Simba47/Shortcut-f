@@ -953,12 +953,12 @@ function EditModeDialog({ videoId, title, videoUrl, durationMs, credits, onClose
   }
   const options = [
     {
-      mode: 'ai' as const, name: 'AI edit', tag: 'Recommended', cta: 'Start with AI',
+      mode: 'ai' as const, name: 'AI edit', tag: 'Recommended', cta: 'AI editing',
       desc: 'AI watches your video and turns its best moments into ready-to-post clips.',
-      points: ['Best moments found for you', 'Captions and titles added', 'Ready in a few minutes'],
+      points: ['Top moments picked for you', 'Captions and titles added', 'Ready in a few minutes'],
     },
     {
-      mode: 'manual' as const, name: 'Manual edit', tag: 'Full control', cta: 'Pick my moments',
+      mode: 'manual' as const, name: 'Manual edit', tag: 'Full control', cta: 'Manual editing',
       desc: 'Play through the video and choose exactly where each clip starts and ends.',
       points: ['Scrub to any moment', 'Set each start and end', 'Fine-tune in the editor'],
     },

@@ -39,6 +39,27 @@ export type FrameItemKind = 'video' | 'photo' | 'text'
  * one after another (a slideshow); they never overlap. Times are clip time, like text overlays,
  * and anything outside the format's own range isn't shown.
  */
+/** A frozen stretch inside a frame video item (FrameItem.holds) */
+/** `on`: the layer a freeze of a part belongs to (a frame item's id, or `main:<slot>`); absent = every video in the part */
+export interface FrameHold { at_ms: number; len_ms: number; on?: string }
+
+/** What a video or photo moved from its row into a frame needs to go back there */
+export interface FrameRowOrigin {
+  start_ms: number
+  track?: number
+  lane?: 'broll'
+  /** Video: its views on the row */
+  views?: Array<{ t_ms: number; x: number; y: number; w: number; h: number }>
+  /** Photo: its box on the row */
+  x?: number
+  y?: number
+  w?: number
+  h?: number
+  z_index?: number
+  rotation?: number
+  opacity?: number
+}
+
 export interface FrameItem {
   id: string
   lane: FrameLane
@@ -60,6 +81,28 @@ export interface FrameItem {
   locked?: boolean
   /** Video / photo: its box inside its slot when resized / moved (shares of the slot; absent = the whole slot) */
   rect?: { x: number; y: number; w: number; h: number } | null
+  /**
+   * Photo: which part of it shows in its box when it fills it (user, 2026-11-05: dragged in the
+   * preview) — x / y as shares of the room to spare each way (0 = its left / top edge, 0.5 = the
+   * middle), zoom ≥ 1 (scrolled). Absent = the middle at 1×. Not with a motion (that moves it itself).
+   */
+  pan?: { x: number; y: number; zoom?: number } | null
+  /**
+   * Video items: frozen (user, 2026-11-06) — one still picture, the one at source_offset_ms, for
+   * its whole time, with no sound. "Freeze until playhead" makes the piece after it start playing
+   * from that same picture. `dim`: a frozen piece shown darker (55%), so the playing one stands out.
+   */
+  freeze?: boolean
+  dim?: boolean
+  /**
+   * Video items: stretches frozen inside it (user, 2026-11-09: "❄ Freeze a–b" mustn't cut the media).
+   * `at_ms` from the item's own start (clip ms), `len_ms` long, in order, not overlapping. It plays up
+   * to one, holds that picture (silent) for its length, then plays on from the same picture. `dim`
+   * darkens them too. Not used while the whole item is frozen.
+   */
+  holds?: FrameHold[] | null
+  /** It came off a row when a frame was put on it (frameOnMedia.ts): where it goes back to when the frame comes off */
+  from_row?: FrameRowOrigin | null
   // Photo
   image_path?: string | null
   /** Signed URL for image_path — preview only, never saved */
@@ -112,8 +155,23 @@ export interface FrameSettings {
   main_locked?: Record<string, boolean>
   /** Rounded corners of the main video, per slot index */
   main_corners?: Record<string, CornerStyle>
+  /**
+   * Freezes of the part (user, 2026-11-10): the layer picked holds still, silent, for each stretch, then
+   * plays on from the same picture, and the part and the clip are that much longer; the others play on
+   * and hold their last picture for the time added. `at_ms` from the part's start, on the timeline.
+   * `dim` darkens the frozen layer of a frame meanwhile.
+   * Any part of the main video has them, a frame or not (a plain part keeps them here too), and they
+   * stay when its format changes.
+   */
+  freeze?: { holds: FrameHold[]; dim?: boolean } | null
   /** The main video is heard under the frame though no slot shows it (Photo Story), at main_volume */
   main_under?: boolean
+  /**
+   * Made on media where the main video wasn't showing (frameOnMedia.ts): it has no main video, in any
+   * frame it's switched to. How the main row was: `gap` the empty space a deleted part left, else the
+   * part's eye off, `muted` its sound off too.
+   */
+  no_main?: { gap?: boolean; muted?: boolean } | null
   /** Heights of the frame's rows (one per template row, shares of the frame) when resized; absent = the template's */
   row_h?: number[] | null
   /** The rows' order top to bottom (template row numbers) when swapped with the bar's swap; absent = the template's */
@@ -280,6 +338,8 @@ export interface CaptionStyle {
   stroke_width?: number | null
   /** Words the AI marked important, keyed by the word's start_ms; set by the export */
   emphasis?: Record<string, boolean> | null
+  /** The word a Creator style makes big on a line with no key word, keyed by its start_ms (AI: lib/keyWords.ts) */
+  line_keys?: Record<string, boolean> | null
   /**
    * The caption style picked (modules/captions/templates.ts: a preset in its own font and look);
    * null = none. `animation` then holds its base preset, drawn where templates aren't known.

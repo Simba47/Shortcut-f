@@ -3,11 +3,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useSession, signOut } from 'next-auth/react'
+import { privacyCards, PRIVACY_DOC } from '@/components/legal/privacyDoc'
+import { termsCards, TERMS_DOC } from '@/components/legal/termsDoc'
+import { COMPANY } from '@/lib/company'
+import { BrandTeamDialog } from '@/components/brand/BrandTeamDialog'
 
 /**
  * Profile button and menu. The button: a small profile photo and the name on a black rounded rectangle. The menu:
  * who you are, plan usage with Upgrade, account links, help
- * (keyboard shortcuts, support, what's new) and Sign out. Used in the dashboard, clip board, AI
+ * (keyboard shortcuts, support) and Sign out, then Privacy and Terms (each read in a popup over the page). Used in the dashboard, clip board, AI
  * edits and editor headers. (styles: .acct-* / .am-* / .dash-popover in app/globals.css)
  *
  * Pass `planInfo` when the page already has it; otherwise it's fetched here.
@@ -86,6 +90,9 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
 
   const [open, setOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [teamOpen, setTeamOpen] = useState(false)
+  // Privacy or Terms, read in a popup over the page (user, 2026-11-05: not a jump to their pages)
+  const [legal, setLegal] = useState<LegalDoc | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   // "?" anywhere (outside a text box) opens the keyboard shortcuts
   useEffect(() => {
@@ -162,6 +169,12 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
             <a href="/pricing" onClick={go('/pricing')} className="am-item" role="menuitem">
               <Icon d={<><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /></>} /><span className="flex-1">Plans &amp; billing</span>
             </a>
+            {/* (the top plan: its brand kits shared with a team — user, 2026-11-10) */}
+            {topPlan && (
+              <button className="am-item" role="menuitem" onClick={() => { setOpen(false); setTeamOpen(true) }}>
+                <Icon d={<><circle cx="9" cy="8" r="4" /><path d="M2 21a7 7 0 0114 0M16 4a4 4 0 010 8M18 15a6 6 0 014 6" /></>} /><span className="flex-1">Team</span>
+              </button>
+            )}
           </div>
 
           {/* Help */}
@@ -175,10 +188,6 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
               <span className="flex-1">Help &amp; support</span>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ opacity: 0.5 }}><path d="M7 17L17 7M8 7h9v9" /></svg>
             </a>
-            <div className="am-item" role="menuitem" aria-disabled="true" title="What’s new — coming soon">
-              <Icon d={<><path d="M12 2l2.2 6.3L20.5 10l-6.3 2.2L12 18.5l-2.2-6.3L3.5 10l6.3-1.7z" /></>} />
-              <span className="flex-1">What’s new</span><span className="am-dot" aria-label="New" />
-            </div>
           </div>
 
           {/* Sign out, then the legal links */}
@@ -190,12 +199,15 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
             </button>
           </div>
           <p className="am-legal">
-            <a href="/privacy" onClick={go('/privacy')}>Privacy</a><span aria-hidden="true">·</span><a href="/terms" onClick={go('/terms')}>Terms</a><span aria-hidden="true">·</span><span>Shortcut</span>
+            <button type="button" onClick={() => { setOpen(false); setLegal('privacy') }}>Privacy</button><span aria-hidden="true">·</span>
+            <button type="button" onClick={() => { setOpen(false); setLegal('terms') }}>Terms</button><span aria-hidden="true">·</span><span>Shortcut</span>
           </p>
         </div>
       )}
 
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
+      {teamOpen && <BrandTeamDialog onClose={() => setTeamOpen(false)} />}
+      {legal && <LegalDialog doc={legal} onDoc={setLegal} onClose={() => setLegal(null)} />}
     </div>
   )
 }
@@ -230,6 +242,56 @@ function ShortcutsDialog({ onClose }: { onClose: () => void }) {
           ))}
         </ul>
         <p className="am-sc-sub" style={{ marginTop: 14 }}>On a Mac, use ⌘ instead of Ctrl.</p>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+type LegalDoc = 'privacy' | 'terms'
+/**
+ * Privacy Policy or Terms, in a popup over the page (styles: .cfm-* for the frame, .am-lg-* inside):
+ * the same words as their pages (components/legal), numbered, scrolling inside the popup. Terms'
+ * link to the Privacy Policy switches the popup to it. Esc, ✕ or a click outside closes it.
+ */
+function LegalDialog({ doc, onDoc, onClose }: { doc: LegalDoc; onDoc: (d: LegalDoc) => void; onClose: () => void }) {
+  const bodyRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose() } }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [onClose])
+  // (switched from Terms to Privacy: from its top)
+  useEffect(() => { bodyRef.current?.scrollTo({ top: 0 }) }, [doc])
+  if (typeof document === 'undefined') return null
+  const info = doc === 'privacy' ? PRIVACY_DOC : TERMS_DOC
+  const cards = doc === 'privacy' ? privacyCards
+    : termsCards(<button type="button" className="am-lg-link" onClick={() => onDoc('privacy')}>Privacy Policy</button>)
+  return createPortal(
+    <div className="cfm-backdrop fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 300 }}
+      onPointerDown={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="lg-title" className="cfm-card am-lg-card" data-tone="warning">
+        <div className="am-lg-head">
+          <div className="min-w-0">
+            <p id="lg-title" className="cfm-title" style={{ margin: 0 }}>{info.title}</p>
+            <p className="am-lg-date">Last updated {info.updated}</p>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="am-sc-close">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+        <div ref={bodyRef} className="am-lg-body">
+          {cards.map(({ icon: CardIcon, title, body }, i) => (
+            <section key={title} className="am-lg-row">
+              <span className="am-lg-icon"><CardIcon aria-hidden /></span>
+              <div className="min-w-0">
+                <h3>{i + 1}. {title}</h3>
+                <p>{body}</p>
+              </div>
+            </section>
+          ))}
+          <p className="am-lg-copy">© {new Date().getFullYear()} {COMPANY.legalName}</p>
+        </div>
       </div>
     </div>,
     document.body,

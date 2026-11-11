@@ -294,6 +294,23 @@ export async function stopVideoTranscript(userId: string, videoId: string): Prom
   return videoTranscriptState(userId, videoId)
 }
 
+/**
+ * The editor's Stop on a clip's Regenerate (user, 2026-11-06): the job is marked stopped, so a queued
+ * one never runs and a running one stops within ~2 s (the worker's runTranscribeJob) without writing
+ * anything — the clip keeps the words it had. False when it had already finished.
+ */
+export async function stopClipCaptions(userId: string, jobId: string): Promise<boolean> {
+  if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw Object.assign(new Error('Not found'), { status: 404 })
+  const [job] = await sql<{ user_id: string | null }[]>`
+    SELECT v.user_id FROM jobs j JOIN clips c ON c.id::text = j.payload->>'clip_id' JOIN videos v ON v.id = c.video_id
+    WHERE j.id = ${jobId} AND j.type = 'transcribe'`
+  if (!job || job.user_id !== userId) throw Object.assign(new Error('Not found'), { status: 404 })
+  const stopped = await sql`
+    UPDATE jobs SET status = 'failed', error = ${READING_STOPPED}
+    WHERE id = ${jobId} AND status IN ('queued', 'processing') RETURNING id`
+  return stopped.length > 0
+}
+
 /** Why a reading failed, in a sentence: the worker's own message, without a failed command's pages of output */
 function readingFailure(error: string | null): string {
   const first = (error ?? '').split('\n')[0].trim()

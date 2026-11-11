@@ -1,4 +1,4 @@
-import type { FrameLayout, FrameBand, FrameItem, FrameLane, FrameSettings, LayoutType, SegmentLocal, CornerStyle } from '@chai-cut/shared'
+import type { FrameLayout, FrameBand, FrameHold, FrameItem, FrameLane, FrameSettings, LayoutType, SegmentLocal, CornerStyle } from '@chai-cut/shared'
 import { cardAreas, cleanCardLook } from '@/lib/shared/brandCard'
 
 // Frame templates. Most divide the 9:16 reel top-to-bottom into rows (media slots, a letterbox
@@ -84,7 +84,9 @@ export interface FrameTemplate {
 
 export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
   frame_single: {
-    name: 'Title', description: 'One video with a top letterbox for text.',
+    // Out of the gallery (user, 2026-11-06): Title + Caption became Title — its caption strip's bar
+    // drags down to close it, which is this. Kept so clips that have it still show and export it
+    name: 'Title (old)', description: 'One video with a top letterbox for text.',
     rows: [{ kind: 'band', h: 0.2 }, { kind: 'slot', slot: 0, h: 0.8 }],
     defaults: ['video'],
   },
@@ -132,8 +134,10 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
     bar2: { dir: 'v', at: 0.5, min: 0.2, max: 0.8, swap: true },
   },
   frame_title_caption: {
-    name: 'Title + Caption', description: 'A title on top, the video, and a strip below for captions.',
-    rows: [{ kind: 'band', h: 0.16 }, { kind: 'slot', slot: 0, h: 0.68 }, { kind: 'caption', h: 0.16 }],
+    // "Title" in the gallery (user, 2026-11-06: Title and Title + Caption merged): the caption strip
+    // starts open at 16%; its bar drags it bigger, or down to nothing (closed: the old Title)
+    name: 'Title', description: 'A title on top, the video, and a strip below for captions — drag its bottom bar down to close the strip.',
+    rows: [{ kind: 'band', h: 0.16, label: 'Title' }, { kind: 'slot', slot: 0, h: 0.68, label: 'Video' }, { kind: 'caption', h: 0.16 }],
     defaults: ['video'],
   },
   frame_big_small: {
@@ -301,11 +305,11 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
  * clips that already use them still show, edit and export as before; they just aren't offered for
  * new frames. Branded card is back with the brand kit (user, 2026-10-17): picked, it starts with the
  * kit's colour, title and @handle (EditorShell fillBrandCard). Side by side taken out the same way, and
- * Pic + Video, which Video + Media covers (user, 2026-11-04).
+ * Pic + Video, which Video + Media covers (user, 2026-11-04), and the Branded card (user, 2026-11-10).
  */
 export const FRAME_LAYOUTS: FrameLayout[] = [
-  'frame_single', 'frame_title_caption', 'frame_blur_fill', 'frame_dual', 'frame_video_photo', 'frame_triple',
-  'frame_trio_main', 'frame_screen_face', 'frame_brand_card',
+  'frame_title_caption', 'frame_blur_fill', 'frame_dual', 'frame_video_photo', 'frame_triple',
+  'frame_trio_main', 'frame_screen_face',
 ]
 /** How a new frame of this template is laid out (its starting row order), for the gallery's picture */
 export const startLayout = (layout: FrameLayout): RowLayout => {
@@ -411,14 +415,16 @@ export function validRowOrder(layout: FrameLayout, custom: RowLayout): number[] 
   return order.every((v, i) => v === i) ? null : order
 }
 
-export function frameRows(layout: FrameLayout, showBand = true, custom?: RowLayout): (FrameRow & { y: number })[] {
+/** `keepClosed`: a closed caption strip (0 high) kept in the list — for the bars, so it can be opened again */
+export function frameRows(layout: FrameLayout, showBand = true, custom?: RowLayout, keepClosed = false): (FrameRow & { y: number })[] {
   const tplRows = FRAME_TEMPLATES[layout].rows
   if (!tplRows) return []   // a free template has no rows (its areas don't resize)
   const hs = validRowHeights(layout, rowHeightsOf(custom))
   const sized = tplRows.map((r, i) => hs ? { ...r, h: hs[i] } : r)
   // Swapped with the bar's swap: the rows in that order, each keeping its own size and look
   const order = validRowOrder(layout, custom)
-  const rows = (order ? order.map(i => sized[i]) : sized).filter(r => showBand || r.kind !== 'band')
+  // (a closed caption strip isn't there: no strip, the captions where they usually are — frames.py frame_rows)
+  const rows = (order ? order.map(i => sized[i]) : sized).filter(r => (showBand || r.kind !== 'band') && (keepClosed || r.h > 0))
   const total = rows.reduce((a, r) => a + r.h, 0) || 1
   let y = 0
   return rows.map(r => { const h = r.h / total, row = { ...r, h, y }; y += h; return row })
@@ -473,16 +479,36 @@ export function boxRect(r: { x: number; y: number; w: number; h: number } | null
   return w > 0.999 && h > 0.999 ? null : { x, y, w, h }
 }
 
+/**
+ * The old Title (frame_single: a title strip and the video) as the merged Title with its caption
+ * strip closed — the same picture (user, 2026-11-06: "remove Title (old)"). Its sizes and swap go
+ * with it; null for any other part.
+ */
+export function oldTitleAsTitle(seg: SegmentLocal): Pick<SegmentLocal, 'layout' | 'frame'> | null {
+  if (seg.layout !== 'frame_single') return null
+  const f = frameOf(seg)
+  const hs = validRowHeights('frame_single', f.row_h) ?? FRAME_TEMPLATES.frame_single.rows!.map(r => r.h)
+  const order = validRowOrder('frame_single', f)
+  return {
+    layout: 'frame_title_caption',
+    frame: { ...f, row_h: [hs[0], hs[1], 0], ...(order ? { row_order: [...order, 2] } : { row_order: undefined }) },
+  }
+}
+
 /** The smallest a row can be dragged to (share of the frame) */
 export const MIN_ROW_H = 0.08
+/** A caption strip dragged thinner than this closes (0 high: no strip — Title's bottom bar) */
+export const CAPTION_CLOSE_H = 0.04
 
 /** A frame's resized row heights if they fit its template (one per row, none too small); else null. render.py (frames.py) mirrors this. */
 export function validRowHeights(layout: FrameLayout, custom?: number[] | null): number[] | null {
   const tplRows = FRAME_TEMPLATES[layout].rows
   if (!tplRows) return null
   const n = tplRows.length
-  if (!Array.isArray(custom) || custom.length !== n || !custom.every(h => typeof h === 'number' && isFinite(h) && h >= 0.03)) return null
+  // (a caption strip can be closed: 0, dragged down to nothing — user, 2026-11-06, Title's bottom bar)
+  if (!Array.isArray(custom) || custom.length !== n || !custom.every((h, i) => typeof h === 'number' && isFinite(h) && (h >= 0.03 || (h === 0 && tplRows[i].kind === 'caption')))) return null
   const total = custom.reduce((a, h) => a + h, 0)
+  if (!(total > 0)) return null
   return custom.map(h => h / total)
 }
 
@@ -575,6 +601,124 @@ export function frameLanes(layout: FrameLayout, showBand = true, custom?: RowLay
 
 export const MIN_ITEM_MS = 200
 
+// ── Freeze stretches inside a video item (FrameItem.holds; user, 2026-11-09: the media stays one
+// piece). Times are clip ms; a hold's at_ms counts from the item's start. render.py does the same.
+
+/** Its holds kept inside a `len` long item: cut at its end, in order, none shorter than 1 ms */
+export function fitHolds(holds: FrameHold[] | null | undefined, len: number): FrameHold[] {
+  const out: FrameHold[] = []
+  for (const h of [...(holds ?? [])].sort((a, b) => a.at_ms - b.at_ms)) {
+    const at = Math.max(0, Math.round(h.at_ms), out.length ? out[out.length - 1].at_ms + out[out.length - 1].len_ms : 0)
+    const end = Math.min(len, Math.round(h.at_ms + h.len_ms))
+    if (end - at >= 1) out.push({ ...h, at_ms: at, len_ms: end - at })
+  }
+  return out
+}
+
+/** How much of the first `rel` ms of an item its holds take (no video plays then) */
+function heldBefore(holds: FrameHold[] | null | undefined, rel: number): number {
+  let held = 0
+  for (const h of holds ?? []) held += Math.max(0, Math.min(rel - h.at_ms, h.len_ms))
+  return held
+}
+
+/** Where in its video (ms) a video item is at clip time `t`, and whether it's held still then */
+export function itemSourceAt(it: FrameItem, t: number): { ms: number; held: boolean } {
+  const off = it.source_offset_ms ?? 0
+  if (it.freeze) return { ms: off, held: true }
+  const rel = Math.max(0, t - it.start_ms)
+  const held = !!it.holds?.some(h => rel >= h.at_ms && rel < h.at_ms + h.len_ms)
+  return { ms: off + rel - heldBefore(it.holds, rel), held }
+}
+
+/** The item with its start moved to `start`, showing the same pictures at the same times (a trim) */
+export function withItemStart(it: FrameItem, start: number): FrameItem {
+  const d = start - it.start_ms
+  if (!d || it.kind !== 'video') return { ...it, start_ms: start }
+  const holds = it.holds?.length ? fitHolds(it.holds.map(h => ({ at_ms: h.at_ms - d, len_ms: h.len_ms })), it.end_ms - start) : it.holds
+  const off = it.freeze ? (it.source_offset_ms ?? 0) : Math.max(0, d > 0 ? itemSourceAt(it, start).ms : (it.source_offset_ms ?? 0) + d)
+  return { ...it, start_ms: start, source_offset_ms: off, ...(it.holds ? { holds: holds?.length ? holds : null } : {}) }
+}
+
+/** An item cut in two at clip time `t`: the right part goes on from where the left stops (a frozen stretch carries over) */
+export function cutItem(it: FrameItem, t: number, rightId: string): [FrameItem, FrameItem] {
+  const left: FrameItem = { ...it, end_ms: t }
+  if (it.holds) left.holds = fitHolds(it.holds, t - it.start_ms)
+  if (left.holds && !left.holds.length) left.holds = null
+  return [left, { ...withItemStart(it, t), id: rightId }]
+}
+
+/** How long a new freeze starts out on the timeline */
+const NEW_HOLD_MS = 2000
+
+/**
+ * `holds` with a new one at `rel` (ms from what they're counted from), inside [lo, hi): up to
+ * NEW_HOLD_MS long, in the room there (a playhead outside, or on another freeze: the nearest room).
+ * Null when none is left. Never merged: each stays its own blue range. (The time for it is added: nothing is used up.)
+ */
+export function newHoldAt(holds: FrameHold[] | null | undefined, rel: number, lo: number, hi: number): FrameHold[] | null {
+  const list = [...(holds ?? [])].sort((x, y) => x.at_ms - y.at_ms)
+  const rooms: Array<[number, number]> = []
+  let from = lo
+  for (const h of list) {
+    if (h.at_ms - from >= MIN_ITEM_MS) rooms.push([from, h.at_ms])
+    from = Math.max(from, h.at_ms + h.len_ms)
+  }
+  if (hi - from >= MIN_ITEM_MS) rooms.push([from, hi])
+  if (!rooms.length) return null
+  const gapTo = ([a, b]: [number, number]) => (rel < a ? a - rel : rel >= b ? rel - b + 1 : 0)
+  const room = rooms.reduce((best, r) => (gapTo(r) < gapTo(best) ? r : best))
+  const len = Math.min(NEW_HOLD_MS, room[1] - room[0])
+  const at = Math.round(Math.max(room[0], Math.min(room[1] - len, rel)))
+  return [...list, { at_ms: at, len_ms: Math.round(len) }].sort((x, y) => x.at_ms - y.at_ms)
+}
+
+/** A freeze range dragged by `d` ms: its start, its end, or all of it; it stays inside [lo, hi) and at least MIN_ITEM_MS long */
+export function movedHold(h: FrameHold, mode: 'move' | 'start' | 'end', d: number, lo: number, hi: number): FrameHold {
+  const end = h.at_ms + h.len_ms
+  if (mode === 'move') return { at_ms: Math.round(Math.max(lo, Math.min(hi - h.len_ms, h.at_ms + d))), len_ms: h.len_ms }
+  if (mode === 'start') {
+    const at = Math.round(Math.max(lo, Math.min(end - MIN_ITEM_MS, h.at_ms + d)))
+    return { at_ms: at, len_ms: end - at }
+  }
+  return { at_ms: h.at_ms, len_ms: Math.round(Math.min(hi, Math.max(h.at_ms + MIN_ITEM_MS, end + d))) - h.at_ms }
+}
+
+// A freeze of a frame: every video in it waits. The main video really does (inserts.ts piecesOf holds
+// it, the clock runs on), and each video added to a slot takes the freeze as stretches of its own
+
+/** Whether a freeze is on the main video (it waits there: inserts.ts) */
+export const isMainHold = (h: FrameHold) => !h.on || h.on.startsWith('main:')
+/** Whether a freeze is on this layer (a frame item's id, or `main:<slot>`) */
+export const sameLayer = (h: FrameHold, layer: string) => !h.on || h.on === layer || (h.on.startsWith('main:') && layer.startsWith('main:'))
+
+/** Whether this layer of the part is frozen at clip time `t` */
+export function frameHeldAt(seg: Pick<SegmentLocal, 'start_ms' | 'frame'>, t: number, layer: string): boolean {
+  const rel = t - seg.start_ms
+  return !!seg.frame?.freeze?.holds?.some(h => sameLayer(h, layer) && rel >= h.at_ms && rel < h.at_ms + h.len_ms)
+}
+
+/** How much of the first `rel` ms of a frame its freezes take */
+export const frameHeldBefore = (frame: FrameSettings | null | undefined, rel: number) => heldBefore(frame?.freeze?.holds, rel)
+
+/** A video item as it plays in its frame: its freezes, and its last picture held for the time another layer's freezes added */
+export function withFrameFreeze(seg: Pick<SegmentLocal, 'start_ms' | 'end_ms' | 'frame'>, it: FrameItem): FrameItem {
+  const f = seg.frame?.freeze
+  if (!f?.holds?.length || it.kind !== 'video' || it.freeze) return it
+  const off = seg.start_ms - it.start_ms, len = it.end_ms - it.start_ms
+  const mine = f.holds.filter(h => sameLayer(h, it.id)).map(h => ({ at_ms: Math.max(0, h.at_ms + off), len_ms: h.at_ms + off + h.len_ms - Math.max(0, h.at_ms + off) }))
+  const added = it.end_ms >= seg.end_ms - 1 ? f.holds.filter(h => !sameLayer(h, it.id)).reduce((sum, h) => sum + h.len_ms, 0) : 0
+  return { ...it, holds: fitHolds([...(it.holds ?? []), ...mine, ...(added ? [{ at_ms: Math.max(0, len - added), len_ms: Math.min(len, added) }] : [])], len) }
+}
+
+/** frame.freeze for a frame whose start moved by `d` and that's now `len` long (null: none left) */
+export function fitFrameFreeze(f: FrameSettings['freeze'], d: number, len: number): FrameSettings['freeze'] {
+  if (!f) return f
+  // (layer by layer: freezes on different layers may overlap)
+  const holds = [...new Set(f.holds.map(h => h.on))].flatMap(on => fitHolds(f.holds.filter(h => h.on === on).map(h => ({ ...h, at_ms: h.at_ms - d })), len)).sort((a, b) => a.at_ms - b.at_ms)
+  return holds.length ? { ...f, holds } : null
+}
+
 /**
  * What a slot's "+" offers in each frame. Video slots offer the same (main) video or a different
  * one; photo slots a photo; Triple's slots both. Text goes on the band — offered from a slot's "+"
@@ -653,21 +797,13 @@ export function frameLanesFor(seg: SegmentLocal): FrameLaneInfo[] {
 }
 
 /**
- * The lanes a frame shows on the timeline, top to bottom as its preview shows them. The band's lane
- * appears once text is on it (the band itself is always in the preview, with its own "Add text"
- * button). A Single frame's slot is just the main video — the film strip already shows that — so it
- * only gets a lane once something is put on it. `asTemplate`: in the template's own order (unswapped).
+ * The lanes a frame shows on the timeline, top to bottom as its preview shows them — every one,
+ * empty or not (user, 2026-11-06: a text area's row and a one-video frame's video row are there
+ * from the start, as a media spot's is — "Title · empty" with its "+ Add", "Video · Main video";
+ * they used to appear only once something was put on them). `asTemplate`: in the template's own order (unswapped).
  */
 export function timelineLanes(seg: SegmentLocal, asTemplate = false): FrameLaneInfo[] {
-  const frame = frameOf(seg)
-  const main = frame.main_slots ?? [0]
-  const slots = frameSlotCount(seg.layout as FrameLayout)
-  const all = asTemplate ? frameLanes(seg.layout as FrameLayout, frameBandShown(seg), { row_h: seg.frame?.row_h }) : frameLanesFor(seg)
-  return all.filter(r => {
-    const empty = laneItems(frame, r.lane, seg).length === 0
-    if (isTextLane(r.lane)) return !empty
-    return !(slots === 1 && main.includes(r.lane) && empty)
-  })
+  return asTemplate ? frameLanes(seg.layout as FrameLayout, frameBandShown(seg), { row_h: seg.frame?.row_h }) : frameLanesFor(seg)
 }
 
 /**
@@ -695,14 +831,17 @@ export function defaultFrame(layout: FrameLayout, prev?: FrameSettings | null): 
   // The main video stays in the slots that still take a video; a frame for videos never starts
   // without it. A template that says where the main video goes (e.g. the face cam) puts it there.
   const kept = (prev?.main_slots ?? [0]).filter(i => i < slots && slotOffers(layout, i).video)
-  const main = under ? [] : tpl.mainSlots ?? (kept.length ? kept : [0])
+  // (a frame made on media has no main video: frameOnMedia.ts)
+  const main = under || prev?.no_main ? [] : tpl.mainSlots ?? (kept.length ? kept : [0])
   const corners = tpl.corners ?? DEFAULT_CORNERS
   const prevBand = { ...DEFAULT_BAND, ...prev?.band }
   return {
     // A template with its own colour (Branded card) starts with it, unless a colour was already picked
     band: { ...prevBand, ...(tpl.bandBg && prevBand.bg.toLowerCase() === DEFAULT_BAND.bg ? { bg: tpl.bandBg } : {}) },
     main_slots: main,
-    main_under: under,
+    main_under: under || (!!prev?.no_main && !prev.no_main.gap && !prev.no_main.muted),
+    ...(prev?.no_main ? { no_main: prev.no_main } : {}),
+    ...(prev?.freeze ? { freeze: prev.freeze } : {}),
     // (a template's own starting order: Pic + Text + Video, the picture on top)
     ...(tpl.startOrder ? { row_order: tpl.startOrder } : {}),
     main_volume: prev?.main_volume ?? 1,
@@ -777,6 +916,16 @@ export function itemAt(frame: FrameSettings, lane: FrameLane, t: number, seg: { 
   return hit
 }
 
+/** A frame made on media (FrameSettings.no_main) */
+export const isMediaFrame = (seg: Pick<SegmentLocal, 'layout' | 'frame'> | null | undefined) => !!seg && isFrameLayout(seg.layout) && !!seg.frame?.no_main
+
+/** What the editing view shows at t in a frame made on media: the media moved in, else the first video or photo showing */
+export function mediaFrameItemAt(seg: Pick<SegmentLocal, 'layout' | 'frame' | 'crop_boxes' | 'start_ms' | 'end_ms'>, t: number): FrameItem | null {
+  const here = (frameOf(seg).items ?? []).filter(it => (it.kind === 'video' || it.kind === 'photo') && !it.hidden
+    && t >= Math.max(it.start_ms, seg.start_ms) && t < Math.min(it.end_ms, seg.end_ms))
+  return here.find(it => it.from_row) ?? here[0] ?? null
+}
+
 /**
  * Where a new item goes when "+" is pressed on a lane with the playhead at t. On an empty stretch
  * it fills all of it (from the previous item, or the frame's start, to the next item or the
@@ -813,15 +962,20 @@ export function itemBounds(frame: FrameSettings, item: FrameItem, seg: { start_m
   return { min: Math.max(seg.start_ms, prev?.end_ms ?? -Infinity), max: Math.min(seg.end_ms, next?.start_ms ?? Infinity) }
 }
 
-/** Frame text-band item showing live captions at t, if any */
-export function captionBandAt(seg: SegmentLocal | null, t: number): { y: number; h: number } | null {
+/**
+ * Frame text-band item showing live captions at t, if any. strips false: captions the user has
+ * moved (position_y set) stay where they were put in a frame with a caption strip too (user,
+ * 2026-11-06: moving them works in every frame); in a text band they still sit there.
+ * render.py caption_band_zones does the same.
+ */
+export function captionBandAt(seg: SegmentLocal | null, t: number, strips = true): { y: number; h: number } | null {
   if (!seg || !isFrameLayout(seg.layout)) return null
   const areas = frameAreas(seg.layout, true, seg.frame)
   const band = areas.find(a => a.kind === 'band' && a.lane === 'band')
   const it = band ? itemAt(frameOf(seg), 'band', t, seg) : null
   if (band && it?.captions && !it.hidden) return { y: band.y, h: band.h }
   // A frame with a caption strip: the captions sit there
-  const strip = areas.find(a => a.kind === 'caption')
+  const strip = strips ? areas.find(a => a.kind === 'caption') : undefined
   return strip ? { y: strip.y, h: strip.h } : null
 }
 

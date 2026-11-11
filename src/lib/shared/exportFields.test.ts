@@ -37,15 +37,16 @@ const FIELDS: Record<string, Record<string, How>> = {
     id: 'saved', clip_id: 'saved', font: 'saved', size: 'saved', color: 'saved', position: 'saved', position_y: 'saved',
     position_x: 'saved', animation: 'saved', language: 'saved', translated_from_language: 'saved', timing_offset_ms: 'saved',
     enabled: 'saved', highlight_color: 'saved', words_per_line: 'saved', uppercase: 'saved', text_case: 'saved',
-    stroke_width: 'saved', emphasis: 'saved', template: 'saved',
+    stroke_width: 'saved', emphasis: 'saved', line_keys: 'saved', template: 'saved',
   },
   FrameItem: {
     id: 'frame', lane: 'frame', kind: 'frame', start_ms: 'frame', end_ms: 'frame', source_video_id: 'frame',
     source_offset_ms: 'frame', volume: 'frame', muted: 'frame', hidden: 'frame', rect: 'frame', image_path: 'frame',
     motion: 'frame', corners: 'frame', text: 'frame', bg: 'frame', color: 'frame', size: 'frame', font: 'frame',
     x: 'frame', y: 'frame', w: 'frame', h: 'frame', rotation: 'frame', captions: 'frame',
+    pan: 'frame', freeze: 'frame', dim: 'frame', holds: 'frame',
     // (a signed link to show the photo; which stock clip was picked; the lock)
-    image_url: 'editor', broll: 'editor', locked: 'editor',
+    image_url: 'editor', broll: 'editor', locked: 'editor', from_row: 'editor',
   },
 }
 

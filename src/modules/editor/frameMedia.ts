@@ -1,5 +1,5 @@
 import type { SegmentLocal, FrameItem } from '@chai-cut/shared'
-import { isFrameLayout, frameOf, mainAudioVolume } from './frames'
+import { withFrameFreeze, isFrameLayout, frameOf, mainAudioVolume, itemSourceAt } from './frames'
 
 // Media a frame's lanes show besides the main video: other uploaded videos and photos. The
 // preview canvas draws them; this keeps one element per video item, in step with the main
@@ -75,7 +75,9 @@ export function createFrameMediaPool(getVideoUrl: (videoId: string) => string | 
       if (Math.abs(main.volume - vol) > 0.01) main.volume = Math.max(0, Math.min(1, vol))
     }
     const inUse = new Set<string>()
-    for (const it of frame?.items ?? []) {
+    for (const raw of frame?.items ?? []) {
+      // (the frame's freezes hold it still too)
+      const it = seg ? withFrameFreeze(seg, raw) : raw
       if (it.kind !== 'video' || !it.source_video_id || !seg) continue
       const from = Math.max(it.start_ms, seg.start_ms), to = Math.min(it.end_ms, seg.end_ms)
       if (clipMs < from - PRELOAD_MS || clipMs >= to) continue
@@ -84,13 +86,15 @@ export function createFrameMediaPool(getVideoUrl: (videoId: string) => string | 
       inUse.add(it.id)
       if (!(v.duration > 0)) continue
       const showing = clipMs >= from
-      // Where this item's video should be, looping over its own length
-      const target = (((it.source_offset_ms ?? 0) + Math.max(0, clipMs - it.start_ms)) / 1000) % v.duration
+      // Where this item's video should be, looping over its own length (frozen, or in one of its
+      // freeze stretches: held on that picture, silent — render.py holds that one picture)
+      const at = itemSourceAt(it, clipMs)
+      const target = (at.ms / 1000) % v.duration
       const drift = Math.abs(v.currentTime - target)
-      const vol = it.muted ? 0 : it.volume ?? 1
+      const vol = it.muted || at.held ? 0 : it.volume ?? 1
       v.muted = !showing || vol <= 0
       v.volume = Math.max(0, Math.min(1, vol))
-      if (playing && showing) {
+      if (playing && showing && !at.held) {
         if (v.paused) v.play().catch(() => {})
         if (drift > 0.35 && drift < v.duration - 0.35) v.currentTime = target
       } else {

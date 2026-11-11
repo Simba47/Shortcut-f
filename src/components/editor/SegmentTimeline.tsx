@@ -47,12 +47,7 @@ export const FRAME_ITEM_COLORS = { video: '#60a5fa', photo: '#34d399', text: '#f
 export const frameItemColor = (it: FrameItem) => it.captions ? FRAME_ITEM_COLORS.captions : FRAME_ITEM_COLORS[it.kind]
 const FRAME_LANE_H = 26
 
-/**
- * The lanes a frame shows on the timeline. The band's lane appears once text is on it (the band
- * itself is always in the preview, with its own "Add text" button). A Single frame's slot is just
- * the main video — the film strip already shows that — so it only gets a lane once something is
- * put on it.
- */
+/** The lanes a frame shows on the timeline: every one, empty or not (frames.ts timelineLanes) */
 // (exported: the desktop timeline, timeline/Timeline.tsx, shows the same lanes)
 export function visibleLanes(seg: SegmentLocal) {
   return timelineLanes(seg)

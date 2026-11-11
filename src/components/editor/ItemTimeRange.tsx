@@ -51,7 +51,7 @@ export function TimeRange({ startMs, endMs, currentTimeMs, onStart, onEnd }: {
   )
 }
 
-function TimeField({ label, ms, onCommit, onNow }: { label: string; ms: number; onCommit: (ms: number) => void; onNow: () => void }) {
+export function TimeField({ label, ms, onCommit, onNow }: { label: string; ms: number; onCommit: (ms: number) => void; onNow: () => void }) {
   const [draft, setDraft] = useState(format(ms))
   useEffect(() => { setDraft(format(ms)) }, [ms])
   function commit() {
@@ -61,7 +61,9 @@ function TimeField({ label, ms, onCommit, onNow }: { label: string; ms: number; 
   }
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[11px] font-medium" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>{label}</span>
+      <span className="text-[11px] font-medium" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
+        {label} <span style={{ color: 'rgb(var(--ed-fg) / 0.35)' }}>(min:sec)</span>
+      </span>
       <div className="flex items-center gap-1">
         <input value={draft} inputMode="decimal" aria-label={`${label} at (minutes:seconds)`}
           onChange={e => setDraft(e.target.value)} onBlur={commit}
@@ -78,15 +80,21 @@ function TimeField({ label, ms, onCommit, onNow }: { label: string; ms: number; 
   )
 }
 
-/** 65400 → "1:05.4" */
+/** 65400 → "01:05.4" — two-digit minutes, so "0:03.0" isn't read as hours (user, 2026-11-09) */
 function format(ms: number) {
   const tenths = Math.round(ms / 100)
   const m = Math.floor(tenths / 600)
   const s = (tenths % 600) / 10
-  return `${m}:${s.toFixed(1).padStart(4, '0')}`
+  return `${String(m).padStart(2, '0')}:${s.toFixed(1).padStart(4, '0')}`
 }
 
-/** "1:05.4", "65.4" or "65" → ms */
+/** 65400 → "01:05" — the same clock without tenths, for buttons and tips next to these fields */
+export function clockLabel(ms: number) {
+  const s = Math.floor(ms / 1000)
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}
+
+/** "01:05.4", "1:05.4", "65.4" or "65" → ms */
 function parse(v: string): number | null {
   const t = v.trim()
   const m = /^(?:(\d+):)?(\d+(?:\.\d*)?)$/.exec(t)

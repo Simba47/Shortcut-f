@@ -17,6 +17,20 @@ interface EventRow {
   source: SuggestionSource; suggestion: SuggestionData; event: SuggestionEvent
 }
 
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null)
+const str = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : null)
+
+/** A suggestion as the browser sent it, kept to what's logged; null without a start and end */
+export function cleanSuggestion(raw: unknown): SuggestionData | null {
+  const s = raw as Record<string, unknown> | null | undefined
+  const start_ms = num(s?.start_ms), end_ms = num(s?.end_ms)
+  if (!s || start_ms == null || end_ms == null) return null
+  return {
+    start_ms, end_ms, title: str(s.title, 200), score: num(s.score),
+    subscores: s.subscores && typeof s.subscores === 'object' ? s.subscores : null, reason: str(s.reason, 300), model: str(s.model, 60),
+  }
+}
+
 export function logSuggestionEvents(rows: EventRow[]) {
   if (!rows.length) return
   void sql`

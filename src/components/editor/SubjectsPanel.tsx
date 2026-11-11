@@ -258,28 +258,7 @@ export function SubjectsPanel(p: Props) {
               </>
           return (
             <div className="flex items-stretch gap-2">
-              {autoRuns ? (
-                <button type="button" onClick={() => press('stop', p.onStop)} disabled={stopping} aria-busy="true"
-                  aria-label={`${autoLabel}${autoPct !== null ? ` ${autoPct}%` : ''} — press to stop`}
-                  title={busy && p.autoPhase === 'idle' ? 'Stop following (the people stay marked, ready to follow again)' : 'Stop Auto format (formats already laid stay — Undo takes them back)'}
-                  className="ed-tap ed-runbtn ed-autobtn ed-autobtn-go relative overflow-hidden flex-1 min-w-0 h-11 px-3 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold disabled:cursor-default"
-                  data-running data-tone="lime" style={{ color: 'var(--ed-text)' }}>
-                  {autoPct !== null && <span aria-hidden="true" className="absolute inset-y-0 left-0 transition-[width] duration-500" style={{ width: `${autoPct}%`, background: 'rgba(200,255,0,0.14)' }} />}
-                  {running(autoLabel, autoPct, false, 'var(--ed-accent-text)')}
-                </button>
-              ) : (
-                <button type="button" onClick={() => press('auto', p.onAutoFormat)} disabled={detectRuns || !!pending}
-                  title={p.autoMode === 'vertical'
-                    ? 'Detects the scenes if needed, then makes every scene Vertical on whoever is talking — the view cuts to each speaker — marks everyone and follows them. Scenes you formatted yourself stay as they are.'
-                    : 'Detects the scenes if needed, then gives every scene its format from who is in it and where they sit (Vertical, Split, Trio, or the whole picture — nobody left out), marks everyone and follows them. Scenes you formatted yourself stay as they are.'}
-                  className={`ed-tap flex-1 min-w-0 h-11 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold disabled:cursor-default ${detectRuns ? '' : 'ed-autobtn'}`}
-                  style={detectRuns
-                    ? { background: 'rgb(var(--ed-fg) / 0.06)', color: 'rgb(var(--ed-fg) / 0.4)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.08)' }
-                    : { color: 'var(--ed-accent-text)' }}>
-                  <svg className="ed-autobtn-spark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>
-                  <span className="truncate">Auto format</span>
-                </button>
-              )}
+              {/* Detect first, then Auto format (user, 2026-11-06: the order they are used in) */}
               {detectRuns ? (
                 <button type="button" onClick={() => press('stop', p.onStop)} disabled={stopping} aria-busy="true"
                   aria-label={`Detecting ${scanPct}% — press to stop`} title="Stop detecting (the scenes found before stay)"
@@ -301,6 +280,28 @@ export function SubjectsPanel(p: Props) {
                     ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 11-2.64-6.36" /><path d="M21 4v5h-5" /></svg>
                     : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0113 0" /><circle cx="18" cy="15" r="3" /><path d="M20.2 17.2L22 19" /></svg>}
                   <span className="truncate">{detected ? 'Detect again' : 'Detect'}</span>
+                </button>
+              )}
+              {autoRuns ? (
+                <button type="button" onClick={() => press('stop', p.onStop)} disabled={stopping} aria-busy="true"
+                  aria-label={`${autoLabel}${autoPct !== null ? ` ${autoPct}%` : ''} — press to stop`}
+                  title={busy && p.autoPhase === 'idle' ? 'Stop following (the people stay marked, ready to follow again)' : 'Stop Auto format (formats already laid stay — Undo takes them back)'}
+                  className="ed-tap ed-runbtn ed-autobtn ed-autobtn-go relative overflow-hidden flex-1 min-w-0 h-11 px-3 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold disabled:cursor-default"
+                  data-running data-tone="lime" style={{ color: 'var(--ed-text)' }}>
+                  {autoPct !== null && <span aria-hidden="true" className="absolute inset-y-0 left-0 transition-[width] duration-500" style={{ width: `${autoPct}%`, background: 'rgba(200,255,0,0.14)' }} />}
+                  {running(autoLabel, autoPct, false, 'var(--ed-accent-text)')}
+                </button>
+              ) : (
+                <button type="button" onClick={() => press('auto', p.onAutoFormat)} disabled={detectRuns || !!pending}
+                  title={p.autoMode === 'vertical'
+                    ? 'Detects the scenes if needed, then makes every scene Vertical on whoever is talking — the view cuts to each speaker — marks everyone and follows them. Scenes you formatted yourself stay as they are.'
+                    : 'Detects the scenes if needed, then gives every scene its format from who is in it and where they sit (Vertical, Split, Trio, or the whole picture — nobody left out), marks everyone and follows them. Scenes you formatted yourself stay as they are.'}
+                  className={`ed-tap flex-1 min-w-0 h-11 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold disabled:cursor-default ${detectRuns ? '' : 'ed-autobtn'}`}
+                  style={detectRuns
+                    ? { background: 'rgb(var(--ed-fg) / 0.06)', color: 'rgb(var(--ed-fg) / 0.4)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.08)' }
+                    : { color: 'var(--ed-accent-text)' }}>
+                  <svg className="ed-autobtn-spark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>
+                  <span className="truncate">Auto format</span>
                 </button>
               )}
             </div>

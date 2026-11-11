@@ -24,3 +24,20 @@ export function splitTargets(
   if (empty) return { ids: shots.filter(inside).map(s => s.id), main: false }
   return { ids: section && inside(section) ? [section.id] : [], main: true }
 }
+
+/**
+ * The playhead still rests on the cut just made, which is the first moment of the part after it: the
+ * part before stays picked there (pausing can nudge the playhead a few ms). Once it moves on, the pick follows it
+ */
+export function restsOnSplit(just: { id: string; t: number } | null, id: string, t: number): boolean {
+  return just?.id === id && Math.abs(t - just.t) < 40
+}
+
+/**
+ * The part of the main row Freeze goes on: the one picked, else the one under the playhead (user, 2026-11-10:
+ * a clip with nothing picked, or no frame or media in it). None while other media is picked, or where no main video plays
+ */
+export function freezePart(picked: SegmentLocal | undefined, here: SegmentLocal | undefined, otherPicked: boolean, mainVideoId: string | null | undefined): SegmentLocal | null {
+  const part = otherPicked ? undefined : picked ?? here
+  return part && !isGapPart(part, mainVideoId) && !isInsert(part, mainVideoId) && !part.frame?.no_main ? part : null
+}

@@ -1,6 +1,6 @@
 import sql from '@/lib/db'
 import type { AudioTrack, BoxKeyframe, CaptionStyle, Overlay, SegmentLocal, TextOverlay, Transition } from '@chai-cut/shared'
-import { captionBand, cleanBrandKitData, cleanProgressBar, type BrandKit } from '@/lib/shared/brandKit'
+import { BRAND_ENDS_ON, captionBand, cleanBrandKitData, type BrandKit } from '@/lib/shared/brandKit'
 import { cleanBrandOn, type BrandOn } from '@/lib/shared/brandOn'
 import { lockHolds } from '@/lib/shared/brandTeam'
 import { brandChanged, putBrandOn, takeBrandOff, updateBrand, type BrandTarget } from '@/modules/brand/engine'
@@ -47,8 +47,8 @@ interface Loaded {
 
 /** A clip read as the editor reads it (app/editor/[clipId]/page.tsx): the parts the brand works on */
 async function load(clipId: string): Promise<Loaded | null> {
-  const [clip] = await sql<{ id: string; video_id: string; start_ms: number; end_ms: number; user_id: string; brand: unknown; progress_bar: unknown; layers: unknown; trims: unknown }[]>`
-    SELECT c.id, c.video_id, c.start_ms, c.end_ms, v.user_id, to_jsonb(c)->'brand' AS brand, to_jsonb(c)->'progress_bar' AS progress_bar,
+  const [clip] = await sql<{ id: string; video_id: string; start_ms: number; end_ms: number; user_id: string; brand: unknown; layers: unknown; trims: unknown }[]>`
+    SELECT c.id, c.video_id, c.start_ms, c.end_ms, v.user_id, to_jsonb(c)->'brand' AS brand,
       to_jsonb(c)->'layers' AS layers, to_jsonb(c)->'trim_ranges' AS trims
     FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.id = ${clipId}`
   if (!clip) return null
@@ -83,9 +83,9 @@ async function load(clipId: string): Promise<Loaded | null> {
   const timelineEdits = !(Array.isArray(noted) && noted.length) && !segments.some(s => isShot(s, clip.video_id))
   return {
     target: {
-      clipId, lengthMs: clip.end_ms - clip.start_ms + inserted + Math.max(0, slower), mainVideoId: clip.video_id,
+      clipId, lengthMs: clip.end_ms - clip.start_ms + inserted + Math.max(0, slower), mainVideoId: clip.video_id, ends: BRAND_ENDS_ON,
       overlays: overlays as unknown as Overlay[], texts: texts as unknown as TextOverlay[],
-      caption, textCase: caption.uppercase ? 'upper' : 'title', segments, progressBar: cleanProgressBar(clip.progress_bar),
+      caption, textCase: caption.uppercase ? 'upper' : 'title', segments,
       keyframes, transitions: transitions as unknown as Transition[],
       // (with a video on top, the editor keeps a note of its layers beside the parts: changing the parts
       // here would leave it behind — the editor makes the end card when the clip is opened)
@@ -110,13 +110,12 @@ const CAPTION_FIELDS = ['template', 'animation', 'font', 'size', 'color', 'highl
 
 /**
  * What the engine changed, written back in one transaction: brand logos, text styles, caption style, frames,
- * the progress bar, the parts an end card, intro or outro changed (and what they moved along), the brand switch
+ * the parts an end card, intro or outro changed (and what they moved along), the brand switch
  */
 async function save(l: Loaded, next: BrandTarget, brand: BrandOn | null) {
   const was = l.target, clipId = was.clipId
-  const [hasOpacity, hasTemplate, hasEnabled, hasBrand, hasBar] = await Promise.all([
+  const [hasOpacity, hasTemplate, hasEnabled, hasBrand] = await Promise.all([
     hasColumn('overlays', 'opacity'), hasColumn('caption_styles', 'template'), hasColumn('caption_styles', 'enabled'), hasColumn('clips', 'brand'),
-    hasColumn('clips', 'progress_bar'),
   ])
   const before = new Map(was.overlays.map(o => [o.id, o]))
   const after = new Map(next.overlays.map(o => [o.id, o]))
@@ -221,9 +220,6 @@ async function save(l: Loaded, next: BrandTarget, brand: BrandOn | null) {
     }
     if (newAudio.length) await tx`INSERT INTO audio_tracks ${tx(newAudio as never)}`
     if (newTr.length) await tx`INSERT INTO transitions ${tx(newTr.map(x => ({ id: x.id, clip_id: clipId, after_segment_id: x.after_segment_id, type: x.type, duration_ms: x.duration_ms })))}`
-    if (hasBar && !same(next.progressBar, was.progressBar)) {
-      await tx`UPDATE clips SET progress_bar = ${next.progressBar ? tx.json(next.progressBar as never) : null} WHERE id = ${clipId}`
-    }
     if (hasBrand) await tx`UPDATE clips SET brand = ${brand ? tx.json(brand as never) : null} WHERE id = ${clipId}`
   })
 }
@@ -239,7 +235,8 @@ export async function brandClip(userId: string, clipId: string, kitId: string | 
   if (l.userId !== userId) throw err('Clip not found', 404)
   const kit = kitId ? await usableKit(userId, kitId) : null
   if (kitId && !kit) throw err('That brand kit isn’t yours to use', 403)
-  if (kit && l.brand?.kit_id === kit.id) return true
+  // (the same kit again: the clip takes the kit as it is now — "Put on all" says so)
+  if (kit && l.brand?.kit_id === kit.id) { await followKit(l, kit); return true }
   // (a locked team kit on it stays on: only its owner, or someone who can edit it, takes it off — Phase 6)
   if (l.brand) {
     const { kitAccess } = await import('./brandKits')
@@ -272,13 +269,19 @@ export async function catchUpClip(clipId: string): Promise<void> {
     if (!l?.brand) return
     const kit = await usableKit(l.userId, l.brand.kit_id)
     if (!kit) return
-    if (!l.brand.applied) { await save(l, l.target, { ...l.brand, applied: kit.data }); return }
-    if (!brandChanged(l.brand.applied, kit.data)) return
-    const r = updateBrand(l.target, l.brand.applied, kit, l.brand.before)
-    await save(l, r.target, { ...l.brand, before: r.before, applied: r.applied })
+    await followKit(l, kit)
   } catch (e) {
     console.error('[brand] a clip could not follow its kit:', e)
   }
+}
+
+/** The clip takes its kit as it is now, if it changed since the clip last took it */
+async function followKit(l: Loaded, kit: BrandKit) {
+  const on = l.brand!
+  if (!on.applied) { await save(l, l.target, { ...on, applied: kit.data }); return }
+  if (!brandChanged(on.applied, kit.data)) return
+  const r = updateBrand(l.target, on.applied, kit, on.before)
+  await save(l, r.target, { ...on, before: r.before, applied: r.applied })
 }
 
 /** The brand kit on one of the user's clips, as saved (null: none) */
@@ -302,10 +305,14 @@ export async function clipBrands(userId: string, videoId: string): Promise<Recor
 /**
  * "Apply brand to all clips" (the clip board): a kit on every clip of a video (or the brand off
  * them all, `null`). Clips being exported are left alone. Returns how many changed.
+ * `clipIds`: only these of the video's clips — the ones on the board pressed (user, 2026-11-09: the AI's
+ * board said "Put on all 7" and put it on the clips cut by hand too, which that board doesn't list)
  */
-export async function brandVideoClips(userId: string, videoId: string, kitId: string | null): Promise<{ changed: number; skipped: number }> {
-  const rows = await sql<{ id: string; status: string }[]>`
+export async function brandVideoClips(userId: string, videoId: string, kitId: string | null, clipIds?: string[]): Promise<{ changed: number; skipped: number }> {
+  const all = await sql<{ id: string; status: string }[]>`
     SELECT c.id, c.status FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.video_id = ${videoId} AND v.user_id = ${userId}`
+  const only = clipIds ? new Set(clipIds) : null
+  const rows = only ? all.filter(r => only.has(r.id)) : all
   if (kitId && !(await usableKit(userId, kitId))) throw err('That brand kit isn’t yours to use', 403)
   let changed = 0, skipped = 0
   for (const r of rows) {
