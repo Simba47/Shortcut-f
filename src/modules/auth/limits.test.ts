@@ -93,7 +93,7 @@ test('a burst of code requests sends one', opts, async () => {
   assert.equal(r.filter(x => x.status === 'fulfilled').length, 1)
 })
 
-test('the address is the one Railway sets, not one the visitor sends', () => {
+test('the address is the one Railway sets, not one the visitor sends', opts, () => {
   const h = (o: Record<string, string>) => new Headers(o)
   assert.equal(L.clientIp(h({ 'x-real-ip': '203.0.113.9', 'x-forwarded-for': '1.2.3.4, 203.0.113.9' })), '203.0.113.9')
   assert.equal(L.clientIp(h({ 'x-forwarded-for': '198.51.100.7' })), '198.51.100.7')
