@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/server/auth'
-import { listVideos, deleteVideos, cleanIds } from '@/server/services/videos'
+import { listVideos, deleteVideos, cleanIds, manualClipCounts } from '@/server/services/videos'
 import { apiError } from '@/lib/api-error'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
@@ -16,6 +16,8 @@ export async function GET(req: NextRequest) {
   try {
     const forEditor = req.nextUrl.searchParams.get('assets') === '1'
     const rows = await listVideos(user.id, forEditor)
+    // (the dashboard's "Open clips": how many are cut by hand, the rest the AI's; a hiccup only leaves it out)
+    const manual = forEditor ? {} : await manualClipCounts(rows.filter(v => v.clip_count > 0).map(v => v.id as string)).catch(() => null)
     const videos = await Promise.all(
       rows.map(async (v, i) => {
         let video_url: string | null = null
@@ -31,10 +33,17 @@ export async function GET(req: NextRequest) {
         } else if (v.source_url) {
           video_url = v.source_url
         }
+        // Its picture for the dashboard (the worker's jobs/poster.ts), when it has one: the card shows it instead
+        // of loading the video (12 hours: the dashboard keeps the first link it gets, as for the video)
+        const poster_url = !forEditor && v.poster_path
+          ? await getSignedUrl(r2, new GetObjectCommand({ Bucket: R2_BUCKET, Key: v.poster_path }), { expiresIn: 43200 }).catch(() => null)
+          : null
         return {
           id: v.id,
           title: v.title,
+          poster_url,
           clip_count: v.clip_count,
+          manual_clip_count: manual ? manual[v.id] ?? 0 : null,
           status: v.status,
           download_progress: v.download_progress,
           duration_ms: v.duration_ms,

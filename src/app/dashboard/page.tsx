@@ -11,11 +11,15 @@ import { ACCEPTED_VIDEO_EXTENSIONS } from '@chai-cut/shared'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { AccountMenu } from '@/components/ui/account-menu'
 import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
-import { BrandLoaderScreen } from '@/components/ui/brand-loader'
+import { DashSkeleton } from './DashSkeleton'
 import { FillButtonContent } from '@/components/ui/fill-button'
 import { useVideoUpload, formatBytes, uploadPace } from '@/modules/upload/useVideoUpload'
 
-type DashVideo = Video & { video_url?: string | null; clip_count?: number; error?: string | null }
+type DashVideo = Video & { video_url?: string | null; clip_count?: number; error?: string | null
+  /** Its picture (the worker's jobs/poster.ts), when it has one: shown instead of loading the video */
+  poster_url?: string | null
+  /** How many of its clips were cut by hand (the rest the AI's); null: not known ("Open clips" asks AI or Manual then) */
+  manual_clip_count?: number | null }
 type SortKey = 'newest' | 'oldest' | 'name'
 interface PlanInfo {
   plan: string
@@ -70,13 +74,22 @@ export default function DashboardPage() {
   // (wrong type, too big, plan full) show in uploadError
   // "Make clips" first asks how: AI edit or manual edit. A finished upload doesn't ask: the new
   // video just appears in the list (the user picks Make clips when they want)
-  const [choosing, setChoosing] = useState<{ id: string; title: string; videoUrl?: string | null; durationMs?: number | null } | null>(null)
+  const [choosing, setChoosing] = useState<{ id: string; title: string; videoUrl?: string | null; posterUrl?: string | null; durationMs?: number | null } | null>(null)
   const upload = useVideoUpload(() => { fetchVideos(); fetchPlan() })
   const uploading = upload.state.phase === 'uploading' || upload.state.phase === 'finishing'
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // "Upload video" asks where the video comes from: this device, or a Drive link
   const [chooserOpen, setChooserOpen] = useState(false)
+  // How many videos there were when the running-low line was hidden (it comes back once there are more)
+  const [lowHiddenAt, setLowHiddenAt] = useState(-1)
+  useEffect(() => {
+    try { const v = Number(sessionStorage.getItem('dashSeenLow')); if (Number.isFinite(v) && v > 0) setLowHiddenAt(v) } catch { /* storage blocked */ }
+  }, [])
+  function hideLow(n: number) {
+    setLowHiddenAt(n)
+    try { sessionStorage.setItem('dashSeenLow', String(n)) } catch { /* storage blocked: hidden for now only */ }
+  }
 
   async function fetchVideos() {
     const res = await fetch('/api/videos')
@@ -97,6 +110,25 @@ export default function DashboardPage() {
   }, [])
 
   usePolling(fetchVideos, videos.some(v => v.status === 'uploaded' || v.status === 'transcribing'))
+
+  // "/" anywhere on the page puts the cursor in the search box (user, 2026-11-11: as YouTube, GitHub, Gmail) —
+  // not while typing somewhere (a rename, a link), with a key held (Ctrl, Alt, ⌘), or with a window open
+  const searchRef = useRef<HTMLInputElement>(null)
+  const searchBlocked = useRef(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || searchBlocked.current) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      const box = searchRef.current
+      if (!box) return
+      e.preventDefault()
+      box.focus()
+      box.select()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
 
   const atLimit = !!planInfo && planInfo.usage.videos >= planInfo.maxVideos
 
@@ -190,10 +222,18 @@ export default function DashboardPage() {
   }
 
   // Same full-screen loader as the clip board and editor (ring, glow, progress bar)
-  if (loading) return <BrandLoaderScreen mascot="dashboard" label="Loading your videos…" />
+  // (user, 2026-11-11) the dashboard's frame and grey cards where the videos will be, not the full-screen loader
+  if (loading) return <DashSkeleton />
 
+  searchBlocked.current = chooserOpen || !!choosing || !!pendingDelete
   const usagePct = planInfo ? Math.min(100, (planInfo.usage.videos / planInfo.maxVideos) * 100) : 0
   const isEmpty = videos.length === 0
+  // Running low (user, 2026-11-11: told before an upload is refused, not after): with a sixth of the plan's videos
+  // left (5 of 30: from 25; at least 2 — 8 of 10) until it's full (then the strip says so). ✕ hides it — until another video is added (kept for
+  // the visit: dashSeenLow in this tab's storage)
+  const used = planInfo?.usage.videos ?? 0
+  const low = !!planInfo && !atLimit && planInfo.maxVideos > 1 && used >= planInfo.maxVideos - Math.max(2, Math.round(planInfo.maxVideos / 6))
+  const showLow = low && used > lowHiddenAt
 
   return (
     <div
@@ -209,7 +249,7 @@ export default function DashboardPage() {
           {planInfo && (
             <div
               className={`dash-usage${usagePct >= 100 ? ' is-full' : usagePct >= 90 ? ' is-warn' : ''}`}
-              title={`${planInfo.usage.videos} of ${planInfo.maxVideos} videos used`}
+              role="img" aria-label={`${planInfo.usage.videos} of ${planInfo.maxVideos} videos used`}
             >
               <span className="dash-usage-label"><strong>{planInfo.usage.videos}</strong> / {planInfo.maxVideos} videos</span>
               <div className="dash-usage-bar"><div style={{ width: `${usagePct}%` }} /></div>
@@ -219,7 +259,7 @@ export default function DashboardPage() {
             <a href="/pricing" className="dash-btn-fill fill-btn fill-btn-sm"><FillButtonContent>Upgrade</FillButtonContent></a>
           )}
           {/* (the account's brand kits: set once, on every clip) */}
-          <button type="button" onClick={() => openBrandKits()} className="dash-brand-link" title="Your logo, colours and caption look — on every clip">
+          <button type="button" onClick={() => openBrandKits()} className="dash-brand-link" aria-label="Brand kits: your logo, colours and caption look, on every clip">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2" /><circle cx="17.5" cy="10.5" r="2" /><circle cx="8.5" cy="7.5" r="2" /><circle cx="6.5" cy="12.5" r="2" /><path d="M12 22a10 10 0 110-20 9 9 0 019 9c0 3-2 4-4 4h-2a2 2 0 00-1 3.7A2 2 0 0112 22z" /></svg>
             <span>Brand kits</span>
           </button>
@@ -231,7 +271,8 @@ export default function DashboardPage() {
       <main className={`dash-main${selecting ? ' has-selectbar' : ''}`}>
         {!isEmpty && (
           <div className="dash-head">
-            <h1><span className="dash-title">Your videos</span><span className="dash-count">{videos.length}</span></h1>
+            {/* (user, 2026-11-11: the count was said twice — the top bar's "1 / 30 videos" says it) */}
+            <h1><span className="dash-title">Your videos</span></h1>
             <div className="dash-tools">
               <label className="dash-search">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -239,13 +280,19 @@ export default function DashboardPage() {
                   <path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                 </svg>
                 <input
+                  ref={searchRef}
                   className="dash-input"
                   type="search"
                   placeholder="Search videos"
                   aria-label="Search videos"
+                  aria-keyshortcuts="/"
                   value={query}
                   onChange={e => setQuery(e.target.value)}
+                  // Esc: clears the search, then leaves the box
+                  onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); if (query) setQuery(''); else e.currentTarget.blur() } }}
                 />
+                {/* (the shortcut, shown in the empty box until it's clicked into) */}
+                {!query && <kbd className="dash-search-kbd" aria-hidden="true">/</kbd>}
               </label>
               <SortMenu value={sort} onChange={setSort} />
               <button
@@ -257,6 +304,20 @@ export default function DashboardPage() {
                 {selecting ? 'Done' : 'Select'}
               </button>
             </div>
+          </div>
+        )}
+
+        {showLow && planInfo && (
+          <div className="dash-low" role="status">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9L2.4 17.6A2 2 0 004.1 20.6h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" /></svg>
+            <p>
+              You&apos;ve used <strong>{used} of your {planInfo.maxVideos}</strong> videos.
+              <span> {planInfo.maxVideos - used === 1 ? 'Room for 1 more' : `Room for ${planInfo.maxVideos - used} more`} — delete old ones, or get more with a bigger plan.</span>
+            </p>
+            <a href="/pricing" className="dash-low-cta">See plans</a>
+            <button type="button" className="dash-low-x" aria-label="Hide this message" onClick={() => hideLow(used)}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
           </div>
         )}
 
@@ -359,7 +420,14 @@ export default function DashboardPage() {
                 onToggle={() => toggleSelected(video.id)}
                 onRename={t => renameVideo(video.id, t)}
                 onDelete={() => setPendingDelete([{ video, title }])}
-                onOpen={() => setChoosing({ id: video.id, title, videoUrl: video.video_url, durationMs: video.duration_ms })}
+                onRetry={async () => {
+                  const res = await fetch(`/api/videos/${video.id}/retry`, { method: 'POST' }).catch(() => null)
+                  if (!res?.ok) return (res ? (await res.json().catch(() => ({}))).error : null) ?? 'Couldn’t start it again. Please try once more.'
+                  await fetchVideos()
+                  return null
+                }}
+                onOpen={() => setChoosing({ id: video.id, title, videoUrl: video.video_url, posterUrl: video.poster_url, durationMs: video.duration_ms })}
+                onGo={mode => router.push(`/videos/${video.id}?start=${mode}`)}
               />
             ))}
           </div>
@@ -403,7 +471,7 @@ export default function DashboardPage() {
       )}
 
       {choosing && (
-        <EditModeDialog title={choosing.title} videoUrl={choosing.videoUrl} durationMs={choosing.durationMs} onClose={() => setChoosing(null)}
+        <EditModeDialog title={choosing.title} videoUrl={choosing.videoUrl} posterUrl={choosing.posterUrl} durationMs={choosing.durationMs} onClose={() => setChoosing(null)}
           onPick={mode => router.push(`/videos/${choosing.id}?start=${mode}`)} />
       )}
 
@@ -501,37 +569,90 @@ function SortMenu({ value, onChange }: { value: SortKey; onChange: (v: SortKey) 
   )
 }
 
-function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDelete, onOpen }: {
+function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDelete, onOpen, onGo, onRetry }: {
   video: DashVideo
   title: string
   /** "Make clips": asks AI edit or manual edit, then opens the clip board */
   onOpen: () => void
+  /** "Open clips": straight to the clip board that has them — the AI's or the ones cut by hand */
+  onGo: (mode: 'ai' | 'manual') => void
   /** Select mode: the whole card toggles its tick; rename, delete and "Make clips" step aside */
   selecting: boolean
   selected: boolean
   onToggle: () => void
   onRename: (title: string) => void
   onDelete: () => void
+  /** A video that couldn't be processed: run it again (null: started; else what went wrong) */
+  onRetry: () => Promise<string | null>
 }) {
+  // Try again on a failed video (user, 2026-11-11): busy while it asks, and why it couldn't, if it couldn't
+  const [retrying, setRetrying] = useState(false)
+  const [retryError, setRetryError] = useState<string | null>(null)
+  async function retry() {
+    if (retrying) return
+    setRetrying(true); setRetryError(null)
+    const problem = await onRetry()
+    setRetrying(false)
+    if (problem) setRetryError(problem)
+  }
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState(title)
+  // (user, 2026-11-11: "clicking the video does nothing") the picture and the name open it too, as Make clips —
+  // only a ready video, not while selecting (the card ticks) or renaming. A press that ends a rename (its box
+  // loses focus on the press, so by the click it's closed) only saves the name: it doesn't open the video too
+  const ended = useRef(false)
+  const canOpen = video.status === 'ready' && !selecting && !renaming
+  // "Open clips" (user, 2026-11-11: a video with clips opens them — no "AI or Manual?" question): only the AI's,
+  // or only ones cut by hand: straight to that board; both: a small menu (AI clips · n, Your clips · n, + Make new
+  // clips). No clips yet — or how many of each isn't known — Make clips asks AI or Manual, as before
+  const total = video.clip_count ?? 0
+  const manualN = video.manual_clip_count ?? null
+  const known = total > 0 && manualN !== null
+  const aiN = known ? Math.max(0, total - (manualN ?? 0)) : 0
+  const both = known && aiN > 0 && (manualN ?? 0) > 0
+  const hasClips = total > 0
+  const [menu, setMenu] = useState(false)
+  const menuRef = useDismiss(menu, () => setMenu(false))
+  // (Select turned on, or the video stops being ready: the menu closes — its button is gone)
+  useEffect(() => { if (selecting || video.status !== 'ready') setMenu(false) }, [selecting, video.status])
+  function open() {
+    if (!known) { onOpen(); return }
+    if (both) { setMenu(m => !m); return }
+    onGo(aiN > 0 ? 'ai' : 'manual')
+  }
+  const openProps = video.status === 'ready' && !selecting ? {
+    onPointerDown: () => { ended.current = renaming },
+    onClick: () => { if (ended.current) { ended.current = false; return } if (!renaming) open() },
+  } : {}
   // Keep the first signed URL — polling returns a fresh signature every 3s,
   // which would otherwise reload the thumbnail each time
   const [thumbSrc, setThumbSrc] = useState<string | null>(null)
   const [thumbLoaded, setThumbLoaded] = useState(false)
   const [thumbFailed, setThumbFailed] = useState(false)
+  // Its kept picture (user, 2026-11-11: one small JPEG, not the whole video — jobs/poster.ts). The first link is
+  // kept, as the video's; a picture that won't load gives way to the video's frame, as before pictures
+  const [posterSrc, setPosterSrc] = useState<string | null>(null)
+  const [posterFailed, setPosterFailed] = useState(false)
   useEffect(() => {
+    if (!posterSrc && !posterFailed && video.status === 'ready' && video.poster_url) setPosterSrc(video.poster_url)
+  }, [posterSrc, posterFailed, video.status, video.poster_url])
+  const usePoster = !!posterSrc && !posterFailed
+  useEffect(() => {
+    // (no picture: the video's frame at 1 s, as before)
+    if (usePoster || video.poster_url && !posterFailed) return
     if (!thumbSrc && !thumbFailed && video.status === 'ready' && video.video_url) setThumbSrc(`${video.video_url}#t=1`)
-  }, [thumbSrc, thumbFailed, video.status, video.video_url])
+  }, [usePoster, posterFailed, thumbSrc, thumbFailed, video.status, video.video_url, video.poster_url])
 
   const ready = video.status === 'ready'
   const pct = video.download_progress ?? 0
+  // A video fetched from a Drive or Dropbox link (the worker's jobs/transcribe.ts: the file comes in up to 46%,
+  // is checked at 47, then kept in storage from 58; the video is ready right after — captions come later).
+  // (user, 2026-11-11) one plain journey: getting it, checking it, saving it — no "Transcribing" it never reached
   const stageLabel =
-    pct < 5  ? 'Queued' :
-    pct < 46 ? `Downloading ${pct}%` :
-    pct < 58 ? `Processing ${pct}%` :
-    pct < 70 ? 'Uploading…' :
-    pct < 99 ? `Transcribing ${pct}%` : 'Finishing…'
+    pct < 5  ? 'Starting…' :
+    pct < 47 ? `Getting your video · ${pct}%` :
+    pct < 58 ? 'Checking your video…' :
+    pct < 99 ? 'Saving your video…' : 'Almost ready…'
 
   const created = new Date(video.created_at)
   const dateStr = created.toLocaleDateString('en-US', {
@@ -551,7 +672,7 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
 
   return (
     <div
-      className={`vcard${ready ? ' is-ready' : ''}${selecting ? ' is-selecting' : ''}${selected ? ' is-selected' : ''}`}
+      className={`vcard${ready ? ' is-ready' : ''}${selecting ? ' is-selecting' : ''}${selected ? ' is-selected' : ''}${menu ? ' has-menu' : ''}`}
       {...(selecting ? {
         role: 'checkbox',
         'aria-checked': selected,
@@ -570,7 +691,7 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
           )}
         </span>
       )}
-      <div className="vcard-thumb">
+      <div className={`vcard-thumb${canOpen ? ' is-openable' : ''}`} {...openProps}>
         {!thumbLoaded && (
           <div className="vcard-placeholder">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -579,7 +700,14 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
             </svg>
           </div>
         )}
-        {thumbSrc && (
+        {usePoster && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={posterSrc!} alt="" draggable={false} decoding="async" className="vcard-poster"
+            onLoad={() => setThumbLoaded(true)}
+            onError={() => { setPosterFailed(true); setThumbLoaded(false) }}
+            style={{ opacity: thumbLoaded ? 1 : 0 }} />
+        )}
+        {!usePoster && thumbSrc && (
           <video
             src={thumbSrc}
             preload="metadata"
@@ -593,7 +721,7 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
         )}
 
         {video.status === 'uploaded' && (
-          <div className="vcard-overlay"><span className="dash-spinner" />Queued</div>
+          <div className="vcard-overlay"><span className="dash-spinner" />Waiting to start…</div>
         )}
         {video.status === 'transcribing' && (
           <div className="vcard-overlay">
@@ -601,13 +729,28 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
             <div className="dash-progress"><div style={{ width: `${Math.max(4, pct)}%` }} /></div>
           </div>
         )}
+        {/* Couldn't be processed: why (what the worker wrote for the user, else a plain line) and what to do —
+            Try again (a link's sharing fixed, a hiccup), or Remove (user, 2026-11-11: it said why, not what next) */}
         {video.status === 'failed' && (
-          <div className="vcard-overlay is-failed">{video.error || 'Couldn’t process this video'}</div>
+          <div className="vcard-overlay is-failed" onClick={selecting ? undefined : e => e.stopPropagation()}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5.5M12 16.5h.01" /></svg>
+            <span className="vcard-failed-text" role="status">{retryError || video.error || 'We couldn’t process this video.'}</span>
+            {!selecting && (
+              <span className="vcard-failed-actions">
+                <button type="button" className="vcard-failed-btn" data-tone="primary" onClick={retry} disabled={retrying}>
+                  {retrying ? <><span className="dash-spinner" />Starting…</> : 'Try again'}
+                </button>
+                <button type="button" className="vcard-failed-btn" onClick={onDelete} disabled={retrying}>Remove</button>
+              </span>
+            )}
+          </div>
         )}
 
 
-        {/* Details on the thumbnail: date (top-left), clips (bottom-left), length (bottom-right) */}
-        {!selecting && <span className="vcard-chip vcard-date">{dateStr}</span>}
+        {/* Pointed at: a soft shade — the picture opens the video (under the chips: they stay clear). (No play mark:
+            user, 2026-11-11) */}
+        {canOpen && <span className="vcard-hover" aria-hidden="true" />}
+        {/* On the picture only how many clips it has (the date and length are under its name) */}
         {ready && (
           <span className="vcard-chip vcard-clips">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -617,7 +760,6 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
             {clipLabel}
           </span>
         )}
-        {durationLabel && <span className="vcard-chip vcard-duration">{durationLabel}</span>}
       </div>
 
       {/* Quick actions: frosted pill in the thumbnail's top-right corner */}
@@ -626,7 +768,6 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
           type="button"
           className="vcard-action"
           aria-label={`Rename ${title}`}
-          title="Rename"
           onClick={() => { setDraft(title); setRenaming(true) }}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -638,7 +779,6 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
           type="button"
           className="vcard-action is-danger"
           aria-label={`Delete ${title}`}
-          title="Delete"
           onClick={onDelete}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -667,14 +807,48 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
               }}
             />
           ) : (
-            <p className="vcard-title" title={title}>{title}</p>
+            <p className={`vcard-title${canOpen ? ' is-openable' : ''}`} {...openProps}>{title}</p>
           )}
+          {/* (user, 2026-11-11) when it was added and how long it is, under its name — the picture stays clear */}
+          <p className="vcard-meta">
+            <span>{dateStr}</span>
+            {durationLabel && <><span className="vcard-meta-dot" aria-hidden="true">·</span><span>{durationLabel}</span></>}
+          </p>
         </div>
         {/* The only way into the clip picker, so a stray click on the card doesn't navigate */}
         {ready && !selecting && (
-          <button type="button" onClick={onOpen} className="vcard-open fill-btn fill-btn-sm" aria-haspopup="dialog" aria-label={`Make clips from ${title}`}>
-            <FillButtonContent icon="scissors">Make clips</FillButtonContent>
-          </button>
+          <div ref={menuRef} className="vcard-open-wrap">
+            <button type="button" onClick={open} className="vcard-open fill-btn fill-btn-sm"
+              aria-haspopup={both ? 'menu' : known ? undefined : 'dialog'} aria-expanded={both ? menu : undefined}
+              aria-label={hasClips ? `Open the clips of ${title}` : `Make clips from ${title}`}>
+              {hasClips ? <FillButtonContent>Open clips</FillButtonContent> : <FillButtonContent icon="scissors">Make clips</FillButtonContent>}
+            </button>
+            {menu && (
+              <div className="dash-popover vcard-menu" role="menu" aria-label={`Clips of ${title}`}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') { e.stopPropagation(); setMenu(false); return }
+                  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+                  e.preventDefault()
+                  const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+                  const i = items.indexOf(document.activeElement as HTMLButtonElement)
+                  items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus()
+                }}>
+                <button type="button" role="menuitem" className="dash-menu-item" autoFocus onClick={() => { setMenu(false); onGo('ai') }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" /></svg>
+                  <span className="vcard-menu-label">AI clips</span><span className="vcard-menu-n">{aiN}</span>
+                </button>
+                <button type="button" role="menuitem" className="dash-menu-item" onClick={() => { setMenu(false); onGo('manual') }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12" /></svg>
+                  <span className="vcard-menu-label">Your clips</span><span className="vcard-menu-n">{manualN}</span>
+                </button>
+                <span className="vcard-menu-line" aria-hidden="true" />
+                <button type="button" role="menuitem" className="dash-menu-item" onClick={() => { setMenu(false); onOpen() }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                  <span className="vcard-menu-label">Make new clips</span>
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -828,7 +1002,6 @@ function UploadChooser({ maxFileSizeGb, onClose, onDevice, onFile, onImported }:
             <path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" strokeWidth="2" />
           </svg>
           Your videos stay private to your account
-          <span className="dash-sheet-soon">YouTube import coming soon</span>
         </div>
       </div>
     </div>
@@ -900,9 +1073,11 @@ function DeleteDialog({ items, onClose, onDeleted }: {
  * best moments light up one after another; Manual's has a stretch held between two handles with
  * the playhead running through it. Esc, the ✕ or a click outside closes it (the video stays).
  */
-function EditModeDialog({ title, videoUrl, durationMs, onClose, onPick }: {
+function EditModeDialog({ title, videoUrl, posterUrl, durationMs, onClose, onPick }: {
   title: string
   videoUrl?: string | null
+  /** Its kept picture (jobs/poster.ts): shown instead of loading the video, when it has one */
+  posterUrl?: string | null
   durationMs?: number | null
   onClose: () => void
   onPick: (mode: 'ai' | 'manual') => void
@@ -933,7 +1108,10 @@ function EditModeDialog({ title, videoUrl, durationMs, onClose, onPick }: {
         <div className="emd-head">
           <div className="emd-thumb" aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="20" height="16" rx="3" stroke="currentColor" strokeWidth="1.6" /><path d="M10 9v6l5-3-5-3z" fill="currentColor" /></svg>
-            {videoUrl && (
+            {posterUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={posterUrl} alt="" draggable={false} onLoad={() => setThumbOk(true)} style={{ opacity: thumbOk ? 1 : 0 }} />
+            ) : videoUrl && (
               <video src={`${videoUrl}#t=1`} preload="metadata" muted playsInline disablePictureInPicture
                 onLoadedData={() => setThumbOk(true)} style={{ opacity: thumbOk ? 1 : 0 }} />
             )}
