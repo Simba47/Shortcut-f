@@ -5,6 +5,7 @@ import sql from '@/lib/db'
 import { razorpayConfigured, razorpayMode } from '@/lib/razorpay'
 import { subscriptionSummary } from '@/server/services/billing'
 import { readingUse } from '@/server/services/readingUsage'
+import { testPackAllowed } from '@/lib/credits'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -48,6 +49,8 @@ export async function GET() {
     // off | mock (dummy keys, nothing is charged) | test (Razorpay test mode) | live
     paymentsMode: razorpayMode(),
     testMode: !razorpayConfigured() && process.env.ALLOW_TEST_SUBSCRIBE === '1',
+    // the ₹1 test pack, for an email in TEST_PACK_EMAILS only
+    testPack: testPackAllowed(user.email),
     autoCaption: plan.autoCaption,
     watermark: plan.watermark,
     usage: {

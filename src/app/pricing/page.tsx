@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { PLANS } from '@/lib/plans'
-import { FREE_SIGNUP_CREDITS, TOPUP_PACKS } from '@/lib/credits'
+import { FREE_SIGNUP_CREDITS, TOPUP_PACKS, TEST_PACK } from '@/lib/credits'
 import { planFeatureRows, creditUses, readingLabel } from '@/lib/planFeatures'
 import { BrandLogo } from '@/components/ui/brand-logo'
 import { CreditsBadge } from '@/components/ui/credits-badge'
@@ -34,7 +34,7 @@ export default function PricingPage() {
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const [mine, setMine] = useState<{ plan: string; testMode: boolean; paymentsMode?: 'off' | 'mock' | 'test' | 'live'; subscription: { status: string; expiresAt: string | null } | null } | null>(null)
+  const [mine, setMine] = useState<{ plan: string; testMode: boolean; paymentsMode?: 'off' | 'mock' | 'test' | 'live'; testPack?: boolean; subscription: { status: string; expiresAt: string | null } | null } | null>(null)
   useEffect(() => {
     if (!session) return
     fetch('/api/billing/plan').then(r => r.ok ? r.json() : null).then(d => d && setMine(d)).catch(() => {})
@@ -309,12 +309,12 @@ export default function PricingPage() {
           <h2 id="topups" className="text-xl font-bold text-white text-center mb-1">Need more credits?</h2>
           <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>Top-up packs for paid plans, paid once. Top-up credits last 12 months. Your plan&apos;s monthly limits stay the same: for more of those, upgrade.</p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {TOPUP_PACKS.map(pack => (
+            {[...TOPUP_PACKS, ...(mine?.testPack ? [TEST_PACK] : [])].map(pack => (
               <div key={pack.key} className="rounded-2xl p-4 text-center" style={{ background: '#161616', border: '1px solid rgba(255,255,255,0.08)' }}>
                 <div className="text-2xl font-bold text-white">{pack.credits}</div>
                 <div className="text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>credits</div>
                 <div className="text-lg font-semibold text-white mt-2">₹{pack.price}</div>
-                {mine && mine.plan !== 'free' ? (
+                {mine && (mine.plan !== 'free' || pack.key === 'test') ? (
                   <button onClick={() => handleTopup(pack.key)} disabled={!!topupBusy}
                     className="w-full mt-3 py-2 rounded-xl text-xs font-semibold transition-opacity"
                     style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', opacity: topupBusy && topupBusy !== pack.key ? 0.4 : 1, cursor: topupBusy ? 'wait' : 'pointer' }}>

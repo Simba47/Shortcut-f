@@ -114,6 +114,23 @@ test('an unknown pack is refused, and the free plan is sent to upgrade', opts, a
   await assert.rejects(topup.startTopup(free, 'small'), (e: { status?: number; message?: string }) => e.status === 403 && /paid plan/i.test(e.message ?? ''))
 })
 
+test('the ₹1 test pack (user, 2026-11-12): only for an email in TEST_PACK_EMAILS, paid and credited like any pack', opts, async () => {
+  const u = await newUser('free')
+  process.env.TEST_PACK_EMAILS = 'owner@example.test, Tester@Example.test'
+  try {
+    // not listed, or no list: the pack does not exist
+    await assert.rejects(topup.startTopup(u, 'test', 'someone@example.test'), (e: { status?: number }) => e.status === 400)
+    await assert.rejects(topup.startTopup(u, 'test'), (e: { status?: number }) => e.status === 400)
+    // listed (any case and spacing): ₹1 for 1 credit, on the free plan too
+    const order = await topup.startTopup(u, 'test', 'tester@example.test')
+    assert.equal(order.amountPaise, 100); assert.equal(order.credits, 1)
+    await mock.mockPay({ orderId: order.orderId, outcome: 'success' }, collect)
+    await deliverAll()
+    assert.equal((await credits.balance(u)).balance, 1)
+  } finally { delete process.env.TEST_PACK_EMAILS }
+  await assert.rejects(topup.startTopup(u, 'test', 'tester@example.test'), (e: { status?: number }) => e.status === 400)
+})
+
 test('a plan payment gives the plan\'s credits once, and each renewal gives them again', opts, async () => {
   const u = await newUser('free')
   const sub = await billing.startSubscription(u, 'creator')

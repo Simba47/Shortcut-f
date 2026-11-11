@@ -104,7 +104,27 @@ export const TOPUP_PACKS = [
   { key: 'large', credits: 1250, price: 1199 },
   { key: 'bulk', credits: 3000, price: 2799 },
 ] as const
-export type TopupPackKey = typeof TOPUP_PACKS[number]['key']
+
+/**
+ * A ₹1 pack of 1 credit, to try a real payment end to end (user, 2026-11-12). It exists only for the
+ * emails in TEST_PACK_EMAILS (comma-separated): nobody else sees it or can buy it, and with the
+ * setting removed it is gone.
+ */
+export const TEST_PACK = { key: 'test', credits: 1, price: 1 } as const
+export type TopupPack = typeof TOPUP_PACKS[number] | typeof TEST_PACK
+export type TopupPackKey = TopupPack['key']
+
+export function testPackAllowed(email: string | null | undefined, env: Record<string, string | undefined> = process.env): boolean {
+  const me = email?.trim().toLowerCase()
+  if (!me) return false
+  return (env.TEST_PACK_EMAILS ?? '').split(',').some(e => e.trim().toLowerCase() === me)
+}
+
+/** A pack by its key; the test pack only when `test` (the buyer is allowed it, or the order was already made) */
+export function findTopupPack(key: unknown, { test }: { test: boolean }): TopupPack | undefined {
+  if (test && key === TEST_PACK.key) return TEST_PACK
+  return TOPUP_PACKS.find(p => p.key === key)
+}
 
 const SPENT_ON: Record<string, string> = {
   render: 'Export', caption: 'Captions', transcribe: 'Captions', subjects: 'Subjects', ask_ai: 'Ask AI', rewrite: 'Rewrites',

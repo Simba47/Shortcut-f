@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  creditsMode, ledgerLabel, subjectsCredits, subjectsNewMs, captionCredits, exportCredits, readingCredits, captionSpan, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS,
+  creditsMode, ledgerLabel, subjectsCredits, subjectsNewMs, captionCredits, exportCredits, readingCredits, captionSpan, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS, testPackAllowed, findTopupPack,
   type SpendableGrant,
 } from './credits'
 import { PLANS } from './plans'
@@ -144,4 +144,19 @@ test('a video costs 15 credits per started 10 minutes', () => {
   assert.equal(readingCredits(10 * MIN), 15)
   assert.equal(readingCredits(11 * MIN), 30)
   assert.equal(readingCredits(60 * MIN), 90)
+})
+
+test('the ₹1 test pack is only for the emails listed in TEST_PACK_EMAILS (user, 2026-11-12)', () => {
+  const env = { TEST_PACK_EMAILS: ' Owner@Shortcut.test ,second@x.test' }
+  assert.equal(testPackAllowed('owner@shortcut.test', env), true)
+  assert.equal(testPackAllowed('SECOND@x.test', env), true)
+  assert.equal(testPackAllowed('other@x.test', env), false)
+  assert.equal(testPackAllowed(null, env), false)
+  assert.equal(testPackAllowed('owner@shortcut.test', {}), false)
+  assert.equal(testPackAllowed('', { TEST_PACK_EMAILS: ',' }), false)
+  assert.deepEqual(findTopupPack('test', { test: true }), { key: 'test', credits: 1, price: 1 })
+  assert.equal(findTopupPack('test', { test: false }), undefined)
+  assert.equal(findTopupPack('small', { test: false })?.price, 199)
+  // never one of the packs everyone sees
+  assert.ok(!TOPUP_PACKS.some(p => (p.key as string) === 'test'))
 })

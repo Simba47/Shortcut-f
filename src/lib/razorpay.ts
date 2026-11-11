@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { TOPUP_PACKS, type TopupPackKey } from './credits'
+import { findTopupPack, type TopupPackKey } from './credits'
 
 // Razorpay, over its REST API (no SDK: three calls and two signature checks). Keys come from
 // RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET; the webhook is signed with RAZORPAY_WEBHOOK_SECRET.
@@ -129,7 +129,8 @@ export function topupChange(event: { event?: string; payload?: { order?: { entit
   if (!order?.id || !payment) return null
   const notes = (order.notes && !Array.isArray(order.notes) ? order.notes : {}) as Record<string, unknown>
   const userId = typeof notes.user_id === 'string' ? notes.user_id : ''
-  const pack = TOPUP_PACKS.find(p => p.key === notes.pack)
+  // the test pack too: applyTopup still needs our own order for this user, made only for someone allowed it
+  const pack = findTopupPack(notes.pack, { test: true })
   if (notes.kind !== 'topup' || !userId || !pack) return null
   if ((order.amount_paid ?? payment.amountPaise) < rupeesToPaise(pack.price)) return null
   return { kind: 'topup', orderId: order.id, userId, pack: pack.key, credits: pack.credits, payment }

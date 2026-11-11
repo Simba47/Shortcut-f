@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import sql from '@/lib/db'
-import { TOPUP_PACKS, TOPUP_CREDIT_DAYS } from '@/lib/credits'
+import { TOPUP_CREDIT_DAYS, findTopupPack, testPackAllowed } from '@/lib/credits'
 import {
   checkoutScriptUrl, createRazorpayOrder, fetchRazorpayPayment, paidPayment, rupeesToPaise, verifyOrderSignature,
   type TopupChange,
@@ -14,12 +14,13 @@ const fail = (message: string, status: number) => Object.assign(new Error(messag
 
 /**
  * Starts buying a credit pack: an order at Razorpay for the pack's price (taken from our own pack
- * table, never from the browser), recorded as ours, and what the payment window needs.
+ * table, never from the browser), recorded as ours, and what the payment window needs. The ₹1 test
+ * pack only for an email in TEST_PACK_EMAILS, on any plan.
  */
-export async function startTopup(userId: string, packKey: unknown) {
-  const pack = TOPUP_PACKS.find(p => p.key === packKey)
+export async function startTopup(userId: string, packKey: unknown, email?: string | null) {
+  const pack = findTopupPack(packKey, { test: testPackAllowed(email) })
   if (!pack) throw fail('Unknown credit pack', 400)
-  if (await getUserPlan(userId) === 'free') throw fail('Top-ups are for paid plans. Upgrade to a paid plan to get more credits.', 403)
+  if (pack.key !== 'test' && await getUserPlan(userId) === 'free') throw fail('Top-ups are for paid plans. Upgrade to a paid plan to get more credits.', 403)
   await ensureCreditsSchema()
   const amountPaise = rupeesToPaise(pack.price)
   const order = await createRazorpayOrder(amountPaise, `topup_${randomUUID().replace(/-/g, '').slice(0, 24)}`, {
@@ -58,7 +59,8 @@ export async function completeTopup(userId: string, p: { orderId: string; paymen
   if (!payment || remote.order_id !== p.orderId || payment.amountPaise < own.amount_paise) {
     throw fail('The payment is not complete yet. If money was taken, your credits will appear shortly.', 409)
   }
-  const pack = TOPUP_PACKS.find(x => x.key === own.pack)!
+  // (an order for the test pack was only made for someone allowed it)
+  const pack = findTopupPack(own.pack, { test: true })!
   await applyTopup({ kind: 'topup', orderId: p.orderId, userId, pack: pack.key, credits: pack.credits, payment })
   return { credits: pack.credits, balance: (await balance(userId)).balance }
 }

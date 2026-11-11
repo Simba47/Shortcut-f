@@ -1,6 +1,6 @@
 import sql from '@/lib/db'
 import { PLANS } from '@/lib/plans'
-import { TOPUP_PACKS } from '@/lib/credits'
+import { findTopupPack } from '@/lib/credits'
 import { COMPANY } from '@/lib/company'
 import { type PaidPayment, fetchRazorpayPayment, paidPayment } from '@/lib/razorpay'
 import { splitTax, fiscalYear, formatInvoiceNo, normalizeGstin, GST_STATES, stateName } from '@/lib/invoice'
@@ -115,7 +115,7 @@ export async function recordCheckoutPayment(userId: string, subscriptionId: stri
 
 /** "topup:medium" is stored as the plan of a credit top-up's payment; shown as "150 credits top-up" */
 function topupLabel(plan: string): string | null {
-  const pack = plan.startsWith('topup:') ? TOPUP_PACKS.find(p => p.key === plan.slice(6)) : null
+  const pack = plan.startsWith('topup:') ? findTopupPack(plan.slice(6), { test: true }) : null
   return pack ? `${pack.credits} credits top-up` : null
 }
 
