@@ -140,9 +140,15 @@ export default function PricingPage() {
     <div className="min-h-screen" style={{ background: '#0d0d0d' }}>
       <nav className="flex items-center justify-between px-6 py-3 border-b" style={{ background: '#111', borderColor: 'rgba(255,255,255,0.07)' }}>
         {/* Same animated logo as every other page; colours pinned because this header is always dark */}
-        <a href="/dashboard" aria-label="Shortcut dashboard" style={{ '--text': '#F4F4F5', '--logo': '#C8FF00', textDecoration: 'none' } as React.CSSProperties}>
+        <a href={session ? '/dashboard' : '/'} aria-label={session ? 'Shortcut dashboard' : 'Shortcut home'} style={{ '--text': '#F4F4F5', '--logo': '#C8FF00', textDecoration: 'none' } as React.CSSProperties}>
           <BrandLogo shine />
         </a>
+        {/* Open signed out too (Razorpay's website review): a way in instead of the credits */}
+        {!session && (
+          <a href="/login" className="text-xs px-3 py-1.5 rounded-lg" style={{ color: '#000', background: '#c8ff00' }}>
+            Sign in
+          </a>
+        )}
         {session && (
           <div className="flex items-center gap-2" style={{ color: 'rgba(255,255,255,0.8)' }}>
           <CreditsBadge credits={credits} />
@@ -323,6 +329,13 @@ export default function PricingPage() {
             ))}
           </div>
         </section>
+
+        <p className="text-center text-xs mt-14" style={{ color: 'rgba(255,255,255,0.35)' }}>
+          Prices include GST. See our{' '}
+          <a href="/refunds" className="underline" style={{ color: 'rgba(255,255,255,0.6)' }}>Refund and Cancellation Policy</a>,{' '}
+          <a href="/terms" className="underline" style={{ color: 'rgba(255,255,255,0.6)' }}>Terms</a> and{' '}
+          <a href="/privacy" className="underline" style={{ color: 'rgba(255,255,255,0.6)' }}>Privacy Policy</a>.
+        </p>
       </main>
     </div>
   )

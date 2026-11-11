@@ -732,6 +732,8 @@ export function LandingPage() {
           <div className="footer-links">
             <Link href="/terms">Terms</Link>
             <Link href="/privacy">Privacy</Link>
+            <Link href="/refunds">Refunds &amp; Cancellation</Link>
+            <Link href="/pricing">Pricing</Link>
             <Link href="/support">Support</Link>
           </div>
           <Link href="/delete-account" className="footer-delete">Delete account</Link>
