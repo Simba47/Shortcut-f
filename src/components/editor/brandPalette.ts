@@ -1,6 +1,6 @@
 'use client'
 
-import { useSyncExternalStore } from 'react'
+import { createContext, useContext, useSyncExternalStore } from 'react'
 
 /**
  * The brand colours the editor's colour choices show first (text, captions, frame text): the
@@ -17,12 +17,18 @@ export function setBrandPalette(next: string[]) {
   listeners.forEach(f => f())
 }
 
+/** Inside a kit's own settings: that kit's colours, whichever kit the editor's choices follow */
+export interface KitColours { primary: string; secondary: string; extra: string[] }
+export const KitColoursContext = createContext<KitColours | null>(null)
+
 export function useBrandPalette(): string[] {
-  return useSyncExternalStore(
+  const kit = useContext(KitColoursContext)
+  const shared = useSyncExternalStore(
     f => { listeners.add(f); return () => { listeners.delete(f) } },
     () => palette,
     () => EMPTY,
   )
+  return kit ? [...new Set([kit.primary, kit.secondary, ...kit.extra].map(c => c.toLowerCase()))] : shared
 }
 
 /**

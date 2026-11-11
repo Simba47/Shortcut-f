@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic'
  * `download` attribute is ignored and the video opens in a new tab instead; this sends the browser
  * to a short-lived link that tells it to save the file, named after the clip.
  */
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ clipId: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ clipId: string }> }) {
   const user = await requireUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { clipId } = await params
@@ -28,7 +28,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ cli
   }
 
   // A safe file name: plain letters for old browsers, the real title (any language) for the rest
-  const title = (typeof row.title === 'string' && row.title.trim() ? row.title.trim() : 'shortcut-clip').slice(0, 80)
+  // (a clip with no name of its own: ?name= is the one on its card, "Clip 3")
+  const title = ((typeof row.title === 'string' && row.title.trim()) || req.nextUrl.searchParams.get('name')?.trim() || 'shortcut-clip').slice(0, 80)
   const ascii = title.replace(/[^\x20-\x7E]/g, '').replace(/[\/:*?"<>|]/g, '').trim() || 'shortcut-clip'
   const disposition = `attachment; filename="${ascii}.mp4"; filename*=UTF-8''${encodeURIComponent(title.replace(/[\/:*?"<>|]/g, ''))}.mp4`
 

@@ -1,5 +1,6 @@
-import type { AudioTrack, SegmentLocal } from '@chai-cut/shared'
+import type { AudioTrack, FrameHold, SegmentLocal } from '@chai-cut/shared'
 import { getBoxPositionAtLerp } from '@/lib/interpolation'
+import { frameHeldBefore, isMainHold } from './frames'
 import { addedVideoBox, isGapPart } from './visibility'
 import type { KeyframeMap } from './store'
 import { isMainAudioTrack, type TimedState } from './trimState'
@@ -166,6 +167,96 @@ function shiftSeg(seg: SegmentLocal, d: number): SegmentLocal {
   }
 }
 
+/**
+ * Everything on the timeline from `from` on moved by `d` (a freeze added, resized or removed): what
+ * runs across `from` gets longer or shorter and stays one piece. `keepAt`: what starts exactly at
+ * `from` stays there and gets longer (a freeze at the very start of a video). Moved earlier, what's in
+ * the time taken out is pulled to its edge, and goes if nothing of it is left.
+ */
+export function rippleFreeze(state: TimedState, from: number, d: number, keepAt = false): TimedState {
+  const start = (t: number) => (d > 0 ? ((keepAt ? t > from : t >= from) ? t + d : t) : (t >= from ? t + d : Math.min(t, from + d)))
+  const end = (t: number) => (d > 0 ? (t > from ? t + d : t) : (t >= from ? t + d : Math.min(t, from + d)))
+  const span = <T extends { start_ms: number; end_ms: number }>(x: T): T => ({ ...x, start_ms: start(x.start_ms), end_ms: end(x.end_ms) })
+  const keyframes: KeyframeMap = {}
+  for (const [id, kfs] of Object.entries(state.keyframes)) {
+    const at = new Map(kfs.map(k => [start(k.t_ms), k] as const))
+    keyframes[id] = [...at].map(([t_ms, k]) => ({ ...k, t_ms })).sort((a, b) => a.t_ms - b.t_ms)
+  }
+  const segments = state.segments.map(s => ({
+    ...span(s),
+    crop_boxes: s.crop_boxes.map(box => ({ ...box, keyframes: (keyframes[box.id] ?? []).map(({ t_ms, x, y, w, h }) => ({ t_ms, x, y, w, h })) })),
+    frame: s.frame?.items ? { ...s.frame, items: s.frame.items.map(span).filter(it => it.end_ms > it.start_ms) } : s.frame,
+  }))
+  const audioTracks = state.audioTracks.flatMap((t): AudioTrack[] => {
+    const e = t.end_ms ?? Infinity
+    if (isMainAudioTrack(t)) {
+      // The video's own sound stops with its picture, and carries on after the freeze
+      if (d > 0 && t.start_ms < from && e > from) {
+        return [
+          { ...t, end_ms: from, fade_out: false },
+          { ...t, id: crypto.randomUUID(), start_ms: from + d, ...(t.end_ms != null ? { end_ms: t.end_ms + d } : {}), ...(t.offset_ms != null ? { offset_ms: t.offset_ms + (from - t.start_ms) } : {}), fade_in: false },
+        ]
+      }
+      if (t.start_ms >= from) return [{ ...t, start_ms: t.start_ms + d, ...(t.end_ms != null ? { end_ms: t.end_ms + d } : {}) }]
+      return [t]
+    }
+    return [{ ...t, start_ms: start(t.start_ms), ...(t.end_ms != null ? { end_ms: end(t.end_ms) } : {}) }]
+  })
+  return {
+    ...state, segments, keyframes, audioTracks,
+    overlays: state.overlays.map(span).filter(o => o.end_ms > o.start_ms),
+    textOverlays: state.textOverlays.map(span).filter(o => o.end_ms > o.start_ms),
+  }
+}
+
+/**
+ * The clip with one of a frame's freezes changed. `i` < 0: `h` added; `h` null: freeze `i` removed;
+ * else freeze `i` is now `h`. The time is added or taken back; the freezes after it keep their place in the video.
+ */
+export function freezeChanged(state: TimedState, segId: string, i: number, h: FrameHold | null): TimedState {
+  const seg = state.segments.find(x => x.id === segId)
+  if (!seg) return state
+  const holds = seg.frame?.freeze?.holds ?? []
+  const old = holds[i]
+  if (i < 0 ? !h : !old) return state
+  const main = isMainHold(i < 0 ? (h as FrameHold) : old)
+  const end = seg.end_ms
+  // On the main video the time goes in where it stops. On another layer the main video plays straight
+  // on, so what's on the timeline stays with it: the time goes in at the end of the part
+  const moved = (at: number, d: number, keepAt = false) => (main ? rippleFreeze(state, at, d, keepAt) : rippleFreeze(state, d > 0 ? end - 1 : end, d))
+  let out = state, next: FrameHold[], d = 0
+  if (i < 0) {
+    const add = h as FrameHold
+    d = add.len_ms
+    out = moved(seg.start_ms + add.at_ms, d, true)
+    next = [...holds.map(x => (main && x.at_ms >= add.at_ms ? { ...x, at_ms: x.at_ms + d } : x)), add]
+  } else if (!h) {
+    d = -old.len_ms
+    out = moved(seg.start_ms + old.at_ms + old.len_ms, d)
+    next = holds.filter((_, j) => j !== i).map(x => (main && x.at_ms > old.at_ms ? { ...x, at_ms: x.at_ms + d } : x))
+  } else {
+    d = h.len_ms - old.len_ms
+    if (d) out = moved(seg.start_ms + old.at_ms + old.len_ms, d)
+    next = holds.map((x, j) => (j === i ? { ...old, ...h } : main && x.at_ms > old.at_ms ? { ...x, at_ms: x.at_ms + d } : x))
+  }
+  next.sort((a, b) => a.at_ms - b.at_ms)
+  const layer = i < 0 ? h?.on : old.on
+  return {
+    ...out,
+    segments: out.segments.map(s => {
+      if (s.id !== segId) return s
+      // (a video ending before the part does gets its added time itself, up to what comes next on its lane)
+      const items = main || !d || !s.frame?.items ? s.frame?.items : s.frame.items.map(it => {
+        // (reached the part's end before this change: the ripple has already moved it)
+        if (it.id !== layer || (seg.frame?.items?.find(x => x.id === layer)?.end_ms ?? end) >= end - 1) return it
+        const after = s.frame?.items?.filter(x => x.lane === it.lane && x.start_ms >= it.end_ms).map(x => x.start_ms) ?? []
+        return { ...it, end_ms: Math.max(it.start_ms + 1, Math.min(it.end_ms + d, s.end_ms, ...after)) }
+      })
+      return { ...s, frame: { ...s.frame, ...(items ? { items } : {}), freeze: next.length ? { ...s.frame?.freeze, holds: next } : null } }
+    }),
+  }
+}
+
 // ── The clip as pieces (a clip with videos put in between) ────────────────────
 // With a video put in between, each part of the main row says itself which moment of the main
 // video it starts at (its main crop box's source_offset_ms, clip-relative ms of the main video).
@@ -216,7 +307,24 @@ export function piecesOf(segments: SegmentLocal[], mainVideoId: string | null | 
     const blank = isGapPart(s, mainVideoId)
     if (isInsert(s, mainVideoId)) out.push({ id: s.id, at, ms, hold: s.video_offset_ms as number })
     else if (blank && gapsHold) out.push({ id: s.id, at, ms, hold: mainFrom(s) ?? videoNow, blank })
-    else {
+    else if (s.frame?.freeze?.holds?.length) {
+      // A part with freezes: the main video stops for its own and carries on from the same moment.
+      // Another layer's add time the main video doesn't play through: it holds its last picture for that
+      const holds = s.frame.freeze.holds
+      const added = holds.filter(h => !isMainHold(h)).reduce((sum, h) => sum + h.len_ms, 0)
+      const playEnd = Math.max(at, s.end_ms - added)
+      let t = at, v = (mainFrom(s) ?? videoNow) + (at - s.start_ms) - frameHeldBefore(s.frame, at - s.start_ms), n = 0
+      for (const h of holds.filter(isMainHold)) {
+        const a = Math.max(t, s.start_ms + h.at_ms), b = Math.min(playEnd, s.start_ms + h.at_ms + h.len_ms)
+        if (b <= a) continue
+        if (a > t) { out.push({ id: n ? `${s.id}~${n}` : s.id, at: t, ms: a - t, from: v }); v += a - t; n++ }
+        out.push({ id: `${s.id}~freeze${n++}`, at: a, ms: b - a, hold: v })
+        t = b
+      }
+      if (playEnd > t) { out.push({ id: n ? `${s.id}~${n}` : s.id, at: t, ms: playEnd - t, from: v }); v += playEnd - t; n++ }
+      if (s.end_ms > playEnd) out.push({ id: `${s.id}~freeze${n}`, at: playEnd, ms: s.end_ms - playEnd, hold: v })
+      videoNow = v
+    } else {
       const speed = speedOf(s)
       const from = (mainFrom(s) ?? videoNow) + (at - s.start_ms) * speed
       out.push({ id: s.id, at, ms, from, ...(speed !== 1 ? { speed } : {}), ...(s.pitch ? { pitch: true } : {}), ...(blank ? { blank } : {}) })

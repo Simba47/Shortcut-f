@@ -1,5 +1,6 @@
 import type { AudioTrack, BoxKeyframe, CaptionStyle, FrameItem, FrameSettings, Overlay, SegmentLocal, TextOverlay, Transition } from '@chai-cut/shared'
-import { brandCaptionStyle, brandLogoBox, cardLookOf, isBrandLogo, logoBox, logoSpan, showHandle, type BrandKit, type BrandKitData, type FrameRect, type LogoCorner } from '@/lib/shared/brandKit'
+import { isLatinText } from '@/modules/captions/templates'
+import { brandCaptionStyle, brandCaptionStyleOn, brandLogoBox, cardLookOf, isBrandLogo, logoBox, logoSpan, showHandle, type BrandKit, type BrandKitData, type FrameRect, type LogoCorner } from '@/lib/shared/brandKit'
 import type { BrandBefore, FrameBefore } from '@/lib/shared/brandOn'
 import { DEFAULT_BAND, frameOf, frameSlotCount, isFrameLayout, isTextLane, newItemCorners, textLaneLook } from '@/modules/editor/frames'
 import { isShot } from '@/modules/editor/shots'
@@ -51,6 +52,8 @@ export interface BrandTarget {
    * one with parts played faster or slower (where the main video is at a moment is the editor's to say)
    */
   canInsert: boolean
+  /** false: the kit's end card, intro and outro aren't added or changed here (BRAND_ENDS_ON); ones already on the clip stay */
+  ends?: boolean
   /** Where the main video is at timeline `t` (clip ms of it); by default as the videos put in between say */
   videoAt?: (t: number) => number
   /** What the logo keeps off on this clip (Phase 4, kit logo.smart): its captions, the faces in it */
@@ -61,6 +64,11 @@ export const NO_BEFORE: BrandBefore = { texts: {}, caption: null, text_case: nul
 
 /** What the brand puts on the clip's own text */
 const titleFont = (d: BrandKitData) => d.title.font ?? 'sans-serif'
+/**
+ * The font the kit gives this text: its title font — text in Telugu, Hindi… keeps its own (as Make my
+ * clips does: a kit's font has none of those letters, and the export draws a text in its one font)
+ */
+const textFontOf = (d: BrandKitData, x: TextOverlay) => (isLatinText(x.text ?? '') ? titleFont(d) : x.font)
 /** The caption case a kit's captions give */
 const caseOf = (d: BrandKitData) => (d.captions.uppercase ? 'upper' : 'title')
 /** A frame's band colour under a kit (a Branded card has its own) */
@@ -168,7 +176,7 @@ function mainSpan(t: BrandTarget, b: BrandBefore | null): [number, number] {
  */
 function syncBookends(t: BrandTarget, kit: Pick<BrandKit, 'data'>, before: BrandBefore):
   { target: BrandTarget; before: BrandBefore; note?: string } {
-  if (!t.canInsert) return { target: t, before }
+  if (!t.canInsert || t.ends === false) return { target: t, before }
   let target = t, b = before, note: string | undefined
   for (const which of ['outro', 'intro'] as const) {
     const want = kit.data.ends[which], rec = b[which] ?? null
@@ -214,7 +222,7 @@ const withTimeline = (t: BrandTarget, tl: CardTimeline): BrandTarget =>
  */
 function syncEndCard(t: BrandTarget, kit: Pick<BrandKit, 'name' | 'data'>, before: BrandBefore, old: BrandKitData | null):
   { target: BrandTarget; before: BrandBefore; note?: string } {
-  if (!t.timelineEdits) return { target: t, before }
+  if (!t.timelineEdits || t.ends === false) return { target: t, before }
   const want = kit.data.ends.card, rec = before.end_card
   let target = t, b = before
   if (rec) {
@@ -246,6 +254,7 @@ function syncEndCard(t: BrandTarget, kit: Pick<BrandKit, 'name' | 'data'>, befor
  * opened, the editor sees the kit has changed and does it
  */
 function appliedOf(t: BrandTarget, d: BrandKitData, old: BrandKitData | null): BrandKitData {
+  if (t.ends === false) return d
   let ends = d.ends
   if (!t.timelineEdits) ends = { ...ends, card: old ? old.ends.card : false, seconds: old ? old.ends.seconds : d.ends.seconds }
   if (!t.canInsert) ends = { ...ends, intro: old ? old.ends.intro : null, outro: old ? old.ends.outro : null }
@@ -296,8 +305,8 @@ export function putBrandOn(t: BrandTarget, kit: BrandKit): { target: BrandTarget
   const on: BrandTarget = {
     ...t,
     overlays: logo ? [...rest, logo] : rest,
-    texts: t.texts.map(x => (x.locked ? x : { ...x, font: titleFont(d), color: d.title.color, size: d.title.size })),
-    caption: d.captions.on ? { ...t.caption, ...brandCaptionStyle(d.captions) } : t.caption,
+    texts: t.texts.map(x => (x.locked ? x : { ...x, font: textFontOf(d, x), color: d.title.color, size: d.title.size })),
+    caption: d.captions.on ? { ...t.caption, ...brandCaptionStyleOn(d.captions, t.caption) } : t.caption,
     textCase: d.captions.on ? caseOf(d) : t.textCase,
     segments,
   }
@@ -357,9 +366,9 @@ export function takeBrandOff(t0: BrandTarget, d: BrandKitData | null, b: BrandBe
   if (d && b) {
     texts = t.texts.map(x => {
       const was = b.texts[x.id]
-      if (!was || x.locked || x.font !== titleFont(d) || x.color !== d.title.color) return x
+      if (!was || x.locked || x.font !== textFontOf(d, x) || x.color !== d.title.color) return x
       // (its size too, where the brand set it and it's still the brand's; a clip branded before sizes were kept has none)
-      return { ...x, font: was.font, color: was.color, ...(was.size !== undefined && x.size === d.title.size ? { size: was.size } : {}) }
+      return { ...x, font: x.font === titleFont(d) ? was.font : x.font, color: was.color, ...(was.size !== undefined && x.size === d.title.size ? { size: was.size } : {}) }
     })
     if (b.caption && d.captions.on && t.caption.template === d.captions.template && t.caption.color === d.captions.color) {
       // (a look kept before 2026-11-04 can have its capitals empty: off)
@@ -461,7 +470,7 @@ export function updateBrand(t: BrandTarget, old: BrandKitData, kit: BrandKit, be
   // Text on the clip
   const texts = t.texts.map(x => {
     if (x.locked) return x
-    const font = x.font === titleFont(old) ? titleFont(n) : x.font
+    const font = x.font === titleFont(old) && isLatinText(x.text ?? '') ? titleFont(n) : x.font
     const color = x.color === old.title.color ? n.title.color : x.color
     const size = x.size === old.title.size ? n.title.size : x.size
     return font === x.font && color === x.color && size === x.size ? x : { ...x, font, color, size }
@@ -470,8 +479,9 @@ export function updateBrand(t: BrandTarget, old: BrandKitData, kit: BrandKit, be
   // Captions: the fields still as the old look left them
   let caption = t.caption, textCase = t.textCase
   if (n.captions.on) {
-    const was = old.captions.on ? brandCaptionStyle(old.captions) as Record<string, unknown> : null
-    const now = brandCaptionStyle(n.captions) as Record<string, unknown>
+    // (a look that named no font left the captions the one they had: still as the brand left it when it's that one)
+    const was = old.captions.on ? { ...brandCaptionStyle(old.captions), font: old.captions.font ?? before?.caption?.font ?? t.caption.font ?? null } as Record<string, unknown> : null
+    const now = brandCaptionStyleOn(n.captions, t.caption) as Record<string, unknown>
     const cur = t.caption as unknown as Record<string, unknown>
     const patch: Record<string, unknown> = {}
     for (const k of Object.keys(now)) if (!was || (cur[k] ?? null) === (was[k] ?? null)) patch[k] = now[k]

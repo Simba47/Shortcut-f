@@ -61,6 +61,10 @@ export async function getClipPreview(userId: string, clipId: string): Promise<Cl
   `
   if (!clip) throw Object.assign(new Error('Clip not found'), { status: 404 })
   if (clip.user_id !== userId) throw Object.assign(new Error('Forbidden'), { status: 403 })
+  // Its brand kit changed since it went on (a new logo, other colours): the clip follows it first, as before an
+  // export or in the editor, so the preview shows the kit as it is now (user, 2026-11-10). Never fails the preview.
+  const { catchUpClip } = await import('./brandApply')
+  await catchUpClip(clipId)
 
   const [words, segRows, [style], overlays] = await Promise.all([
     sql`

@@ -1,6 +1,6 @@
 'use client'
 
-import { useSyncExternalStore } from 'react'
+import { createContext, useContext, useSyncExternalStore } from 'react'
 import { isBrandFont } from '@/lib/shared/brandKit'
 
 /**
@@ -23,8 +23,14 @@ export function setBrandFonts(next: BrandFontItem[]) {
   listeners.forEach(f => f())
 }
 
+/** Inside a kit's own settings: its fonts, wherever it's opened (the list above is the editor's alone) */
+export const KitFontsContext = createContext<BrandFontItem[] | null>(null)
+
 export function useBrandFonts(): BrandFontItem[] {
-  return useSyncExternalStore(f => { listeners.add(f); return () => { listeners.delete(f) } }, () => fonts, () => EMPTY)
+  const kit = useContext(KitFontsContext)
+  const shared = useSyncExternalStore(f => { listeners.add(f); return () => { listeners.delete(f) } }, () => fonts, () => EMPTY)
+  if (!kit) return shared
+  return [...kit, ...shared.filter(f => !kit.some(k => k.family === f.family))]
 }
 
 /** Load a brand font into the page (once); anything that isn't one is left to the font list it came from */

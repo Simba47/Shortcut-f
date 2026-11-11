@@ -6,7 +6,7 @@ import { LAYOUT_SLOT_COUNT } from '@chai-cut/shared'
 import { getBoxPositionAtLerp, type BoxPosition } from '@/lib/interpolation'
 import { makeBox, defaultCropForSlot } from './utils'
 import { inFramePicture } from './framePicture'
-import { isFrameLayout, DEFAULT_BAND, defaultFrame, frameOf, placeNewItem, MIN_ITEM_MS, fitHolds, withItemStart, cutItem, addHold } from './frames'
+import { fitFrameFreeze, frameHeldBefore, itemSourceAt, withFrameFreeze, isFrameLayout, DEFAULT_BAND, defaultFrame, frameOf, placeNewItem, MIN_ITEM_MS, fitHolds, withItemStart, cutItem } from './frames'
 import { setViewAt, recordMotionAt, removeViewChangeAt, moveViewChange, duplicateViewChange, type ViewKeyframe } from './views'
 import { isShot } from './shots'
 import { useMediaStore } from '@/modules/media/store'
@@ -87,7 +87,7 @@ interface EditorActions {
   /** Frame layouts: change the letterbox band's look */
   updateFrameBand: (segId: string, patch: Partial<FrameBand>) => void
   /** Frame layouts: main video's slots and sound */
-  updateFrame: (segId: string, patch: Partial<Pick<FrameSettings, 'main_slots' | 'main_volume' | 'main_muted' | 'main_volumes' | 'main_mutes' | 'main_hidden' | 'main_locked' | 'main_corners' | 'row_h' | 'row_order' | 'split' | 'split2' | 'flip' | 'flip2' | 'face_box' | 'main_rects' | 'bg'>>) => void
+  updateFrame: (segId: string, patch: Partial<Pick<FrameSettings, 'main_slots' | 'main_volume' | 'main_muted' | 'main_volumes' | 'main_mutes' | 'main_hidden' | 'main_locked' | 'main_corners' | 'row_h' | 'row_order' | 'split' | 'split2' | 'flip' | 'flip2' | 'face_box' | 'main_rects' | 'freeze' | 'bg'>>) => void
   /** Put something on a frame lane at time t (see placeNewItem). Returns its id, or null if there's no room. */
   /** `maxLenMs`: it plays no longer than this (a part of a video); what it lands on goes on after it */
   addFrameItem: (segId: string, lane: FrameLane, t: number, item: Omit<FrameItem, 'id' | 'lane' | 'start_ms' | 'end_ms'>, maxLenMs?: number) => string | null
@@ -100,12 +100,6 @@ interface EditorActions {
    * where it starts playing: the same video's piece right after it starts from that picture
    */
   setFrameItemFreeze: (segId: string, itemId: string, on: boolean) => void
-  /**
-   * Freeze a video item from `from` to `to` (clip time): it plays up to `from`, holds that picture
-   * until `to` (silent), then plays on from that same picture — as if paused there. It stays one
-   * item (a stretch in FrameItem.holds). Ends closer than MIN_ITEM_MS to its own edges snap to them
-   */
-  freezeFrameItemRange: (segId: string, itemId: string, from: number, to: number) => void
   /** Move one edge of a format. Formats are independent: the neighbour never moves, the edge
    *  just stops at it (no overlap). Uncovered time uses the default framing. */
   setSegmentEdge: (segId: string, edge: 'start' | 'end', tMs: number, durationMs: number) => void
@@ -167,8 +161,10 @@ function withStart(seg: SegmentLocal, start_ms: number): SegmentLocal {
  * at its end, and they go when another video or a photo takes its place.
  */
 function patchItem(it: FrameItem, patch: Partial<Omit<FrameItem, 'id'>>): FrameItem {
-  if (it.kind !== 'video' || !it.holds?.length) return { ...it, ...patch }
-  if ((patch.source_video_id !== undefined && patch.source_video_id !== it.source_video_id) || (patch.kind && patch.kind !== it.kind)) return { ...it, ...patch, holds: null }
+  if (it.kind !== 'video') return { ...it, ...patch }
+  // (another video in its place: the stretches and the part picked were this one's)
+  if ((patch.source_video_id !== undefined && patch.source_video_id !== it.source_video_id) || (patch.kind && patch.kind !== it.kind)) return { ...it, ...patch, holds: null, pan: null }
+  if (!it.holds?.length) return { ...it, ...patch }
   const { start_ms, source_offset_ms, ...rest } = patch
   const trimmed = start_ms != null && start_ms !== it.start_ms && source_offset_ms !== undefined
   const out: FrameItem = trimmed
@@ -180,12 +176,14 @@ function patchItem(it: FrameItem, patch: Partial<Omit<FrameItem, 'id'>>): FrameI
 
 function withFrameEdges(prev: SegmentLocal, next: SegmentLocal): SegmentLocal {
   const items = next.frame?.items
-  if (!items?.length || (prev.start_ms === next.start_ms && prev.end_ms === next.end_ms)) return next
+  const freeze = next.frame?.freeze
+  if ((!items?.length && !freeze) || (prev.start_ms === next.start_ms && prev.end_ms === next.end_ms)) return next
   return {
     ...next,
     frame: {
       ...next.frame,
-      items: items.map(it => {
+      ...(freeze ? { freeze: fitFrameFreeze(freeze, next.start_ms - prev.start_ms, next.end_ms - next.start_ms) } : {}),
+      items: items?.map(it => {
         let out = it
         if (next.start_ms !== prev.start_ms && it.start_ms <= prev.start_ms + 1 && it.end_ms > prev.start_ms) out = withItemStart(out, next.start_ms)
         if (next.end_ms !== prev.end_ms && it.end_ms >= prev.end_ms - 1 && it.start_ms < prev.end_ms) out = patchItem(out, { end_ms: next.end_ms })
@@ -369,6 +367,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
       const kf = { ...s.keyframes }
       const joinable = (a: SegmentLocal, b: SegmentLocal) =>
         a.layout === b.layout && !isFrameLayout(a.layout) && !a.locked && !b.locked
+        // (a part with a freeze stays its own: its freezes are counted from its start)
+        && !a.frame?.freeze?.holds?.length && !b.frame?.freeze?.holds?.length
         && Math.abs(b.start_ms - a.end_ms) <= 1
         && !transitionAfter?.has(a.id)
         && a.crop_boxes.length === b.crop_boxes.length
@@ -465,17 +465,20 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     set(s => {
       const seg = s.segments.find(s => s.id === segId)
       if (!seg || tMs <= seg.start_ms + 100 || tMs >= seg.end_ms - 100) return s
+      // (the right half's items are new: a freeze on one follows it)
+      const newItemIds = new Map(seg.frame?.items?.map(it => [it.id, crypto.randomUUID()]))
+      const rightFreeze = seg.frame?.freeze ? fitFrameFreeze(seg.frame.freeze, tMs - seg.start_ms, seg.end_ms - tMs) : undefined
       const newBoxes: CropBoxLocal[] = seg.crop_boxes.map(box => ({
         ...makeBox(box.slot_index, seg.layout, tMs, [{ t_ms: tMs, ...getPos(box.id, tMs) }]),
         source_video_id: box.source_video_id,
         // (the main video moves on by as much video as the part plays before the cut: at its speed)
-        source_offset_ms: box.source_offset_ms + (tMs - seg.start_ms) * (box.source_video_id || box.image_path ? 1 : speedOfSeg(seg)),
+        source_offset_ms: box.source_offset_ms + (tMs - seg.start_ms) * (box.source_video_id || box.image_path ? 1 : speedOfSeg(seg)) - (box.source_video_id || box.image_path ? 0 : frameHeldBefore(seg.frame, tMs - seg.start_ms)),
         // A video on top (or an inserted one) cut in two: both halves keep its sound and hide switches
         ...(onTop(s, seg) || inserted(seg) ? { volume: box.volume, muted: box.muted !== false, ...(box.hidden ? { hidden: true } : {}) } : {}),
       }))
       return {
         segments: [
-          ...s.segments.map(s => s.id === segId ? { ...s, end_ms: tMs } : s),
+          ...s.segments.map(s => s.id === segId ? { ...s, end_ms: tMs, ...(s.frame?.freeze ? { frame: { ...s.frame, freeze: fitFrameFreeze(s.frame.freeze, 0, tMs - s.start_ms) } } : {}) } : s),
           {
             id: newId, start_ms: tMs, end_ms: seg.end_ms, layout: seg.layout, sort_order: seg.sort_order + 0.5, crop_boxes: newBoxes,
             ...(seg.lane ? { lane: seg.lane } : {}),
@@ -487,7 +490,12 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
             // (both halves of an inserted video hold the main video at the same moment)
             ...(inserted(seg) ? { video_offset_ms: seg.video_offset_ms } : {}),
             // Each half keeps its own copy of the frame; items are cut to each half's range when shown
-            frame: seg.frame ? { ...seg.frame, items: seg.frame.items?.map(it => ({ ...it, id: crypto.randomUUID() })) } : seg.frame,
+            // (a frame with freezes: its videos on the right go on from where they've got to, freezes and all)
+            frame: seg.frame ? {
+              ...seg.frame,
+              items: seg.frame.items?.map(it => ({ ...it, id: newItemIds.get(it.id) as string, ...(seg.frame?.freeze && it.kind === 'video' && !it.freeze && it.start_ms < tMs && it.end_ms > tMs ? { start_ms: tMs, source_offset_ms: itemSourceAt(withFrameFreeze(seg, it), tMs).ms } : {}) })),
+              ...(seg.frame.freeze ? { freeze: rightFreeze ? { ...rightFreeze, holds: rightFreeze.holds.map(h => (h.on && newItemIds.has(h.on) ? { ...h, on: newItemIds.get(h.on) } : h)) } : rightFreeze } : {}),
+            } : seg.frame,
           },
         ].sort((a, b) => a.sort_order - b.sort_order),
         keyframes: withBoxes(s.keyframes, newBoxes),
@@ -553,11 +561,18 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     segments: s.segments.map(seg => {
       if (seg.id !== segId) return seg
       const frame = frameOf(seg)
-      return { ...seg, frame: { ...frame, items: (frame.items ?? []).flatMap(it => {
-        if (it.id !== itemId || t <= it.start_ms || t >= it.end_ms) return [it]
-        // (a frozen video's right part holds the same picture; a freeze stretch cut goes on in it)
-        return cutItem(it, t, crypto.randomUUID())
-      }) } }
+      const rightId = crypto.randomUUID()
+      const rel = t - seg.start_ms
+      return { ...seg, frame: {
+        ...frame,
+        items: (frame.items ?? []).flatMap(it => {
+          if (it.id !== itemId || t <= it.start_ms || t >= it.end_ms) return [it]
+          // (a frozen video's right part holds the same picture; a freeze stretch cut goes on in it)
+          return cutItem(it, t, rightId)
+        }),
+        // (the video's freezes after the cut are on its right part now)
+        ...(frame.freeze ? { freeze: { ...frame.freeze, holds: frame.freeze.holds.map(h => (h.on === itemId && h.at_ms >= rel ? { ...h, on: rightId } : h)) } } : {}),
+      } }
     }),
   })),
 
@@ -577,18 +592,6 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
         if (x === next && on) return { ...x, source_offset_ms: off }
         if (x === next && !on && (x.source_offset_ms ?? 0) === off) return { ...x, source_offset_ms: off + (it.end_ms - it.start_ms) }
         return x
-      }) } }
-    }),
-  })),
-
-  freezeFrameItemRange: (segId, itemId, from, to) => set(s => ({
-    segments: s.segments.map(seg => {
-      if (seg.id !== segId) return seg
-      const frame = frameOf(seg)
-      return { ...seg, frame: { ...frame, items: (frame.items ?? []).map(it => {
-        if (it.id !== itemId || it.kind !== 'video' || it.freeze) return it
-        const holds = addHold(it, from, to)
-        return holds ? { ...it, holds } : it
       }) } }
     }),
   })),

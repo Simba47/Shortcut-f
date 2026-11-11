@@ -61,7 +61,7 @@ const ASK_EXAMPLES = ['funny reactions', 'controversial takes', 'emotional momen
 const CLIP_TABS: Array<{ id: ClipTab; label: string; empty: string }> = [
   { id: 'all', label: 'All clips', empty: '' },
   { id: 'yours', label: 'Your clips', empty: 'Clips you make yourself (New clip) show here.' },
-  { id: 'ask', label: 'Ask AI', empty: 'Describe what you want in Ask AI, then press Use on a result.' },
+  { id: 'ask', label: 'Ask AI', empty: 'Describe what you want in Ask AI, then press + on a result.' },
   { id: 'auto', label: 'Make my clips', empty: 'Clips AI makes for you with Make my clips show here.' },
   // (Best moments: removed 2026-11-09 (user), kept commented; clips it made stay under All clips)
   // { id: 'best', label: 'Best moments', empty: 'Find best moments, then press + on the ones you want.' },
@@ -206,8 +206,11 @@ const PANEL_LINE = '1px solid rgb(var(--cb-fg) / 0.07)'
 // Wide screens get three columns (AI tools · video · clips); narrower ones stack the AI tools under the video
 const WIDE_QUERY = '(min-width: 1280px)'
 // The side columns' usual widths and how far their bars drag them; the video column keeps CENTRE_MIN
-const AI_W = 340, CLIPS_W = 340, CLIPS_W_MANUAL = 420
-const AI_RANGE: [number, number] = [300, 520]
+// AI edit (user, 2026-11-09): all three columns start equal, a third of the row each, at any window
+// size: each side column a third (the row less the 16 px between columns), the video the rest
+const ONE_THIRD = 'calc((100% - 32px) / 3)'
+const CLIPS_W = 340, CLIPS_W_MANUAL = 420
+const AI_MIN = 300
 const CLIPS_RANGE: [number, number] = [280, 720]
 const CENTRE_MIN = 420
 // The AI column's split: the least Make my clips and Ask AI keep
@@ -398,13 +401,29 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const [autoStopping, setAutoStopping] = useState(false)
   // The clip list (kept locally so deleted clips disappear at once; a refresh brings the server's copy)
   const [clips, setClips] = useState(savedClips)
-  useEffect(() => { setClips(savedClips) }, [savedClips])
+  // A heart or a new name from the last moments: a reload of the list that left the server before
+  // it was saved must not put the old one back (the card would show it until the next refresh)
+  const justSaved = useRef(new Map<string, { at: number; fields: { favorite?: boolean; title?: string | null } }>())
+  function noteSaved(id: string, fields: { favorite?: boolean; title?: string | null }) {
+    justSaved.current.set(id, { at: Date.now(), fields: { ...justSaved.current.get(id)?.fields, ...fields } })
+  }
+  useEffect(() => {
+    const now = Date.now()
+    setClips(savedClips.map(c => {
+      const e = justSaved.current.get(c.id)
+      return e && now - e.at < 15_000 ? { ...c, ...e.fields } : c
+    }))
+  }, [savedClips])
   // Download from Preview: an exported clip saves straight away; one AI only edited (Make my clips
   // saves edits, not files) is exported first and saves by itself once ready
-  const [dlState, setDlState] = useState<Record<string, 'exporting' | { error: string }>>({})
+  const [dlState, setDlState] = useState<Record<string, 'exporting' | 'stopping' | { error: string }>>({})
+  // (Stop pressed before the export has been asked for: it waits for that, or the export would start after it)
+  const exportAsks = useRef(new Map<string, Promise<unknown>>())
   function saveFile(id: string) {
     const a = document.createElement('a')
-    a.href = `/api/clips/${id}/download`
+    // (a clip with no name of its own is saved under the one on its card: "Clip 3")
+    const c = byTime.find(x => x.id === id)
+    a.href = `/api/clips/${id}/download${c && !c.title ? `?name=${encodeURIComponent(`Clip ${c.index}`)}` : ''}`
     a.download = ''
     document.body.appendChild(a)
     a.click()
@@ -415,9 +434,12 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     if (c?.status === 'done' && c.output_url) { saveFile(id); return }
     setDlState(d => ({ ...d, [id]: 'exporting' }))
     if (c?.status !== 'rendering') {
-      const res = await fetch('/api/export', {
+      const ask = fetch('/api/export', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clip_id: id, quality: '1080p' }),
       }).catch(() => null)
+      exportAsks.current.set(id, ask)
+      const res = await ask
+      exportAsks.current.delete(id)
       // 409: it's already exporting — just wait for it
       if (!res || (!res.ok && res.status !== 409)) {
         const error = res ? (await res.json().catch(() => ({}))).error ?? 'Could not export' : 'Could not export'
@@ -426,6 +448,22 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       }
     }
     setClips(cs => cs.map(x => x.id === id ? { ...x, status: 'rendering', output_url: null } : x))
+  }
+  /** Stop on a card while it exports (user, 2026-11-10): the export stops, nothing is saved, the clip as it was before */
+  async function stopDownload(id: string) {
+    setDlState(d => ({ ...d, [id]: 'stopping' }))
+    setClipError(null)
+    try {
+      await exportAsks.current.get(id)
+      const res = await fetch(`/api/clips/${id}/cancel-export`, { method: 'POST' })
+      const d = await res.json().catch(() => null) as { status?: string; output_url?: string | null; error?: string } | null
+      if (!res.ok || !d?.status) throw new Error(d?.error ?? 'Couldn’t stop the export. Try again.')
+      setClips(cs => cs.map(x => x.id === id ? { ...x, status: d.status!, output_url: d.output_url ?? null } : x))
+      setDlState(s => { const n = { ...s }; delete n[id]; return n })
+    } catch (e) {
+      setDlState(s => ({ ...s, [id]: 'exporting' }))
+      setClipError(e instanceof Error ? e.message : 'Couldn’t stop the export. Try again.')
+    }
   }
   // While a download waits on its export, check (usePolling's rhythm); save it the moment it's done
   // (a hidden tab saves it the moment it is shown again)
@@ -449,7 +487,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const editorHref = (id: string) => `/editor/${id}${startWith ? `?from=${startWith}` : ''}`
   const [clipTab, setClipTab] = useState<ClipTab>(manualOnly ? 'yours' : 'all')
   // The clipboard badge: Manual edit counts only the user's own clips, as that board lists only those
-  // Clips on this board: Start with AI never lists the clips cut by hand (they belong to Pick my moments)
+  // Clips on this board: Start with AI never lists the clips cut by hand (they belong to Pick my moments),
+  // Manual edit never the AI's (its Favorites included)
   // Numbered in the order they were made (Clip 1 is the first one, and keeps its number), listed newest first.
   // Two counts (user, 2026-11-09): the clips cut by hand (Manual edit) and the AI's (Make my clips, Ask AI,
   // Best moments) — separate boards, so AI clips start at 1 however many were cut by hand, and back.
@@ -463,15 +502,16 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       return c.index === n ? c : { ...c, index: n }
     })
     .reverse()
-  const boardClips = manualOnly ? byTime : byTime.filter(c => c.origin !== 'yours')
-  const badgeCount = manualOnly ? byTime.filter(c => c.origin === 'yours').length : boardClips.length
+  const boardClips = byTime.filter(c => (c.origin === 'yours') === manualOnly)
+  const badgeCount = boardClips.length
   // Edited = opened in the editor at least once (the editor creates a clip's formats on first open)
   // (Manual edit lists only the user's own clips, so an AI-made clip never counts, even though it has formats)
   const isEdited = (c: { layout: string | null; origin: ClipOrigin }) => c.layout != null && (!manualOnly || c.origin === 'yours')
   // (brand kit Phase 2) each clip's kit, for its tag, and "Put on all"
   // ("Put on all": this board's own clips — the AI's here, the ones cut by hand on Manual edit — never the other board's)
-  const brandClips = manualOnly ? byTime.filter(c => c.origin === 'yours') : boardClips
-  const brands = useClipBrands(initialVideo.id, brandClips.map(c => c.id))
+  // (a brand put on or taken off: those clips' previews are loaded again — previewClip below)
+  const brandChangedRef = useRef<(ids: string[]) => void>(() => {})
+  const brands = useClipBrands(initialVideo.id, boardClips.map(c => c.id), ids => brandChangedRef.current(ids))
   const tabClips = clipTab === 'all' ? boardClips : clipTab === 'fav' ? boardClips.filter(c => c.favorite) : clipTab === 'edited' ? byTime.filter(isEdited) : byTime.filter(c => c.origin === clipTab)
   // Filters on the tab's clips (user, 2026-11-05: "get the clips easily", no search): their length, exported
   // or not, and the order — newest first (as before), oldest first, as they come in the video. (Length is
@@ -512,17 +552,27 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // An Ask AI / Best moments result shown in Preview before it's a clip (framed as a new clip would be)
   type MomentSource = 'best_moments' | 'clip_search'
   const [momentPreview, setMomentPreview] = useState<{ s: Suggestion; source: MomentSource } | null>(null)
+  /** A clip's preview read (again) from the server */
+  function loadPreview(id: string) {
+    setPreviews(p => ({ ...p, [id]: 'loading' }))
+    fetch(`/api/clips/${id}/preview`)
+      .then(async r => (r.ok ? r.json() : Promise.reject(new Error((await r.json().catch(() => ({}))).error ?? 'Could not load the preview'))))
+      .then((d: ClipPreviewData) => setPreviews(p => ({ ...p, [id]: d })))
+      .catch((e: unknown) => setPreviews(p => ({ ...p, [id]: { error: e instanceof Error ? e.message : 'Could not load the preview' } })))
+  }
   function previewClip(id: string) {
     videoRef.current?.pause()
     setViewMode('preview')
     setMomentPreview(null)
     setPreviewId(id)
     if (previews[id] && previews[id] !== 'loading' && !('error' in (previews[id] as object))) return
-    setPreviews(p => ({ ...p, [id]: 'loading' }))
-    fetch(`/api/clips/${id}/preview`)
-      .then(async r => (r.ok ? r.json() : Promise.reject(new Error((await r.json().catch(() => ({}))).error ?? 'Could not load the preview'))))
-      .then((d: ClipPreviewData) => setPreviews(p => ({ ...p, [id]: d })))
-      .catch((e: unknown) => setPreviews(p => ({ ...p, [id]: { error: e instanceof Error ? e.message : 'Could not load the preview' } })))
+    loadPreview(id)
+  }
+  // Their brand changed (user, 2026-11-10: a preview kept the look it was loaded with): the one showing
+  // loads again at once, the others when next opened
+  brandChangedRef.current = ids => {
+    setPreviews(p => { const next = { ...p }; for (const id of ids) delete next[id]; return next })
+    if (previewId && viewMode === 'preview' && ids.includes(previewId)) loadPreview(previewId)
   }
   // Click a clip: an edited one plays in Clip preview; one not edited yet shows in the source Video at its start
   function openClip(clip: { id: string; start_ms: number; layout: string | null; origin: ClipOrigin }) {
@@ -552,10 +602,18 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   }, [focusClipId, clipTab])
   // Select mode: tick several clips, then delete them together
   const [selecting, setSelecting] = useState(false)
+  const showSelect = selecting || shownClips.length > 0
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  // A ticked clip that a filter hides is unticked: Delete and Download only ever act on clips in view
+  const shownKey = shownClips.map(c => c.id).join()
+  useEffect(() => {
+    const inView = new Set(shownKey.split(','))
+    setSelected(prev => ([...prev].every(id => inView.has(id)) ? prev : new Set([...prev].filter(id => inView.has(id)))))
+  }, [shownKey])
 
   function toggleSelected(id: string) {
     setSelected(prev => {
@@ -580,11 +638,13 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   /** The heart: saved with the clip (put back if it couldn't be saved) */
   async function toggleFavorite(id: string) {
     const was = !!clips.find(c => c.id === id)?.favorite
+    noteSaved(id, { favorite: !was })
     setClips(prev => prev.map(c => c.id === id ? { ...c, favorite: !was } : c))
     try {
       const res = await fetch(`/api/clips/${id}/favorite`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ favorite: !was }) })
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not save the favourite')
     } catch (e) {
+      noteSaved(id, { favorite: was })
       setClips(prev => prev.map(c => c.id === id ? { ...c, favorite: was } : c))
       setClipError(e instanceof Error ? e.message : 'Could not save the favourite')
     }
@@ -593,11 +653,13 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   async function renameClip(id: string, title: string | null) {
     const was = clips.find(c => c.id === id)?.title ?? null
     if ((title ?? null) === was) return
+    noteSaved(id, { title })
     setClips(prev => prev.map(c => c.id === id ? { ...c, title } : c))
     try {
       const res = await fetch(`/api/clips/${id}/title`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) })
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not rename the clip')
     } catch (e) {
+      noteSaved(id, { title: was })
       setClips(prev => prev.map(c => c.id === id ? { ...c, title: was } : c))
       setClipError(e instanceof Error ? e.message : 'Could not rename the clip')
     }
@@ -727,7 +789,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // Parsed form range, for the live duration readout
   const formStartMs = parseTime(formStart)
   const formEndMs = parseTime(formEnd)
-  const formRangeValid = formStartMs !== null && formEndMs !== null && formEndMs > formStartMs
 
   /** `open`: open the new clip in the editor (Create & edit); otherwise just add it to the board */
   function submitForm(open = true) {
@@ -739,15 +800,16 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     createClip(formStartMs, formEndMs, open ? 'form' : 'board', formTitle.trim() || undefined, undefined, open)
   }
 
-  // What the user does with an AI suggestion (logged for improving clip picking; fire and forget)
-  function logSuggestion(event: 'previewed' | 'used', s: Suggestion, source: 'best_moments' | 'clip_search', clipId?: string) {
+  // An AI suggestion as it's logged (for improving clip picking)
+  const suggestionLog = (s: Suggestion) => ({
+    start_ms: s.start_ms, end_ms: s.end_ms, title: s.title, score: s.score, subscores: s.subscores, reason: s.reason,
+    model: 'gemini-2.5-flash',   // one model picks clips everywhere (CLIP_MODEL in services/videos.ts)
+  })
+  // A suggestion played without being made a clip (fire and forget)
+  function logPreviewed(s: Suggestion, source: 'best_moments' | 'clip_search') {
     fetch(`/api/videos/${video.id}/suggestion-events`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true,
-      body: JSON.stringify({
-        event, source, clip_id: clipId,
-        suggestion: { start_ms: s.start_ms, end_ms: s.end_ms, title: s.title, score: s.score, subscores: s.subscores, reason: s.reason,
-          model: 'gemini-2.5-flash' },   // one model picks clips everywhere (CLIP_MODEL in services/videos.ts)
-      }),
+      body: JSON.stringify({ event: 'previewed', source, suggestion: suggestionLog(s) }),
     }).catch(() => {})
   }
 
@@ -758,11 +820,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       const res = await fetch('/api/clips', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_id: video.id, start_ms: startMs, end_ms: endMs, layout: 'vertical', ...(title ? { title } : {}) }),
+        body: JSON.stringify({
+          video_id: video.id, start_ms: startMs, end_ms: endMs, layout: 'vertical', ...(title ? { title } : {}),
+          // (saved with the clip: it's how the board knows this one is the AI's)
+          ...(from ? { from: { source: from.source, suggestion: suggestionLog(from.s) } } : {}),
+        }),
       })
       if (!res.ok) throw new Error((await res.json()).error ?? 'Failed to create clip')
       const { clip_id } = await res.json()
-      if (from && typeof from.s.score === 'number') logSuggestion('used', from.s, from.source, clip_id)
       if (!open) {
         // Add to board: the clip joins "Your clips" here, highlighted; the editor isn't opened
         setClips(prev => prev.some(c => c.id === clip_id) ? prev : [...prev, {
@@ -788,12 +853,17 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     }
   }
 
+  const autoDoneSeen = useRef<number | null>(null)
   async function loadAutoClips() {
     const res = await fetch(`/api/videos/${video.id}/auto-clips`)
     if (!res.ok) return
     const data = await res.json() as { job: AutoJob | null; clips: AutoClip[] }
     setAutoJob(data.job)
     setAutoClips(data.clips ?? [])
+    // New clips also belong in the clip list on the right (the first read finds only what the page already lists)
+    const done = (data.clips ?? []).filter(c => c.status !== 'rendering').length
+    if (autoDoneSeen.current !== null && done > 0 && done !== autoDoneSeen.current) router.refresh()
+    autoDoneSeen.current = done
   }
   const autoRunning = autoJob?.status === 'queued' || autoJob?.status === 'running'
   // The bar's percent as shown: moving between the worker's reports (user, 2026-11-09: it sat still)
@@ -811,9 +881,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // Show an earlier run on load, then poll (usePolling's rhythm) while the job runs or its clips export
   useEffect(() => { if (video.status === 'ready') loadAutoClips().catch(() => {}) }, [video.id, video.status]) // eslint-disable-line react-hooks/exhaustive-deps
   usePolling(() => loadAutoClips().catch(() => {}), autoRunning || autoRendering)
-  // New clips also belong in the clip list on the right
-  const autoDoneCount = autoClips.filter(c => c.status !== 'rendering').length
-  useEffect(() => { if (autoDoneCount > 0) router.refresh() }, [autoDoneCount, router])
 
   async function makeClips() {
     // The number in the box, kept to 1–10 (it may not have settled yet if Enter wasn't pressed)
@@ -926,7 +993,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     setPreviewId(null)
     setMomentPreview({ s, source })
     setViewMode('preview')
-    if (typeof s.score === 'number') logSuggestion('previewed', s, source)
+    if (typeof s.score === 'number') logPreviewed(s, source)
   }
   function closeMoment() { setMomentPreview(null); setViewMode('video') }
   /** Edit: opens it in the editor (made a clip first if it isn't one yet) */
@@ -1022,6 +1089,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const [mmcH, setMmcH] = useState<number | null>(null)
   const mmcRef = useRef<HTMLElement>(null)
   const aiColRef = useRef<HTMLElement>(null)
+  const clipsColRef = useRef<HTMLElement>(null)
   // What Ask AI keeps: its box and one-tap searches while it has nothing to show, more once results come
   const askMin = aiSuggestions?.length || loadingAi || aiError ? ASK_MIN : ASK_MIN_EMPTY
   function startSplitResize(e: React.PointerEvent) {
@@ -1042,8 +1110,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     window.addEventListener('pointerup', up)
   }
   const aiShown = wide && isReady && !manualOnly
-  const aiWidth = aiW ?? AI_W
-  const clipsWidth = clipsW ?? (manualOnly ? CLIPS_W_MANUAL : CLIPS_W)
+  const aiBasis = aiW !== null ? `${aiW}px` : ONE_THIRD
+  const clipsBasis = clipsW !== null ? `${clipsW}px` : aiShown ? ONE_THIRD : `${manualOnly ? CLIPS_W_MANUAL : CLIPS_W}px`
   /** Drag a bar: the AI tools grow to the right, the clipboard to the left; the video keeps CENTRE_MIN */
   function startColumnResize(e: React.PointerEvent, which: 'ai' | 'clips') {
     if (e.button !== 0) return
@@ -1051,11 +1119,12 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     const x0 = e.clientX
     // (from the width it is drawn at: a smaller window may have narrowed it)
     const col = which === 'ai' ? e.currentTarget.previousElementSibling : e.currentTarget.nextElementSibling
-    const w0 = col?.getBoundingClientRect().width ?? (which === 'ai' ? aiWidth : clipsWidth)
-    const [lo, hi] = which === 'ai' ? AI_RANGE : CLIPS_RANGE
+    const w0 = col?.getBoundingClientRect().width ?? 0
+    // (AI edit: as far as the room below allows, a third of a big screen being past any fixed limit)
+    const [lo, hi] = which === 'ai' ? [AI_MIN, Infinity] : [CLIPS_RANGE[0], aiShown ? Infinity : CLIPS_RANGE[1]]
     // (the room there is: the row less its padding, the other column, the gaps and the video's least)
     const row = columnsRef.current
-    const other = which === 'ai' ? clipsWidth : aiShown ? aiWidth : 0
+    const other = (which === 'ai' ? clipsColRef.current : aiShown ? aiColRef.current : null)?.getBoundingClientRect().width ?? 0
     const room = row ? row.clientWidth - 32 - other - (aiShown ? 32 : 16) - CENTRE_MIN : hi
     const max = Math.max(lo, Math.min(hi, room))
     setResizing(which)
@@ -1281,11 +1350,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           </button>}
         </div>
       </div>
-      {/* (the "Type hours, minutes and seconds" hint: out, user 2026-11-09 — only the length or a problem shows) */}
-      {(formError || formRangeValid) && (
-        <p className="text-xs" style={{ color: formError ? '#f87171' : 'rgb(var(--cb-fg) / 0.45)' }}>
-          {formError ?? `Length: ${durLabel(formStartMs!, formEndMs!)}`}
-        </p>
+      {/* (only a problem shows: the hint went 2026-11-09, the "Length: 2m" line 2026-11-10 — the badge between Start and End says it) */}
+      {formError && (
+        <p className="text-xs" style={{ color: '#f87171' }}>{formError}</p>
       )}
     </form>
   ) : (
@@ -1554,7 +1621,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             </svg>
             Ask AI
           </h3>
-          <InfoTip label="About Ask AI">Describe a moment — an emotion, a topic, a hot take — and AI finds matching clips. Press Use on a result to add it.</InfoTip>
+          <InfoTip label="About Ask AI">Describe a moment — an emotion, a topic, a hot take — and AI finds matching clips. Press + on a result to add it.</InfoTip>
         </div>
         {/* The Ask AI ⇄ Best moments switch, as it was (inner comments written /~ ~/):
         <div className="shrink-0 flex items-center gap-2">
@@ -1658,8 +1725,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         {!loadingAi && aiSuggestions && aiSuggestions.length === 0 && (
           <p className="text-xs" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>Nothing matched that. Try a different description.</p>
         )}
-        {!loadingAi && aiSuggestions?.map((s, i) => (
-          <ResultCard key={s.id} s={s} rank={i + 1} videoUrl={videoUrl} busy={busy} inClips={!!clipFor(s)}
+        {!loadingAi && aiSuggestions?.map(s => (
+          <ResultCard key={s.id} s={s} videoUrl={videoUrl} busy={busy} inClips={!!clipFor(s)}
             open={viewMode === 'preview' && momentPreview?.s.id === s.id}
             onOpen={() => previewMoment(s, 'clip_search')} onClose={closeMoment}
             onEdit={() => editMoment(s, 'clip_search')} onAdd={() => addMomentToBoard(s, 'clip_search')} />
@@ -1700,8 +1767,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             {clips.length ? 'No new moments — the strongest ones are already in your clips.' : 'No suggestions for this video.'}
           </p>
         )}
-        {suggestions && suggestions.map((s, i) => (
-          <ResultCard key={s.id} s={s} rank={i + 1} videoUrl={videoUrl} busy={busy} inClips={!!clipFor(s)}
+        {suggestions && suggestions.map(s => (
+          <ResultCard key={s.id} s={s} videoUrl={videoUrl} busy={busy} inClips={!!clipFor(s)}
             open={viewMode === 'preview' && momentPreview?.s.id === s.id}
             onOpen={() => previewMoment(s, 'best_moments')} onClose={closeMoment}
             onEdit={() => editMoment(s, 'best_moments')} onAdd={() => addMomentToBoard(s, 'best_moments')} />
@@ -1793,10 +1860,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   )
   const aiTools = aiLocked ? aiToolsLocked : aiToolsOpen
   // A scan over the video (the editor's CaptionScan) while AI works on it (user, 2026-11-09): its
-  // captions being read, or Make my clips running — the line under it says which
+  // captions being read, Make my clips running, or an Ask AI search — the line under it says which
   const scanLabel = autoRunning
     ? (autoJob?.status === 'queued' ? 'Waiting to start…' : autoJob?.stage?.text ? `${autoJob.stage.text}…` : 'Making your clips…')
-    : reading?.status === 'running' ? 'Getting captions…' : null
+    : reading?.status === 'running' ? 'Getting captions…'
+    : loadingAi ? 'Finding your moments…' : null
 
   return (
     <div className="cb-page h-screen flex flex-col overflow-hidden">
@@ -1821,7 +1889,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         {/* ── Left: AI tools (wide screens) ─────────────────────── */}
         {aiShown && (
           // (a smaller window: the video keeps CENTRE_MIN and the side columns give way, each by its share)
-          <aside ref={aiColRef} className="cb-panel flex flex-col gap-3 p-3 min-h-0 min-w-0 overflow-hidden" style={{ flex: `0 1 ${aiWidth}px` }}>
+          <aside ref={aiColRef} className="cb-panel flex flex-col gap-3 p-3 min-h-0 min-w-0 overflow-hidden" style={{ flex: `0 1 ${aiBasis}` }}>
             {aiTools}
           </aside>
         )}
@@ -1865,7 +1933,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           onPointerDown={e => startColumnResize(e, 'clips')} onDoubleClick={() => setClipsW(null)} />
 
         {/* ── Right: your clips (cb-clips: its cards follow its width, not the window's) ── */}
-        <aside className="cb-panel cb-clips flex flex-col min-h-0 min-w-0 overflow-hidden" style={{ flex: `0 1 ${clipsWidth}px` }}>
+        <aside ref={clipsColRef} className="cb-panel cb-clips flex flex-col min-h-0 min-w-0 overflow-hidden" style={{ flex: `0 1 ${clipsBasis}` }}>
           <div className="px-4 pt-4 pb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 shrink-0">
             <svg className="cb-head-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 4V3h6v1M9 10h6M9 14h4" />
@@ -1875,21 +1943,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               <span className="cb-count text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ color: ACCENT, background: 'rgba(200,255,0,0.1)', border: '1px solid rgba(200,255,0,0.25)' }}>
                 {badgeCount} clip{badgeCount === 1 ? '' : 's'}
               </span>
-            )}
-            <div className="flex-1" />
-            {/* Select (user, 2026-11-09): starts with nothing ticked — tap the clips wanted; Cancel leaves,
-                clearing the ticks. (It was a "Select all" tick box: it ticked every clip, and once one was
-                unticked it showed empty and ticked them all again — no way out but Esc.) */}
-            {(selecting || shownClips.length > 0) && (
-              <button type="button" className="cb-select-btn" data-on={selecting || undefined} aria-pressed={selecting}
-                onClick={() => (selecting ? stopSelecting() : (setSelecting(true), setSelected(new Set())))}>
-                {selecting ? 'Cancel' : (
-                  <>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4" /><path d="M8 12.5l2.8 2.8L16.5 9.5" /></svg>
-                    Select
-                  </>
-                )}
-              </button>
             )}
           </div>
           {/* Sections: every clip, or only those from one place */}
@@ -1917,21 +1970,38 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             </div>
             {/* (brand kit Phase 2) a kit on every clip at once */}
             {/* (shown while selecting too: the kit then goes on the ticked clips only) */}
-            <BrandAllBar b={brands} total={brandClips.length} selected={selecting ? [...selected] : []} />
-            {tabClips.length > 1 && (
+            <BrandAllBar b={brands} total={boardClips.length} selected={selecting ? [...selected] : []} />
+            {(tabClips.length > 1 || showSelect) && (
               <div className="cb-filters" role="group" aria-label="Filter the clips">
-                <FilterChip size="xs" label="Length" value={lenF} onChange={setLenF} clearable
-                  options={[['all', 'Any length'], ['short', 'Under 30s'], ['mid', '30–60s'], ['long', 'Over 1 min']]} />
-                <FilterChip size="xs" label="Exported" value={expF} onChange={setExpF} clearable
-                  options={[['all', 'Any'], ['yes', 'Exported'], ['no', 'Not exported yet']]} />
-                {/* Sort at the far end, as an icon and its choice */}
-                <span className="cb-filters-end">
-                  <FilterChip size="xs" align="end" label="Sort" value={sortBy} onChange={setSortBy}
-                    icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 4v16M3.5 16.5L7 20l3.5-3.5M17 20V4M13.5 7.5L17 4l3.5 3.5" /></svg>}
-                    options={[['new', 'Newest first'], ['old', 'Oldest first'], ['video', 'Order in the video'], ['short', 'Shortest first'], ['long', 'Longest first']]} />
-                </span>
+                {/* Sort first, Select at the far end (user, 2026-11-10) */}
+                {tabClips.length > 1 && (
+                  <>
+                    <FilterChip size="xs" label="Sort" value={sortBy} onChange={setSortBy}
+                      icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 4v16M3.5 16.5L7 20l3.5-3.5M17 20V4M13.5 7.5L17 4l3.5 3.5" /></svg>}
+                      options={[['new', 'Newest first'], ['old', 'Oldest first'], ['video', 'Order in the video'], ['short', 'Shortest first'], ['long', 'Longest first']]} />
+                    <FilterChip size="xs" label="Length" value={lenF} onChange={setLenF} clearable
+                      options={[['all', 'Any length'], ['short', 'Under 30s'], ['mid', '30–60s'], ['long', 'Over 1 min']]} />
+                    <FilterChip size="xs" label="Exported" value={expF} onChange={setExpF} clearable
+                      options={[['all', 'Any'], ['yes', 'Exported'], ['no', 'Not exported yet']]} />
+                  </>
+                )}
+                {/* Select (user, 2026-11-09): starts with nothing ticked; Cancel leaves, clearing the ticks. Without
+                    the filters too: one clip has no filters but can still be ticked */}
+                {showSelect && (
+                  <span className="cb-filters-end">
+                    <button type="button" className="cb-select-btn" data-on={selecting || undefined} aria-pressed={selecting}
+                      onClick={() => (selecting ? stopSelecting() : (setSelecting(true), setSelected(new Set())))}>
+                      {selecting ? 'Cancel' : (
+                        <>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4" /><path d="M8 12.5l2.8 2.8L16.5 9.5" /></svg>
+                          Select
+                        </>
+                      )}
+                    </button>
+                  </span>
+                )}
                 {/* ("3 of 7 · Clear" on its own line under the chips: .cb-filter-count) */}
-                {clipFiltering && (
+                {clipFiltering && tabClips.length > 1 && (
                   <p className="cb-filter-count" role="status">
                     {shownClips.length} of {tabClips.length}
                     <button type="button" onClick={clearClipFilters}>Clear</button>
@@ -1967,7 +2037,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 key={clip.id}
                 id={clip.id}
                 focused={focusClipId === clip.id}
-                number={clip.index}
                 origin={clipTab === 'all' || clipTab === 'fav' || clipTab === 'edited' ? clip.origin : undefined}
                 videoUrl={videoUrl}
                 favorite={!!clip.favorite}
@@ -1989,9 +2058,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 open={previewId === clip.id}
                 onClose={() => { setPreviewId(null); setViewMode('video') }}
                 onDownload={() => downloadClip(clip.id)}
+                onStopDownload={() => stopDownload(clip.id)}
                 manual={manualOnly}
                 edited={manualOnly && isEdited(clip)}
-                download={dlState[clip.id] === 'exporting' || clip.status === 'rendering' ? 'preparing'
+                download={dlState[clip.id] === 'stopping' ? 'stopping'
+                  : dlState[clip.id] === 'exporting' || clip.status === 'rendering' ? 'preparing'
                   : typeof dlState[clip.id] === 'object' ? 'failed' : 'ready'}
                 disabled={!!busy}
                 selecting={selecting}
@@ -2448,7 +2519,7 @@ function Spinner() {
 }
 
 /** A clip's picture: a frame from its start, with its number on it */
-function ClipThumb({ videoUrl, atMs, number, w, h }: { videoUrl: string; atMs: number; number?: number; w: number; h: number }) {
+function ClipThumb({ videoUrl, atMs, w, h }: { videoUrl: string; atMs: number; w: number; h: number }) {
   const src = useFrameAt(videoUrl, atMs)
   return (
     // (--cb-thumb-k: smaller in a narrow clipboard, globals.css .cb-clips)
@@ -2456,10 +2527,6 @@ function ClipThumb({ videoUrl, atMs, number, w, h }: { videoUrl: string; atMs: n
       style={{ width: `calc(${w}px * var(--cb-thumb-k, 1))`, height: `calc(${h}px * var(--cb-thumb-k, 1))`, background: 'rgb(var(--cb-fg) / 0.06)' }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       {src && <img src={src} alt="" className="w-full h-full object-cover" />}
-      {number != null && (
-        <span className="absolute left-1 top-1 min-w-5 h-5 px-1 rounded-md flex items-center justify-center text-[11px] font-bold tabular-nums"
-          style={{ background: 'rgba(0,0,0,0.72)', color: '#fff', border: '1px solid rgba(255,255,255,0.18)' }}>{number}</span>
-      )}
     </span>
   )
 }
@@ -2479,18 +2546,14 @@ function Heart({ on }: { on: boolean }) {
  * An Ask AI / Best moments result, like a clip card: slim (picture, title, length, +) until clicked;
  * clicked, it opens and plays in Preview with Preview · Edit · Add. Clicking it again closes it.
  */
-function ResultCard({ s, rank, videoUrl, busy, inClips, open, onOpen, onClose, onEdit, onAdd }: {
-  s: Suggestion; rank: number; videoUrl: string; busy: string | null
+function ResultCard({ s, videoUrl, busy, inClips, open, onOpen, onClose, onEdit, onAdd }: {
+  s: Suggestion; videoUrl: string; busy: string | null
   /** Already a clip on the board (Add then shows it there) */
   inClips: boolean
   open: boolean
   onOpen: () => void; onClose: () => void; onEdit: () => void; onAdd: () => void
 }) {
   const working = busy === s.id
-  const score = typeof s.score === 'number' && (
-    <span role="img" aria-label={`Viral score ${s.score} out of 99`} className="shrink-0 px-1.5 py-px rounded-md text-[10px] font-bold tabular-nums"
-      style={{ color: ACCENT, background: 'rgba(200,255,0,0.1)', border: '1px solid rgba(200,255,0,0.25)' }}>{s.score}</span>
-  )
   const addIcon = inClips
     ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
     : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
@@ -2507,12 +2570,11 @@ function ResultCard({ s, rank, videoUrl, busy, inClips, open, onOpen, onClose, o
       <div role="button" tabIndex={0} onClick={click} onKeyDown={keys}
         className="shrink-0 flex items-center gap-3 rounded-xl p-2 min-h-[68px] cursor-pointer transition-colors hover:bg-white/[0.05] focus-visible:outline focus-visible:outline-2"
         style={{ background: 'rgb(var(--cb-fg) / 0.03)', border: '1px solid rgb(var(--cb-fg) / 0.07)', outlineColor: ACCENT }}>
-        <ClipThumb videoUrl={videoUrl} atMs={s.start_ms} number={rank} w={84} h={48} />
+        <ClipThumb videoUrl={videoUrl} atMs={s.start_ms} w={84} h={48} />
         <span className="flex-1 min-w-0 flex flex-col gap-1">
           <span className="text-sm font-semibold text-white leading-snug line-clamp-2 break-words">{s.title}</span>
           <span className="flex items-center gap-1.5 text-[11px] tabular-nums" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>
             <ClockIcon />{durLabel(s.start_ms, s.end_ms)}
-            {score}
           </span>
         </span>
         <button type="button" onClick={onAdd} disabled={!!busy} aria-label={inClips ? 'In your clips — show it' : 'Add to your clips'}
@@ -2529,17 +2591,14 @@ function ResultCard({ s, rank, videoUrl, busy, inClips, open, onOpen, onClose, o
       className="shrink-0 rounded-xl p-2.5 cursor-pointer transition-colors hover:bg-white/[0.04] focus-visible:outline focus-visible:outline-2"
       style={{ background: 'rgba(200,255,0,0.03)', border: `1px solid ${ACCENT}`, outlineColor: ACCENT }}>
       <div className="flex items-start gap-3">
-        <ClipThumb videoUrl={videoUrl} atMs={s.start_ms} number={rank} w={112} h={64} />
+        <ClipThumb videoUrl={videoUrl} atMs={s.start_ms} w={112} h={64} />
         <div className="flex-1 min-w-0 flex flex-col gap-1">
           <p className="text-sm font-semibold text-white leading-snug line-clamp-2">{s.title}</p>
           <span className="flex items-center gap-1.5 text-xs tabular-nums" style={{ color: 'rgb(var(--cb-fg) / 0.65)' }}>
             <ClockIcon />{msToDisplay(s.start_ms)} – {msToDisplay(s.end_ms)}
             <span style={{ color: 'rgb(var(--cb-fg) / 0.35)' }}>· {durLabel(s.start_ms, s.end_ms)}</span>
           </span>
-          <span className="flex items-center gap-1.5">
-            {score}
-            {inClips && <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: ACCENT }}>✓ In your clips</span>}
-          </span>
+          {inClips && <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: ACCENT }}>✓ In your clips</span>}
         </div>
       </div>
       {(s.summary || s.reason) && (
@@ -2705,7 +2764,7 @@ function SubEditOverlay({ startedAt, estimate, ahead, onStop }: { startedAt: num
   )
 }
 
-function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, download, onSubEdited, manual, edited, brandTag, onRename, defaultTitle }: {
+function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, onStopDownload, download, onSubEdited, manual, edited, brandTag, onRename, defaultTitle }: {
   id: string
   /** Renamed from its card (✎ or a double-click on the name): the new name, or null for `defaultTitle` again */
   onRename?: (title: string | null) => void
@@ -2721,8 +2780,10 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
   onSubEdited?: () => void
   /** Download: saves the file, exporting it first if it isn't exported yet (e.g. AI's clips) */
   onDownload: () => void
-  /** preparing: exporting, saves by itself when ready · failed: the last try didn't work */
-  download: 'ready' | 'preparing' | 'failed'
+  /** Stop, in the Download button's place while it exports */
+  onStopDownload: () => void
+  /** preparing: exporting, saves by itself when ready (the button is Stop) · failed: the last try didn't work */
+  download: 'ready' | 'preparing' | 'stopping' | 'failed'
   videoUrl: string
   favorite: boolean
   /** Why AI picked it (Make my clips), when we have it */
@@ -2737,7 +2798,6 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
   previewing?: boolean
   /** Just jumped to (e.g. from Best moments): shown open, outlined for a moment */
   focused?: boolean
-  number: number
   /** Shown in "All clips" / "Favorites": which section the clip belongs to */
   origin?: ClipOrigin
   title: string
@@ -2783,6 +2843,11 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
   // Rename's icon, a text field with a typing cursor (the pencil is Edit's): on the labelled Rename button beside
   // Edit and Download (user, 2026-11-05: an icon alone at the top wasn't clear)
   const renameIcon = (size: number) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 4h1a3 3 0 013 3 3 3 0 013-3h1" /><path d="M13 20h-1a3 3 0 01-3-3 3 3 0 01-3 3H5" /><path d="M5 16H4a2 2 0 01-2-2v-4a2 2 0 012-2h1" /><path d="M13 8h7a2 2 0 012 2v4a2 2 0 01-2 2h-7" /><path d="M9 7v10" /></svg>
+  // Download's button: Stop while the clip exports
+  const exporting = download === 'preparing' || download === 'stopping'
+  const downloadLabel = download === 'preparing' ? 'Stop' : download === 'stopping' ? 'Stopping…' : download === 'failed' ? 'Retry' : 'Download'
+  const tapDownload = (e: React.MouseEvent) => { e.stopPropagation(); if (download === 'preparing') onStopDownload(); else onDownload() }
+  const stopIcon = (size: number) => <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
   const sub = useSubEdit(id, onSubEdited)
   // Opened: a click anywhere outside the card closes it again (not while picking clips, nor in its
   // own pop-ups, nor on the centre panel where it is being previewed: data-keep-clip-open)
@@ -2826,7 +2891,7 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
         {/* The picture at the top beside the name; Edit · Download · Rename in one row under both
             (user, 2026-11-09: they wrapped under the name, the picture sat lower with a gap above) */}
         <span className="flex items-start gap-3">
-          <ClipThumb videoUrl={videoUrl} atMs={startMs} number={number} w={84} h={48} />
+          <ClipThumb videoUrl={videoUrl} atMs={startMs} w={84} h={48} />
           <span className="flex-1 min-w-0 flex flex-col gap-1">
             <span className="flex items-start gap-2">
               {nameField || (
@@ -2850,6 +2915,8 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
                 <span className="cb-edited px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide" style={{ color: ACCENT, background: 'rgba(200,255,0,0.12)' }}>Edited</span>
               )}
               {status === 'rendering' && <span className="flex items-center gap-1" style={{ color: ACCENT }}>· <Spinner /> Exporting</span>}
+              {/* Which brand kit is on it, at a glance (user, 2026-11-10: the slim cards didn't say) */}
+              {brandTag}
               {sub.busy && <SubEditInline startedAt={sub.startedAt} estimate={sub.estimate} ahead={sub.ahead} onStop={sub.stop} />}
             </span>
           </span>
@@ -2868,12 +2935,12 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
                   Edit
                 </button>
-                <button type="button" onClick={e => { e.stopPropagation(); onDownload() }} disabled={download === 'preparing'} className="cb-act justify-center"
-                  data-tone={download === 'failed' ? 'danger' : undefined}>
-                  {download === 'preparing' ? <Spinner /> : (
+                <button type="button" onClick={tapDownload} disabled={download === 'stopping'} className="cb-act justify-center"
+                  data-tone={download === 'failed' || exporting ? 'danger' : undefined}>
+                  {exporting ? stopIcon(11) : (
                     <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   )}
-                  {download === 'preparing' ? 'Preparing' : download === 'failed' ? 'Retry' : 'Download'}
+                  {downloadLabel}
                 </button>
                 {onRename && (
                   <button type="button" onClick={startRename} className="cb-act justify-center" data-on={renaming ? '' : undefined}>
@@ -2920,7 +2987,7 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
             {selected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
           </span>
         ) : null}
-        <ClipThumb videoUrl={videoUrl} atMs={startMs} number={number} w={112} h={64} />
+        <ClipThumb videoUrl={videoUrl} atMs={startMs} w={112} h={64} />
         <div className="flex-1 min-w-0 flex flex-col gap-1">
           <div className="flex items-start gap-1">
             {nameField || (
@@ -2979,13 +3046,13 @@ function ClipCard({ id, focused, number, origin, title, startMs, endMs, status, 
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
             Edit
           </button>
-          <button onClick={e => { e.stopPropagation(); onDownload() }} disabled={download === 'preparing'}
+          <button onClick={tapDownload} disabled={download === 'stopping'}
             className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-90 disabled:opacity-70"
-            style={download === 'failed' ? { color: '#f87171', border: '1px solid rgba(239,68,68,0.45)' } : { background: ACCENT, color: '#000' }}>
-            {download === 'preparing' ? <Spinner /> : (
+            style={download === 'failed' || exporting ? { color: '#f87171', border: '1px solid rgba(239,68,68,0.45)' } : { background: ACCENT, color: '#000' }}>
+            {exporting ? stopIcon(12) : (
               <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
             )}
-            {download === 'preparing' ? 'Preparing' : download === 'failed' ? 'Retry' : 'Download'}
+            {downloadLabel}
           </button>
           {onRename && (
             <button onClick={startRename}

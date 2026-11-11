@@ -10,7 +10,7 @@ import { withoutRanges, computeCutRanges, reactionRanges } from '@/lib/cuts'
 import { inLineText } from '@/lib/inLine'
 import { cleanTrims, trimMap, addTrim, wordsOnTimeline, MAX_CLIP_MS, MIN_CLIP_MS } from '@/lib/trims'
 import { toTimelineState, toSourceState, rippleDelete, rippleStretch, lockedInRange, insertAtStart, extendEnd, type TimedState } from '@/modules/editor/trimState'
-import { insertsOf, insertedMs, rippleInsert, isInsert, goesAfterMain, piecesOf, piecesLength, videoAtPieces, timelineAtPieces, rippleCut, pieceAt, speedOf, pieceVideoMs, mainFrom } from '@/modules/editor/inserts'
+import { freezeChanged, insertsOf, insertedMs, rippleInsert, isInsert, goesAfterMain, piecesOf, piecesLength, videoAtPieces, timelineAtPieces, rippleCut, pieceAt, speedOf, pieceVideoMs, mainFrom } from '@/modules/editor/inserts'
 import { PostText, type PostTextValue } from '@/components/clips/PostText'
 import { BrollPanel, type StockResult } from '@/components/editor/BrollPanel'
 import { VideoPanel, type PanelVideo } from '@/components/editor/VideoPanel'
@@ -34,7 +34,8 @@ import { AudioMixerPanel } from '@/components/editor/AudioMixerPanel'
 import { MediaPickerModal } from '@/components/editor/MediaPickerModal'
 import { shownSegment, addedVideoBox, isGapPart, isMainShot, STAND_IN_SUFFIX } from '@/modules/editor/visibility'
 import { placeInRow, liftToRow, lowerToRow, liftBlock, fillUncovered } from '@/modules/editor/place'
-import { splitTargets } from '@/modules/editor/split'
+import { frameOffMedia, frameOnMedia, mediaForFrame, type RowMedia } from '@/modules/editor/frameOnMedia'
+import { freezePart, restsOnSplit, splitTargets } from '@/modules/editor/split'
 import { AccountMenu } from '@/components/ui/account-menu'
 import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { BrandLogo } from '@/components/ui/brand-logo'
@@ -49,9 +50,9 @@ import { putBrandOn, takeBrandOff, brandNewFrames, updateBrand, brandChanged, fi
 import { EditorBrandMenu } from '@/components/brand/EditorBrandMenu'
 import { CleanupPanel, type CleanupRow } from '@/components/editor/CleanupPanel'
 import { cleanupCards, isDeleted } from '@/modules/editor/cleanup'
-import { brandPalette, brandLockOf, brandTextStyle, brandCaptionLooks, brandCaptionStyle, captionBand, sameEndVideo, type FrameRect, type BrandKit, type BrandTextKind } from '@/lib/shared/brandKit'
+import { BRAND_ENDS_ON, brandPalette, brandLockOf, brandTextStyle, brandCaptionLooks, brandCaptionStyleOn, captionBand, sameEndVideo, type FrameRect, type BrandKit, type BrandTextKind } from '@/lib/shared/brandKit'
 import { brandTextLook } from '@/modules/editor/textStyle'
-import { brandCaptionWords, type BrandWords } from '@/lib/brandWords'
+import { brandCaptionWords, BRAND_WORDS_ON, type BrandWords } from '@/lib/brandWords'
 import { lockClipLook, lockHolds, lockSetOf, type LockSet } from '@/lib/shared/brandTeam'
 import { BrandCaptionLooks } from '@/components/brand/BrandCaptionLooks'
 import { setBrandPalette, setBrandLock } from '@/components/editor/brandPalette'
@@ -59,7 +60,7 @@ import { setBrandFonts, ensureBrandFont } from '@/components/editor/brandFonts'
 import { EditorTour, hasSeenEditorTour } from '@/components/editor/EditorTour'
 import { FrameAddMenu, addChoices, type AddChoice } from '@/components/editor/FrameAddMenu'
 import { createFrameMediaPool } from '@/modules/editor/frameMedia'
-import { FRAME_TEMPLATES, isFrameLayout, frameOf, mainAudioVolume, mainSlotSound, frameLanes, frameSlotLabels, emptySlotStretches, slotOffers, laneInRowKey, newItemCorners, frameSlotCount, itemAt, isTextLane, textLaneLook, type TextLane } from '@/modules/editor/frames'
+import { FRAME_TEMPLATES, isMainHold, sameLayer, newHoldAt, MIN_ITEM_MS as MIN_FREEZE_MS, isMediaFrame, isFrameLayout, frameOf, mainAudioVolume, mainSlotSound, frameLanes, frameSlotLabels, emptySlotStretches, slotOffers, laneInRowKey, newItemCorners, frameSlotCount, itemAt, isTextLane, textLaneLook, type TextLane } from '@/modules/editor/frames'
 import { signOut } from 'next-auth/react'
 import { PlatformOverlay, PLATFORM_SAFE, type Platform } from '@/components/editor/PlatformOverlay'
 // ── Domain stores ──────────────────────────────────────────────────────────────
@@ -74,7 +75,8 @@ import { cleanParts, playedParts, playedPartAt, applyLook, lookOf, isLookChange,
 import { CAPTION_TEMPLATES, usesKeyWords } from '@/modules/captions/templates'
 import { useMediaStore } from '@/modules/media/store'
 import { rowsToLocal, normalizeCoverage, uncoveredRanges, defaultCropForSlot, msToLabel } from '@/modules/editor/utils'
-import { isShot, flattenShots, toSaved, restoreLayers, asMainPart } from '@/modules/editor/shots'
+import { isShot, flattenShots, toSaved, asMainPart } from '@/modules/editor/shots'
+import { stateFromRows, type SegmentRow } from '@/modules/editor/loadRows'
 import { applyGroupShots, applyFormatSpans } from '@/modules/editor/groupShots'
 import { LAYOUT_SLOT_COUNT } from '@chai-cut/shared'
 import { fitsOn, freeTrackIn, settleTracks, savedLanes, type TrackItem, type TrackRef } from '@/modules/editor/tracks'
@@ -90,7 +92,7 @@ import { briefView, withWide, WIDEN_MIN_MS } from '@/modules/editor/briefWiden'
 import { decideFormat, decideVertical, AUTO_FORMAT, SOURCE_PX_H, WHOLE_PICTURE, keepsAll, viewsOverlap } from '@/modules/editor/autoFormat'
 import { pictureOrWhole, toPicture, fromPicture, pictureAR } from '@/modules/editor/pictureBox'
 import { setFramePicture, framePicture, inFramePicture } from '@/modules/editor/framePicture'
-import type { SegmentLocal, CropBoxLocal, FrameLayout, FrameLane, FrameItem, TransitionType } from '@chai-cut/shared'
+import type { SegmentLocal, CropBoxLocal, FrameHold, FrameLayout, FrameLane, FrameItem, TransitionType } from '@chai-cut/shared'
 import { SPEED_MIN, SPEED_MAX } from '@chai-cut/shared'
 import { TransitionsPanel, TRANSITION_DEFAULT_MS, TRANSITION_KINDS, playedTransitionMs, type TransitionJoin } from '@/components/editor/TransitionsPanel'
 
@@ -100,8 +102,14 @@ type MediaFilter = 'all' | 'video' | 'audio' | 'image'
 /** 'retrying': no answer (the connection); 'refused': the server answered with a failure — both tried again */
 type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'retrying' | 'refused'
 
-interface SegmentRow extends Omit<Segment, never> {
-  crop_boxes: (CropBox & { box_keyframes: BoxKeyframe[] })[]
+/** A Make my clips clip as the AI made it: the rows the editor loads (the worker's saveClip; the page signs its pictures) */
+export interface AiMade {
+  start_ms: number; end_ms: number; trim_ranges: unknown
+  brand: BrandOn | null
+  segments: SegmentRow[]
+  caption_style: (Partial<CaptionStyle> & Record<string, unknown>) | null
+  text_overlays: TextOverlay[]
+  overlays: Overlay[]
 }
 
 interface Props {
@@ -122,6 +130,8 @@ interface Props {
   initialOverlays: Overlay[]
   /** The clip board it was opened from (the dashboard's AI edit / Manual edit choice), so "Clip board" returns to it */
   backStart?: 'ai' | 'manual'
+  /** A Make my clips clip as the AI made it (clip_ai_made): what Reset goes back to. null: none kept */
+  aiMade?: AiMade | null
 }
 
 const LAYOUTS: { id: LayoutType; label: string }[] = [
@@ -160,9 +170,13 @@ const TIMELINE_PAD_Y = 28
 // How wide the side columns can be dragged
 const OPTIONS_RANGE: [number, number] = [220, 520]
 const PREVIEW_RANGE: [number, number] = [260, 620]
+/** The Preview column never takes more of the window than this, so a narrow or tall window keeps room for the video panel */
+const PREVIEW_MAX_VW = 40
 const DEFAULT_SEG_ID = '__default-format'
 const DEFAULT_BOX_ID = '__default-box'
 const ACCENT = '#c8ff00'
+/** A choice in the Reset popup: plain, red only under the mouse or the keyboard (user, 2026-11-10) */
+const RESET_CHOICE = 'rounded-lg text-left transition-colors bg-[rgb(var(--ed-fg)/0.08)] text-[var(--ed-text)] hover:bg-[#ef4444] hover:text-white focus-visible:bg-[#ef4444] focus-visible:text-white'
 
 const TOOLS: { id: Tool; label: string; title: string; hint: string; icon: React.ReactNode }[] = [
   {
@@ -219,7 +233,7 @@ const TOOLS: { id: Tool; label: string; title: string; hint: string; icon: React
   {
     // (user, 2026-10-17) Its workshop takes the video's place in the middle, for more room
     id: 'brand', label: 'Brand kit', title: 'Brand kit',
-    hint: 'Your colours, logo, @handle and title style, saved for every clip. Set a kit up, then Apply it to this clip.',
+    hint: 'Your colours, logo and title style, saved for every clip. Set a kit up, then Apply it to this clip.',
     icon: <><path d="M12 21a9 9 0 110-18 8.5 8.5 0 018.5 8.2c0 2.6-1.8 3.8-3.8 3.8h-1.9a1.9 1.9 0 00-1 3.5A1.9 1.9 0 0112 21z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" fill="none" /><circle cx="7.6" cy="11" r="1.3" fill="currentColor" /><circle cx="10.4" cy="7" r="1.3" fill="currentColor" /><circle cx="15.2" cy="7.6" r="1.3" fill="currentColor" /></>,
   },
 ]
@@ -233,7 +247,7 @@ type AutoMode = 'vertical' | 'cuts'
 type AutoRecord = { mode: AutoMode; places: Array<[number, number, string]>; groups: string[] }
 
 export function EditorShell({
-  clip: savedClip, videoUrl, words: initialWords, initialSegments,
+  clip: savedClip, aiMade = null, videoUrl, words: initialWords, initialSegments,
   initialCaptionStyles, initialTextOverlays, initialAudioTracks, initialTransitions, initialOverlays,
   initialMusicUrls, initialOriginalSound, initialBrand, backStart,
 }: Props) {
@@ -288,7 +302,9 @@ export function EditorShell({
     () => (trimmed ? [] : piecesOf(mainRowOf(storeSegments, belowRows), ownVideoIdForInserts, s => isShot(s, ownVideoIdForInserts), true)),
     [trimmed, storeSegments, ownVideoIdForInserts, belowRows, rawClip.start_ms], // eslint-disable-line react-hooks/exhaustive-deps
   )
-  const piecesOn = hasInserts || allPieces.some(p => p.from != null && Math.abs(p.from - p.at) > 1) || allPieces.some(p => (p.speed ?? 1) !== 1)
+  // (a part with a freeze: the main video waits in it, as for a video put in between)
+  const hasFreeze = allPieces.some(p => p.hold != null && !p.blank && !inserts.some(i => i.id === p.id))
+  const piecesOn = hasInserts || hasFreeze || allPieces.some(p => p.from != null && Math.abs(p.from - p.at) > 1) || allPieces.some(p => (p.speed ?? 1) !== 1)
   const pieces = useMemo(() => (piecesOn ? allPieces : []), [piecesOn, allPieces])
   const insertsKey = pieces.map(p => `${p.id}:${p.at}+${p.ms}:${p.from ?? ''}@${p.hold ?? ''}x${p.speed ?? 1}`).join(',')
   const clip = useMemo(
@@ -388,62 +404,12 @@ export function EditorShell({
 
   // ── Hydrate stores from server props (once on mount) ─────────────────────────
   useEffect(() => {
-    // Saved as one row of parts, a video on top (B-roll) cutting the section under it: here the
-    // sections are whole again and the videos lie over them (shots.ts)
     const ownVideoId = (savedClip as unknown as { video_id: string }).video_id
-    const restored = restoreLayers(rowsToLocal(initialSegments), (savedClip as unknown as { layers?: unknown }).layers, ownVideoId)
-    // (videos put in between make the clip longer than its stretch of the video)
-    const lenMs = Math.max(savedClip.end_ms - savedClip.start_ms + insertedMs(insertsOf(restored.segments, ownVideoId)), ...restored.segments.map(s => s.end_ms))
-    const localSegments = [
-      // (time no part covers gets a Vertical part of its own: no "default framing" anywhere)
-      ...fillUncovered(normalizeCoverage(restored.segments.filter(s => !isShot(s, ownVideoId)), lenMs), lenMs, ownVideoId),
-      ...restored.segments.filter(s => isShot(s, ownVideoId)).map(s => ({ ...s, end_ms: Math.min(s.end_ms, lenMs) })).filter(s => s.end_ms - s.start_ms >= 100),
-    ].sort((a, b) => a.start_ms - b.start_ms)
-    const initialKeyframeMap: KeyframeMap = {}
-    for (const seg of localSegments) {
-      for (const box of seg.crop_boxes) {
-        const kfs = box.keyframes?.length ? box.keyframes : [{ t_ms: seg.start_ms, ...inFramePicture(defaultCropForSlot(seg.layout as LayoutType, box.slot_index)) }]
-        initialKeyframeMap[box.id] = kfs.map(k => ({ id: (k as { id?: string }).id ?? crypto.randomUUID(), box_id: box.id, t_ms: k.t_ms, x: k.x, y: k.y, w: k.w, h: k.h })) as typeof initialKeyframeMap[string]
-      }
-    }
-    // A transition after a part that was joined back into its section stays with that section
-    const loadedTransitions = initialTransitions
-      .map(t => (restored.renamed[t.after_segment_id] ? { ...t, after_segment_id: restored.renamed[t.after_segment_id] } : t))
-      .filter((t, i, all) => all.findIndex(x => x.after_segment_id === t.after_segment_id) === i)
-    // Saved in source clip time; shown with the removed parts closed up
-    const savedTrims = cleanTrims((savedClip as unknown as { trim_ranges?: unknown }).trim_ranges, savedClip.start_ms, savedClip.end_ms)
-    let loaded: TimedState = {
-      segments: localSegments, keyframes: initialKeyframeMap,
-      overlays: initialOverlays, textOverlays: initialTextOverlays, audioTracks: initialAudioTracks, transitions: loadedTransitions,
-    }
-    if (savedTrims.length) loaded = toTimelineState(loaded, trimMap(savedTrims, savedClip.start_ms, savedClip.end_ms), savedClip.start_ms)
-    // Tracks (as in CapCut, tracks.ts): videos on top, photos and text share the visual tracks,
-    // music has its own. Each goes back on the track it was saved on.
-    {
-      const lanes = savedLanes((savedClip as unknown as { layers?: unknown }).layers)
-      const vis = settleTracks([
-        ...loaded.segments.filter(s => isShot(s, ownVideoId)).map(s => ({ id: s.id, start_ms: s.start_ms, end_ms: s.end_ms, track: s.track ?? 0 })),
-        ...loaded.overlays.filter(o => o.type === 'image').map(o => ({ id: o.id, start_ms: o.start_ms, end_ms: o.end_ms })),
-        ...loaded.textOverlays.map(o => ({ id: o.id, start_ms: o.start_ms, end_ms: o.end_ms })),
-      ], lanes)
-      // Music keeps its saved track (a song's own length isn't known yet); music saved without one gets the lowest with room
-      const songs = loaded.audioTracks.filter(t => !isMainAudio(t))
-        .map((t): TrackItem => ({ id: t.id, start_ms: t.start_ms, end_ms: t.end_ms ?? lenMs, ...(lanes[t.id] != null ? { track: lanes[t.id] } : {}) }))
-      const aud: Record<string, number> = {}
-      const placed = songs.filter(t => t.track != null)
-      for (const t of placed) aud[t.id] = t.track!
-      for (const t of songs.filter(x => x.track == null).sort((a, b) => a.start_ms - b.start_ms)) {
-        aud[t.id] = freeTrackIn(placed, t.start_ms, t.end_ms)
-        placed.push({ ...t, track: aud[t.id] })
-      }
-      loaded = {
-        ...loaded,
-        segments: loaded.segments.map(s => (isShot(s, ownVideoId) && vis[s.id] != null && (s.track ?? 0) !== vis[s.id] ? { ...s, track: vis[s.id] } : s)),
-        overlays: loaded.overlays.map(o => (vis[o.id] != null ? { ...o, track: vis[o.id] } : o)),
-        textOverlays: loaded.textOverlays.map(o => (vis[o.id] != null ? { ...o, track: vis[o.id] } : o)),
-        audioTracks: loaded.audioTracks.map(t => (aud[t.id] != null ? { ...t, track: aud[t.id] } : t)),
-      }
-    }
+    const { loaded, trims: savedTrims, lenMs } = stateFromRows({
+      rows: initialSegments, layers: (savedClip as unknown as { layers?: unknown }).layers, mainVideoId: ownVideoId,
+      startMs: savedClip.start_ms, endMs: savedClip.end_ms, trimRanges: (savedClip as unknown as { trim_ranges?: unknown }).trim_ranges,
+      overlays: initialOverlays, textOverlays: initialTextOverlays, audioTracks: initialAudioTracks, transitions: initialTransitions,
+    })
     hydrateEditor(loaded.segments, loaded.keyframes, savedTrims, ownVideoId)
 
     // Captions on/off: the saved choice when the clip has a caption style; a clip without one yet
@@ -523,7 +489,8 @@ export function EditorShell({
   // The brand kit's workshop (in the video's place): open when the tool opens; its X or Done closes it, Edit kit
   // opens it again. Closing the options sidebar leaves it open
   const [kitStudio, setKitStudio] = useState(true)
-  useEffect(() => { if (tool === 'brand') setKitStudio(true) }, [tool])
+  // (and its sidebar — your kits, the switch — open with it: user, 2026-11-10)
+  useEffect(() => { if (tool === 'brand') { setKitStudio(true); setOptionsOpen(true) } }, [tool])
   // What was open before the Brand kit (user, 2026-10-28: closing it goes back there — Brand kit isn't on
   // the rail any more, so nothing else would close its panel)
   const beforeBrandRef = useRef<{ tool: Tool; open: boolean }>({ tool: 'subjects', open: false })
@@ -571,6 +538,7 @@ export function EditorShell({
   // The Preview column follows its height (the phone fills it, no gap above or below) until its edge is
   // dragged; a double-click on the edge goes back to that
   const [previewFit, setPreviewFit] = useState(true)
+  const shownPreviewW = `min(${previewW}px, ${PREVIEW_MAX_VW}vw)`
   const previewBodyRef = useRef<HTMLDivElement>(null)
   const [resizing, setResizing] = useState<'options' | 'preview' | 'timeline' | null>(null)
   // The timeline's height, dragged at the line above the play bar (null = its usual size; this visit only)
@@ -605,8 +573,10 @@ export function EditorShell({
     if (e.button !== 0) return
     e.preventDefault(); e.stopPropagation()
     const x0 = e.clientX
-    const w0 = which === 'options' ? optionsW : previewW
-    const [lo, hi] = which === 'options' ? OPTIONS_RANGE : PREVIEW_RANGE
+    const previewCap = window.innerWidth * PREVIEW_MAX_VW / 100
+    const w0 = which === 'options' ? optionsW : Math.min(previewW, previewCap)
+    const lo = (which === 'options' ? OPTIONS_RANGE : PREVIEW_RANGE)[0]
+    const hi = which === 'options' ? OPTIONS_RANGE[1] : Math.min(PREVIEW_RANGE[1], previewCap)
     let w = w0
     setResizing(which)
     if (which === 'preview') setPreviewFit(false)
@@ -835,7 +805,7 @@ export function EditorShell({
   }
   // (with videos put in between, the clip's clock runs the added videos: the main video waits during one)
   const brollSource = useBrollSources(videoRef, clip.start_ms, id => videoLibraryRef.current[id]?.url, mainVideoId, videoToTimeline,
-    hasInserts || pieces.some(p => p.hold != null) ? () => ({ ms: liveTime.get(), playing: usePlayerStore.getState().playing }) : undefined)
+    hasInserts || hasFreeze || pieces.some(p => p.hold != null) ? () => ({ ms: liveTime.get(), playing: usePlayerStore.getState().playing }) : undefined)
   heldPlayedRef.current = id => {
     const seg = useEditorStore.getState().segments.find(s => s.id === id)
     // The empty stretch after the main video has no video of its own to follow (its box only names
@@ -1808,6 +1778,13 @@ export function EditorShell({
     if (usePlayerStore.getState().playing) { pause(); setQueuedFormat(id); return }
     setFormatPlay(p => ({ id, n: (p?.n ?? 0) + 1 }))
     if (tool === 'subjects' && pickForScene(id)) return
+    const onFrame = pickedPartAt(liveTime.get()) ?? activeSegment
+    // (a format isn't a frame: the frame's own videos go, and their freezes with them. Vertical keeps the frame)
+    if (onFrame && isFrameLayout(onFrame.layout) && id !== 'vertical' && !sectionBlocked(onFrame.id)) dropFreezes(onFrame.id, h => !isMainHold(h))
+    if (onFrame?.frame?.no_main && isFrameLayout(onFrame.layout)) {
+      notifyLocked('This frame holds media, not the main video — pick None in Frames to take it off')
+      return
+    }
     // A part picked on the timeline, the playhead in it or on its edge: that whole part gets the format
     // (user, 2026-11-01: a short part picked, the playhead resting on its last moment — the line into the
     // next part — and Vertical went to the next part, or seemed to do nothing)
@@ -1841,9 +1818,12 @@ export function EditorShell({
     const now = useEditorStore.getState().segments.find(x => x.id === keep)
     if (!now) return
     setPickedSegIdState(now.id)
-    // (a little inside the edge: a jump onto the line itself can land a hair before it, in the part before)
-    const edge = Math.min(80, (now.end_ms - now.start_ms) / 3)
-    if (t < now.start_ms + 1 || t > now.end_ms - edge) seekToMs(Math.min(Math.max(t, now.start_ms + edge), now.end_ms - edge))
+    seekIntoPart(now, t)
+  }
+  /** The playhead inside `part` if it's on its edge (a little in: a jump onto the line itself can land a hair before it, in the part before) */
+  function seekIntoPart(part: SegmentLocal, t: number) {
+    const edge = Math.min(80, (part.end_ms - part.start_ms) / 3)
+    if (t < part.start_ms + 1 || t > part.end_ms - edge) seekToMs(Math.min(Math.max(t, part.start_ms + edge), part.end_ms - edge))
   }
   useEffect(() => {
     if (!queuedFormat || playing) return
@@ -1986,6 +1966,9 @@ export function EditorShell({
   const pickedShot = pickedSegId ? shots.find(x => x.id === pickedSegId) : undefined
   const splitTo = splitTargets(currentTimeMs, playingSection, shots, pickedShot, mainVideoId)
   const canSplitHere = splitTo.ids.length > 0
+  // The main video split (user, 2026-11-09): the part before the cut is picked, so a format or frame
+  // picked next goes on all of it (pickedPartAt)
+  const justSplitRef = useRef<{ id: string; t: number } | null>(null)
   function splitHere() {
     if (!canSplitHere) return
     const ids = splitTo.main ? splitTo.ids.filter(id => !sectionBlocked(id)) : splitTo.ids.filter(id => !blocked({ kind: 'broll', id }))
@@ -1993,6 +1976,10 @@ export function EditorShell({
     pause()
     skipCanvasTransitionRef.current = true
     for (const id of ids) splitAtMs(id, currentTimeMs, getPositionAt)
+    if (splitTo.main) {
+      justSplitRef.current = { id: ids[0], t: currentTimeMs }
+      setPickedSegId(ids[0])
+    }
   }
 
   const musicName = (t: { storage_path: string }) => {
@@ -2071,6 +2058,62 @@ export function EditorShell({
       return
     }
     setTextOverlays(prev => prev.flatMap(o => (o.id === p.id ? [{ ...o, end_ms: t }, { ...o, id: crypto.randomUUID(), start_ms: t }] : [o])))
+  }
+  /** What the Freeze button (timeline toolbar) adds to: the video picked in a frame, its main video, or a part of the main video picked on the main row */
+  function freezeBar() {
+    if (frameSeg && activeFrameItemId) {
+      if (activeFrameItemId.startsWith('main:')) return { seg: frameSeg, layer: activeFrameItemId, from: frameSeg.start_ms, to: frameSeg.end_ms }
+      const it = frameOf(frameSeg).items?.find(x => x.id === activeFrameItemId)
+      return it?.kind === 'video' && !it.freeze ? { seg: frameSeg, layer: it.id, from: Math.max(it.start_ms, frameSeg.start_ms), to: Math.min(it.end_ms, frameSeg.end_ms) } : null
+    }
+    const part = freezePart(pickedSegId ? sections.find(x => x.id === pickedSegId) : undefined, activeSegment, !!selTarget && selTarget.kind !== 'section', mainVideoId)
+    return part ? { seg: part, layer: 'main:0', from: part.start_ms, to: part.end_ms } : null
+  }
+  /** One of a frame's freezes changed (i < 0: `h` added; `h` null: removed): the clip gets longer or shorter by it. One burst, one undo step */
+  function setFreeze(segId: string, i: number, h: FrameHold | null) {
+    const editor = useEditorStore.getState(), media = useMediaStore.getState()
+    const seg = editor.segments.find(x => x.id === segId)
+    const added = !h ? 0 : h.len_ms - (i < 0 ? 0 : seg?.frame?.freeze?.holds[i]?.len_ms ?? 0)
+    if (added > MAX_CLIP_MS - clipLengthMs) { notifyLocked('The clip is as long as a clip can be (5 minutes): there is no room for more freeze'); return }
+    const next = freezeChanged({ segments: editor.segments, keyframes: editor.keyframes, overlays: media.overlays, textOverlays: media.textOverlays, audioTracks: media.audioTracks, transitions: media.transitions }, segId, i, h)
+    skipCanvasTransitionRef.current = true
+    seekAfterInsertRef.current = liveTime.get()
+    editor.applyTrim(next.segments, next.keyframes, editor.trims)
+    useMediaStore.setState({ overlays: next.overlays, textOverlays: next.textOverlays, audioTracks: next.audioTracks })
+  }
+  /** Freeze `n` of a layer of a part changed (`h`), or removed */
+  function setLayerFreeze(segId: string, layer: string, n: number, h: FrameHold | null) {
+    const holds = useEditorStore.getState().segments.find(x => x.id === segId)?.frame?.freeze?.holds ?? []
+    const i = holds.map((x, k) => (sameLayer(x, layer) ? k : -1)).filter(k => k >= 0)[n]
+    if (i !== undefined) setFreeze(segId, i, h)
+  }
+  /** The freezes of a part taken out, and their time (those `which` picks: a video going, or nothing left to wait) */
+  function dropFreezes(segId: string, which: (h: FrameHold) => boolean = () => true) {
+    const holds = () => useEditorStore.getState().segments.find(x => x.id === segId)?.frame?.freeze?.holds ?? []
+    for (let k = holds().length - 1; k >= 0; k--) if (which(holds()[k])) setFreeze(segId, k, null)
+  }
+  // (removed parts first become a clip of pieces: a freeze holds the main video in one)
+  const pendingFreezeRef = useRef(false)
+  useEffect(() => {
+    if (!pendingFreezeRef.current || trimmed) return
+    pendingFreezeRef.current = false
+    addFreeze()
+  }, [trimmed]) // eslint-disable-line react-hooks/exhaustive-deps
+  /** Freeze: a new blue range on the picked video, at the playhead (dragged to where it should be) */
+  function addFreeze() {
+    const bar = freezeBar()
+    if (!bar || (frameSeg && activeFrameItemId ? frameItemBlocked(frameSeg.id, activeFrameItemId) : sectionBlocked(bar.seg.id))) return
+    pause()
+    if (trimmed) { pendingFreezeRef.current = true; trimsToPieces(); return }
+    const old = (bar.seg.frame?.freeze?.holds ?? []).filter(x => sameLayer(x, bar.layer))
+    const s0 = bar.seg.start_ms
+    // (it may start anywhere up to just before the video's end: its time is added)
+    const holds = newHoldAt(old, liveTime.get() - s0, bar.from - s0, bar.to - s0 - MIN_FREEZE_MS + 2000)
+    const h = holds?.find(x => !old.includes(x))
+    if (!h) { notifyLocked('No room for another freeze on this video'); return }
+    setFreeze(bar.seg.id, -1, { ...h, on: bar.layer })
+    // (nothing was picked: the part frozen is now, so its range has its handles)
+    if (!activeFrameItemId && pickedSegId !== bar.seg.id) setPickedSegId(bar.seg.id)
   }
   /** The picked item in a frame's lanes, when the playhead is inside it (where a split would cut it) */
   function frameItemCut(): { segId: string; id: string } | null {
@@ -3041,12 +3084,41 @@ export function EditorShell({
     const picked = pickedPartAt(liveTime.get())
     // (with the brand kit on, the brand-on watcher below dresses it, from the kit that's on)
     brandFillRef.current = layout === 'frame_brand_card' && !useBrandStore.getState().on ? { t: picked ? picked.start_ms : currentTimeMs, until: Date.now() + 4000 } : null
+    // (the main video isn't showing here: the frame goes on the video or photo that is)
+    const media = rowMediaHere(liveTime.get())
+    if (media) { frameRowMedia(media, layout); return }
     if (picked) { formatWholePart(picked, layout, liveTime.get()); return }
     handleLayoutChange(layout, 'fromPlayhead')
+  }
+  const rowMediaHere = (t: number) => mediaForFrame(t, segments, overlays, mainVideoId)
+  function frameRowMedia(m: RowMedia, layout: FrameLayout) {
+    if (sectionBlocked(m.part) || blocked({ kind: m.kind === 'video' ? 'broll' : 'photo', id: m.id })) return
+    pause()
+    skipCanvasTransitionRef.current = true
+    setActiveBoxId(null)
+    setActiveOverlayId(null)
+    const id = frameOnMedia(m, layout, getVideoAR())
+    if (!id) { notifyLocked(`This frame can’t show a ${m.kind}`); return }
+    setPickedSegIdState(id)
+    const part = useEditorStore.getState().segments.find(x => x.id === id)
+    if (part) seekIntoPart(part, liveTime.get())
+  }
+  /** The frames gallery's None: the frame comes off all of the part picked, or the one under the playhead */
+  function handleNoFrame() {
+    const t = liveTime.get()
+    const picked = pickedPartAt(t)
+    const seg = picked ?? activeSegment
+    if (!seg || !isFrameLayout(seg.layout) || sectionBlocked(seg.id)) return
+    setActiveBoxId(null)
+    setActiveFrameItemId(null)
+    removeFrame(seg.id)
+    if (picked) seekIntoPart(picked, t)
   }
   // What a layout or frame picked now will cover (see handleLayoutChange)
   const frameTarget = (() => {
     const t = currentTimeMs
+    const media = rowMediaHere(t)
+    if (media) return `${msToLabel(media.start_ms)}–${msToLabel(media.end_ms)}`
     const picked = pickedPartAt(t)
     if (picked) return `${msToLabel(picked.start_ms)}–${msToLabel(picked.end_ms)}`
     if (activeSegment) {
@@ -3276,6 +3348,9 @@ export function EditorShell({
   function removeFrame(segId: string) {
     pause()
     skipCanvasTransitionRef.current = true
+    // (the frame's own videos are going: their freezes go, the main video's stay)
+    dropFreezes(segId, h => !!useEditorStore.getState().segments.find(x => x.id === segId)?.frame?.no_main || !isMainHold(h))
+    if (frameOffMedia(segId, clip.id, getVideoAR())) return
     applyLayout(segId, 'vertical', getVideoAR())
   }
 
@@ -3284,8 +3359,11 @@ export function EditorShell({
   // part of it cut out, one Vertical format over the whole of it, no frames, text, media, music,
   // transitions or filters, pauses kept, and the default caption look. The captions themselves
   // (words, language, on/off) stay. It's one undo step, so Undo brings everything back.
+  // A Make my clips clip has two (user, 2026-11-09): back to how the AI made it (`toAi`: only the manual
+  // changes go — its formats and framing, title, logo, caption look, pause cuts and brand come back),
+  // or everything, the AI's work too, as above.
   const [confirmResetAll, setConfirmResetAll] = useState(false)
-  function handleResetAll() {
+  function handleResetAll(toAi = false) {
     setConfirmResetAll(false)
     pause()
     skipCanvasTransitionRef.current = true
@@ -3295,28 +3373,53 @@ export function EditorShell({
     edgeBaseRef.current = null
     // Where the clip was made: kept when its ends were first dragged (else: as it was loaded)
     const made = savedClip as typeof savedClip & { original_start_ms?: number | null; original_end_ms?: number | null }
-    const origStart = made.original_start_ms ?? savedClip.start_ms
-    const origEnd = made.original_end_ms ?? savedClip.end_ms
-    useEditorStore.setState({
-      segments: [], keyframes: {}, trims: [], activeSegmentId: null, activeBoxId: null,
-      clipRange: origStart === savedClip.start_ms && origEnd === savedClip.end_ms ? null : [origStart, origEnd],
-    })
+    const backTo = toAi ? aiMade : null
+    const origStart = backTo ? backTo.start_ms : made.original_start_ms ?? savedClip.start_ms
+    const origEnd = backTo ? backTo.end_ms : made.original_end_ms ?? savedClip.end_ms
+    const rangeBack = origStart === savedClip.start_ms && origEnd === savedClip.end_ms ? null : [origStart, origEnd] as [number, number]
     seekAfterTrimRef.current = 0
     // The playhead goes back to the start of the clip, once the reset clip is in place (the
     // removed-parts effect does it only when those changed; this always does, and clears its ask)
     setTimeout(() => { seekAfterTrimRef.current = null; seekToMs(0) }, 0)
-    addFormat(0, origEnd - origStart, 'vertical', getVideoAR())
     if (removeFillers) setRemoveFillers(false)
-    useMediaStore.setState({
-      overlays: [], textOverlays: [], audioTracks: [], transitions: [],
-      filters: { brightness: 100, contrast: 100, saturation: 100 }, activeOverlayId: null,
-    })
-    // Explicit defaults (not blanks): the save only writes caption fields that have a value
-    useCaptionStore.setState(st => ({
-      // (one caption style for the whole clip again: no parts)
-      captionParts: [], pickedCaptionPart: null,
-      captionStyle: { ...st.captionStyle, font: null, size: null, color: '#FFE700', position: null, position_y: null, position_x: null, animation: 'karaoke', template: null },
-    }))
+    const noFilters = { brightness: 100, contrast: 100, saturation: 100 }
+    const plainLook = { font: null, size: null, color: '#FFE700', position: null, position_y: null, position_x: null, animation: 'karaoke', template: null } as const
+    if (backTo) {
+      // The rows as the AI saved them, through the same path as opening the clip
+      const { loaded, trims: madeTrims } = stateFromRows({
+        rows: backTo.segments, layers: null, mainVideoId: (savedClip as unknown as { video_id: string }).video_id,
+        startMs: backTo.start_ms, endMs: backTo.end_ms, trimRanges: backTo.trim_ranges,
+        overlays: backTo.overlays, textOverlays: backTo.text_overlays, audioTracks: [], transitions: [],
+      })
+      useEditorStore.setState({ segments: loaded.segments, keyframes: loaded.keyframes, trims: madeTrims, activeSegmentId: null, activeBoxId: null, clipRange: rangeBack })
+      useMediaStore.setState({ overlays: loaded.overlays, textOverlays: loaded.textOverlays, audioTracks: [], transitions: [], filters: noFilters, activeOverlayId: null })
+      // The look the AI gave the captions (its row has every field, so a look added by hand is blanked);
+      // the words, their language, on/off and key words stay
+      let look: Partial<CaptionStyle> = plainLook
+      if (backTo.caption_style) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { id, clip_id, enabled, language, emphasis, line_keys, created_at, updated_at, ...fields } = backTo.caption_style
+        look = fields
+      }
+      useCaptionStore.setState(st => ({ captionParts: [], pickedCaptionPart: null, captionStyle: { ...st.captionStyle, ...look } }))
+      // The brand as the AI left it (a kit put on by hand since comes off with what it changed); groups were by hand
+      setBrandOn(backTo.brand)
+      useGroupStore.setState({ groups: [] })
+    } else {
+      useEditorStore.setState({ segments: [], keyframes: {}, trims: [], activeSegmentId: null, activeBoxId: null, clipRange: rangeBack })
+      addFormat(0, origEnd - origStart, 'vertical', getVideoAR())
+      useMediaStore.setState({ overlays: [], textOverlays: [], audioTracks: [], transitions: [], filters: noFilters, activeOverlayId: null })
+      // Explicit defaults (not blanks): the save only writes caption fields that have a value
+      useCaptionStore.setState(st => ({
+        // (one caption style for the whole clip again: no parts)
+        captionParts: [], pickedCaptionPart: null, captionStyle: { ...st.captionStyle, ...plainLook },
+      }))
+      // (an AI clip with its logo gone: its brand kit, which the AI put on, is off too)
+      if ((savedClip as unknown as { ai_edit_job_id?: string | null }).ai_edit_job_id) {
+        setBrandOn(null)
+        useGroupStore.setState({ groups: [] })
+      }
+    }
     // The video's own sound: full volume, not muted; and nothing stays selected
     setOriginalVolume(1)
     setOriginalMuted(false)
@@ -3466,7 +3569,7 @@ export function EditorShell({
   function brandTarget(): BrandTarget {
     const m = useMediaStore.getState(), c = useCaptionStore.getState()
     return {
-      clipId: clip.id, lengthMs: clipLengthMs, mainVideoId: mainVideoId ?? null,
+      clipId: clip.id, lengthMs: clipLengthMs, mainVideoId: mainVideoId ?? null, ends: BRAND_ENDS_ON,
       overlays: m.overlays, texts: m.textOverlays, caption: c.captionStyle, textCase: c.captionTextCase,
       segments: useEditorStore.getState().segments, avoid: brandAvoid(),
       keyframes: useEditorStore.getState().keyframes, transitions: m.transitions, timelineEdits: true,
@@ -3574,13 +3677,12 @@ export function EditorShell({
   // on this clip, else the account's default one
   const styleKit = (brandOn ? brand.kits.find(k => k.id === brandOn.kit_id) : undefined) ?? brand.kits.find(k => k.data.is_default) ?? null
   // (its words on the captions: the same kit — brandedWords above)
-  const styleWordsKey = JSON.stringify(styleKit?.data.words ?? null)
-  useEffect(() => { setCaptionBrandWords(styleKit?.data.words ?? null) }, [styleWordsKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const styleWordsNow = BRAND_WORDS_ON ? styleKit?.data.words ?? null : null
+  const styleWordsKey = JSON.stringify(styleWordsNow)
+  useEffect(() => { setCaptionBrandWords(styleWordsNow) }, [styleWordsKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const BRAND_TEXT: Array<{ id: BrandTextKind; name: string; text: string }> = [
+    // (only the title: the kit's subtitle and call to action went, user 2026-11-10)
     { id: 'title', name: 'Title', text: 'Your title' },
-    { id: 'subtitle', name: 'Subtitle', text: 'Your subtitle' },
-    // (the kit's own main line, brand kit Phase 5)
-    { id: 'cta', name: 'Call to action', text: styleKit?.data.words?.lines[0] ?? 'Follow for more' },
   ]
   const brandTextStyles = styleKit ? BRAND_TEXT.map(x => ({ ...x, look: brandTextLook(brandTextStyle(styleKit.data, x.id)) })) : null
   /** The kit's title font on every text and frame text of this clip (locked ones stay): one undo step */
@@ -3631,14 +3733,6 @@ export function EditorShell({
     if (r.note) notifyLocked(r.note)
     brandNeedsPieces(kitOn, r.applied)
   }, [kitOn, trimmed]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  function askDeleteBrandKit(kit: BrandKit) {
-    confirm({
-      title: `Delete “${kit.name}”?`,
-      body: 'The kit goes from your account. Clips it was put on keep their look.',
-      confirmLabel: 'Delete kit',
-    }, () => { brand.remove(kit.id).catch(() => brand.reload()) })
-  }
 
   /**
    * Cut timeline [a, b) out of the clip and close the gap (trimState.ts rippleDelete): that part
@@ -4664,6 +4758,7 @@ export function EditorShell({
   /** Remove an item from a frame: straight away, as other media (Undo brings it back) */
   function askRemoveFrameItem(segId: string, id: string) {
     if (frameItemBlocked(segId, id)) return
+    dropFreezes(segId, h => h.on === id)
     removeFrameItem(segId, id)
     setActiveFrameItemId(cur => cur === id ? null : cur)
   }
@@ -5898,7 +5993,7 @@ export function EditorShell({
   }
 
   function setRemoveFillers(on: boolean) {
-    if (on && hasInserts) { notifyLocked('Remove pauses can\u2019t be used with a video put in between (yet)'); return }
+    if (on && (hasInserts || hasFreeze)) { notifyLocked(hasFreeze ? 'Remove pauses can\u2019t be used with a freeze (yet)' : 'Remove pauses can\u2019t be used with a video put in between (yet)'); return }
     setRemoveFillersState(on)
     removeFillersRef.current = on
     unsavedRef.current = true
@@ -5965,6 +6060,7 @@ export function EditorShell({
     if (pickPressRef.current && !usePlayerStore.getState().playing) return
     const t = liveTime.get()
     if (t >= cur.start_ms && t < cur.end_ms) return
+    if (restsOnSplit(justSplitRef.current, cur.id, t)) return
     const here = partAt(sections, t)
     if (!here || here.id === cur.id || isGapPart(here, mainVideoId)) return
     setPickedSegIdState(here.id)
@@ -6829,6 +6925,7 @@ export function EditorShell({
                 videoTitles={videoTitles}
                 selected={activeFrameItemId}
                 onApply={handleApplyFrame}
+                onNoFrame={handleNoFrame}
                 onOpenFrame={openFrame}
                 onSelectItem={selectInFrame}
                 onToggleLock={segId => toggleCtl({ kind: 'section', id: segId }, 'locked')}
@@ -6841,7 +6938,6 @@ export function EditorShell({
                 onReplaceMedia={(segId, id, kind) => { if (sectionBlocked(segId)) return; pause(); setFramePicker({ segId, kind, replaceId: id }) }}
                 onChangePart={(segId, id) => { void changeItemPart(segId, id) }}
                 onFreeze={(segId, id, on) => { if (!frameItemBlocked(segId, id)) useEditorStore.getState().setFrameItemFreeze(segId, id, on) }}
-                onFreezeRange={(segId, id, from, to) => { if (!frameItemBlocked(segId, id)) { pause(); useEditorStore.getState().freezeFrameItemRange(segId, id, from, to) } }}
                 onSwapBroll={(segId, id, index) => { if (!frameItemBlocked(segId, id)) void swapBroll(segId, id, index) }}
                 swappingBroll={swappingBroll}
                 onRemoveFrame={askRemoveFrame}
@@ -7006,8 +7102,8 @@ export function EditorShell({
                   {/* (brand kit Phase 3) the kit's caption looks, one tap each */}
                   {captionTab === 'style' && styleKit && (
                     <BrandCaptionLooks kitName={styleKit.name} current={panelCaptionStyle}
-                      looks={brandCaptionLooks(styleKit.data).filter(l => l.id !== 'main' || styleKit.data.captions.on)}
-                      onPick={l => { changeCaptionStyle(brandCaptionStyle(l.captions)); setCaptionTextCase(l.captions.uppercase ? 'upper' : 'title') }} />
+                      looks={brandCaptionLooks(styleKit.data).filter(l => l.id === 'main' && styleKit.data.captions.on)}
+                      onPick={l => { changeCaptionStyle(brandCaptionStyleOn(l.captions, panelCaptionStyle)); setCaptionTextCase(l.captions.uppercase ? 'upper' : 'title') }} />
                   )}
                   {captionTab !== 'captions' && (
                     <div role="tabpanel" aria-label={CAPTION_TABS.find(t => t.id === captionTab)?.label}>
@@ -7037,8 +7133,7 @@ export function EditorShell({
                 onUndo={undo} />
             )}
             {tool === 'brand' && (
-              <BrandKitPanel brand={brand} onKitId={brandOn?.kit_id ?? null} onTurnOn={turnBrandOn} onTurnOff={turnBrandOff} onDelete={askDeleteBrandKit}
-                editing={kitStudio} onEdit={() => setKitStudio(true)} />
+              <BrandKitPanel brand={brand} onEdit={() => setKitStudio(true)} />
             )}
 
             {tool === 'post' && (
@@ -7254,7 +7349,8 @@ export function EditorShell({
               Styles: .ed-fmt* and .ed-motion* at the end of globals.css */}
           <div className="ed-canvas-bar shrink-0 flex items-center justify-center gap-3 px-4" style={{ minHeight: 60, borderBottom: '1px solid rgb(var(--ed-fg) / 0.06)' }}>
             {/* (in the empty space a deleted part left: nothing here — no layout to pick) */}
-            {!inGap && <>
+            {/* (nor on a frame made on media: it has no main video to lay out) */}
+            {!inGap && !isMediaFrame(activeSegment) && <>
             <FormatSwitcher
               activeId={activeSegment ? formatLayoutOf(activeSegment.layout) : null}
               play={formatPlay} liveActive={formatAt}
@@ -7280,7 +7376,7 @@ export function EditorShell({
           <AmbientGlow videoRef={videoRef} />
           <div className="ed-stage relative flex-1 min-h-0" style={{ background: 'var(--ed-canvas)' }}>
             <div className="ed-stage-box absolute flex flex-col rounded-xl overflow-hidden" style={{ inset: 8, border: '1px solid rgb(var(--ed-fg) / 0.1)' }}>
-              <VideoPreview live segmentAt={viewAt} overlaySource={brollSource} mainVideoId={mainVideoId}
+              <VideoPreview live segmentAt={viewAt} overlaySource={brollSource} frameMedia={framePool} mainVideoId={mainVideoId}
                 videoRef={videoRef} videoUrl={clipVideoUrl} currentTimeMs={currentTimeMs}
                 activeSegment={viewSegment} getPositionAt={viewGetPositionAt}
                 activeBoxId={activeBoxId ?? null}
@@ -7322,7 +7418,7 @@ export function EditorShell({
           </div>
         )}
         <aside data-tour="export" data-layout-panel="Preview" aria-hidden={!previewOpen} className="ed-preview-col relative shrink-0 flex flex-col min-h-0 overflow-hidden" data-open={previewOpen || undefined} data-resizing={resizing === 'preview' || undefined}
-          style={{ width: previewOpen ? previewW : 0, background: 'var(--ed-panel)' }}
+          style={{ width: previewOpen ? shownPreviewW : 0, background: 'var(--ed-panel)' }}
           {...(!previewOpen ? { inert: true } : {})}>
           {/* Its left edge: drag to make the preview wider or narrower */}
           {previewOpen && (
@@ -7330,7 +7426,7 @@ export function EditorShell({
               title="Drag to resize · double-click to reset" className="ed-col-handle" style={{ left: 0 }} data-on={resizing === 'preview' || undefined}
               onPointerDown={e => startColumnResize(e, 'preview')} onDoubleClick={() => resetColumn('preview')} />
           )}
-          <div className="ed-preview-inner flex flex-col min-h-0 h-full" style={{ width: previewW }}>
+          <div className="ed-preview-inner flex flex-col min-h-0 h-full" style={{ width: shownPreviewW }}>
           {/* One row (user, 2026-10-29: more room for the phone): close · how it looks inside each app · Export */}
           <div className="ed-pv-head shrink-0 px-3 flex items-center gap-2" style={{ height: 52, borderBottom: '1px solid rgb(var(--ed-fg) / 0.06)' }}>
             <span className="flex items-center shrink-0">
@@ -7369,7 +7465,7 @@ export function EditorShell({
                   title={exporting ? 'Starting…' : `Exporting · ${formatElapsed(renderElapsed)}`}>
                   <span className="sbb-beam" aria-hidden="true" />
                   <span className="sbb-surface gap-1.5 h-8 px-3.5 text-xs font-bold">
-                    <ExportIcon /> Exporting
+                    <ExportIcon /> <span className="ed-pv-act-word">Exporting</span>
                   </span>
                 </span>
                 {/* (once the export is on its way: while it starts there is nothing to stop yet) */}
@@ -7394,10 +7490,10 @@ export function EditorShell({
                       <path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7" />
                     </svg>
                   </button>
-                  <a href={`/api/clips/${clip.id}/download`} download
+                  <a href={`/api/clips/${clip.id}/download`} download aria-label="Download" title="Download"
                     className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold transition-opacity hover:opacity-90"
                     style={{ background: ACCENT, color: '#000' }}>
-                    <DownloadIcon /> Download
+                    <DownloadIcon /> <span className="ed-pv-act-word">Download</span>
                   </a>
                 </>
               ) : (
@@ -7426,8 +7522,7 @@ export function EditorShell({
             {/* Not in full view: the 9:16 video on a card — rounded, a fine lime-to-white edge and a soft glow
                 under it (user, 2026-10-31: "remove the mobile completely, a normal preview, a little creative";
                 styles: .ed-pv-card). As big as the panel lets the full 9:16 be */}
-            {/* (room kept either side for the full-view button beside it, so the video stays in the middle) */}
-            <div className={fullView ? undefined : 'ed-pv-card'} style={{ width: fullView ? 'min(100cqw, calc(100cqh * 9 / 16))' : 'min(calc(100cqw - 88px), calc(100cqh * 9 / 16))' }}>
+            <div className={fullView ? undefined : 'ed-pv-card'} style={{ width: 'min(100cqw, calc(100cqh * 9 / 16))' }}>
               <div className={fullView ? undefined : 'ed-pv-card-in'}>
               <div className="relative">
               {rendering ? (
@@ -7447,7 +7542,7 @@ export function EditorShell({
                   )}
                 </div>
               ) : (
-                <OutputCanvas live segmentAt={viewAt} transitionCuts={transitionCuts} watermark={showWatermark} timelineToVideo={timelineToVideo} clock={hasInserts ? liveTime.get : undefined}
+                <OutputCanvas live segmentAt={viewAt} transitionCuts={transitionCuts} watermark={showWatermark} timelineToVideo={timelineToVideo} clock={hasInserts || hasFreeze ? liveTime.get : undefined}
                   videoRef={videoRef} currentTimeMs={currentTimeMs} clipStartMs={clip.start_ms} videoToTimeline={videoToTimeline}
                   activeSegment={viewSegment} getPositionAt={viewGetPositionAt} sourceFor={brollSource} slotSourceFor={borrowed.slotSourceFor}
                   skipTransitionRef={skipCanvasTransitionRef} words={displayWords}
@@ -7488,18 +7583,22 @@ export function EditorShell({
                     if (rect) rects[String(slot)] = rect; else delete rects[String(slot)]
                     updateFrame(frameSeg.id, { main_rects: rects })
                   }}
+                  onFrameMainViewChange={(slot, boxId, pos) => {
+                    if (!frameSeg || sectionBlocked(frameSeg.id) || frameItemBlocked(frameSeg.id, `main:${slot}`)) return
+                    // (its ◆ show on the Views row: that row follows the picked box)
+                    if (useEditorStore.getState().activeBoxId !== boxId) setActiveBoxId(boxId)
+                    handleBoxChange(boxId, pos)
+                  }}
                   style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 10, border: '1px solid rgb(var(--ed-fg) / 0.1)', boxShadow: '0 4px 24px rgba(0,0,0,0.6)' }}
                 />
               )}
               {!rendering && <PlatformOverlay platform={platform} />}
               </div>
               </div>
-              {/* Full view: just outside the video's bottom-right corner, so it covers none of it (user, 2026-11-06) */}
+              {/* Full view: in the video's bottom-right corner (user, 2026-11-10) */}
               {!fullView && !rendering && (
-                <button onClick={openFullView} aria-label="Full view: see the preview big" title="Full view (Esc to leave)"
-                  className="ed-fullview-btn absolute w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
-                  style={{ left: 'calc(100% + 8px)', bottom: 0, zIndex: 20, color: 'rgb(var(--ed-fg) / 0.8)', background: 'rgb(var(--ed-fg) / 0.05)', border: '1px solid rgb(var(--ed-fg) / 0.14)' }}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <button onClick={openFullView} aria-label="Full view: see the preview big" title="Full view (Esc to leave)" className="ed-pv-fullview">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
                   </svg>
                 </button>
@@ -7568,6 +7667,14 @@ export function EditorShell({
                     <circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12" />
                   </svg>
                 </button>
+                {/* Freeze: on a video picked in a frame (the part of it to hold still is dragged on its bar) */}
+                {freezeBar() && (
+                  <button onClick={addFreeze} aria-label="Freeze a part of this video" title="Freeze: add a blue range on this video, then drag it and its ends. It holds still there, then plays on" className="ed-tl-btn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M12 2v20M4 6.5l16 11M20 6.5l-16 11M12 6L9.5 3.5M12 6l2.5-2.5M12 18l-2.5 2.5M12 18l2.5 2.5" />
+                    </svg>
+                  </button>
+                )}
                 {/* Delete: whatever is selected — a song, photo, video, text, frame item or section */}
                 {(() => {
                   const del = deleteTarget()
@@ -7640,17 +7747,34 @@ export function EditorShell({
                 <div role="alertdialog" aria-labelledby="reset-all-title" aria-describedby="reset-all-desc"
                   className="absolute right-0 bottom-full mb-2 flex flex-col gap-3 p-4 rounded-xl"
                   style={{ width: 280, zIndex: 71, background: 'var(--ed-panel)', border: '1px solid rgb(var(--ed-fg) / 0.12)', boxShadow: '0 12px 32px rgba(0,0,0,0.55)' }}>
-                  <p id="reset-all-title" className="text-sm font-semibold text-[var(--ed-text)]">Reset all edits?</p>
+                  <p id="reset-all-title" className="text-sm font-semibold text-[var(--ed-text)]">{aiMade ? 'Reset this clip?' : 'Reset all edits?'}</p>
                   <p id="reset-all-desc" className="text-xs leading-relaxed" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
-                    The clip goes back to how it was made: its original start and end, nothing cut out. Formats, frames, text, media, music, the video’s sound and the caption look go back to the start, and the people marked in Subjects are removed. Your captions stay. Undo brings back everything except the marked people.
+                    {aiMade
+                      ? 'Captions stay. Undo brings it back, except marked people.'
+                      : (savedClip as unknown as { ai_edit_job_id?: string | null }).ai_edit_job_id
+                        ? 'AI’s edits go too on this older clip. Captions stay. Undo brings it back, except marked people.'
+                        : 'Back to how it was made. Captions stay. Undo brings it back, except marked people.'}
                   </p>
+                  {/* A Make my clips clip: only my edits, or the AI's too */}
+                  {aiMade && (
+                    <div className="flex flex-col gap-2">
+                      <button onClick={() => handleResetAll(true)} className={`group px-3 py-2 ${RESET_CHOICE}`}>
+                        <span className="block text-xs font-bold">Reset manual edit</span>
+                        <span className="block text-[11px] opacity-[.55] group-hover:opacity-[.85] group-focus-visible:opacity-[.85]">Back to how AI made it</span>
+                      </button>
+                      <button onClick={() => handleResetAll()} className={`group px-3 py-2 ${RESET_CHOICE}`}>
+                        <span className="block text-xs font-bold">Reset AI edit</span>
+                        <span className="block text-[11px] opacity-[.55] group-hover:opacity-[.85] group-focus-visible:opacity-[.85]">Back to the original clip</span>
+                      </button>
+                    </div>
+                  )}
                   <div className="flex justify-end gap-2">
                     <button onClick={() => setConfirmResetAll(false)} autoFocus
                       className="h-8 px-3 rounded-lg text-xs font-medium transition-colors hover:bg-[rgb(var(--ed-fg)/0.08)]"
                       style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>Cancel</button>
-                    <button onClick={handleResetAll}
-                      className="h-8 px-3 rounded-lg text-xs font-semibold transition-opacity hover:opacity-90"
-                      style={{ background: '#ef4444', color: '#fff' }}>Reset everything</button>
+                    {!aiMade && (
+                      <button onClick={() => handleResetAll()} className={`h-8 px-3 text-xs font-bold ${RESET_CHOICE}`}>Reset everything</button>
+                    )}
                   </div>
                 </div>
               </>
@@ -7738,6 +7862,8 @@ export function EditorShell({
           selectedId={lastPick === 'frameItem' && activeFrameItemId ? activeFrameItemId : selTarget?.id ?? (activeFrameItemId?.startsWith('main:') ? activeFrameItemId : null)}
           onSelectFrameItem={id => selectFrameItem(id, undefined, !!id && doubleTap(`f${id}`))}
           onUpdateFrameItem={(id, patch) => { if (frameSeg && !frameItemBlocked(frameSeg.id, id)) updateFrameItem(frameSeg.id, id, patch) }}
+          onPartFreeze={(segId, n, h) => { if (!sectionBlocked(segId)) setLayerFreeze(segId, 'main:0', n, h) }}
+          onFrameFreeze={(layer, n, h) => { if (frameSeg && !frameItemBlocked(frameSeg.id, layer)) setLayerFreeze(frameSeg.id, layer, n, h) }}
           onJumpToFrameItem={(segId, itemId) => {
             const sg = segments.find(x => x.id === segId)
             const it = sg ? frameOf(sg).items?.find(x => x.id === itemId) : undefined

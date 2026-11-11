@@ -40,7 +40,25 @@ export type FrameItemKind = 'video' | 'photo' | 'text'
  * and anything outside the format's own range isn't shown.
  */
 /** A frozen stretch inside a frame video item (FrameItem.holds) */
-export interface FrameHold { at_ms: number; len_ms: number }
+/** `on`: the layer a freeze of a part belongs to (a frame item's id, or `main:<slot>`); absent = every video in the part */
+export interface FrameHold { at_ms: number; len_ms: number; on?: string }
+
+/** What a video or photo moved from its row into a frame needs to go back there */
+export interface FrameRowOrigin {
+  start_ms: number
+  track?: number
+  lane?: 'broll'
+  /** Video: its views on the row */
+  views?: Array<{ t_ms: number; x: number; y: number; w: number; h: number }>
+  /** Photo: its box on the row */
+  x?: number
+  y?: number
+  w?: number
+  h?: number
+  z_index?: number
+  rotation?: number
+  opacity?: number
+}
 
 export interface FrameItem {
   id: string
@@ -83,6 +101,8 @@ export interface FrameItem {
    * darkens them too. Not used while the whole item is frozen.
    */
   holds?: FrameHold[] | null
+  /** It came off a row when a frame was put on it (frameOnMedia.ts): where it goes back to when the frame comes off */
+  from_row?: FrameRowOrigin | null
   // Photo
   image_path?: string | null
   /** Signed URL for image_path — preview only, never saved */
@@ -135,8 +155,23 @@ export interface FrameSettings {
   main_locked?: Record<string, boolean>
   /** Rounded corners of the main video, per slot index */
   main_corners?: Record<string, CornerStyle>
+  /**
+   * Freezes of the part (user, 2026-11-10): the layer picked holds still, silent, for each stretch, then
+   * plays on from the same picture, and the part and the clip are that much longer; the others play on
+   * and hold their last picture for the time added. `at_ms` from the part's start, on the timeline.
+   * `dim` darkens the frozen layer of a frame meanwhile.
+   * Any part of the main video has them, a frame or not (a plain part keeps them here too), and they
+   * stay when its format changes.
+   */
+  freeze?: { holds: FrameHold[]; dim?: boolean } | null
   /** The main video is heard under the frame though no slot shows it (Photo Story), at main_volume */
   main_under?: boolean
+  /**
+   * Made on media where the main video wasn't showing (frameOnMedia.ts): it has no main video, in any
+   * frame it's switched to. How the main row was: `gap` the empty space a deleted part left, else the
+   * part's eye off, `muted` its sound off too.
+   */
+  no_main?: { gap?: boolean; muted?: boolean } | null
   /** Heights of the frame's rows (one per template row, shares of the frame) when resized; absent = the template's */
   row_h?: number[] | null
   /** The rows' order top to bottom (template row numbers) when swapped with the bar's swap; absent = the template's */

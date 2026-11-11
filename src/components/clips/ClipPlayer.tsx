@@ -78,7 +78,7 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
   const pieces = useMemo(() => {
     if (removed) return removed.pieces
     const all = piecesOf(segments, mainVideoId, s => isShot(s, mainVideoId))
-    return insertsOf(segments, mainVideoId).length || all.some(p => (p.from != null && Math.abs(p.from - p.at) > 1) || (p.speed ?? 1) !== 1) ? all : []
+    return insertsOf(segments, mainVideoId).length || all.some(p => p.hold != null || (p.from != null && Math.abs(p.from - p.at) > 1) || (p.speed ?? 1) !== 1) ? all : []
   }, [segments, mainVideoId, removed])
   const lengthMs = pieces.length ? piecesLength(pieces) : endMs - startMs
   const tRef = useRef(0)

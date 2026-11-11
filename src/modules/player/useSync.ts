@@ -70,6 +70,8 @@ export function useVideoSync(clipStartMs = 0, clipEndMs?: number, pieces?: Piece
   // One seek at a time: a seek asked for while another is still running waits, and only the
   // latest waits (each new seek would cancel the one before, and while dragging none would finish)
   const pendingSeekRef = useRef<number | null>(null)
+  // A seek just finished and the next one is waiting for the preview to draw its frame (onSeeked)
+  const seekWaitRef = useRef(0)
   // Slow motion: the video shows a new frame only every so often (a 30 fps video at 0.25x: every
   // 133 ms), and the tick runs per frame — so the clock (playhead, captions, text) would step. In
   // between, a glide moves the clock on at real time, never further than the next frame is due
@@ -89,7 +91,7 @@ export function useVideoSync(clipStartMs = 0, clipEndMs?: number, pieces?: Piece
     glideRafRef.current = 0
   }
   function seekVideo(el: HTMLVideoElement, sec: number) {
-    if (el.seeking) { pendingSeekRef.current = sec; return }
+    if (el.seeking || seekWaitRef.current) { pendingSeekRef.current = sec; return }
     pendingSeekRef.current = null
     el.currentTime = sec
   }
@@ -430,12 +432,18 @@ export function useVideoSync(clipStartMs = 0, clipEndMs?: number, pieces?: Piece
       }
     }
 
-    // A seek finished: make the one asked for meanwhile (the latest), if any
+    // A seek finished: no new one until the next drawing, then the one asked for meanwhile (the
+    // latest). Started at once, the video was seeking again before the preview (a canvas, drawn once
+    // a screen refresh) came to copy this frame: dragging, it got a third of the frames the video showed
     const onSeeked = () => {
-      const p = pendingSeekRef.current
-      if (p == null) return
-      pendingSeekRef.current = null
-      if (Math.abs(el.currentTime - p) > 0.001) el.currentTime = p
+      if (seekWaitRef.current) return
+      seekWaitRef.current = requestAnimationFrame(() => {
+        seekWaitRef.current = 0
+        const p = pendingSeekRef.current
+        if (p == null) return
+        pendingSeekRef.current = null
+        if (Math.abs(el.currentTime - p) > 0.001) el.currentTime = p
+      })
     }
     el.addEventListener('seeked', onSeeked)
     el.addEventListener('play', onPlay)
@@ -446,6 +454,8 @@ export function useVideoSync(clipStartMs = 0, clipEndMs?: number, pieces?: Piece
     if (el.readyState >= 1) onLoaded()
     return () => {
       el.removeEventListener('seeked', onSeeked)
+      cancelAnimationFrame(seekWaitRef.current)
+      seekWaitRef.current = 0
       el.removeEventListener('play', onPlay)
       el.removeEventListener('pause', onPause)
       el.removeEventListener('loadedmetadata', onLoaded)

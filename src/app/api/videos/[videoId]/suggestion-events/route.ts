@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/server/auth'
 import sql from '@/lib/db'
-import { logSuggestionEvents } from '@/server/services/suggestionEvents'
+import { cleanSuggestion, logSuggestionEvents } from '@/server/services/suggestionEvents'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const SOURCES = ['best_moments', 'clip_search']
 const EVENTS = ['previewed', 'used']
-const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null)
-const str = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : null)
 
-// Events the clip board sees in the browser: a suggestion previewed (▶), or used to make a clip.
+// Events the clip board sees in the browser: a suggestion previewed (▶). ('used' is now saved with
+// the clip, services/clips.ts createClip; still taken from a page opened before that.)
 // Always answers 204: logging must never bother the user.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ videoId: string }> }) {
   const user = await requireUser()
@@ -19,8 +18,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ vid
   const { videoId } = await params
   const body = await req.json().catch(() => null)
   try {
-    const s = body?.suggestion
-    if (!SOURCES.includes(body?.source) || !EVENTS.includes(body?.event) || num(s?.start_ms) == null || num(s?.end_ms) == null) {
+    const suggestion = cleanSuggestion(body?.suggestion)
+    if (!SOURCES.includes(body?.source) || !EVENTS.includes(body?.event) || !suggestion) {
       return new NextResponse(null, { status: 204 })
     }
     const [owned] = await sql`SELECT 1 FROM videos WHERE id = ${videoId} AND user_id = ${user.id}`
@@ -30,13 +29,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ vid
       clipId = clip?.id ?? null
     }
     if (owned) {
-      logSuggestionEvents([{
-        user_id: user.id, video_id: videoId, clip_id: clipId, source: body.source, event: body.event,
-        suggestion: {
-          start_ms: num(s.start_ms)!, end_ms: num(s.end_ms)!, title: str(s.title, 200), score: num(s.score),
-          subscores: s.subscores && typeof s.subscores === 'object' ? s.subscores : null, reason: str(s.reason, 300), model: str(s.model, 60),
-        },
-      }])
+      logSuggestionEvents([{ user_id: user.id, video_id: videoId, clip_id: clipId, source: body.source, event: body.event, suggestion }])
     }
   } catch (e) {
     console.warn('[suggestion-events] not logged:', e)
