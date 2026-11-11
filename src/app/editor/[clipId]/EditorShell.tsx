@@ -146,8 +146,9 @@ const PLATFORM_OPTIONS: { id: Platform; label: string; icon: React.ReactNode }[]
 ]
 // Options sidebar width (px): it opens this wide for every tool and stays so until its edge is dragged
 // (user, 2026-10-31: the size in their screenshot as the default — room for a scene's faces and Mark as group
-// on one line; was 272, then 338)
-const OPTIONS_W = 384
+// on one line; was 272, then 338, then 384. 2026-11-11: "so big — make it smaller as the default": 320 for every
+// tool, as Transitions; Mark as group goes on its own line when there's no room beside the faces)
+const OPTIONS_W = 320
 // The Transitions tool opens narrower (user, 2026-11-01: the size in their screenshot, ~320 px — the
 // preview screen and three tiles a row fit), and keeps its own width: dragged while on Transitions, it
 // comes back that wide next time this visit; the other tools keep theirs

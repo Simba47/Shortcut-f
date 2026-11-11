@@ -117,7 +117,9 @@ export function FrameThumb({ layout }: { layout: FrameLayout }) {
   const base = frameBase(layout)
   return (
     <div className="relative rounded-[7px] overflow-hidden" style={{
-      width: 40, height: 71,
+      // (user, 2026-11-11: three to a row filling the panel — a little bigger than the 40 x 71 of four to a row)
+      // (2026-11-11 again: "9% smaller" — 42 x 75)
+      width: 42, height: 75,
       background: base === 'blur'
         ? 'radial-gradient(120% 70% at 50% 35%, #34343c 0%, #1a1a1f 70%)'
         : base === 'band' ? 'linear-gradient(180deg, #202026, #141418)' : 'linear-gradient(180deg, #121215, #070708)',
@@ -219,11 +221,13 @@ export function FramesPanel({
   return (
     <div className="flex flex-col">
       {/* Gallery */}
-      <div className="px-3 py-3 flex flex-col gap-2.5" style={{ borderBottom: '1px solid rgb(var(--ed-fg) / 0.06)' }}>
+      {/* (the tiles 9% narrower — user, 2026-11-11 — by a wider margin each side, so no row ends in a gap) */}
+      <div className="py-3 flex flex-col gap-2.5" style={{ paddingInline: 25, borderBottom: '1px solid rgb(var(--ed-fg) / 0.06)' }}>
         {!targetLabel && (
           <p className="text-xs" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>Move the playhead onto a format first.</p>
         )}
-        {/* Grouped by how many videos or photos each shows (1, 2, 3), 4 across; in each group the brand
+        {/* Grouped by how many videos or photos each shows (1, 2, 3), 3 across (user, 2026-11-11: four across left
+            an empty slot at every row's end — no group has more than three, None included); in each group the brand
             kit's frames first, then the most used. A clip already using a frame no longer offered still shows it here */}
         {(() => {
           const all = [...brandFrames, ...FRAME_LAYOUTS.filter(l => !brandFrames.includes(l)), ...frames.map(f => f.layout as FrameLayout).filter((l, i, list) => isFrameLayout(l) && !FRAME_LAYOUTS.includes(l) && list.indexOf(l) === i)]
@@ -231,16 +235,16 @@ export function FramesPanel({
           return counts.map(n => (
             <section key={n} className="flex flex-col gap-1.5" aria-label={mediaGroupLabel(n)}>
               <h3 className="text-[11px] font-medium" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>{mediaGroupLabel(n)}</h3>
-              <div className="grid grid-cols-4 gap-1.5">
+              <div className="grid grid-cols-3 gap-2">
                 {/* None (user, 2026-11-09): take the frame off again, first of the one-video frames */}
                 {n === 1 && (
                   <button key="none" onClick={onNoFrame} disabled={!targetLabel} aria-pressed={!!segment && !current} title="No frame: this part goes back to plain Vertical"
-                    className="min-w-0 flex flex-col items-center gap-1 px-0.5 py-1.5 rounded-lg text-center transition-colors disabled:opacity-40 hover:bg-[rgb(var(--ed-fg)/0.05)]"
+                    className="min-w-0 flex flex-col items-center gap-[5px] px-1 pt-[7px] pb-[7px] rounded-xl text-center transition-colors disabled:opacity-40 hover:bg-[rgb(var(--ed-fg)/0.05)]"
                     style={{ background: segment && !current ? 'rgb(var(--ed-fg) / 0.08)' : 'rgb(var(--ed-fg) / 0.02)', boxShadow: `inset 0 0 0 ${segment && !current ? 1.5 : 1}px ${segment && !current ? ACCENT : 'rgb(var(--ed-fg) / 0.08)'}` }}>
-                    <div className="flex items-center justify-center rounded-[7px]" style={{ width: 40, height: 71, border: '1px dashed rgb(var(--ed-fg) / 0.25)', color: 'rgb(var(--ed-fg) / 0.5)' }}>
+                    <div className="flex items-center justify-center rounded-[7px]" style={{ width: 42, height: 75, border: '1px dashed rgb(var(--ed-fg) / 0.25)', color: 'rgb(var(--ed-fg) / 0.5)' }}>
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M5.7 5.7l12.6 12.6" /></svg>
                     </div>
-                    <span className="w-full text-[9.5px] font-semibold leading-[1.15]" style={{ color: segment && !current ? 'var(--ed-text)' : 'rgb(var(--ed-fg) / 0.75)' }}>None</span>
+                    <span className="w-full text-[9.5px] font-semibold leading-[1.2]" style={{ color: segment && !current ? 'var(--ed-text)' : 'rgb(var(--ed-fg) / 0.75)' }}>None</span>
                   </button>
                 )}
                 {all.filter(id => frameSlotCount(id) === n).map(id => {
@@ -250,10 +254,10 @@ export function FramesPanel({
                   return (
                     <button key={id} onClick={() => onApply(id)} disabled={!targetLabel} aria-pressed={on} title={`${t.description}
 ${mediaTip(id)}`}
-                      className="min-w-0 flex flex-col items-center gap-1 px-0.5 py-1.5 rounded-lg text-center transition-colors disabled:opacity-40 hover:bg-[rgb(var(--ed-fg)/0.05)]"
+                      className="min-w-0 flex flex-col items-center gap-[5px] px-1 pt-[7px] pb-[7px] rounded-xl text-center transition-colors disabled:opacity-40 hover:bg-[rgb(var(--ed-fg)/0.05)]"
                       style={{ background: on ? 'rgb(var(--ed-fg) / 0.08)' : 'rgb(var(--ed-fg) / 0.02)', boxShadow: `inset 0 0 0 ${on ? 1.5 : 1}px ${on ? ACCENT : 'rgb(var(--ed-fg) / 0.08)'}` }}>
                       <FrameThumb layout={id} />
-                      <span className="w-full text-[9.5px] font-semibold leading-[1.15]" style={{ color: on ? 'var(--ed-text)' : 'rgb(var(--ed-fg) / 0.75)' }}>{t.name}</span>
+                      <span className="w-full text-[9.5px] font-semibold leading-[1.2]" style={{ color: on ? 'var(--ed-text)' : 'rgb(var(--ed-fg) / 0.75)' }}>{t.name}</span>
                       {ours && <span className="text-[8.5px] font-bold uppercase tracking-wide" style={{ color: 'var(--ed-accent-text)' }} title="One of your brand kit's frames">Brand</span>}
                     </button>
                   )

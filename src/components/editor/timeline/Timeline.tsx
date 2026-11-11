@@ -2011,7 +2011,8 @@ export function Timeline({
       <div className="tl2-bar" data-sel="" data-kind={kind}
         style={{
           position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
-          '--bar-c': MEDIA_COLORS[kind], background: video ? '#0d0d0d' : `color-mix(in srgb, ${MEDIA_COLORS[kind]} 55%, #0d0d0d)`,
+          '--bar-c': MEDIA_COLORS[kind], // (text: black, as on its row — its colour only on its T)
+          background: video || kind === 'text' ? '#0d0d0d' : `color-mix(in srgb, ${MEDIA_COLORS[kind]} 55%, #0d0d0d)`,
           cursor: 'grabbing', filter: 'drop-shadow(0 10px 18px rgba(0,0,0,0.65))', ...(hidden ? { opacity: 0.7 } : {}),
         } as React.CSSProperties}>
         {inside && <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: 'inherit', opacity: video ? 1 : 0.55 }}>{inside}</div>}

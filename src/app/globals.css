@@ -2856,6 +2856,16 @@ html[data-theme="light"] .editor-theme .ed-subtabs-pill::after { background: #8f
 /* a video on a row looks like the main video: its own pictures, plain (no colour over them) */
 .tl2-bar:is([data-kind="video"], [data-kind="broll"]) { background: #0d0d0d; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.14); }
 .tl2-bar:is([data-kind="video"], [data-kind="broll"])[data-sel] { background: #0d0d0d; box-shadow: inset 0 0 0 2px #c8ff00; }
+/* Text on the timeline (user, 2026-11-11: "no need to make the whole thing pink" … "make the whole bar black, the text to
+   suit"): black as a video's bar, a hairline edge, its name in clean white; its T in a small neutral badge, only the
+   T itself in its colour. Picked: the lime ring as any bar */
+.tl2-bar[data-kind="text"] { background: #0d0d0d; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14); color: #f4f4f5; }
+.tl2-bar[data-kind="text"]:hover { background: #141416; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.22); }
+.tl2-bar[data-kind="text"][data-sel] { background: #0d0d0d; box-shadow: inset 0 0 0 2px #c8ff00; }
+/* its T in a badge (MediaIcon, the label's first picture) */
+.tl2-bar[data-kind="text"] > span > svg:first-child { width: 16px; height: 16px; padding: 3.5px; margin-left: 4px !important; margin-right: 2px; border-radius: 5px;
+  background: rgb(255 255 255 / 0.08); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1); }
+.tl2-bar[data-kind="text"] > span > .truncate { font-weight: 600; letter-spacing: .01em; color: #f4f4f5; }
 .tl2-bar-len { flex-shrink: 0; padding: 0 4px; border-radius: 4px; font-size: 9.5px; background: rgba(0, 0, 0, 0.4); font-variant-numeric: tabular-nums; }
 .tl2-bar-grip { top: 0; bottom: 0; width: 10px; background: #c8ff00; cursor: ew-resize; z-index: 4; }
 /* a bar's grips are the main video's (.tl2-grip), a little narrower; the bubble over the edge being trimmed */
@@ -3178,6 +3188,8 @@ html[data-theme="light"] .editor-theme .ed-subtabs-pill::after { background: #8f
 [data-theme="light"] .editor-theme .ed-tl-btn:hover:not(:disabled) { color: #0c0c0e; }
 [data-theme="light"] .tl2-block { box-shadow: inset 0 0 0 1px rgba(12, 12, 14, 0.12); }
 [data-theme="light"] .tl2-bar { color: #0c0c0e; }
+/* (a text bar stays black in the light theme too, as a video's: its name stays white) */
+[data-theme="light"] .tl2-bar[data-kind="text"] { color: #f4f4f5; }
 [data-theme="light"] .tl2-playhead { background: #0c0c0e; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7), 0 0 8px rgba(12, 12, 14, 0.2); }
 [data-theme="light"] .tl2-bubble { color: #fff; background: #0c0c0e; }
 [data-theme="light"] .tl2-grip:focus-visible { outline-color: #0c0c0e; }
