@@ -31,9 +31,13 @@ export function ensureLimitsSchema(): Promise<void> {
   return ready
 }
 
-/** The visitor's address, as Railway's proxy passes it on */
+/**
+ * The visitor's address. X-Real-IP first: Railway's edge sets it on every request, overwriting one a
+ * visitor sends, so it can't be faked to dodge the limits (a visitor can put anything at the start of
+ * X-Forwarded-For). The limits per email never depend on it.
+ */
 export function clientIp(headers: Headers | null | undefined): string {
-  return headers?.get('x-forwarded-for')?.split(',')[0]?.trim() || headers?.get('x-real-ip') || 'unknown'
+  return headers?.get('x-real-ip')?.trim() || headers?.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
 }
 
 const norm = (email: string) => email.toLowerCase().trim()
@@ -48,6 +52,34 @@ export async function loginLocked(email: string, ip: string): Promise<boolean> {
     FROM auth_events WHERE kind = 'fail' AND created_at > now() - make_interval(mins => ${LOCK_MINUTES})
       AND (email = ${norm(email)} OR ip = ${ip})`
   return r.e >= FAILS_PER_EMAIL || r.i >= FAILS_PER_IP
+}
+
+/**
+ * A sign-in try starts: counted as a wrong one before the password is checked, under a lock on the
+ * email, so a burst of tries at the same moment can't get past the limit. Throws code 'too_many'
+ * when locked. loginSucceeded takes it back.
+ */
+export async function startLoginAttempt(email: string, ip: string): Promise<string> {
+  await ensureLimitsSchema()
+  const e = norm(email)
+  return sql.begin(async tx => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${'login:' + e}))`
+    const [r] = await tx<{ e: number; i: number }[]>`
+      SELECT
+        count(*) FILTER (WHERE email = ${e})::int AS e,
+        count(*) FILTER (WHERE ip = ${ip})::int AS i
+      FROM auth_events WHERE kind = 'fail' AND created_at > now() - make_interval(mins => ${LOCK_MINUTES})
+        AND (email = ${e} OR ip = ${ip})`
+    if (r.e >= FAILS_PER_EMAIL || r.i >= FAILS_PER_IP) throw Object.assign(new Error('Too many wrong tries'), { code: 'too_many' })
+    const [row] = await tx<{ id: string }[]>`INSERT INTO auth_events (kind, email, ip) VALUES ('fail', ${e}, ${ip}) RETURNING id`
+    return String(row.id)
+  }) as Promise<string>
+}
+
+/** The password was right: this try and the email's earlier wrong ones are forgotten */
+export async function loginSucceeded(email: string, attemptId: string): Promise<void> {
+  await ensureLimitsSchema()
+  await sql`DELETE FROM auth_events WHERE kind = 'fail' AND (id = ${attemptId} OR email = ${norm(email)})`
 }
 
 export async function recordLoginFailure(email: string, ip: string): Promise<void> {
@@ -67,7 +99,12 @@ const tooMany = (message: string) => Object.assign(new Error(message), { status:
 export async function allowCodeSend(email: string, ip: string): Promise<void> {
   await ensureLimitsSchema()
   const e = norm(email)
-  const [r] = await sql<{ gap: number; day: number; hour: number }[]>`
+  // (now and then, old rows go: nothing older than a day is ever counted)
+  if (Math.random() < 0.02) await sql`DELETE FROM auth_events WHERE created_at < now() - interval '2 days'`.catch(() => {})
+  await sql.begin(async tx => {
+  // (under a lock on the email: a burst of requests at the same moment sends one)
+  await tx`SELECT pg_advisory_xact_lock(hashtext(${'code:' + e}))`
+  const [r] = await tx<{ gap: number; day: number; hour: number }[]>`
     SELECT
       count(*) FILTER (WHERE email = ${e} AND created_at > now() - make_interval(secs => ${CODE_GAP_SECONDS}))::int AS gap,
       count(*) FILTER (WHERE email = ${e} AND created_at > now() - interval '1 day')::int AS day,
@@ -76,5 +113,6 @@ export async function allowCodeSend(email: string, ip: string): Promise<void> {
   if (r.gap > 0) throw tooMany('A code was just sent. Wait a minute before asking for another.')
   if (r.day >= CODES_PER_EMAIL_DAY) throw tooMany('Too many codes were sent to this email today. Try again tomorrow.')
   if (r.hour >= CODES_PER_IP_HOUR) throw tooMany('Too many codes were asked for. Try again in an hour.')
-  await sql`INSERT INTO auth_events (kind, email, ip) VALUES ('code', ${e}, ${ip})`
+  await tx`INSERT INTO auth_events (kind, email, ip) VALUES ('code', ${e}, ${ip})`
+  })
 }

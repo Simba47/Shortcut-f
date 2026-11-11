@@ -7,7 +7,7 @@ import { authConfig } from './auth.config'
 import { verifyPassword } from './modules/auth/password'
 import { startSession, isCurrentSession } from './modules/auth/one-device'
 import sql from './lib/db'
-import { clearLoginFailures, clientIp, loginLocked, recordLoginFailure } from './modules/auth/limits'
+import { clientIp, loginSucceeded, startLoginAttempt } from './modules/auth/limits'
 
 const g = global as typeof globalThis & { _pgPool?: Pool }
 if (!g._pgPool) {
@@ -42,14 +42,16 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const email = (credentials?.email as string | undefined)?.toLowerCase().trim()
         const password = credentials?.password as string | undefined
         if (!email || !password) return null
-        const ip = clientIp(request?.headers)
-        if (await loginLocked(email, ip)) throw new TooManyTries()
+        // (counted as a wrong try until the password checks out: modules/auth/limits.ts)
+        let attempt: string
+        try { attempt = await startLoginAttempt(email, clientIp(request?.headers)) }
+        catch (e) { if ((e as { code?: string }).code === 'too_many') throw new TooManyTries(); throw e }
 
         const [user] = await sql`
           SELECT id, email, name, image, password_hash, "emailVerified"
           FROM users WHERE email = ${email}
         `
-        if (!user) { await recordLoginFailure(email, ip); return null }
+        if (!user) return null
         if (!user.password_hash) {
           if (user.emailVerified) throw new GoogleOnly()
           return null
@@ -57,8 +59,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (!user.emailVerified) return null
 
         const ok = await verifyPassword(password, user.password_hash as string)
-        if (!ok) { await recordLoginFailure(email, ip); return null }
-        await clearLoginFailures(email)
+        if (!ok) return null
+        await loginSucceeded(email, attempt)
 
         // (image: the profile photo's address — the same one photoUrl makes in server/services/account.ts)
         const photo = user.image as string | null

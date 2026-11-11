@@ -69,3 +69,48 @@ test('"send the code again" only emails someone waiting for a code, and answers 
     assert.equal(sent.length, 0, 'no account: nothing sent')
   } finally { (mailer as { sendOtpEmail: typeof real }).sendOtpEmail = real }
 })
+
+test('a burst of guesses at the same moment still stops at the limit', opts, async () => {
+  const e = email('burst')
+  const got = await Promise.all(Array.from({ length: 30 }, () => L.startLoginAttempt(e, ip(30)).then(id => id, () => null)))
+  assert.equal(got.filter(x => x !== null).length, 10)
+  await assert.rejects(L.startLoginAttempt(e, ip(31)), (x: { code?: string }) => x.code === 'too_many')
+})
+
+test('a right password forgets the attempt and the earlier wrong ones', opts, async () => {
+  const e = email('right')
+  for (let i = 0; i < 3; i++) await L.startLoginAttempt(e, ip(32))
+  const id = await L.startLoginAttempt(e, ip(32))
+  await L.loginSucceeded(e, id)
+  assert.equal(await L.loginLocked(e, ip(33)), false)
+  const [{ n }] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM auth_events WHERE email = ${e} AND kind = 'fail'`
+  assert.equal(n, 0)
+})
+
+test('a burst of code requests sends one', opts, async () => {
+  const e = email('codeburst')
+  const r = await Promise.allSettled(Array.from({ length: 10 }, () => L.allowCodeSend(e, ip(34))))
+  assert.equal(r.filter(x => x.status === 'fulfilled').length, 1)
+})
+
+test('the address is the one Railway sets, not one the visitor sends', () => {
+  const h = (o: Record<string, string>) => new Headers(o)
+  assert.equal(L.clientIp(h({ 'x-real-ip': '203.0.113.9', 'x-forwarded-for': '1.2.3.4, 203.0.113.9' })), '203.0.113.9')
+  assert.equal(L.clientIp(h({ 'x-forwarded-for': '198.51.100.7' })), '198.51.100.7')
+  assert.equal(L.clientIp(h({})), 'unknown')
+})
+
+test('a password reset unlocks the account', opts, async () => {
+  const { resetPassword, issueOtp } = await import('./services')
+  void issueOtp
+  const e = email('reset')
+  await sql`INSERT INTO users (email, "emailVerified") VALUES (${e}, now())`
+  for (let i = 0; i < 10; i++) await L.recordLoginFailure(e, ip(35))
+  assert.equal(await L.loginLocked(e, ip(35)), true)
+  const otp = '123456'
+  const { hashOtp } = await import('./otp')
+  await sql`INSERT INTO verification_otps (email, otp_hash, purpose, expires_at) VALUES (${e}, ${hashOtp(otp)}, 'password_reset', now() + interval '10 minutes')`
+  await resetPassword(e, otp, 'New-Pass-123!')
+  assert.equal(await L.loginLocked(e, ip(35)), false)
+  await sql`DELETE FROM users WHERE email = ${e}`
+})

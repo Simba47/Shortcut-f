@@ -3,7 +3,7 @@ import sql from '@/lib/db'
 import { hashPassword, validatePassword } from './password'
 import { generateOtp, hashOtp, verifyOtpHash } from './otp'
 import { sendOtpEmail } from './mailer'
-import { allowCodeSend } from './limits'
+import { allowCodeSend, clearLoginFailures } from './limits'
 
 const OTP_TTL_MS = 10 * 60 * 1000   // 10 minutes
 const MAX_ATTEMPTS = 5
@@ -148,6 +148,8 @@ export async function resetPassword(
 
   const passwordHash = await hashPassword(newPassword)
   await sql`UPDATE users SET password_hash = ${passwordHash} WHERE email = ${norm}`
+  // (a new password: its owner is no longer locked out by the wrong tries before it)
+  await clearLoginFailures(norm)
 }
 
 /**
