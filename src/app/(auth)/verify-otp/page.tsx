@@ -73,7 +73,7 @@ function VerifyOtpForm() {
       body: JSON.stringify({ email, purpose }),
     }).catch(() => null)
     setNotice(r?.ok ? AUTH.notes.newCodeSent(email) : null)
-    if (!r?.ok) setError(AUTH.errors.resendFailed)
+    if (!r?.ok) { const d = r ? await r.json().catch(() => ({})) : {}; setError(r?.status === 429 && d.error ? d.error : AUTH.errors.resendFailed) }
   }
 
   if (success) {

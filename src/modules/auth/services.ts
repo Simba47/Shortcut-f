@@ -3,13 +3,14 @@ import sql from '@/lib/db'
 import { hashPassword, validatePassword } from './password'
 import { generateOtp, hashOtp, verifyOtpHash } from './otp'
 import { sendOtpEmail } from './mailer'
+import { allowCodeSend } from './limits'
 
 const OTP_TTL_MS = 10 * 60 * 1000   // 10 minutes
 const MAX_ATTEMPTS = 5
 
 // ── Signup ────────────────────────────────────────────────────────────────────
 
-export async function signupUser(email: string, password: string): Promise<void> {
+export async function signupUser(email: string, password: string, ip = 'unknown'): Promise<void> {
   const norm = email.toLowerCase().trim()
 
   const pwErr = validatePassword(password)
@@ -25,6 +26,8 @@ export async function signupUser(email: string, password: string): Promise<void>
     throw Object.assign(new Error(msg), { status: 409 })
   }
 
+  // (a code is about to be sent: at most once a minute to an email, and a few a day: limits.ts)
+  await allowCodeSend(norm, ip)
   const passwordHash = await hashPassword(password)
 
   if (existing) {
@@ -119,8 +122,10 @@ export async function verifyOtp(
 
 // ── Password reset ────────────────────────────────────────────────────────────
 
-export async function requestPasswordReset(email: string): Promise<void> {
+export async function requestPasswordReset(email: string, ip = 'unknown'): Promise<void> {
   const norm = email.toLowerCase().trim()
+  // Counted before looking the email up, so the answer is the same whether it has an account or not
+  await allowCodeSend(norm, ip)
   // Don't reveal whether the email exists
   const [user] = await sql`
     SELECT id FROM users WHERE email = ${norm} AND "emailVerified" IS NOT NULL
@@ -143,4 +148,18 @@ export async function resetPassword(
 
   const passwordHash = await hashPassword(newPassword)
   await sql`UPDATE users SET password_hash = ${passwordHash} WHERE email = ${norm}`
+}
+
+/**
+ * "Send the code again": only to an email waiting for one — a signup whose code isn't entered yet, or
+ * a password reset for an account. Anything else sends nothing and answers the same, so this can't
+ * be used to email codes to anyone.
+ */
+export async function resendOtp(email: string, purpose: 'signup' | 'password_reset', ip = 'unknown'): Promise<void> {
+  const norm = email.toLowerCase().trim()
+  await allowCodeSend(norm, ip)
+  const [u] = await sql`SELECT "emailVerified" FROM users WHERE email = ${norm}`
+  if (!u) return
+  if (purpose === 'signup' ? u.emailVerified : !u.emailVerified) return
+  await issueOtp(norm, purpose)
 }

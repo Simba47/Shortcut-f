@@ -7,6 +7,7 @@ import { authConfig } from './auth.config'
 import { verifyPassword } from './modules/auth/password'
 import { startSession, isCurrentSession } from './modules/auth/one-device'
 import sql from './lib/db'
+import { clearLoginFailures, clientIp, loginLocked, recordLoginFailure } from './modules/auth/limits'
 
 const g = global as typeof globalThis & { _pgPool?: Pool }
 if (!g._pgPool) {
@@ -24,6 +25,8 @@ export const googleOn = () => !!process.env.AUTH_GOOGLE_ID && !!process.env.AUTH
 
 /** A password tried on an account that signs in with Google only (no password yet): the form says so */
 class GoogleOnly extends CredentialsSignin { code = 'google_only' }
+/** Too many wrong passwords lately (modules/auth/limits.ts): the form says to wait */
+class TooManyTries extends CredentialsSignin { code = 'too_many' }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
@@ -35,16 +38,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         const email = (credentials?.email as string | undefined)?.toLowerCase().trim()
         const password = credentials?.password as string | undefined
         if (!email || !password) return null
+        const ip = clientIp(request?.headers)
+        if (await loginLocked(email, ip)) throw new TooManyTries()
 
         const [user] = await sql`
           SELECT id, email, name, image, password_hash, "emailVerified"
           FROM users WHERE email = ${email}
         `
-        if (!user) return null
+        if (!user) { await recordLoginFailure(email, ip); return null }
         if (!user.password_hash) {
           if (user.emailVerified) throw new GoogleOnly()
           return null
@@ -52,7 +57,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (!user.emailVerified) return null
 
         const ok = await verifyPassword(password, user.password_hash as string)
-        if (!ok) return null
+        if (!ok) { await recordLoginFailure(email, ip); return null }
+        await clearLoginFailures(email)
 
         // (image: the profile photo's address — the same one photoUrl makes in server/services/account.ts)
         const photo = user.image as string | null

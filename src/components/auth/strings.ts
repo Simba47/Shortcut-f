@@ -169,6 +169,7 @@ export const AUTH = {
     network: 'Something went wrong. Check your connection and try again.',
     googleOnly: 'This email signs in with Google — use Continue with Google. (Or set a password with “Forgot password?”)',
     wrongPassword: 'Wrong password. Try again, or reset it with “Forgot password?”',
+    tooManyTries: 'Too many wrong tries. Wait 15 minutes, or reset your password with “Forgot password?”',
     mismatch: 'The passwords don’t match',
     weakPassword: 'Your password needs 8+ characters, 1 uppercase letter and 1 number.',
     exists: (email: string) => `You already have an account with ${email}. Enter its password to sign in, or reset it with “Forgot password?”`,

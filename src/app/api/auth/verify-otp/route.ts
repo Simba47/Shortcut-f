@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyOtp, issueOtp } from '@/modules/auth/services'
+import { verifyOtp, resendOtp } from '@/modules/auth/services'
+import { clientIp } from '@/modules/auth/limits'
 
 export async function POST(req: NextRequest) {
   try {
@@ -21,7 +22,8 @@ export async function PUT(req: NextRequest) {
     if (!email || !purpose) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
-    await issueOtp(email, purpose)
+    if (purpose !== 'signup' && purpose !== 'password_reset') return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+    await resendOtp(email, purpose, clientIp(req.headers))
     return NextResponse.json({ ok: true })
   } catch (err: unknown) {
     const e = err as Error & { status?: number }
