@@ -8,6 +8,8 @@ import type { Clip, Segment, CropBox, BoxKeyframe, CaptionStyle, TextOverlay, Au
 import { VideoPreview, OutputCanvas, buildCaptionChunks, captionWordsPerLine, captionDefaultY } from '@/components/editor/VideoPreview'
 import { withoutRanges, computeCutRanges, reactionRanges } from '@/lib/cuts'
 import { inLineText } from '@/lib/inLine'
+import { CAPTION_CREDITS_PER_MINUTE, CAPTION_GAP_MS, captionCredits, captionSpan, exportCredits } from '@/lib/credits'
+import { useCredits } from '@/lib/useCredits'
 import { cleanTrims, trimMap, addTrim, wordsOnTimeline, MAX_CLIP_MS, MIN_CLIP_MS } from '@/lib/trims'
 import { toTimelineState, toSourceState, rippleDelete, rippleStretch, lockedInRange, insertAtStart, extendEnd, type TimedState } from '@/modules/editor/trimState'
 import { freezeChanged, insertsOf, insertedMs, rippleInsert, isInsert, goesAfterMain, piecesOf, piecesLength, videoAtPieces, timelineAtPieces, rippleCut, pieceAt, speedOf, pieceVideoMs, mainFrom } from '@/modules/editor/inserts'
@@ -37,6 +39,7 @@ import { placeInRow, liftToRow, lowerToRow, liftBlock, fillUncovered } from '@/m
 import { frameOffMedia, frameOnMedia, mediaForFrame, type RowMedia } from '@/modules/editor/frameOnMedia'
 import { freezePart, restsOnSplit, splitTargets } from '@/modules/editor/split'
 import { AccountMenu } from '@/components/ui/account-menu'
+import { CreditsBadge, TopUpLink } from '@/components/ui/credits-badge'
 import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { BrandLogo } from '@/components/ui/brand-logo'
 import { BrandLoader } from '@/components/ui/brand-loader'
@@ -1621,7 +1624,6 @@ export function EditorShell({
    * more than CAPTION_GAP_MS at its start or end with none (the clip was made longer after its
    * captions were made). A pause that long at an end is rare; captioning it again is cheap.
    */
-  const CAPTION_GAP_MS = 4000
   function needsCaptions(): boolean {
     const kept = trim.kept
     if (!kept.length) return false
@@ -1648,19 +1650,58 @@ export function EditorShell({
     await handleSave()
     handleRetranscribe('unknown')
   }
-  /** Captions on: made now for this clip if any part of it has none yet (nothing is captioned until asked) */
+  /** Captions on or off. Nothing is read until Get CC is pressed: it costs credits, so the price comes first */
   function turnCaptions(on: boolean) {
     setShowCaptions(on)
-    if (on && needsCaptions()) makeCaptions()
   }
-  // Captions are on and the clip was just made longer: caption the new part too (once the drag is over)
-  const captionAfterEdgeRef = useRef(false)
-  const [edgeDragsDone, setEdgeDragsDone] = useState(0)
-  useEffect(() => {
-    if (!captionAfterEdgeRef.current) return
-    captionAfterEdgeRef.current = false
-    if (showCaptions && needsCaptions()) makeCaptions()
-  }, [edgeDragsDone]) // eslint-disable-line react-hooks/exhaustive-deps
+  const { credits, refresh: refreshCredits } = useCredits()
+  // An export taken, finished, cancelled or failed (which gives its credits back): the balance follows
+  useEffect(() => { refreshCredits() }, [clipStatus, refreshCredits])
+  /** The part of the clip Get CC reads, and its price: the server works it out the same way (captionSpan) */
+  function captionQuote() {
+    const kept = trim.kept
+    const start = kept[0]?.[0] ?? clip.start_ms, end = kept[kept.length - 1]?.[1] ?? clip.end_ms
+    const span = captionSpan(start, end, sourceWords) ?? { start_ms: start, end_ms: end }
+    const ms = span.end_ms - span.start_ms
+    return { ms, credits: captionCredits(ms), newPart: ms < end - start }
+  }
+  /** Asks before a step that makes captions on its own (Post, Cleanup). With credits off there is no price to ask about. */
+  function withCaptionPrice(go: () => void, notNow?: () => void) {
+    if (!credits) { go(); return }
+    const q = captionQuote()
+    confirm({
+      title: `Get captions for ${q.credits} credits?`,
+      body: `This needs the clip's captions first, from its main video. You have ${credits.balance} credits.`,
+      confirmLabel: 'Get CC', cancelLabel: 'Not now', onCancel: notNow, tone: 'warning',
+    }, go)
+  }
+  /** Regenerate reads all of the clip again, words or no words */
+  function askRegenerate() {
+    const clipMs = trim.kept.length ? trim.kept[trim.kept.length - 1][1] - trim.kept[0][0] : clip.end_ms - clip.start_ms
+    const go = async () => { setRetranscribing(true); await handleSave(); handleRetranscribe('unknown', true) }
+    // (credits off: it still asks, since word edits are replaced)
+    if (!credits) {
+      confirm({ title: 'Regenerate this clip’s captions?', body: 'Its speech is read again. Your word edits in this clip will be replaced.', confirmLabel: 'Regenerate', tone: 'warning' }, () => { void go() })
+      return
+    }
+    const price = captionCredits(clipMs)
+    confirm({
+      title: `Regenerate captions for ${price} credits?`,
+      body: `All of this clip is read again, from its main video, and caption words you corrected are replaced. You have ${credits.balance} credits.`,
+      confirmLabel: 'Regenerate', cancelLabel: 'Not now', tone: 'warning',
+    }, () => { void go() })
+  }
+  /** Re-render when part of the clip has no captions: the export reads all of the clip first, so both prices are asked about */
+  function askRender() {
+    if (!needsCaptions() || !credits) { requestExport(needsCaptions()); return }
+    const clipMs = trim.kept.length ? trim.kept[trim.kept.length - 1][1] - trim.kept[0][0] : clip.end_ms - clip.start_ms
+    const price = captionCredits(clipMs), render = exportCredits(clipLengthMs)
+    confirm({
+      title: `Render with captions for ${price + render} credits?`,
+      body: `Part of this clip has no captions, so all of it is read first (${price} credits), then exported (${render}). You have ${credits.balance} credits.`,
+      confirmLabel: 'Render', cancelLabel: 'Not now', tone: 'warning',
+    }, () => requestExport(true))
+  }
 
   // (`fresh`: Regenerate — read the clip again even where it has words; else only parts with none.
   // Try again repeats what failed)
@@ -1703,6 +1744,7 @@ export function EditorShell({
         const errBody = await res.json().catch(() => ({}))
         throw new Error(errBody?.error ?? `Retranscription failed (${res.status})`)
       }
+      refreshCredits()
       const videoId = (clip as unknown as { video_id: string }).video_id
       const queuedAt = new Date().toISOString()
       const { job_id: jobId } = await res.json().catch(() => ({})) as { job_id?: string | null }
@@ -1727,6 +1769,7 @@ export function EditorShell({
             if (failed) {
               stopTimer(); setRetranscribing(false)
               setRetranscribeError(`Captions couldn't be made: ${failed}`)
+              refreshCredits()
               return
             }
           }
@@ -2331,9 +2374,19 @@ export function EditorShell({
   async function subjectsCall(url: string, init: RequestInit) {
     const res = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json' } })
     const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(data.error ?? 'Something went wrong')
+    if (!res.ok) throw Object.assign(new Error(data.error ?? 'Something went wrong'), { code: data.code, credits: data.credits })
     return data
   }
+  /** Subjects costs credits once per clip: the server answers 402 subjects_cost with the price, which is asked about first */
+  function askSubjectsPrice(price: number, go: () => void, notNow?: () => void) {
+    confirm({
+      title: `Follow people in this clip for ${price} credits?`,
+      body: `You pay once for this clip: adding or marking people again is free. Only making the clip longer costs more. You have ${credits?.balance ?? 0} credits.`,
+      confirmLabel: 'Continue', cancelLabel: 'Not now', onCancel: notNow, tone: 'warning',
+    }, go)
+  }
+  const askSubjectsPriceRef = useRef(askSubjectsPrice)
+  askSubjectsPriceRef.current = askSubjectsPrice
   // A tap while the last mark is still being saved is ignored (user, 2026-10-24: a double tap on a
   // face made C and C — the face showed unmarked until the first was saved)
   const markingSubjectRef = useRef(false)
@@ -2429,13 +2482,21 @@ export function EditorShell({
     setMarking(false)
     await trackSubjectsNow(true)
   }
-  async function trackSubjectsNow(all: boolean) {
-    setSubjectNotice(null)
+  async function trackSubjectsNow(all: boolean, pay = false) {
+    if (!pay) setSubjectNotice(null)
     try {
-      const { subjects: list } = await subjectsCall(`${subjectsUrl}/track`, { method: 'POST', body: JSON.stringify({ start_ms: rawClip.start_ms, end_ms: rawClip.end_ms, all }) })
+      const { subjects: list } = await subjectsCall(`${subjectsUrl}/track`, { method: 'POST', body: JSON.stringify({ start_ms: rawClip.start_ms, end_ms: rawClip.end_ms, all, pay }) })
       takeSubjects(list)
       setSubjectsError(null)
-    } catch (e) { setSubjectsError(e instanceof Error ? e.message : 'Could not start tracking') }
+      if (pay) refreshCredits()
+    } catch (e) {
+      const asks = e as { code?: string; credits?: number }
+      if (asks.code === 'subjects_cost' && asks.credits) {
+        askSubjectsPrice(asks.credits, () => { void trackSubjectsNow(all, true) }, () => setSubjectNotice(null))
+        return
+      }
+      setSubjectsError(e instanceof Error ? e.message : 'Could not start tracking')
+    }
   }
   async function removeSubject(id: string) {
     setSubjects(list => list.filter(s => s.id !== id))
@@ -2679,11 +2740,13 @@ export function EditorShell({
   // The scenes last found: what a stopped scan goes back to (as the server's stop does)
   const lastDoneAnglesRef = useRef<AnglesData | null>(null)
   useEffect(() => { if (anglesData?.status === 'done') lastDoneAnglesRef.current = anglesData }, [anglesData])
-  const loadAngles = useCallback(async (scan = false) => {
+  // The scan stopped to ask its price: the panel's Detect button stops showing "Starting…"
+  const [scanPriceAsked, setScanPriceAsked] = useState(0)
+  const loadAngles = useCallback(async (scan = false, pay = false) => {
     const gen = stopGenRef.current
     try {
       const res = await fetch(`${subjectsUrl}/angles`, scan
-        ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start_ms: rawClip.start_ms, end_ms: rawClip.end_ms }) }
+        ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start_ms: rawClip.start_ms, end_ms: rawClip.end_ms, pay }) }
         : undefined)
       const data = await res.json().catch(() => ({}))
       if (gen !== stopGenRef.current) {
@@ -2691,13 +2754,23 @@ export function EditorShell({
         if (scan && res.ok) fetch(`${subjectsUrl}/stop`, { method: 'POST' }).catch(() => {})
         return
       }
+      if (res.status === 402 && data.code === 'subjects_cost') {
+        setScanPriceAsked(n => n + 1)
+        askSubjectsPriceRef.current(data.credits, () => { void loadAngles(true, true) }, () => {
+          if (!autoAfterScanRef.current) return
+          autoAfterScanRef.current = false   // Auto format was waiting for this scan
+          setAutoPhase('idle')
+        })
+        return
+      }
       if (!res.ok) throw new Error(data.error ?? 'The camera angles could not be listed.')
+      if (pay) refreshCredits()
       setAnglesData(data)
     } catch (e) {
       if (gen !== stopGenRef.current) return
       setAnglesData({ status: 'failed', progress: 0, error: e instanceof Error ? e.message : 'The camera angles could not be listed.', angles: [], scan_start_ms: null, scan_end_ms: null })
     }
-  }, [subjectsUrl, rawClip.start_ms, rawClip.end_ms])
+  }, [subjectsUrl, rawClip.start_ms, rawClip.end_ms, refreshCredits])
   // (read when the editor opens — no scan — so a format picked anywhere can snap to the camera cuts)
   useEffect(() => { if (!anglesData) loadAngles() }, [anglesData, loadAngles])
   // The clip grew past what was read: the list misses the new part (Detect again)
@@ -3047,6 +3120,7 @@ export function EditorShell({
       const t = setTimeout(() => ctl.abort(), 20_000)
       try {
         const data = await subjectsCall(`${subjectsUrl}/stop`, { method: 'POST', signal: ctl.signal })
+        refreshCredits()   // a stopped job gives its credits back
         if (gen === stopGenRef.current) {
           takeSubjects(data.subjects)
           if (data.angles) setAnglesData(data.angles)
@@ -3470,13 +3544,6 @@ export function EditorShell({
 
   // ── Every delete asks first ─────────────────────────────────────────────────
   const { confirm, dialog: confirmDialog } = useConfirm()
-  /** The refresh icon on Show captions: this clip's speech read again (its word edits go), once confirmed */
-  function askRegenerate() {
-    confirm({
-      title: 'Regenerate this clip’s captions?', body: 'Its speech is read again. Your word edits in this clip will be replaced.',
-      confirmLabel: 'Regenerate', tone: 'warning',
-    }, () => handleRetranscribe('unknown', true))
-  }
   const UNDO_NOTE = 'You can undo this.'
 
   // ── Brand kit (user, 2026-10-17) ──────────────────────────────────────────────
@@ -4677,7 +4744,7 @@ export function EditorShell({
       edgeBaseRef.current = base
       pause()
     }
-    if (done) { edgeBaseRef.current = null; setEdgeDragsDone(n => n + 1) }
+    if (done) edgeBaseRef.current = null
     const lim = base.limits
     const d = Math.round(edge === 'start'
       ? Math.max(-lim.startEarlier, Math.min(lim.startLater, delta))
@@ -4691,8 +4758,6 @@ export function EditorShell({
     }
     const step = edgeStep(base, edge, d)
     if (!step) return
-    if (step.added) captionAfterEdgeRef.current = true
-    if (!done) captionAfterEdgeRef.current = false   // only once the drag is over
     skipCanvasTransitionRef.current = true
     seekAfterTrimRef.current = step.playhead
     editor.applyTrim(step.next.segments, step.next.keyframes, cleanTrims(base.trims, step.start, step.end), [step.start, step.end])
@@ -4811,6 +4876,7 @@ export function EditorShell({
       body: `${lines.join('\n')}\n\nIf you export anyway, these parts become plain Vertical (just the main video). You can undo this afterwards.`,
       confirmLabel: 'Convert to Vertical & export',
       cancelLabel: 'Go to it',
+      cancelIsAction: true,
       tone: 'warning',
       onCancel: () => { seekToMs(found[0].start_ms); setTool('frames'); toggleOptions(true) },
     }, () => {
@@ -5832,8 +5898,11 @@ export function EditorShell({
     if (!needsCaptions()) return Promise.resolve()
     if (isFreePlan) return Promise.reject(new Error('Captions aren\u2019t part of the Free plan, so there are no words to work from.'))
     return new Promise((resolve, reject) => {
-      captionsWaitRef.current = { resolve, reject, started: transcribing || retranscribing }
-      if (!transcribing && !retranscribing) { setRetranscribeError(null); makeCaptions() }
+      if (transcribing || retranscribing) { captionsWaitRef.current = { resolve, reject, started: true }; return }
+      withCaptionPrice(() => {
+        captionsWaitRef.current = { resolve, reject, started: false }
+        setRetranscribeError(null); makeCaptions()
+      }, () => reject(new Error('No captions were made, so nothing was used.')))
     })
   }
   useEffect(() => {
@@ -6629,6 +6698,7 @@ export function EditorShell({
               <circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 015 .5c0 1.5-2.5 2-2.5 3.5M12 17h.01" />
             </svg>
           </button>
+          <CreditsBadge credits={credits} onClick={e => { e.preventDefault(); leave(() => { window.location.href = '/billing#credits' }) }} />
           <ThemeSwitch />
           {/* Shared profile button; saves pending edits before leaving the editor */}
           <AccountMenu
@@ -6641,7 +6711,7 @@ export function EditorShell({
       {exportError && (
         <div role="alert" className="shrink-0 flex items-center gap-3 px-4 py-2 text-xs"
           style={{ background: 'rgba(239,68,68,0.12)', borderBottom: '1px solid rgba(239,68,68,0.25)', color: '#fca5a5' }}>
-          <span className="flex-1">{exportError}</span>
+          <span className="flex-1">{exportError}<TopUpLink message={exportError} /></span>
           <button onClick={() => setExportError(null)} className="px-2 py-0.5 rounded hover:bg-[rgb(var(--ed-fg)/0.1)]" aria-label="Dismiss">✕</button>
         </div>
       )}
@@ -6907,7 +6977,7 @@ export function EditorShell({
             {tool === 'subjects' && (
               <SubjectsPanel
                 angles={anglesView} onOpenAngle={openAngle} onMarkFace={markAngleFace} savingFace={savingFace} onClickMark={markByClick}
-                onScanAngles={() => loadAngles(true)}
+                onScanAngles={() => loadAngles(true)} scanPriceAsked={scanPriceAsked}
                 subjects={subjectItems} loading={subjectsLoading} error={subjectsError}
                 marking={marking} onToggleMarking={markFromView} onMarkShot={markShot} onMarkInClip={markInWholeClip} retrack={needsRetrack}
                 onAutoFormat={runAutoFormat} autoPhase={autoPhase} autoMode={autoMode} onAutoMode={setAutoMode} onStop={stopSubjectsWork}
@@ -7050,6 +7120,14 @@ export function EditorShell({
                         </button>
                         </div>
                       </div>
+                      {needsCaptions() && !transcribing && !retranscribing && (() => {
+                        const q = captionQuote()
+                        return (
+                          <GetCaptions lengthMs={q.ms} price={q.credits} newPart={q.newPart} balance={credits?.balance ?? null} freePlan={isFreePlan}
+                            hasAddedVideos={shots.length > 0 || segments.some(sg => isInsert(sg, mainVideoId))}
+                            onGet={() => { setShowCaptions(true); setRetranscribeError(null); makeCaptions() }} />
+                        )
+                      })()}
                     </div>
 
                     {showCaptions && words.length > 0 && (
@@ -7083,7 +7161,7 @@ export function EditorShell({
                       <div role="alert" className="flex flex-col gap-2 rounded-xl px-3 py-2.5 text-[12px] leading-snug"
                         style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', color: '#fca5a5' }}>
                         <span>{retranscribeError}</span>
-                        <button type="button" onClick={() => handleRetranscribe('unknown', lastFreshRef.current)}
+                        <button type="button" onClick={() => (lastFreshRef.current ? askRegenerate() : withCaptionPrice(() => { void handleRetranscribe('unknown', false) }))}
                           className="self-start rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors hover:bg-[rgba(239,68,68,0.2)]"
                           style={{ border: '1px solid rgba(239,68,68,0.45)', color: '#fecaca' }}>
                           Try again
@@ -7114,7 +7192,7 @@ export function EditorShell({
                         onChange={changeCaptionStyle}
                         onTextCaseChange={setCaptionTextCase}
                         onEditCaptions={() => setEditingTranscript(true)}
-                        onRetranscribe={l => handleRetranscribe(l, lastFreshRef.current)}
+                        onRetranscribe={l => (lastFreshRef.current ? askRegenerate() : withCaptionPrice(() => { void handleRetranscribe(l, false) }))}
                         retranscribing={retranscribing} retranscribeElapsed={retranscribeElapsed} retranscribePlace={retranscribePlace}
                         retranscribeError={retranscribeError} hasWords={words.length > 0}
                         hasRoman={hasRoman} romanize={romanize} romanizeLabel={scriptLabel}
@@ -7139,7 +7217,7 @@ export function EditorShell({
 
             {tool === 'post' && (
               <div className="p-4">
-                <PostText clipId={clip.id} value={postText} prepare={async () => { await handleSave(); await ensureCaptions() }} onChange={v => setPostText({ title: v.title, post_caption: v.post_caption, hashtags: v.hashtags })} />
+                <PostText clipId={clip.id} value={postText} prepare={async () => { await handleSave(); await ensureCaptions() }} onChange={v => { refreshCredits(); setPostText({ title: v.title, post_caption: v.post_caption, hashtags: v.hashtags }) }} />
               </div>
             )}
 
@@ -7483,7 +7561,7 @@ export function EditorShell({
                   {/* (with the captions as they are: read again only where part of the clip has none — it was
                       made longer. Reading the whole clip again every time changed its words from the ones
                       in the preview and threw corrections away: user, 2026-11-04) */}
-                  <button onClick={() => requestExport(needsCaptions())} aria-label="Re-render"
+                  <button onClick={askRender} aria-label="Re-render"
                     title="Render again with your latest edits"
                     className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
                     style={{ color: 'rgb(var(--ed-fg) / 0.75)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }}>
@@ -7506,7 +7584,7 @@ export function EditorShell({
                   data-pressed={exportPress || undefined}
                   className="ed-export rounded-[10px]"
                   surfaceClassName="gap-1.5 h-8 px-3.5 text-xs font-bold">
-                  <ExportIcon /> Export
+                  <ExportIcon /> Export{credits && clipLengthMs <= MAX_CLIP_MS ? ` · ${exportCredits(clipLengthMs)} credit${exportCredits(clipLengthMs) === 1 ? '' : 's'}` : ''}
                 </SpinningBorderButton>
               )}
             </div>
@@ -8432,6 +8510,56 @@ function PlayRing({ lengthMs }: { lengthMs: number }) {
 }
 
 /** The playhead's time / the clip's length, over the timeline: 0:12.4 / 1:43 */
+/** "1 min 30 s" */
+function captionLengthLabel(ms: number) {
+  const sec = Math.round(ms / 1000), m = Math.floor(sec / 60), rest = sec % 60
+  return m ? `${m} min${rest ? ` ${rest} s` : ''}` : `${rest} s`
+}
+
+/** The price of a clip's captions, and the button that gets them: nothing is read or charged until it is pressed */
+function GetCaptions({ lengthMs, price, newPart, balance, freePlan, hasAddedVideos, onGet }: {
+  lengthMs: number; price: number; newPart: boolean; balance: number | null; freePlan: boolean; hasAddedVideos: boolean; onGet: () => void
+}) {
+  const muted = { color: 'rgb(var(--ed-fg) / 0.6)' }
+  if (freePlan) {
+    return (
+      <div className="mt-3 flex flex-col gap-2 text-[11.5px] leading-snug" style={muted}>
+        <span>Captions aren&rsquo;t part of the Free plan.</span>
+        <a href="/pricing" className="cap-link justify-center font-semibold">Upgrade to get captions</a>
+      </div>
+    )
+  }
+  const short = balance !== null && balance < price ? price - balance : 0
+  return (
+    <div className="mt-3 flex flex-col gap-2 text-[11.5px] leading-snug">
+      {balance !== null && (
+        <>
+          <div className="flex justify-between gap-3" style={muted}>
+            <span>{newPart ? 'New part of the clip' : 'Clip length'} (main video only)</span>
+            <span className="shrink-0">{captionLengthLabel(lengthMs)} → {price / CAPTION_CREDITS_PER_MINUTE} min</span>
+          </div>
+          <div className="flex justify-between gap-3 font-semibold text-[var(--ed-text)]">
+            <span>Cost: {price} credits</span>
+            <span className="shrink-0 font-normal" style={muted}>You have {balance}</span>
+          </div>
+        </>
+      )}
+      {hasAddedVideos && <span style={muted}>Added videos don&rsquo;t get captions.</span>}
+      {short > 0 ? (
+        <>
+          <span style={{ color: '#f87171' }}>You need {short} more credit{short === 1 ? '' : 's'}.</span>
+          <a href="/pricing" className="cap-link justify-center font-semibold">Buy a top-up</a>
+        </>
+      ) : (
+        <button type="button" onClick={onGet} className="h-9 rounded-lg text-[12.5px] font-bold transition-opacity hover:opacity-90"
+          style={{ background: ACCENT, color: '#0a0a0a' }}>
+          Get CC
+        </button>
+      )}
+    </div>
+  )
+}
+
 function ClipClock({ lengthMs }: { lengthMs: number }) {
   const now = useLiveTimeMs()
   const fmt = (ms: number, tenths: boolean) => {

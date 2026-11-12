@@ -10,8 +10,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'clip_id and language_code required' }, { status: 400 })
   }
   try {
-    // (fresh: Regenerate — the clip is read again even where it has words)
-    const jobId = await queueRetranscribe(user.id, body.clip_id, body.language_code, undefined, { fresh: body.fresh === true })
+    // (read_all / fresh: Regenerate — the clip is read again even where it has words)
+    const jobId = await queueRetranscribe(user.id, body.clip_id, body.language_code, undefined, { readAll: body.read_all === true || body.fresh === true })
     return NextResponse.json({ ok: true, job_id: jobId ?? null })
   } catch (err: unknown) {
     const e = err as { message?: string; status?: number }

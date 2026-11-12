@@ -46,7 +46,7 @@ const CARDS: LegalCard[] = [
   {
     icon: UserCog,
     title: 'Account & Billing',
-    body: <>Didn’t get your verification code? Check your spam folder and wait a minute before asking for a new one; each code expires after 10 minutes. Forgot your password? Choose ‘Forgot password’ on the sign-in page. You can change your name and password in Account settings, and compare plans in our <Link href="/#pricing">pricing section</Link>. If you subscribed in our iOS or Android app, manage or cancel it in your App Store or Google Play subscription settings; deleting the app does not cancel it. To delete your account and all of its data, open Account settings → Delete my account, or see <Link href="/delete-account">Delete your account</Link>. For billing problems, contact {mail} with your account email and the date and amount of the payment.</>,
+    body: <>Didn’t get your verification code? Check your spam folder and wait a minute before asking for a new one; each code expires after 10 minutes. Forgot your password? Choose ‘Forgot password’ on the sign-in page. You can change your name and password in Account settings, and compare plans on our <Link href="/pricing">Pricing</Link> page. Cancellations and refunds are explained in our <Link href="/refunds">Refund and Cancellation Policy</Link>. If you subscribed in our iOS or Android app, manage or cancel it in your App Store or Google Play subscription settings; deleting the app does not cancel it. To delete your account and all of its data, open Account settings → Delete my account, or see <Link href="/delete-account">Delete your account</Link>. For billing problems, contact {mail} with your account email and the date and amount of the payment.</>,
   },
   {
     icon: Mail,

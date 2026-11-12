@@ -10,6 +10,8 @@ export interface ConfirmOptions {
   /** Label of the other button (default "Cancel") and what it does besides closing */
   cancelLabel?: string
   onCancel?: () => void
+  /** The cancel button is an action of its own ("Go to it"): Esc or a click outside only closes */
+  cancelIsAction?: boolean
   /** A warning rather than a delete: the confirm button isn't red */
   tone?: 'danger' | 'warning'
   /** A second, gentler thing to do instead (a quiet link under the text) */
@@ -30,8 +32,11 @@ export function useConfirm(): { confirm: (options: ConfirmOptions, onConfirm: ()
   return { confirm, dialog }
 }
 
-function ConfirmDialog({ title, body, confirmLabel = 'Delete', cancelLabel = 'Cancel', onCancel, tone = 'danger', extraLabel, onExtra, onConfirm, onClose }: Pending & { onClose: () => void }) {
+function ConfirmDialog({ title, body, confirmLabel = 'Delete', cancelLabel = 'Cancel', onCancel, cancelIsAction, tone = 'danger', extraLabel, onExtra, onConfirm, onClose }: Pending & { onClose: () => void }) {
   const confirmRef = useRef<HTMLButtonElement>(null)
+  // Esc and a click outside are the same answer as the cancel button, unless that button is an action of its own
+  const dismissRef = useRef(() => {})
+  dismissRef.current = () => { onClose(); if (!cancelIsAction) onCancel?.() }
 
   useEffect(() => {
     // Focus the confirm button so Enter confirms; Esc cancels. Capture phase so the editor's own
@@ -39,7 +44,7 @@ function ConfirmDialog({ title, body, confirmLabel = 'Delete', cancelLabel = 'Ca
     const previous = document.activeElement as HTMLElement | null
     confirmRef.current?.focus()
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose() }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); dismissRef.current() }
       else if (e.key !== 'Tab' && e.key !== 'Enter' && e.key !== ' ') e.stopPropagation()
     }
     window.addEventListener('keydown', onKey, true)
@@ -51,7 +56,7 @@ function ConfirmDialog({ title, body, confirmLabel = 'Delete', cancelLabel = 'Ca
   // show their keys (Esc / Enter)
   return (
     <div className="cfm-backdrop fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 100 }}
-      onPointerDown={e => { if (e.target === e.currentTarget) onClose() }}>
+      onPointerDown={e => { if (e.target === e.currentTarget) dismissRef.current() }}>
       <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby={body ? 'confirm-body' : undefined}
         className="editor-theme cfm-card" data-tone={tone}>
         <span className="cfm-icon" aria-hidden="true">

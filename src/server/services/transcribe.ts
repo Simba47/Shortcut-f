@@ -1,7 +1,14 @@
 import sql from '@/lib/db'
+import { captionCredits, captionSpan } from '@/lib/credits'
+import { charge, linkJob } from './credits'
 
 // renderAfter: when set, the worker queues this render job once transcription finishes
-export async function queueRetranscribe(userId: string, clipId: string, languageCode: string, renderAfter?: { clip_id: string; video_storage_path: string; quality: string; watermark: boolean; user_id?: string; priority?: boolean }, opts: { fresh?: boolean } = {}) {
+export async function queueRetranscribe(
+  userId: string, clipId: string, languageCode: string,
+  renderAfter?: { clip_id: string; video_storage_path: string; quality: string; watermark: boolean; user_id?: string; priority?: boolean },
+  /** Regenerate: read all of the clip again, words or no words */
+  opts: { readAll?: boolean } = {},
+) {
   const [row] = await sql`
     SELECT c.video_id, c.start_ms, c.end_ms, v.storage_path, v.user_id
     FROM clips c JOIN videos v ON v.id = c.video_id
@@ -23,6 +30,22 @@ export async function queueRetranscribe(userId: string, clipId: string, language
     if (existing?.language) resolvedLang = existing.language
   }
 
+  // "Get CC" (no language picked, no fresh-captions export): only what has no words is read and
+  // paid for, nothing at all on a video already read in full. Anything else reads the whole clip.
+  const fillGaps = !renderAfter && !opts.readAll && (!languageCode || languageCode === 'unknown')
+  let span = { start_ms: row.start_ms as number, end_ms: row.end_ms as number }
+  let free = false
+  if (fillGaps) {
+    const [latest] = await sql<{ id: string; whole_video: boolean | null }[]>`
+      SELECT id, whole_video FROM transcripts WHERE video_id = ${row.video_id} ORDER BY created_at DESC LIMIT 1`
+    if (latest?.whole_video) free = true
+    else if (latest) {
+      const words = await sql<{ start_ms: number; end_ms: number }[]>`
+        SELECT start_ms, end_ms FROM transcript_words WHERE transcript_id = ${latest.id} AND start_ms >= ${row.start_ms} AND start_ms < ${row.end_ms}`
+      span = captionSpan(row.start_ms, row.end_ms, words) ?? span
+    }
+  }
+
   const { getUserPlanConfig } = await import('./quota')
   const plan = await getUserPlanConfig(userId)
   const payload = {
@@ -31,18 +54,23 @@ export async function queueRetranscribe(userId: string, clipId: string, language
     language_code: resolvedLang,
     is_retranscribe: true,
     clip_id: clipId,
-    clip_start_ms: row.start_ms,
-    clip_end_ms: row.end_ms,
+    clip_start_ms: span.start_ms,
+    clip_end_ms: span.end_ms,
     user_id: userId,
     // The top plan: first in the worker's line and in the shared Google line, as its exports
     ...(plan.priorityExports ? { priority: true } : {}),
-    // "Captions on" (no language picked, no fresh-captions export): only parts with no words need
-    // reading, so a video already read in full needs no new reading (the worker checks). Regenerate
-    // (`fresh`) always reads the clip again: it did nothing on a video read in full (user, 2026-11-06)
-    ...(!renderAfter && !opts.fresh && (!languageCode || languageCode === 'unknown') ? { fill_gaps: true } : {}),
+    // (a video already read in full needs no new reading: the worker checks)
+    ...(fillGaps ? { fill_gaps: true } : {}),
     ...(renderAfter ? { render_after: renderAfter } : {}),
   }
-  const [job] = await sql`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${sql.json(payload)}, 'queued') RETURNING id`
+  // Captions for this clip alone, its main video: per started minute of what is read. The hold and
+  // the job are made together, so a clip that cannot be paid for queues nothing.
+  const job = await sql.begin(async tx => {
+    const hold = free ? null : await charge(userId, { amount: captionCredits(span.end_ms - span.start_ms), refType: 'caption', refId: clipId }, tx)
+    const [made] = await tx`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${tx.json(payload)}, 'queued') RETURNING id`
+    if (hold && made) await linkJob(hold.id, made.id, tx)
+    return made
+  })
   return job?.id as string | undefined
 }
 
@@ -57,6 +85,9 @@ export async function queueRetranscribe(userId: string, clipId: string, language
 export async function ensureVideoTranscript(videoId: string): Promise<'ready' | 'running'> {
   const [video] = await sql`SELECT storage_path, duration_ms, user_id FROM videos WHERE id = ${videoId}`
   if (await hasWholeTranscript(videoId, video?.duration_ms ?? null)) return 'ready'
+  // The worker's reference transcript is reading it (./referenceTranscript): no Gemini reading is started
+  const { pickingState } = await import('./referenceTranscript')
+  if ((await pickingState(videoId))?.state === 'reading') return 'running'
   const [last] = await sql`
     SELECT id, status, error, payload->>'reported' AS reported FROM jobs
     WHERE type = 'transcribe' AND payload->>'video_id' = ${videoId} AND payload->>'transcribe_full' = 'true'
@@ -84,7 +115,10 @@ export async function ensureVideoTranscript(videoId: string): Promise<'ready' | 
       const [busy] = await tx`
         SELECT 1 FROM jobs WHERE type = 'transcribe' AND payload->>'video_id' = ${videoId}
           AND payload->>'transcribe_full' = 'true' AND status IN ('queued', 'processing') LIMIT 1`
-      if (!busy) await tx`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${tx.json(payload)}, 'queued')`
+      if (busy) return
+      // A Gemini reading happens when our transcriber could not read the video: on us, not charged.
+      // Reading is counted against the plan's hours at upload (readingUsage.ts).
+      await tx`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${tx.json(payload)}, 'queued')`
     })
   }
   return 'running'
@@ -96,6 +130,10 @@ export async function ensureVideoTranscript(videoId: string): Promise<'ready' | 
  * cover that clip, so they never count.
  */
 async function hasWholeTranscript(videoId: string, durationMs: number | null): Promise<boolean> {
+  // The worker's reference transcript stands in for the whole video's words when it is marked for
+  // picking moments (./referenceTranscript): no Gemini reading of the whole video is needed then
+  const { pickingState } = await import('./referenceTranscript')
+  if ((await pickingState(videoId))?.state === 'ready') return true
   // (to_jsonb: a database whose worker hasn't added the field yet has no whole_video)
   const [whole] = await sql`
     SELECT 1 FROM transcripts t WHERE t.video_id = ${videoId} AND (to_jsonb(t)->>'whole_video')::boolean LIMIT 1`
@@ -134,6 +172,9 @@ export interface VideoTranscriptState {
    *  long-job slot; 'queue' — other videos' readings are ahead (place); 'server' — the server is busy
    *  with other work or picking it up */
   waitingOn?: 'copy' | 'queue' | 'server' | null
+  /** 'reference': being read by the worker's own speech model (./referenceTranscript), which takes a
+   *  few minutes even for a long video; the clip board paces its bar by that */
+  source?: 'reference'
 }
 
 /** What Stop writes on the reading's job (the worker's READING_STOPPED: it stops when it sees it) */
@@ -188,6 +229,12 @@ export async function placeInLine(jobId: string): Promise<number | null> {
 export async function videoTranscriptState(userId: string, videoId: string): Promise<VideoTranscriptState> {
   const video = await ownVideo(userId, videoId)
   if (await hasWholeTranscript(videoId, video.duration_ms)) return { status: 'ready', progress: 100, error: null }
+  // Being read by the worker's reference transcript (a few minutes even for a long video): no Gemini reading
+  const { pickingState } = await import('./referenceTranscript')
+  const reference = await pickingState(videoId)
+  if (reference?.state === 'reading') {
+    return { status: 'running', progress: reference.progress ? Math.min(99, reference.progress) : null, error: null, source: 'reference' }
+  }
   const [last] = await sql<{ id: string; status: string; error: string | null; read_pct: string | null; read_step: string | null; read_done: string | null; read_total: string | null }[]>`
     SELECT id, status, error, payload->>'read_pct' AS read_pct, payload->>'read_step' AS read_step,
       payload->>'read_done' AS read_done, payload->>'read_total' AS read_total FROM jobs
@@ -223,7 +270,11 @@ export async function startVideoTranscript(userId: string, videoId: string): Pro
     SELECT id FROM jobs WHERE type = 'transcribe' AND payload->>'video_id' = ${videoId} AND payload->>'transcribe_full' = 'true'
       AND status = 'failed' AND NOT (payload ? 'reported') ORDER BY created_at DESC LIMIT 1`
   if (last) await sql`UPDATE jobs SET payload = payload || '{"reported": true}'::jsonb WHERE id = ${last.id}`
-  await ensureVideoTranscript(videoId).catch(() => { /* its reason is in the state below */ })
+  await ensureVideoTranscript(videoId).catch(e => {
+    // Not enough credits is the user's to act on (top up or upgrade): it is not a reading that failed
+    if (e?.status === 402) throw e
+    /* any other reason is in the state below */
+  })
   return videoTranscriptState(userId, videoId)
 }
 

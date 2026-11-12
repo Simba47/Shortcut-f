@@ -7,6 +7,7 @@ import { authConfig } from './auth.config'
 import { verifyPassword } from './modules/auth/password'
 import { startSession, isCurrentSession } from './modules/auth/one-device'
 import sql from './lib/db'
+import { clientIp, loginSucceeded, startLoginAttempt } from './modules/auth/limits'
 
 const g = global as typeof globalThis & { _pgPool?: Pool }
 if (!g._pgPool) {
@@ -24,6 +25,8 @@ export const googleOn = () => !!process.env.AUTH_GOOGLE_ID && !!process.env.AUTH
 
 /** A password tried on an account that signs in with Google only (no password yet): the form says so */
 class GoogleOnly extends CredentialsSignin { code = 'google_only' }
+/** Too many wrong passwords lately (modules/auth/limits.ts): the form says to wait */
+class TooManyTries extends CredentialsSignin { code = 'too_many' }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
@@ -35,10 +38,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         const email = (credentials?.email as string | undefined)?.toLowerCase().trim()
         const password = credentials?.password as string | undefined
         if (!email || !password) return null
+        // (counted as a wrong try until the password checks out: modules/auth/limits.ts)
+        let attempt: string
+        try { attempt = await startLoginAttempt(email, clientIp(request?.headers)) }
+        catch (e) { if ((e as { code?: string }).code === 'too_many') throw new TooManyTries(); throw e }
 
         const [user] = await sql`
           SELECT id, email, name, image, password_hash, "emailVerified"
@@ -53,6 +60,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         const ok = await verifyPassword(password, user.password_hash as string)
         if (!ok) return null
+        await loginSucceeded(email, attempt)
 
         // (image: the profile photo's address — the same one photoUrl makes in server/services/account.ts)
         const photo = user.image as string | null

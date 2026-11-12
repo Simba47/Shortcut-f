@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { TopUpLink } from '@/components/ui/credits-badge'
 
 export interface PostTextValue {
   title: string | null
@@ -32,6 +33,12 @@ export function PostText({ clipId, value, onChange, compact = false, prepare }: 
   const [copied, setCopied] = useState<string | null>(null)
   const tags = (value.hashtags ?? []).map(t => `#${t}`).join(' ')
   const empty = !value.post_caption && !(value.hashtags ?? []).length
+  // What is left of the month's rewrites, or what the next costs. A gallery of clips looks only when a button is pointed at
+  const [note, setNote] = useState<string | null>(null)
+  const loadNote = useCallback(() => {
+    fetch(`/api/clips/${clipId}/ai-text`).then(r => (r.ok ? r.json() : null)).then((d: { note?: string } | null) => setNote(d?.note ?? null)).catch(() => {})
+  }, [clipId])
+  useEffect(() => { if (!compact) loadNote() }, [compact, loadNote])
 
   async function regenerate() {
     setBusy(true); setError(null)
@@ -44,6 +51,7 @@ export function PostText({ clipId, value, onChange, compact = false, prepare }: 
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Could not write the text')
       onChange({ title: data.title, post_caption: data.post_caption, hashtags: data.hashtags, hook: data.hook })
+      loadNote()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not write the text')
     } finally {
@@ -78,14 +86,15 @@ export function PostText({ clipId, value, onChange, compact = false, prepare }: 
       {row('caption', 'Post caption', value.post_caption ?? '')}
       {row('tags', 'Hashtags', tags)}
       <div className="flex items-center gap-2">
-        <button onClick={regenerate} disabled={busy}
+        <button onClick={regenerate} disabled={busy} onMouseEnter={() => { if (compact && !note) loadNote() }}
           className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-50"
           style={{ color: fg(0.75), border: `1px solid ${fg(0.12)}` }}>
           {busy && <span className="inline-block w-2.5 h-2.5 border-2 border-current border-t-transparent rounded-full animate-spin" />}
           {empty ? '✦ Write post text' : '✦ Regenerate'}
         </button>
-        {error && <span className="text-[11px]" style={{ color: '#f87171' }}>{error}</span>}
+        {error && <span className="text-[11px]" style={{ color: '#f87171' }}>{error}<TopUpLink message={error} /></span>}
       </div>
+      {note && <p className="text-[11px]" style={{ color: fg(0.5) }}>{note}</p>}
       {preparing && (
         <p role="status" className="text-[11px] leading-relaxed" style={{ color: 'var(--ed-accent-text, #c8ff00)' }}>
           Getting the clip&rsquo;s captions so we can write your post — this takes a moment. They won&rsquo;t show on the video.

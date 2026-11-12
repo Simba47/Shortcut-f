@@ -1,5 +1,8 @@
+import type postgres from 'postgres'
 import sql from '@/lib/db'
+import { creditsMode, subjectsCredits, subjectsNewMs } from '@/lib/credits'
 import { hasColumn } from './clips'
+import { charge, ensureCreditsSchema, linkJob, sweep } from './credits'
 
 // ── Subjects: people marked in a clip and followed through it ─────────────────
 // The editor's Subjects tool. The user marks a person (a click on them at a moment of the source
@@ -73,12 +76,62 @@ function notReady(err: unknown): never {
 }
 
 async function ownClip(userId: string, clipId: string) {
-  const [clip] = await sql<{ id: string; user_id: string; start_ms: number; end_ms: number }[]>`
-    SELECT c.id, v.user_id, c.start_ms, c.end_ms FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.id = ${clipId}
+  const [clip] = await sql<{ id: string; user_id: string; start_ms: number; end_ms: number; ai_edit_job_id: string | null }[]>`
+    SELECT c.id, v.user_id, c.start_ms, c.end_ms, c.ai_edit_job_id FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.id = ${clipId}
   `
   if (!clip) throw Object.assign(new Error('Clip not found'), { status: 404 })
   if (clip.user_id !== userId) throw Object.assign(new Error('Forbidden'), { status: 403 })
   return clip
+}
+
+// ── Credits ───────────────────────────────────────────────────────────────────
+// The worker's job costs credits once per clip, whichever button starts it (following people, the
+// angles scan, Sub-edit): more people or following again on the same clip is free, a clip made longer
+// pays for the new part, and a clip from Make my clips is free (its AI clip covers it). A job that
+// fails or is stopped gives its credits back and its part is no longer paid for (credits.ts sweep).
+
+let chargesReady: Promise<void> | null = null
+function ensureCharges(): Promise<void> {
+  chargesReady ??= (async () => {
+    await ensureCreditsSchema()
+    await sql`
+      CREATE TABLE IF NOT EXISTS subject_charges (
+        id BIGSERIAL PRIMARY KEY,
+        clip_id UUID NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+        hold_id UUID NOT NULL,
+        start_ms INTEGER NOT NULL,
+        end_ms INTEGER NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`
+    await sql`CREATE INDEX IF NOT EXISTS subject_charges_clip_idx ON subject_charges (clip_id)`
+  })().catch(e => { chargesReady = null; throw e })
+  return chargesReady
+}
+
+/** The price of following this part of the clip. Credits on: past nothing yet, not paid for and not agreed to (`pay`), it asks first (402 subjects_cost) */
+async function subjectsPrice(userId: string, clip: { id: string; ai_edit_job_id: string | null }, startMs: number, endMs: number, pay: unknown): Promise<number> {
+  const mode = creditsMode()
+  if (mode === 'off' || clip.ai_edit_job_id) return 0
+  await ensureCharges()
+  await sweep(userId)
+  const paid = await sql<{ start_ms: number; end_ms: number }[]>`
+    SELECT s.start_ms, s.end_ms FROM subject_charges s JOIN credit_holds h ON h.id = s.hold_id
+    WHERE s.clip_id = ${clip.id} AND h.status <> 'released'`
+  const price = subjectsCredits(subjectsNewMs(startMs, endMs, paid))
+  if (price > 0 && mode === 'on' && pay !== true) {
+    throw Object.assign(new Error(`Following people in this clip costs ${price} credit${price === 1 ? '' : 's'}, once for this clip.`), { status: 402, expose: true, code: 'subjects_cost', credits: price })
+  }
+  return price
+}
+
+/** Queues the worker's job and takes its credits together, so a clip that cannot be paid for queues nothing */
+async function queueSubjectsJob(tx: postgres.TransactionSql, userId: string, clipId: string, payload: { start_ms: number; end_ms: number; [k: string]: unknown }, price: number) {
+  const hold = price > 0 ? await charge(userId, { amount: price, refType: 'subjects', refId: clipId }, tx) : null
+  const [job] = await tx<{ id: string }[]>`INSERT INTO jobs (type, payload, status) VALUES ('track_subjects', ${tx.json({ clip_id: clipId, ...payload, user_id: userId } as never)}, 'queued') RETURNING id`
+  if (hold) {
+    await linkJob(hold.id, job.id, tx)
+    await tx`INSERT INTO subject_charges (clip_id, hold_id, start_ms, end_ms) VALUES (${clipId}, ${hold.id}, ${payload.start_ms}, ${payload.end_ms})`
+  }
 }
 
 const BASE_COLUMNS = sql`id, label, color, mark_ms, mark_x, mark_y, status, error, progress, path, scan_start_ms, scan_end_ms`
@@ -190,30 +243,34 @@ export async function deleteAllSubjects(userId: string, clipId: string): Promise
  * editor). New and failed subjects are tracked; `all` tracks every one again (after the clip's
  * start or end moved).
  */
-export async function trackSubjects(userId: string, clipId: string, body: { start_ms?: unknown; end_ms?: unknown; all?: unknown }): Promise<Subject[]> {
+export async function trackSubjects(userId: string, clipId: string, body: { start_ms?: unknown; end_ms?: unknown; all?: unknown; pay?: unknown }): Promise<Subject[]> {
   const clip = await ownClip(userId, clipId)
   let start = Number(body.start_ms), end = Number(body.end_ms)
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) { start = clip.start_ms; end = clip.end_ms }
   // Never longer than the longest clip the editor allows, with some room
   end = Math.min(end, start + 6 * 60_000)
   try {
-    const queued = await sql<{ id: string }[]>`
-      UPDATE clip_subjects SET status = 'queued', progress = 0, error = NULL
-      WHERE clip_id = ${clipId} AND status NOT IN ('queued', 'running')
-        AND (${body.all === true} OR status IN ('new', 'failed'))
-      RETURNING id
-    `
-    if (queued.length) {
+    const [{ n }] = await sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM clip_subjects WHERE clip_id = ${clipId} AND status NOT IN ('queued', 'running')
+        AND (${body.all === true} OR status IN ('new', 'failed'))`
+    const price = n ? await subjectsPrice(userId, clip, Math.round(start), Math.round(end), body.pay) : 0
+    await sql.begin(async tx => {
+      const queued = await tx<{ id: string }[]>`
+        UPDATE clip_subjects SET status = 'queued', progress = 0, error = NULL
+        WHERE clip_id = ${clipId} AND status NOT IN ('queued', 'running')
+          AND (${body.all === true} OR status IN ('new', 'failed'))
+        RETURNING id
+      `
+      if (!queued.length) return
       // A job still waiting will take these too; one already running takes only its own
       // (not a Sub-edit or an angles scan of the clip: those never track the marked ones)
-      const [waiting] = await sql`
+      const [waiting] = await tx`
         SELECT 1 FROM jobs WHERE type = 'track_subjects' AND status = 'queued' AND payload->>'clip_id' = ${clipId}
           AND payload->>'auto' IS NULL AND payload->>'angles' IS NULL LIMIT 1
       `
-      if (!waiting) {
-        await sql`INSERT INTO jobs (type, payload, status) VALUES ('track_subjects', ${sql.json({ clip_id: clipId, start_ms: Math.round(start), end_ms: Math.round(end), user_id: userId })}, 'queued')`
-      }
-    }
+      // (a new part paid for gets its own job: the one waiting does not read it)
+      if (!waiting || price > 0) await queueSubjectsJob(tx, userId, clipId, { start_ms: Math.round(start), end_ms: Math.round(end) }, price)
+    })
     return await sql<Subject[]>`SELECT ${pick(await extras())} FROM clip_subjects WHERE clip_id = ${clipId} ORDER BY created_at`
   } catch (e) {
     // An older database that doesn't allow this kind of job yet
@@ -283,23 +340,26 @@ export async function getAngles(userId: string, clipId: string): Promise<AnglesS
 }
 
 /** Look for the angles through [start_ms, end_ms] of the source video (the clip as it is in the editor) */
-export async function scanAngles(userId: string, clipId: string, body: { start_ms?: unknown; end_ms?: unknown }): Promise<AnglesState> {
+export async function scanAngles(userId: string, clipId: string, body: { start_ms?: unknown; end_ms?: unknown; pay?: unknown }): Promise<AnglesState> {
   const clip = await ownClip(userId, clipId)
   let start = Number(body.start_ms), end = Number(body.end_ms)
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) { start = clip.start_ms; end = clip.end_ms }
   start = Math.max(0, start)
   end = Math.min(end, start + 6 * 60_000)
   try {
-    // One scan at a time: a row already waiting or being worked on is left alone
-    const [queued] = await sql<{ clip_id: string }[]>`
-      INSERT INTO clip_angles (clip_id, status, progress) VALUES (${clipId}, 'queued', 0)
-      ON CONFLICT (clip_id) DO UPDATE SET status = 'queued', progress = 0, error = NULL, updated_at = now()
-        WHERE clip_angles.status NOT IN ('queued', 'running') OR clip_angles.updated_at < now() - ${ANGLES_STUCK}::interval
-      RETURNING clip_id
-    `
-    if (queued) {
-      await sql`INSERT INTO jobs (type, payload, status) VALUES ('track_subjects', ${sql.json({ clip_id: clipId, start_ms: Math.round(start), end_ms: Math.round(end), angles: true, user_id: userId })}, 'queued')`
-    }
+    const [going] = await sql`
+      SELECT 1 FROM clip_angles WHERE clip_id = ${clipId} AND status IN ('queued', 'running') AND updated_at >= now() - ${ANGLES_STUCK}::interval`
+    const price = going ? 0 : await subjectsPrice(userId, clip, Math.round(start), Math.round(end), body.pay)
+    await sql.begin(async tx => {
+      // One scan at a time: a row already waiting or being worked on is left alone
+      const [queued] = await tx<{ clip_id: string }[]>`
+        INSERT INTO clip_angles (clip_id, status, progress) VALUES (${clipId}, 'queued', 0)
+        ON CONFLICT (clip_id) DO UPDATE SET status = 'queued', progress = 0, error = NULL, updated_at = now()
+          WHERE clip_angles.status NOT IN ('queued', 'running') OR clip_angles.updated_at < now() - ${ANGLES_STUCK}::interval
+        RETURNING clip_id
+      `
+      if (queued) await queueSubjectsJob(tx, userId, clipId, { start_ms: Math.round(start), end_ms: Math.round(end), angles: true }, price)
+    })
   } catch (e) {
     if ((e as { code?: string })?.code === '42P01') return { ...NO_ANGLES, status: 'unavailable' }
     throw e
@@ -400,12 +460,13 @@ function plainError(e: string | null): string {
 }
 
 /** Start a Sub-edit (or report the one already running) */
-export async function startSubEdit(userId: string, clipId: string): Promise<SubEditState> {
+export async function startSubEdit(userId: string, clipId: string, body: { pay?: unknown } = {}): Promise<SubEditState> {
   const clip = await ownClip(userId, clipId)
   const now = await subEditStatus(userId, clipId)
   if (now.status === 'queued' || now.status === 'processing') return now
+  const price = await subjectsPrice(userId, clip, Number(clip.start_ms), Number(clip.end_ms), body.pay)
   try {
-    await sql`INSERT INTO jobs (type, payload, status) VALUES ('track_subjects', ${sql.json({ clip_id: clipId, start_ms: Number(clip.start_ms), end_ms: Number(clip.end_ms), auto: true, user_id: userId })}, 'queued')`
+    await sql.begin(tx => queueSubjectsJob(tx, userId, clipId, { start_ms: Number(clip.start_ms), end_ms: Number(clip.end_ms), auto: true }, price))
   } catch (e) {
     // An older database that doesn't allow this kind of job yet
     if ((e as { code?: string })?.code === '23514') {

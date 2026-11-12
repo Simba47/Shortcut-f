@@ -41,7 +41,9 @@ export async function ingestLink(userId: string, rawUrl: string) {
   }
 
   const { checkVideoQuota, getUserPlanConfig } = await import('./quota')
+  const { checkBeforeUpload, recordReading } = await import('./readingUsage')
   await checkVideoQuota(userId)
+  await checkBeforeUpload(userId, null)
   const plan = await getUserPlanConfig(userId)
 
   const [video] = await sql`
@@ -50,6 +52,7 @@ export async function ingestLink(userId: string, rawUrl: string) {
     RETURNING id
   `
   if (!video) throw err('Failed to create video record', 500)
+  await recordReading(userId, video.id, null)
 
   // Every link import needs this job: it downloads the file (on every plan). Captions are not
   // made here: they cost money, so they're made when someone asks (captions switched on in the
@@ -72,8 +75,8 @@ export interface SignUploadRequest {
   partNumber?: number
   /** Several parts signed in one go (PUT): up to 100 part numbers */
   partNumbers?: number[]
-  /** The file being uploaded — needed to start an upload */
-  file?: { name: string; size: number; type?: string }
+  /** The file being uploaded — needed to start an upload (duration_ms when the browser could read it) */
+  file?: { name: string; size: number; type?: string; duration_ms?: number }
   /** B-roll uploaded in the editor: saved as an asset (not on the dashboard, not counted as a video) */
   asset?: boolean
 }
@@ -99,6 +102,8 @@ export async function signUploadRequest(userId: string, r: SignUploadRequest): P
     } else {
       await checkVideoQuota(userId)
       await checkFileSizeQuota(userId, r.file.size)
+      const { checkBeforeUpload } = await import('./readingUsage')
+      await checkBeforeUpload(userId, typeof r.file.duration_ms === 'number' ? r.file.duration_ms : null)
     }
     const key = `raw/${userId}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}${ext}`
     const contentType = r.file.type || 'video/mp4'
@@ -166,12 +171,14 @@ export async function completeUpload(userId: string, storagePath: string, durati
   // Check the file as it actually arrived (the size the browser reported could be wrong), and the
   // video count again (it was checked when the upload started, which may be a while ago)
   const { checkVideoQuota, checkFileSizeQuota, checkBrollSize } = await import('./quota')
+  const { checkBeforeUpload, recordReading } = await import('./readingUsage')
   try {
     if (asset) {
       await checkBrollSize(userId, size)
     } else {
       await checkFileSizeQuota(userId, size)
       await checkVideoQuota(userId)
+      await checkBeforeUpload(userId, durationMs ?? null)
     }
   } catch (e) {
     await r2.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: storagePath })).catch(() => {})
@@ -185,6 +192,17 @@ export async function completeUpload(userId: string, storagePath: string, durati
     RETURNING id
   `
   if (!video) throw err('Failed to create video record', 500)
+  if (!asset) {
+    // Counted now, whatever is done with the video after. Credits spent between the check above and
+    // here: the upload is taken back, as if the check had said so.
+    try {
+      await recordReading(userId, video.id, durationMs ?? null)
+    } catch (e) {
+      await sql`DELETE FROM videos WHERE id = ${video.id}`
+      await r2.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: storagePath })).catch(() => {})
+      throw e
+    }
+  }
 
   // Every upload gets a worker job: it fills in the length when the browser couldn't read it
   // (e.g. MKV or iPhone HEVC files). No captions here: they're made when someone asks for them
