@@ -228,6 +228,8 @@ export function SubjectsPanel(p: Props) {
             </span>
           )}
         </div>
+        {/* What this is for, in one line (user, 2026-11-09: "make sure the user understands this clearly") */}
+        <p className="-mt-3 text-[12px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>Find the people in each scene and frame them for vertical video.</p>
 
         {/* Two buttons, ever (user, 2026-10-31: "do we need two different buttons to show detecting and to stop —
             keep them in a single button"): Auto format on the left, Detect on the right. The one that runs turns
@@ -256,32 +258,44 @@ export function SubjectsPanel(p: Props) {
                 <span className="ed-run-mark relative ml-auto shrink-0 w-5 h-5 rounded-md flex items-center justify-center"
                   style={{ background: dark ? 'rgba(0,0,0,0.14)' : 'rgb(var(--ed-fg) / 0.1)' }}>{stopIcon}</span>
               </>
+          const tick = <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+          // (user, 2026-11-09: "looks simple and odd — make it attractive, and clear"): Auto format the main card —
+          // what it does, how it frames each scene as two pictured choices, its button; Detect a quiet row under it
+          // that says it changes nothing. The buttons themselves, running or not, are as they were
           return (
-            <div className="flex items-stretch gap-2">
-              {/* Detect first, then Auto format (user, 2026-11-06: the order they are used in) */}
-              {detectRuns ? (
-                <button type="button" onClick={() => press('stop', p.onStop)} disabled={stopping} aria-busy="true"
-                  aria-label={`Detecting ${scanPct}% — press to stop`} title="Stop detecting (the scenes found before stay)"
-                  className="ed-tap ed-runbtn relative overflow-hidden flex-1 min-w-0 h-11 px-3 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold disabled:cursor-default"
-                  data-running data-tone="dark"
-                  // (white text; the palette colour on its border, loading circle and % — user, 2026-10-31)
-                  style={{ background: 'rgb(var(--ed-fg) / 0.07)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.5)' }}>
-                  <span aria-hidden="true" className="absolute inset-y-0 left-0 transition-[width] duration-500" style={{ width: `${scanPct}%`, background: 'rgb(var(--ed-fg) / 0.07)' }} />
-                  {running('Detecting', scanPct, false, 'var(--ed-accent-text)')}
-                </button>
-              ) : (
-                <button type="button" onClick={() => press('detect', p.onScanAngles)} disabled={autoRuns || !!pending}
-                  title={detected ? 'Look for the scenes and people again (someone missed, a scene wrong, or the clip changed). The people you marked stay marked.' : 'Find the scenes, people and groups in this clip. Nothing is formatted.'}
-                  className="ed-tap flex-1 min-w-0 h-11 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold transition-colors hover:bg-[rgb(var(--ed-fg)/0.12)] disabled:cursor-default"
-                  style={detectHot
-                    ? { background: 'rgba(200,255,0,0.14)', color: 'var(--ed-accent-text)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.55)' }
-                    : { background: 'rgb(var(--ed-fg) / 0.07)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)', opacity: autoRuns ? 0.45 : 1 }}>
-                  {detected
-                    ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 11-2.64-6.36" /><path d="M21 4v5h-5" /></svg>
-                    : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0113 0" /><circle cx="18" cy="15" r="3" /><path d="M20.2 17.2L22 19" /></svg>}
-                  <span className="truncate">{detected ? 'Detect again' : 'Detect'}</span>
-                </button>
-              )}
+            <div className="flex flex-col gap-3">
+              <section className="sp-auto" aria-label="Auto format">
+                <div className="flex items-start gap-3">
+                  <span className="sp-auto-icon" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>
+                  </span>
+                  <div className="min-w-0">
+                    <p className="sp-card-title">Auto format</p>
+                    <p className="sp-card-sub">Finds everyone, then frames every scene for you.</p>
+                  </div>
+                </div>
+                {/* How it frames each scene: two pictured choices (were a small Vertical | Cuts switch, then
+                    "Follow the speaker | Show everyone" with a line under it) */}
+                <div className="flex flex-col gap-2">
+                  <span className="sp-q" id="sp-mode-q">How should each scene be framed?</span>
+                  <div role="radiogroup" aria-labelledby="sp-mode-q" className="grid grid-cols-2 gap-2" data-off={working || undefined}>
+                    {(['vertical', 'cuts'] as const).map(m => {
+                      const on = p.autoMode === m
+                      return (
+                        <button key={m} type="button" role="radio" aria-checked={on} disabled={working} onClick={() => p.onAutoMode(m)}
+                          className="sp-tile" data-on={on || undefined}>
+                          {on && <span className="sp-tile-tick">{tick}</span>}
+                          <span className="sp-tile-art" aria-hidden="true">{m === 'vertical' ? <SpeakerArt /> : <EveryoneArt />}</span>
+                          <span className="sp-tile-name">{m === 'vertical' ? 'Follow the speaker' : 'Show everyone'}</span>
+                          <span className="sp-tile-sub">{m === 'vertical'
+                            ? 'One person fills the screen and it switches to whoever is talking.'
+                            : 'Scenes get Split or Trio so nobody is left out.'}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div className="flex">
               {autoRuns ? (
                 <button type="button" onClick={() => press('stop', p.onStop)} disabled={stopping} aria-busy="true"
                   aria-label={`${autoLabel}${autoPct !== null ? ` ${autoPct}%` : ''} — press to stop`}
@@ -304,6 +318,50 @@ export function SubjectsPanel(p: Props) {
                   <span className="truncate">Auto format</span>
                 </button>
               )}
+                </div>
+              </section>
+
+              {/* Detect only: see who is in each scene first, nothing laid out (running: its button fills the row) */}
+              <div className="sp-detect" data-running={detectRuns || undefined}>
+                {!detectRuns && (
+                  <>
+                    <span className="sp-detect-icon" aria-hidden="true">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0113 0" /><circle cx="18" cy="15" r="3" /><path d="M20.2 17.2L22 19" /></svg>
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="sp-card-title" data-size="sm">{detected ? 'People found' : 'Detect people only'}</p>
+                      <p className="sp-card-sub">{detected
+                        ? 'Look again if someone was missed. Who you marked stays marked.'
+                        : 'See who is in each scene first. Nothing on your video changes.'}</p>
+                    </div>
+                  </>
+                )}
+                <div className={detectRuns ? 'flex flex-1 min-w-0' : 'flex shrink-0'}>
+              {detectRuns ? (
+                <button type="button" onClick={() => press('stop', p.onStop)} disabled={stopping} aria-busy="true"
+                  aria-label={`Detecting ${scanPct}% — press to stop`} title="Stop detecting (the scenes found before stay)"
+                  className="ed-tap ed-runbtn relative overflow-hidden flex-1 min-w-0 h-11 px-3 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold disabled:cursor-default"
+                  data-running data-tone="dark"
+                  // (white text; the palette colour on its border, loading circle and % — user, 2026-10-31)
+                  style={{ background: 'rgb(var(--ed-fg) / 0.07)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.5)' }}>
+                  <span aria-hidden="true" className="absolute inset-y-0 left-0 transition-[width] duration-500" style={{ width: `${scanPct}%`, background: 'rgb(var(--ed-fg) / 0.07)' }} />
+                  {running('Detecting', scanPct, false, 'var(--ed-accent-text)')}
+                </button>
+              ) : (
+                <button type="button" onClick={() => press('detect', p.onScanAngles)} disabled={autoRuns || !!pending}
+                  title={detected ? 'Look for the scenes and people again (someone missed, a scene wrong, or the clip changed). The people you marked stay marked.' : 'Find the scenes, people and groups in this clip. Nothing is formatted.'}
+                  className="ed-tap shrink-0 h-9 px-4 flex items-center justify-center gap-2 rounded-xl text-[12.5px] font-bold transition-colors hover:bg-[rgb(var(--ed-fg)/0.12)] disabled:cursor-default"
+                  style={detectHot
+                    ? { background: 'rgba(200,255,0,0.14)', color: 'var(--ed-accent-text)', boxShadow: 'inset 0 0 0 1.5px rgba(200,255,0,0.55)' }
+                    : { background: 'rgb(var(--ed-fg) / 0.07)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)', opacity: autoRuns ? 0.45 : 1 }}>
+                  {detected
+                    ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 11-2.64-6.36" /><path d="M21 4v5h-5" /></svg>
+                    : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0113 0" /><circle cx="18" cy="15" r="3" /><path d="M20.2 17.2L22 19" /></svg>}
+                  <span className="truncate">{detected ? 'Detect again' : 'Detect'}</span>
+                </button>
+              )}
+                </div>
+              </div>
             </div>
           )
         })()}
@@ -324,32 +382,6 @@ export function SubjectsPanel(p: Props) {
           <p className="-mt-2 text-[11px]" role="status" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
             {pending === 'stop' ? 'Stopping… this can take a few seconds.' : 'Starting… the worker is getting it ready, this can take a few seconds.'}
           </p>
-        )}
-        {/* How Auto format lays the scenes (user, 2026-10-28): Vertical — the speaker first; Cuts — the Rulebook's formats.
-            (2026-10-31: "highlight it properly") a soft lime pill slides under the one chosen, each with its icon.
-            (2026-11-01: a new user couldn't tell what "Vertical / Cuts" meant) each option says what it does —
-            Follow the speaker / Show everyone — and a line under it says what the chosen one will do */}
-        {canAct && (
-          <div className="-mt-2 flex flex-col gap-1.5">
-            <span className="text-[11.5px] font-medium" style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>How Auto format frames each scene</span>
-            <div role="radiogroup" aria-label="How Auto format frames each scene" className="sp-mode" data-mode={p.autoMode} data-off={working || undefined}>
-              <span className="sp-mode-pill" aria-hidden="true" />
-              {(['vertical', 'cuts'] as const).map(m => (
-                <button key={m} type="button" role="radio" aria-checked={p.autoMode === m} disabled={working} onClick={() => p.onAutoMode(m)}
-                  className="sp-mode-opt" data-on={p.autoMode === m || undefined}>
-                  {m === 'vertical'
-                    ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M11 18.5h2" /></svg>
-                    : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M7 12h10" /></svg>}
-                  {m === 'vertical' ? 'Follow the speaker' : 'Show everyone'}
-                </button>
-              ))}
-            </div>
-            <p className="text-[11px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
-              {p.autoMode === 'vertical'
-                ? 'One person fills the screen, and it switches to whoever is talking.'
-                : 'Each scene gets Vertical, Split or Trio, so everyone in it stays in view.'}
-            </p>
-          </div>
         )}
         {p.angles.status === 'done' && p.angles.stale && !working && (
           <p className="-mt-2 text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.75)' }}>The clip got longer — Detect again to look in the new part too.</p>
@@ -708,5 +740,31 @@ function Avatar({ subject: s, videoUrl }: { subject: SubjectItem; videoUrl: stri
       <i className="absolute -right-0.5 -bottom-0.5 w-2.5 h-2.5 rounded-full" aria-hidden="true"
         style={{ background: s.color, boxShadow: '0 0 0 2px var(--ed-panel, #111)' }} />
     </span>
+  )
+}
+
+/** Follow the speaker, pictured: a 9:16 screen filled by one person, a swap mark (it cuts to whoever talks) */
+function SpeakerArt() {
+  return (
+    <svg width="44" height="64" viewBox="0 0 44 64" fill="none">
+      <rect x="1" y="1" width="42" height="62" rx="8" className="sp-art-screen" />
+      <circle cx="22" cy="27" r="8" className="sp-art-person" />
+      <path d="M8 63c0-10 6.3-17 14-17s14 7 14 17" className="sp-art-person" />
+      <path d="M30 9.5h5.5l-2-2M14 13.5H8.5l2 2" className="sp-art-mark" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/** Show everyone, pictured: a 9:16 screen split in two, a person in each half */
+function EveryoneArt() {
+  return (
+    <svg width="44" height="64" viewBox="0 0 44 64" fill="none">
+      <rect x="1" y="1" width="42" height="62" rx="8" className="sp-art-screen" />
+      <path d="M1 32h42" className="sp-art-line" strokeWidth="1.5" />
+      <circle cx="22" cy="13" r="5" className="sp-art-person" />
+      <path d="M12 31.5c0-6 4.5-10 10-10s10 4 10 10" className="sp-art-person" />
+      <circle cx="22" cy="44" r="5" className="sp-art-person" />
+      <path d="M12 62.5c0-6 4.5-10 10-10s10 4 10 10" className="sp-art-person" />
+    </svg>
   )
 }

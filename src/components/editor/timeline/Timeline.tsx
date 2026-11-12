@@ -223,7 +223,8 @@ const ROW_H = 30
 /** A row of videos, photos and text: its bars as tall as the main video's parts (BLOCK_H) */
 const VIS_ROW_H = BLOCK_H + 4
 const ROW_GAP = 3
-const FRAME_LANE_H = 26
+// (user, 2026-11-12) a frame lane's bar 70% of the main video strip's height: 32 − 2 × 2 px = 28 px of BLOCK_H's 40
+const FRAME_LANE_H = 32
 /** The picked frame's name and time over its rows */
 const FRAME_HEAD_H = 16
 const LEFT_W = 52
@@ -2011,7 +2012,8 @@ export function Timeline({
       <div className="tl2-bar" data-sel="" data-kind={kind}
         style={{
           position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
-          '--bar-c': MEDIA_COLORS[kind], background: video ? '#0d0d0d' : `color-mix(in srgb, ${MEDIA_COLORS[kind]} 55%, #0d0d0d)`,
+          '--bar-c': MEDIA_COLORS[kind], // (text: black, as on its row — its colour only on its T)
+          background: video || kind === 'text' ? '#0d0d0d' : `color-mix(in srgb, ${MEDIA_COLORS[kind]} 55%, #0d0d0d)`,
           cursor: 'grabbing', filter: 'drop-shadow(0 10px 18px rgba(0,0,0,0.65))', ...(hidden ? { opacity: 0.7 } : {}),
         } as React.CSSProperties}>
         {inside && <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: 'inherit', opacity: video ? 1 : 0.55 }}>{inside}</div>}

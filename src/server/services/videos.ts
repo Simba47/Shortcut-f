@@ -34,10 +34,34 @@ export async function listVideos(userId: string, includeAssets = false) {
       to_jsonb(videos)->>'error' AS error,
       -- Its editing copy (the worker's jobs/proxy.ts), once made: what the editor plays
       to_jsonb(videos)->>'proxy_path' AS proxy_path,
+      -- Its picture for the dashboard (the worker's jobs/poster.ts), once made
+      to_jsonb(videos)->>'poster_path' AS poster_path,
       (SELECT COUNT(*)::int FROM clips c WHERE c.video_id = videos.id) AS clip_count
     -- Stock clips saved for auto B-roll are the user's assets, not videos they uploaded
     FROM videos WHERE user_id = ${userId} AND (${includeAssets} OR role <> 'asset') ORDER BY created_at DESC
   `
+}
+
+/**
+ * How many of each video's clips were cut by hand (the clip board's "Your clips": not made by Make my clips, nor
+ * taken from Best moments or Ask AI — the same rule as app/videos/[videoId]/page.tsx originOf), by video id. The
+ * rest are the AI's. The dashboard's "Open clips" goes to the board that has them (user, 2026-11-11).
+ * No suggestion log yet (or a hiccup reading it): those count as cut by hand, as the clip board shows them.
+ */
+export async function manualClipCounts(videoIds: string[]): Promise<Record<string, number>> {
+  if (!videoIds.length) return {}
+  const rows = await sql<{ id: string; video_id: string }[]>`
+    SELECT c.id, c.video_id FROM clips c
+    WHERE c.video_id = ANY(${videoIds}) AND (to_jsonb(c)->>'ai_edit_job_id') IS NULL`
+  if (!rows.length) return {}
+  const fromAi = new Set((await sql<{ clip_id: string; source: string }[]>`
+    SELECT DISTINCT ON (clip_id) clip_id, source FROM ai_suggestion_events
+    WHERE video_id = ANY(${videoIds}) AND event = 'used' AND clip_id IS NOT NULL
+    ORDER BY clip_id, created_at DESC
+  `.catch(() => [])).filter(r => r.source === 'best_moments' || r.source === 'clip_search').map(r => r.clip_id))
+  const out: Record<string, number> = {}
+  for (const r of rows) if (!fromAi.has(r.id)) out[r.video_id] = (out[r.video_id] ?? 0) + 1
+  return out
 }
 
 export async function renameVideo(userId: string, videoId: string, title: string) {
@@ -73,6 +97,11 @@ export function cleanIds(ids: unknown): string[] {
   return [...new Set(ids.filter((id): id is string => typeof id === 'string' && UUID.test(id)))]
 }
 
+/** Where a video's picture for the dashboard is kept (the worker's jobs/poster.ts posterKeyFor): deleted with it */
+export function posterKeyFor(storagePath: string): string {
+  return storagePath.replace(/\.[^.]+$/, '') + '_poster.jpg'
+}
+
 /** Where a video's editing copy is kept (the worker's jobs/proxy.ts proxyKeyFor): deleted with it */
 export function proxyKeyFor(storagePath: string): string {
   return storagePath.replace(/\.[^.]+$/, '') + '_proxy.mp4'
@@ -101,6 +130,40 @@ export async function requestProxy(userId: string, videoId: string): Promise<{ q
   } catch {
     return { queued: false }
   }
+}
+
+/**
+ * A video that couldn't be processed, run again (the dashboard's "Try again", user 2026-11-11): its first
+ * processing job — an upload or a Drive / Dropbox link — queued once more as it was, and the video back to
+ * waiting with no error. Not while one is still queued or running for it; a video too old to have its job
+ * kept can't be retried (upload it again).
+ */
+export async function retryVideo(userId: string, videoId: string): Promise<{ queued: true }> {
+  const err = (message: string, status: number) => Object.assign(new Error(message), { status })
+  const [video] = await sql`SELECT id, status FROM videos WHERE id = ${videoId} AND user_id = ${userId}`
+  if (!video) throw err('Not found', 404)
+  if (video.status !== 'failed') throw err('This video isn’t stuck: there is nothing to try again.', 409)
+  // (its processing job: the one for the whole video — not a clip's captions, not a re-reading)
+  const [job] = await sql<{ payload: Record<string, unknown> }[]>`
+    SELECT payload FROM jobs
+    WHERE type = 'transcribe' AND payload->>'video_id' = ${videoId}
+      AND payload->>'clip_id' IS NULL AND COALESCE(payload->>'is_retranscribe', 'false') <> 'true'
+    ORDER BY created_at ASC LIMIT 1`
+  if (!job) throw err('This video can’t be tried again. Remove it and upload it once more.', 409)
+  const payload = typeof job.payload === 'string' ? JSON.parse(job.payload) : job.payload
+  await sql.begin(async tx => {
+    // (one at a time: a second press while it waits changes nothing)
+    const [running] = await tx`
+      SELECT 1 FROM jobs WHERE type = 'transcribe' AND status IN ('queued', 'processing')
+        AND payload->>'video_id' = ${videoId} AND payload->>'clip_id' IS NULL LIMIT 1`
+    if (running) return
+    const back = await tx`
+      UPDATE videos SET status = 'uploaded', download_progress = 0, error = NULL
+      WHERE id = ${videoId} AND user_id = ${userId} AND status = 'failed' RETURNING id`
+    if (!back.length) return
+    await tx`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${tx.json(payload as never)}, 'queued')`
+  })
+  return { queued: true }
 }
 
 /** Remove files from R2, 1,000 keys per request (the S3 limit). Best effort: rows are what matter. */
@@ -152,7 +215,7 @@ export async function uploadsOnlyUsedBy(userId: string, clipIds: string[]): Prom
 export async function deleteUploads(uploads: Array<{ id: string; storage_path: string | null }>) {
   if (!uploads.length) return
   await deleteR2Keys(uploads.flatMap(u => u.storage_path
-    ? [u.storage_path, u.storage_path.replace(/\.[^.]+$/, '_audio.flac'), u.storage_path.replace(/\.[^.]+$/, '_reading.json'), proxyKeyFor(u.storage_path)] : []))
+    ? [u.storage_path, u.storage_path.replace(/\.[^.]+$/, '_audio.flac'), u.storage_path.replace(/\.[^.]+$/, '_reading.json'), proxyKeyFor(u.storage_path), posterKeyFor(u.storage_path)] : []))
   await sql`DELETE FROM videos WHERE id = ANY(${uploads.map(u => u.id)}) AND role = 'asset' AND stock_ref IS NULL`
 }
 
@@ -174,6 +237,8 @@ export async function deleteVideos(userId: string, videoIds: string[]) {
     keysToDelete.push(video.storage_path.replace(/\.[^.]+$/, '_reading.json'))
     // Its editing copy (made by the worker for the editor)
     keysToDelete.push(proxyKeyFor(video.storage_path))
+    // Its picture for the dashboard (made by the worker when it was ready)
+    keysToDelete.push(posterKeyFor(video.storage_path))
   }
   // Rendered output for every clip of these videos
   const clipOutputs = await sql`

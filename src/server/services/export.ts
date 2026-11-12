@@ -41,6 +41,9 @@ async function startRender(
   await catchUpClip(clipId)
 
   await sql`UPDATE clips SET status = 'rendering' WHERE id = ${clipId}`
+  // This export has every edit saved so far: the editor's "edited since the last export" note goes (user,
+  // 2026-11-12 — an export from the clip board too). Never fails the export
+  await sql`UPDATE clips SET layers = layers - 'editedSinceExport' WHERE id = ${clipId} AND layers ? 'editedSinceExport'`.catch(() => {})
   // "Remove pauses and filler words", as the editor shows it when exporting
   if (typeof removeFillers === 'boolean') {
     const { clipsHasRemoveFillers } = await import('./clips')

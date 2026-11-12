@@ -31,7 +31,7 @@ export async function ingestLink(userId: string, rawUrl: string) {
   }
   const source = linkSourceOf(url)
   if (source === 'youtube') {
-    throw err('Importing from YouTube is coming soon. For now, upload the file or paste a Google Drive or Dropbox link.', 400)
+    throw err('YouTube links can’t be imported. Upload the video file, or paste a Google Drive or Dropbox link.', 400)
   }
   if (!source) {
     throw err('Paste a Google Drive or Dropbox link to a video file, or upload the file.', 400)

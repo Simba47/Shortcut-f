@@ -531,6 +531,59 @@ body {
   animation: ai-ping .6s ease-out forwards;
 }
 @keyframes ai-ping { from { transform: scale(.4); opacity: .8; } to { transform: scale(2.6); opacity: 0; } }
+/* (user, 2026-11-12: lime only for the main action) Ask AI's search button is neutral: its ring and hover in ink */
+.ai-find .ai-ping.is-on::after { border-color: currentColor; }
+/* Make my clips ⓘ: what each option does, one line each under the description */
+.mmc-tip-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(127,127,127,0.25); }
+.mmc-tip-list b { font-weight: 700; }
+/* Clipboard: the error banner (user, 2026-11-12) — calm: a neutral card, a soft red edge and icon, what failed
+   in bold and why underneath; a real ✕ button */
+.cb-alert { display: flex; align-items: flex-start; gap: 10px; padding: 10px 8px 10px 10px; border-radius: 12px;
+  background: rgb(var(--cb-fg) / 0.04); box-shadow: inset 0 0 0 1px rgba(239,68,68,0.28), inset 3px 0 0 rgba(239,68,68,0.55);
+  animation: cb-alert-in .22s cubic-bezier(.2,.8,.3,1); }
+@keyframes cb-alert-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.cb-alert-ico { flex-shrink: 0; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; color: #f87171; background: rgba(239,68,68,0.12); }
+.cb-alert-title { display: block; font-size: 12.5px; font-weight: 600; line-height: 1.35; color: var(--cb-text); }
+.cb-alert-text { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: rgb(var(--cb-fg) / 0.6); }
+.cb-alert-x { flex-shrink: 0; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; color: rgb(var(--cb-fg) / 0.5); transition: background-color .15s, color .15s; }
+.cb-alert-x:hover { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.08); }
+.cb-alert-x:focus-visible { outline: 2px solid rgb(var(--cb-fg) / 0.5); outline-offset: 1px; }
+[data-theme="light"] .cb-alert-ico { color: #dc2626; background: rgba(220,38,38,0.1); }
+[data-theme="light"] .cb-alert { box-shadow: inset 0 0 0 1px rgba(220,38,38,0.25), inset 3px 0 0 rgba(220,38,38,0.5); }
+@media (prefers-reduced-motion: reduce) { .cb-alert { animation: none; } }
+/* Ask AI results: "+" neutral at rest, lime when pointed at (user, 2026-11-12: a column of lime squares);
+   added: a grey ✓ in an outline */
+.cb-add { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.08); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.16); transition: background-color .15s, color .15s, box-shadow .15s, transform .1s; }
+.cb-add:not(:disabled):not([data-in]):hover { color: #0a0a0a; background: #c8ff00; box-shadow: none; }
+.cb-add:not(:disabled):active { transform: scale(.92); }
+.cb-add[data-in] { color: rgb(var(--cb-fg) / 0.7); background: transparent; box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.2); }
+.cb-add[data-in]:not(:disabled):hover { background: rgb(var(--cb-fg) / 0.06); }
+.cb-add:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
+[data-theme="light"] .cb-add:focus-visible { outline-color: #18181b; }
+/* Make my clips: the small heading over what each clip gets (user, 2026-11-12) */
+.mmc-heading { margin: 0; padding: 0 2px; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgb(var(--cb-fg) / 0.45); }
+/* Clipboard and Clip preview: empty places — an icon, a title, one line and the next step (user, 2026-11-12) */
+.cb-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; max-width: 280px; margin: 28px auto 8px; padding: 0 8px; }
+.cb-empty-ico { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 4px; border-radius: 12px;
+  color: rgb(var(--cb-fg) / 0.6); background: rgb(var(--cb-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.1); }
+.cb-empty-title { margin: 0; font-size: 13px; font-weight: 600; color: rgb(var(--cb-fg) / 0.85); }
+.cb-empty-text { margin: 0; font-size: 11.5px; line-height: 1.5; color: rgb(var(--cb-fg) / 0.5); }
+.cb-empty-btn { margin-top: 6px; height: 30px; padding: 0 14px; border-radius: 9px; font-size: 12px; font-weight: 600;
+  color: var(--cb-text); background: rgb(var(--cb-fg) / 0.08); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.16); transition: background-color .15s, box-shadow .15s, transform .1s; }
+.cb-empty-btn:hover { background: rgb(var(--cb-fg) / 0.13); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.26); }
+.cb-empty-btn:active { transform: scale(.97); }
+.cb-empty-btn:focus-visible { outline: 2px solid rgb(var(--cb-fg) / 0.5); outline-offset: 2px; }
+/* New clip: "Now" inside the Start / End box — puts the video's current time there; quiet until pointed at */
+.cb-now { color: rgb(var(--cb-fg) / 0.75); background: rgb(var(--cb-fg) / 0.07); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.12); transition: background-color .15s, color .15s, transform .1s; }
+.cb-now:not(:disabled):hover { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.14); }
+.cb-now:not(:disabled):active { transform: scale(.94); }
+.cb-now:disabled { opacity: .35; cursor: not-allowed; }
+.cb-now:focus-visible { outline: 2px solid rgb(var(--cb-fg) / 0.5); outline-offset: 1px; }
+/* Make my clips: "Find new moments" as a small outlined button, not an underlined line of text */
+.mmc-new { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.05); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.16); transition: background-color .15s, box-shadow .15s; }
+.mmc-new:not(:disabled):hover { background: rgb(var(--cb-fg) / 0.1); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.26); }
+.mmc-new:focus-visible { outline: 2px solid rgb(var(--cb-fg) / 0.5); outline-offset: 2px; }
+.ai-find:not(:disabled):hover { filter: none; background: rgb(var(--cb-fg) / 0.16) !important; }
 
 @media (prefers-reduced-motion: reduce) {
   .ai-btn *, .ai-btn *::after { animation: none !important; }
@@ -707,17 +760,21 @@ body {
 .mmc-step:disabled { opacity: .3; cursor: not-allowed; }
 .mmc-input::selection { background: rgba(200,255,0,0.3); }
 
-/* The main button, kept quiet: a faint lime tint with a thin lime edge and lime words (no filled
-   block, no glow). Its click effects (.ai-spark, .ai-fire) are toned to match. */
+/* The main button (user, 2026-11-12: it was too quiet to be seen as the one to press): solid lime with
+   black words, as Add clip on the Manual board (.cb-page .cb-cta). Its click effects (.ai-spark, .ai-fire)
+   in black and white on the lime. */
 .mmc-go {
-  color: #c8ff00; background: rgba(200,255,0,0.06); box-shadow: inset 0 0 0 1px rgba(200,255,0,0.22);
+  color: #0a0a0a; background: #c8ff00; box-shadow: 0 8px 20px -12px rgba(200,255,0,0.5);
   transition: transform .12s ease, background-color .2s, box-shadow .2s;
 }
-.mmc-go:not(:disabled):hover { filter: none; background: rgba(200,255,0,0.11); box-shadow: inset 0 0 0 1px rgba(200,255,0,0.4); }
+.mmc-go:not(:disabled):hover { filter: none; background: #d4ff3a; box-shadow: 0 10px 24px -12px rgba(200,255,0,0.6); }
+.mmc-go:disabled { box-shadow: none; }
 .mmc-go:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
+[data-theme="light"] .mmc-go { box-shadow: 0 6px 16px -10px rgba(77,100,0,0.45); }
+[data-theme="light"] .mmc-go:focus-visible { outline-color: #18181b; }
 .mmc-go .ai-spark i { background: currentColor; }
 .mmc-go .ai-fire.is-on, .mmc-go[data-busy] .ai-fire {
-  background-image: linear-gradient(105deg, transparent 30%, rgba(200,255,0,0.22) 50%, transparent 70%);
+  background-image: linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.6) 50%, transparent 70%);
 }
 
 /* Video ⇄ Clip preview switch (clip board): a pill track with two equal halves and a lime knob
@@ -888,6 +945,53 @@ body {
   box-shadow: 0 6px 18px -6px rgba(0,0,0,0.6); opacity: 0; transition: opacity .15s, translate .15s;
 }
 .ed-tip:hover::after, .ed-tip:focus-visible::after { opacity: 1; translate: -50% 0; }
+/* (in the top bar: under the button, not off the top of the screen; at the bar's right end: lined up with
+   the button's right edge, so it stays on screen — user, 2026-11-12) */
+/* Editor: the export's problem (user, 2026-11-12) — a calm card under the top bar's Export, not a red strip:
+   a neutral card, a soft red edge and icon, what failed in bold, why underneath, Try again, a real ✕ */
+.ed-alert { position: fixed; top: 64px; right: 12px; z-index: 65; width: min(400px, calc(100vw - 24px)); display: flex; align-items: flex-start; gap: 10px;
+  padding: 11px 8px 11px 11px; border-radius: 12px; background: var(--ed-panel);
+  box-shadow: inset 0 0 0 1px rgba(239,68,68,0.3), inset 3px 0 0 rgba(239,68,68,0.6), 0 14px 34px -14px rgba(0,0,0,0.6);
+  animation: ed-alert-in .22s cubic-bezier(.2,.8,.3,1); }
+@keyframes ed-alert-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.ed-alert-ico { flex-shrink: 0; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; color: #f87171; background: rgba(239,68,68,0.12); }
+.ed-alert-title { display: block; font-size: 12.5px; font-weight: 600; line-height: 1.35; color: var(--ed-text); }
+.ed-alert-text { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: rgb(var(--ed-fg) / 0.6); }
+.ed-alert-retry { margin-top: 8px; height: 26px; padding: 0 11px; border-radius: 8px; font-size: 11.5px; font-weight: 600; color: var(--ed-text);
+  background: rgb(var(--ed-fg) / 0.08); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.16); transition: background-color .15s; }
+.ed-alert-retry:hover { background: rgb(var(--ed-fg) / 0.14); }
+.ed-alert-x { flex-shrink: 0; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; color: rgb(var(--ed-fg) / 0.5); transition: background-color .15s, color .15s; }
+.ed-alert-x:hover { color: var(--ed-text); background: rgb(var(--ed-fg) / 0.08); }
+.ed-alert-retry:focus-visible, .ed-alert-x:focus-visible { outline: 2px solid rgb(var(--ed-fg) / 0.5); outline-offset: 1px; }
+[data-theme="light"] .ed-alert { box-shadow: inset 0 0 0 1px rgba(220,38,38,0.25), inset 3px 0 0 rgba(220,38,38,0.5), 0 14px 34px -14px rgba(24,24,27,0.25); }
+[data-theme="light"] .ed-alert-ico { color: #dc2626; background: rgba(220,38,38,0.1); }
+
+/* Editor: "Your reel is ready" (user, 2026-11-12) — slides up at the bottom, stays 5 s, fades away by itself.
+   A dark pill in both themes (it floats over everything), the tick and Download the only lime */
+.ed-ready { position: fixed; left: 50%; bottom: 24px; z-index: 66; display: flex; align-items: center; gap: 10px; padding: 7px 7px 7px 10px;
+  border-radius: 999px; background: #18181b; color: #f4f4f5; box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 16px 40px -12px rgba(0,0,0,0.6);
+  translate: -50% 0; animation: ed-ready-in .32s cubic-bezier(.2,.9,.3,1.15); }
+.ed-ready[data-state="out"] { animation: ed-ready-out .26s ease forwards; }
+@keyframes ed-ready-in { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes ed-ready-out { to { opacity: 0; transform: translateY(10px) scale(.98); } }
+.ed-ready-ico { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; color: #0a0a0a; background: #c8ff00; }
+.ed-ready-text { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.ed-ready-dl { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #0a0a0a; background: #c8ff00; transition: filter .15s; }
+.ed-ready-dl:hover { filter: brightness(1.06); }
+.ed-ready-x { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 999px; color: rgba(244,244,245,0.55); transition: background-color .15s, color .15s; }
+.ed-ready-x:hover { color: #fff; background: rgba(255,255,255,0.1); }
+.ed-ready-dl:focus-visible, .ed-ready-x:focus-visible { outline: 2px solid rgba(255,255,255,0.6); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .ed-ready, .ed-ready[data-state="out"], .ed-alert { animation-duration: .01ms; } }
+
+/* The preview's note while the downloaded file is older than the edits: calm amber, not an error */
+.ed-pv-stale { color: rgb(var(--ed-fg) / 0.75); background: rgba(245,158,11,0.08); box-shadow: inset 0 0 0 1px rgba(245,158,11,0.22); }
+.ed-pv-stale b { color: var(--ed-text); font-weight: 600; }
+.ed-pv-stale-dot { flex-shrink: 0; width: 6px; height: 6px; margin-top: 5px; border-radius: 999px; background: #f59e0b; }
+[data-theme="light"] .ed-pv-stale-dot { background: #d97706; }
+.ed-tip[data-tip-below]::after { bottom: auto; top: calc(100% + 8px); translate: -50% -4px; }
+.ed-tip[data-tip-below]:hover::after, .ed-tip[data-tip-below]:focus-visible::after { translate: -50% 0; }
+.ed-tip[data-tip-end]::after { left: auto; right: 0; translate: 0 -4px; }
+.ed-tip[data-tip-end]:hover::after, .ed-tip[data-tip-end]:focus-visible::after { translate: 0 0; }
 .ed-tl-btn[data-active] { color: #c8ff00; background: rgba(200,255,0,0.1); }
 /* Fold buttons (the options panel's close, the preview's close / reopen): a round button with one
    chevron that nudges the way a click goes; quiet greys, a touch brighter while the panel is away */
@@ -1865,6 +1969,8 @@ body {
 .am-sc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .am-sc-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 13px; color: rgba(244,244,245,0.85); border-bottom: 1px solid rgba(255,255,255,0.06); }
 .am-sc-list li:last-child { border-bottom: 0; }
+/* (grouped: Play · Edit · Undo, user 2026-11-12) the groups scroll inside the card on a short screen */
+.am-sc-groups { display: flex; flex-direction: column; gap: 14px; max-height: min(64vh, 560px); overflow-y: auto; margin-right: -6px; padding-right: 6px; }
 
 /* ── Account settings page (app/settings/page.tsx) ── */
 .st-title { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: #fff; }
@@ -2386,6 +2492,48 @@ html[data-theme="light"] .kit-name-btn[data-danger]:hover { color: #dc2626; back
 .tx-add:hover:not(:disabled) { filter: brightness(1.06); }
 .tx-add:active:not(:disabled) { transform: scale(.96); }
 .tx-add:disabled { opacity: .4; cursor: default; }
+/* The Text panel's tabbed layout (TextOverlayPanel layout="tabs"): the picked text on the caption preview's
+   card, then each text a slim row — its words in its own style and when it shows; the picked one outlined */
+/* An editor panel's sub-tabs (TextOverlayPanel's Text · Style · Look · Motion), compact, one line. (user, 2026-11-09:
+   "ordinary… make it look premium — not bigger") A recessed track with a bevel; hairline dividers between the tabs,
+   fading beside the open one; the open one a raised pill — a soft top light, a hairline edge, a shadow under it —
+   and a short lime bar with a faint glow under its name (the one lime touch). Names in a tight, even weight.
+   --n tabs, --i the open one */
+.ed-subtabs { position: relative; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); padding: 3px; border-radius: 12px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.28), rgb(var(--ed-fg) / 0.025));
+  box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.07), inset 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 0 rgb(var(--ed-fg) / 0.04); }
+.ed-subtabs-pill { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / var(--n)); border-radius: 9px; pointer-events: none;
+  transform: translateX(calc(var(--i) * 100%)); transition: transform .34s cubic-bezier(.3, 1.2, .5, 1);
+  background: linear-gradient(180deg, rgb(var(--ed-fg) / 0.13), rgb(var(--ed-fg) / 0.07));
+  box-shadow: inset 0 1px 0 rgb(var(--ed-fg) / 0.14), inset 0 0 0 1px rgb(var(--ed-fg) / 0.07), 0 6px 14px -7px rgba(0, 0, 0, 0.85); }
+.ed-subtabs-pill::after { content: ''; position: absolute; left: 50%; bottom: 3px; width: 16px; height: 2px; translate: -50% 0; border-radius: 2px;
+  background: #c8ff00; box-shadow: 0 0 8px rgba(200, 255, 0, 0.55); }
+.ed-subtab { position: relative; z-index: 1; height: 34px; padding: 0 6px 2px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border-radius: 9px; font-size: 11.5px; font-weight: 550; letter-spacing: .01em; white-space: nowrap; color: rgb(var(--ed-fg) / 0.5); transition: color .2s; }
+.ed-subtab + .ed-subtab::before { content: ''; position: absolute; left: 0; top: 50%; height: 14px; width: 1px; translate: 0 -50%;
+  background: rgb(var(--ed-fg) / 0.08); transition: opacity .2s; }
+.ed-subtab[data-on]::before, .ed-subtab[data-on] + .ed-subtab::before { opacity: 0; }
+.ed-subtab-icon { flex-shrink: 0; opacity: .75; transition: opacity .2s; }
+.ed-subtab:hover:not(:disabled):not([data-on]) { color: rgb(var(--ed-fg) / 0.85); }
+.ed-subtab:hover:not(:disabled):not([data-on]) .ed-subtab-icon { opacity: 1; }
+.ed-subtab[data-on] { color: var(--ed-text); font-weight: 650; }
+.ed-subtab[data-on] .ed-subtab-icon { opacity: 1; }
+/* (waiting for a text to be picked: quieter, still readable) */
+.ed-subtab:disabled { color: rgb(var(--ed-fg) / 0.28); cursor: not-allowed; }
+.ed-subtab:focus-visible { outline: 2px solid rgba(200, 255, 0, 0.6); outline-offset: 1px; }
+html[data-theme="light"] .editor-theme .ed-subtabs { background: rgb(var(--ed-fg) / 0.05); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.08), inset 0 1px 2px rgba(0, 0, 0, 0.06); }
+html[data-theme="light"] .editor-theme .ed-subtabs-pill { background: #fff; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.08), 0 2px 8px -3px rgba(0, 0, 0, 0.2); }
+html[data-theme="light"] .editor-theme .ed-subtabs-pill::after { background: #8fb800; box-shadow: none; }
+@media (prefers-reduced-motion: reduce) { .ed-subtabs-pill { transition: none; } }
+.tx-preview { display: grid; place-items: center; aspect-ratio: 3 / 1; padding: 10px 16px; }
+.tx-preview-text { max-width: 100%; text-align: center; overflow-wrap: anywhere; line-height: 1.15; }
+.tx-row { padding: 6px 6px 6px 10px; border-radius: 12px; background: rgb(var(--ed-fg) / 0.03); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.08); transition: box-shadow .2s, background-color .2s; }
+.tx-row:hover { background: rgb(var(--ed-fg) / 0.05); }
+.tx-row[data-on] { box-shadow: inset 0 0 0 1px rgba(200,255,0,0.4); padding-bottom: 10px; }
+.tx-row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 32px; text-align: left; }
+.tx-row-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-row-time { flex-shrink: 0; font-size: 11px; font-variant-numeric: tabular-nums; color: rgb(var(--ed-fg) / 0.5); }
+[data-theme="light"] .tx-row[data-on] { box-shadow: inset 0 0 0 1px rgba(143,184,0,0.6); }
 .tx-item { padding: 8px; border-radius: 14px; background: rgb(var(--ed-fg) / 0.03); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.08); transition: box-shadow .2s; }
 .tx-item[data-open] { box-shadow: inset 0 0 0 1px rgba(200,255,0,0.4); }
 .tx-head {
@@ -2814,6 +2962,16 @@ html[data-theme="light"] .kit-name-btn[data-danger]:hover { color: #dc2626; back
 /* a video on a row looks like the main video: its own pictures, plain (no colour over them) */
 .tl2-bar:is([data-kind="video"], [data-kind="broll"]) { background: #0d0d0d; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.14); }
 .tl2-bar:is([data-kind="video"], [data-kind="broll"])[data-sel] { background: #0d0d0d; box-shadow: inset 0 0 0 2px #c8ff00; }
+/* Text on the timeline (user, 2026-11-11: "no need to make the whole thing pink" … "make the whole bar black, the text to
+   suit"): black as a video's bar, a hairline edge, its name in clean white; its T in a small neutral badge, only the
+   T itself in its colour. Picked: the lime ring as any bar */
+.tl2-bar[data-kind="text"] { background: #0d0d0d; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14); color: #f4f4f5; }
+.tl2-bar[data-kind="text"]:hover { background: #141416; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.22); }
+.tl2-bar[data-kind="text"][data-sel] { background: #0d0d0d; box-shadow: inset 0 0 0 2px #c8ff00; }
+/* its T in a badge (MediaIcon, the label's first picture) */
+.tl2-bar[data-kind="text"] > span > svg:first-child { width: 16px; height: 16px; padding: 3.5px; margin-left: 4px !important; margin-right: 2px; border-radius: 5px;
+  background: rgb(255 255 255 / 0.08); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1); }
+.tl2-bar[data-kind="text"] > span > .truncate { font-weight: 600; letter-spacing: .01em; color: #f4f4f5; }
 .tl2-bar-len { flex-shrink: 0; padding: 0 4px; border-radius: 4px; font-size: 9.5px; background: rgba(0, 0, 0, 0.4); font-variant-numeric: tabular-nums; }
 .tl2-bar-grip { top: 0; bottom: 0; width: 10px; background: #c8ff00; cursor: ew-resize; z-index: 4; }
 /* a bar's grips are the main video's (.tl2-grip), a little narrower; the bubble over the edge being trimmed */
@@ -3136,6 +3294,8 @@ html[data-theme="light"] .kit-name-btn[data-danger]:hover { color: #dc2626; back
 [data-theme="light"] .editor-theme .ed-tl-btn:hover:not(:disabled) { color: #0c0c0e; }
 [data-theme="light"] .tl2-block { box-shadow: inset 0 0 0 1px rgba(12, 12, 14, 0.12); }
 [data-theme="light"] .tl2-bar { color: #0c0c0e; }
+/* (a text bar stays black in the light theme too, as a video's: its name stays white) */
+[data-theme="light"] .tl2-bar[data-kind="text"] { color: #f4f4f5; }
 [data-theme="light"] .tl2-playhead { background: #0c0c0e; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7), 0 0 8px rgba(12, 12, 14, 0.2); }
 [data-theme="light"] .tl2-bubble { color: #fff; background: #0c0c0e; }
 [data-theme="light"] .tl2-grip:focus-visible { outline-color: #0c0c0e; }
@@ -4405,6 +4565,44 @@ html:not([data-theme="light"]) .bkd-box { --ed-panel: #121214; }
 .sp-mode-opt:focus-visible { outline: 2px solid rgba(200, 255, 0, 0.6); outline-offset: 1px; }
 .sp-mode[data-off] { opacity: .55; }
 .sp-mode-opt:disabled { cursor: default; }
+/* ── Subjects' start (user, 2026-11-09: "simple and odd — make it attractive and clear"): Auto format a card —
+   its icon, what it does, two pictured choices of how each scene is framed (a small 9:16 screen each; the chosen
+   one outlined, a lime tick), its button; Detect a quiet row under it. Lime only on the icon, the chosen tile and
+   the button. SubjectsPanel .sp-auto / .sp-tile / .sp-detect ── */
+.sp-auto { display: flex; flex-direction: column; gap: 14px; padding: 14px; border-radius: 16px;
+  background: linear-gradient(180deg, rgb(var(--ed-fg) / 0.05), rgb(var(--ed-fg) / 0.02)); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.09); }
+.sp-auto-icon { flex-shrink: 0; width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center;
+  color: var(--ed-accent-text); background: rgba(200, 255, 0, 0.1); box-shadow: inset 0 0 0 1px rgba(200, 255, 0, 0.25); }
+.sp-card-title { font-size: 14px; font-weight: 700; line-height: 1.25; color: var(--ed-text); }
+.sp-card-title[data-size="sm"] { font-size: 13px; }
+.sp-card-sub { margin-top: 2px; font-size: 11.5px; line-height: 1.4; color: rgb(var(--ed-fg) / 0.55); }
+.sp-q { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: rgb(var(--ed-fg) / 0.45); }
+.sp-tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 10px 11px; border-radius: 12px; text-align: center;
+  background: rgb(var(--ed-fg) / 0.03); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.1); transition: background-color .2s, box-shadow .2s, transform .12s; }
+.sp-tile:hover:not(:disabled):not([data-on]) { background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.2); }
+.sp-tile[data-on] { background: rgb(var(--ed-fg) / 0.07); box-shadow: inset 0 0 0 1.5px rgba(200, 255, 0, 0.55); }
+.sp-tile:active:not(:disabled) { transform: scale(.98); }
+.sp-tile:disabled { cursor: default; }
+[data-off] > .sp-tile { opacity: .55; }
+.sp-tile:focus-visible { outline: 2px solid rgba(200, 255, 0, 0.6); outline-offset: 2px; }
+.sp-tile-tick { position: absolute; top: 7px; right: 7px; width: 16px; height: 16px; border-radius: 999px; display: grid; place-items: center; background: #c8ff00; color: #0c0c0e; }
+.sp-tile-art svg { display: block; }
+.sp-art-screen { fill: rgb(var(--ed-fg) / 0.05); stroke: rgb(var(--ed-fg) / 0.28); stroke-width: 1.5; transition: stroke .2s; }
+.sp-art-person { fill: rgb(var(--ed-fg) / 0.26); transition: fill .2s; }
+.sp-art-line { stroke: rgb(var(--ed-fg) / 0.28); }
+.sp-art-mark { stroke: rgb(var(--ed-fg) / 0.5); transition: stroke .2s; }
+.sp-tile[data-on] .sp-art-screen { stroke: rgb(var(--ed-fg) / 0.5); }
+.sp-tile[data-on] .sp-art-person { fill: rgb(var(--ed-fg) / 0.55); }
+.sp-tile[data-on] .sp-art-mark { stroke: var(--ed-accent-text); }
+.sp-tile-name { font-size: 12.5px; font-weight: 700; color: var(--ed-text); }
+.sp-tile-sub { font-size: 10.5px; line-height: 1.35; color: rgb(var(--ed-fg) / 0.5); }
+.sp-detect { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 14px; border-radius: 14px; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.08); }
+.sp-detect[data-running] { padding: 0; box-shadow: none; }
+.sp-detect-icon { flex-shrink: 0; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: rgb(var(--ed-fg) / 0.75); background: rgb(var(--ed-fg) / 0.06); }
+html[data-theme="light"] .editor-theme .sp-auto-icon { background: rgba(150, 200, 0, 0.14); box-shadow: inset 0 0 0 1px rgba(110, 150, 0, 0.35); }
+html[data-theme="light"] .editor-theme .sp-tile[data-on] { box-shadow: inset 0 0 0 1.5px rgba(110, 150, 0, 0.6); }
+html[data-theme="light"] .editor-theme .sp-tile-tick { background: #b4e600; }
+@media (prefers-reduced-motion: reduce) { .sp-tile { transition: none; } .sp-tile:active:not(:disabled) { transform: none; } }
 html[data-theme="light"] .sp-mode-pill { background: linear-gradient(135deg, rgba(150, 200, 0, 0.28), rgba(150, 200, 0, 0.1)); box-shadow: inset 0 0 0 1px rgba(110, 150, 0, 0.55); }
 @media (prefers-reduced-motion: reduce) { .sp-mode-pill { transition: none; } }
 
@@ -4419,3 +4617,38 @@ html[data-theme="light"] .sp-mode-pill { background: linear-gradient(135deg, rgb
 .credits-badge.is-low { border-color: #f59e0b; }
 .credits-badge.is-low svg { color: #f59e0b; }
 .credits-topup { margin-left: 6px; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; color: inherit; white-space: nowrap; }
+
+/* The clip board's AI edit / Manual edit, by the breadcrumb (ClipPickerShell BoardPicker, user 2026-11-12: a plain
+   switch didn't look right, a chip with ▾ didn't say it switches). One pill in two parts: where you are — its icon in
+   a lime disc and its name — and "⇄ Switch to …", a plain button whose arrows turn on hover. A soft lime light
+   travels slowly round the pill's edge (a conic gradient in a 1px ring; still for reduced motion) */
+@property --cb-board-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.cb-board { position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding: 3px;
+  border-radius: 999px; background: linear-gradient(180deg, rgb(var(--cb-fg) / 0.08), rgb(var(--cb-fg) / 0.04));
+  box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.12), inset 0 1px 0 rgb(var(--cb-fg) / 0.08); }
+.cb-board::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: conic-gradient(from var(--cb-board-a), transparent 0deg 250deg, rgba(200, 255, 0, 0.7) 300deg, transparent 340deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); animation: cb-board-spin 5s linear infinite; }
+@keyframes cb-board-spin { to { --cb-board-a: 360deg; } }
+.cb-board-here { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px 0 4px; font-size: 12.5px; font-weight: 700;
+  white-space: nowrap; color: var(--cb-text); }
+.cb-board-here-icon { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; color: #0c0c0e; background: #c8ff00;
+  box-shadow: 0 2px 10px -3px rgba(200, 255, 0, 0.6); }
+.cb-board-switch { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 999px; white-space: nowrap;
+  font-size: 12px; font-weight: 500; color: rgb(var(--cb-fg) / 0.7); background: rgb(var(--cb-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.1);
+  transition: background-color .15s, color .15s, box-shadow .15s, transform .12s; }
+.cb-board-switch b { font-weight: 700; color: var(--cb-text); }
+.cb-board-switch:hover:not(:disabled) { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.12); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.2); }
+.cb-board-switch:active:not(:disabled) { transform: scale(.97); }
+.cb-board-switch:disabled { cursor: default; opacity: .6; }
+.cb-board-switch:focus-visible { outline: 2px solid rgba(200, 255, 0, 0.6); outline-offset: 2px; }
+.cb-board-swap { flex-shrink: 0; transition: transform .35s cubic-bezier(.34, 1.4, .64, 1); }
+.cb-board-switch:hover:not(:disabled) .cb-board-swap { transform: rotate(180deg); }
+[data-theme="light"] .cb-board-here-icon { background: #b4e600; }
+[data-theme="light"] .cb-board::before { background: conic-gradient(from var(--cb-board-a), transparent 0deg 250deg, rgba(110, 150, 0, 0.8) 300deg, transparent 340deg); }
+@media (prefers-reduced-motion: reduce) { .cb-board::before { animation: none; --cb-board-a: 300deg; } .cb-board-swap, .cb-board-switch { transition: none; } }
+
+/* A clip's download that didn't work: why, under its time (ClipPickerShell .cb-dl-error, user 2026-11-12) */
+.cb-dl-error { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 11px; line-height: 1.4; color: #f87171; cursor: default; }
+.cb-dl-error .credits-topup { font-weight: 700; }

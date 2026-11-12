@@ -220,6 +220,11 @@
     radial-gradient(ellipse 60% 70% at 50% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%),
     var(--surface);
 }
+/* (user, 2026-11-12) the first-run card 10% smaller — 90% of the column's width, centred, and 10% shorter
+   (61px above and below instead of 80px); what's inside keeps its size. Wider screens only: phones as before */
+@media (min-width: 721px) {
+  .dash-drop.is-empty { width: 90%; margin-left: auto; margin-right: auto; padding-top: 61px; padding-bottom: 61px; }
+}
 .dash-drop.is-empty .dash-drop-icon { width: 64px; height: 64px; border-radius: 20px; }
 .dash-drop.is-empty .dash-drop-text p:first-child {
   font-size: clamp(24px, 3vw, 32px); font-weight: 900; letter-spacing: -0.03em; margin-bottom: 8px;
@@ -600,7 +605,7 @@
   display: grid; place-items: center; color: var(--text-muted); background: var(--media-bg, #0a0a0a);
   box-shadow: 0 0 0 1px var(--emd-line-2), 0 10px 24px -12px rgba(0,0,0,.8);
 }
-.emd-thumb video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: opacity .3s; }
+.emd-thumb video, .emd-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: opacity .3s; }
 .emd-thumb-len {
   position: absolute; right: 5px; bottom: 5px; padding: 1px 5px; border-radius: 5px;
   font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums; color: #fff; background: rgba(0,0,0,0.72);
@@ -772,4 +777,99 @@
 .vcard { border-radius: 18px; }
 .vcard-info { gap: 10px; padding: 10px 4px 2px 6px; min-height: 50px; }
 .vcard-title { font-size: 14px; }
-:root .vcard-open.fill-btn-sm { padding: 7px 16px; font-size: 11.5px; }
+:root .vcard-open.fill-btn-sm { padding: 7px 24px; font-size: 11.5px; }
+/* (user, 2026-11-11: the scissors ran into "Make clips") the icon sits 12px from the edge and the name moves 10px
+   towards the other side: 24px each side leaves ~7px between them, before and after the hover swap */
+
+/* (user, 2026-11-11) a ready video opens from its picture and its name too, as Make clips: a hand over them, and
+   over the picture a soft shade (not while selecting or renaming — .is-openable; no play mark — user, 2026-11-11) */
+.vcard-thumb.is-openable, .vcard-title.is-openable { cursor: pointer; }
+.vcard-hover { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: rgba(0, 0, 0, 0.22); opacity: 0; transition: opacity .2s ease; }
+.vcard-thumb.is-openable:hover .vcard-hover { opacity: 1; }
+.vcard-title.is-openable:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--text) 35%, transparent); }
+@media (prefers-reduced-motion: reduce) { .vcard-hover { transition: none; } }
+
+/* "Open clips" with both kinds of clip (user, 2026-11-11): a small menu over the card's picture, from its button —
+   AI clips · n, Your clips · n, a line, + Make new clips. The card with it open stays over its neighbours */
+.vcard.has-menu { z-index: 5; }
+.vcard-open-wrap { position: relative; flex-shrink: 0; }
+.vcard-menu { top: auto; bottom: calc(100% + 8px); right: 0; min-width: 200px; transform-origin: bottom right;
+  animation: vcard-menu-in .2s cubic-bezier(.2, .9, .3, 1.2) both; }
+@keyframes vcard-menu-in { from { opacity: 0; transform: translateY(6px) scale(.94); } to { opacity: 1; transform: none; } }
+.vcard-menu .dash-menu-item { font-weight: 600; }
+.vcard-menu .dash-menu-item svg { flex-shrink: 0; color: var(--text-muted); }
+.vcard-menu .dash-menu-item:hover svg, .vcard-menu .dash-menu-item:focus-visible svg { color: var(--text); }
+.vcard-menu .dash-menu-item:focus-visible { outline: none; background: var(--hover); }
+.vcard-menu-label { flex: 1; min-width: 0; }
+.vcard-menu-n { min-width: 22px; padding: 1px 7px; border-radius: 999px; font-size: 11.5px; font-weight: 700; text-align: center;
+  font-variant-numeric: tabular-nums; color: var(--text-muted); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.vcard-menu-line { display: block; height: 1px; margin: 5px 6px; background: var(--border); }
+@media (prefers-reduced-motion: reduce) { .vcard-menu { animation: none; } }
+
+/* Its kept picture (jobs/poster.ts), filling the thumbnail as the video's frame did */
+.vcard-thumb .vcard-poster { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; transition: opacity .3s; }
+/* (user, 2026-11-11) the date and length under the name, small and quiet; the picture keeps only the clip count */
+.vcard-title { margin-bottom: 2px; }
+.vcard-meta { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--text-muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; }
+.vcard-meta-dot { opacity: .6; }
+
+/* (user, 2026-11-11) a long name gets two lines before it's cut short ("Anchor Pradeep Full & Hilarious…" hid the
+   useful part); the button stays beside it, centred on the name and its date */
+.vcard-title { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  overflow: hidden; line-height: 1.3; overflow-wrap: anywhere; }
+
+/* A video that couldn't be processed (user, 2026-11-11): why, then Try again (the white one) and Remove */
+.vcard-overlay.is-failed { gap: 10px; text-align: center; }
+.vcard-overlay.is-failed > svg { color: #fca5a5; flex-shrink: 0; }
+.vcard-failed-text { max-width: 30ch; font-size: 12.5px; line-height: 1.4; color: #fecaca; }
+.vcard-failed-actions { display: flex; gap: 8px; }
+.vcard-failed-btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 14px; border-radius: 999px; border: 0; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 700; color: #f4f4f5; background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); transition: background-color .15s, scale .15s; }
+.vcard-failed-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); }
+.vcard-failed-btn[data-tone="primary"] { color: #0a0a0a; background: #f4f4f5; box-shadow: none; }
+.vcard-failed-btn[data-tone="primary"]:hover:not(:disabled) { background: #fff; }
+.vcard-failed-btn:active:not(:disabled) { scale: .96; }
+.vcard-failed-btn:disabled { opacity: .7; cursor: default; }
+.vcard-failed-btn:focus-visible { outline: 2px solid rgba(200, 255, 0, 0.6); outline-offset: 2px; }
+.vcard-failed-btn .dash-spinner { width: 12px; height: 12px; }
+
+/* "/" to search (user, 2026-11-11): a small key at the box's right end, gone once it's clicked into */
+.dash-search-kbd { position: absolute; right: 12px; top: 50%; translate: 0 -50%; pointer-events: none;
+  min-width: 20px; height: 20px; padding: 0 6px; display: grid; place-items: center; border-radius: 6px;
+  font: inherit; font-size: 11px; font-weight: 700; color: var(--text-muted);
+  background: color-mix(in srgb, var(--text) 6%, transparent); box-shadow: inset 0 0 0 1px var(--border-strong); transition: opacity .15s; }
+.dash-search:focus-within .dash-search-kbd { opacity: 0; }
+
+/* The dashboard while it loads (DashSkeleton.tsx): grey shapes in the places of what's coming, a soft pulse */
+.skel { display: block; flex-shrink: 0; border-radius: 999px; background: color-mix(in srgb, var(--text) 7%, transparent);
+  animation: skel-pulse 1.5s ease-in-out infinite; animation-delay: var(--d, 0s); }
+@keyframes skel-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+.skel-strip { height: 110px; margin-bottom: 32px; border-radius: 22px; }
+.skel-card { pointer-events: none; }
+.skel-card .skel { --d: inherit; }
+.skel-thumb { aspect-ratio: 16 / 9; border-radius: 15px; }
+.skel-info { display: flex; flex-direction: column; gap: 8px; padding: 14px 6px 10px; }
+.skel-line { height: 12px; width: 72%; border-radius: 6px; }
+.skel-line[data-short] { width: 38%; height: 10px; }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
+
+/* Running low on the plan's videos (user, 2026-11-11): a slim line above the upload strip — a warm hint, not
+   an alarm — with See plans and ✕ */
+.dash-low { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 10px 10px 10px 16px; border-radius: 16px;
+  color: var(--text); background: color-mix(in srgb, #f59e0b 9%, var(--surface)); border: 1px solid color-mix(in srgb, #f59e0b 30%, transparent); }
+.dash-low > svg { flex-shrink: 0; color: #fbbf24; }
+.dash-low p { flex: 1; min-width: 0; margin: 0; font-size: 13px; line-height: 1.45; }
+.dash-low p span { color: var(--text-muted); }
+.dash-low-cta { flex-shrink: 0; height: 32px; padding: 0 16px; display: inline-flex; align-items: center; border-radius: 999px;
+  font-size: 12.5px; font-weight: 700; text-decoration: none; color: #0a0a0a; background: #f4f4f5; transition: background-color .15s, scale .15s; }
+.dash-low-cta:hover { background: #fff; }
+.dash-low-cta:active { scale: .96; }
+.dash-low-x { flex-shrink: 0; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 999px; border: 0; cursor: pointer;
+  color: var(--text-muted); background: transparent; transition: background-color .15s, color .15s; }
+.dash-low-x:hover { color: var(--text); background: var(--hover); }
+.dash-low-cta:focus-visible, .dash-low-x:focus-visible { outline: 2px solid rgba(200, 255, 0, 0.6); outline-offset: 2px; }
+[data-theme="light"] .dash-low > svg { color: #d97706; }
+[data-theme="light"] .dash-low-cta { color: #fff; background: #0c0c0e; }
+[data-theme="light"] .dash-low-cta:hover { background: #26262a; }
