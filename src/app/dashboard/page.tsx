@@ -6,6 +6,10 @@ import './dashboard.css'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { usePolling } from '@/lib/usePolling'
+import { useCredits, type CreditsInfo } from '@/lib/useCredits'
+import { CreditsBadge } from '@/components/ui/credits-badge'
+import { CAPTION_CREDITS_PER_MINUTE, EXPORT_CREDITS_PER_MINUTE } from '@/lib/credits'
+import { ASK_AI_CREDITS, CLIP_CREDITS } from '@/lib/aiLimits'
 import type { Video } from '@chai-cut/shared'
 import { ACCEPTED_VIDEO_EXTENSIONS } from '@chai-cut/shared'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -90,6 +94,8 @@ export default function DashboardPage() {
     setLowHiddenAt(n)
     try { sessionStorage.setItem('dashSeenLow', String(n)) } catch { /* storage blocked: hidden for now only */ }
   }
+  // Credits (null while loading, and when credits are off: no prices are shown then)
+  const { credits, refresh: refreshCredits } = useCredits()
 
   async function fetchVideos() {
     const res = await fetch('/api/videos')
@@ -255,6 +261,7 @@ export default function DashboardPage() {
               <div className="dash-usage-bar"><div style={{ width: `${usagePct}%` }} /></div>
             </div>
           )}
+          <CreditsBadge credits={credits} className="dash-credits" />
           {planInfo?.plan === 'free' && (
             <a href="/pricing" className="dash-btn-fill fill-btn fill-btn-sm"><FillButtonContent>Upgrade</FillButtonContent></a>
           )}
@@ -347,6 +354,13 @@ export default function DashboardPage() {
                 <p className="dash-drop-error" role="alert">{upload.state.error}</p>
                 <div className="dash-progress"><div style={{ width: `${upload.state.progress}%` }} /></div>
               </>
+            ) : upload.priceAsk ? (
+              <>
+                <p className="dash-upload-title" title={upload.state.fileName}>Upload {upload.state.fileName}?</p>
+                <p className="dash-upload-pace">
+                  Reading this {upload.priceAsk.minutes} min video costs <b>{upload.priceAsk.credits} credits</b>. You have {upload.priceAsk.balance}.
+                </p>
+              </>
             ) : uploading ? (
               <>
                 <p className="dash-upload-title" title={upload.state.fileName}>
@@ -386,6 +400,11 @@ export default function DashboardPage() {
               {upload.state.canRetry && (
                 <button type="button" className="dash-upload-btn dash-upload-btn--plain" onClick={upload.retry}>Retry</button>
               )}
+            </div>
+          ) : upload.priceAsk ? (
+            <div className="dash-drop-actions">
+              <button type="button" className="dash-link-btn" onClick={upload.cancel}>Cancel</button>
+              <button type="button" className="dash-upload-btn dash-upload-btn--plain" onClick={upload.confirmPrice}>Upload · {upload.priceAsk.credits} credits</button>
             </div>
           ) : upload.state.phase === 'uploading' ? (
             <button type="button" className="dash-link-btn" onClick={upload.cancel}>Cancel</button>
@@ -471,7 +490,7 @@ export default function DashboardPage() {
       )}
 
       {choosing && (
-        <EditModeDialog title={choosing.title} videoUrl={choosing.videoUrl} posterUrl={choosing.posterUrl} durationMs={choosing.durationMs} onClose={() => setChoosing(null)}
+        <EditModeDialog videoId={choosing.id} title={choosing.title} videoUrl={choosing.videoUrl} posterUrl={choosing.posterUrl} durationMs={choosing.durationMs} credits={credits} onClose={() => { setChoosing(null); refreshCredits() }}
           onPick={mode => router.push(`/videos/${choosing.id}?start=${mode}`)} />
       )}
 
@@ -1073,12 +1092,15 @@ function DeleteDialog({ items, onClose, onDeleted }: {
  * best moments light up one after another; Manual's has a stretch held between two handles with
  * the playhead running through it. Esc, the ✕ or a click outside closes it (the video stays).
  */
-function EditModeDialog({ title, videoUrl, posterUrl, durationMs, onClose, onPick }: {
+function EditModeDialog({ videoId, title, videoUrl, posterUrl, durationMs, credits, onClose, onPick }: {
+  videoId: string
   title: string
   videoUrl?: string | null
   /** Its kept picture (jobs/poster.ts): shown instead of loading the video, when it has one */
   posterUrl?: string | null
   durationMs?: number | null
+  /** The balance, when credits are on: the cards then say what each way costs */
+  credits: CreditsInfo | null
   onClose: () => void
   onPick: (mode: 'ai' | 'manual') => void
 }) {
@@ -1089,7 +1111,21 @@ function EditModeDialog({ title, videoUrl, posterUrl, durationMs, onClose, onPic
     window.addEventListener('keydown', esc)
     return () => window.removeEventListener('keydown', esc)
   }, [onClose, picked])
-  const pick = (mode: 'ai' | 'manual') => { if (picked) return; setPicked(mode); onPick(mode) }
+  // Reading is in the plan's hours, counted at upload: nothing more to pay here. A video that is being
+  // read, or already read, says so.
+  const [reading, setReading] = useState<'unknown' | 'paid' | 'unpaid'>('unknown')
+  useEffect(() => {
+    let live = true
+    fetch(`/api/videos/${videoId}/transcript`, { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (live) setReading(d && (d.status === 'running' || d.status === 'ready') ? 'paid' : 'unpaid') })
+      .catch(() => { if (live) setReading('unpaid') })
+    return () => { live = false }
+  }, [videoId])
+  const pick = (mode: 'ai' | 'manual') => {
+    if (picked) return
+    setPicked(mode); onPick(mode)
+  }
   const options = [
     {
       mode: 'ai' as const, name: 'AI edit', tag: 'Recommended', cta: 'AI editing',
@@ -1166,6 +1202,17 @@ function EditModeDialog({ title, videoUrl, posterUrl, durationMs, onClose, onPic
                     </span>
                   ))}
                 </span>
+                {credits && (o.mode === 'ai' ? (
+                  <span className="emd-cost">
+                    {reading === 'paid'
+                      ? <>This video is <b>already read</b>. AI clips: <b>{CLIP_CREDITS} credits</b> each. Ask AI: <b>{ASK_AI_CREDITS} credits</b> a search.</>
+                      : <>AI clips: <b>{CLIP_CREDITS} credits</b> each. Ask AI: <b>{ASK_AI_CREDITS} credits</b> a search.</>}
+                  </span>
+                ) : (
+                  <span className="emd-cost">
+                    Cutting and editing are free. Captions: <b>{CAPTION_CREDITS_PER_MINUTE} credits</b> per clip minute. Export: <b>{EXPORT_CREDITS_PER_MINUTE} credit</b> per clip minute.
+                  </span>
+                ))}
               </span>
               <span className="emd-cta">
                 {picked === o.mode ? <><span className="dash-spinner" />Opening…</> : <>{o.cta}
@@ -1175,7 +1222,10 @@ function EditModeDialog({ title, videoUrl, posterUrl, durationMs, onClose, onPic
           ))}
         </div>
 
-        <p className="emd-foot">Not sure? Either way opens the clip board, where both are there, so you can switch any time.</p>
+        <p className="emd-foot">
+          {credits && <><b>{credits.balance} credits</b> left. </>}
+          Not sure? Either way opens the clip board, where both are there, so you can switch any time{credits ? ' (switching to AI later reads the video then)' : ''}.
+        </p>
       </div>
     </div>
   )

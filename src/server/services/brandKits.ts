@@ -8,6 +8,7 @@ import { cleanRole, INVITE_DAYS, TEAM_PLANS, teamSeats, type KitInviteIn, type K
 import { hasColumn } from './clips'
 import { pictureColours } from './brandStyle'
 import { BRAND_WORDS_ON, cleanBrandWords, type BrandWords } from '@/lib/brandWords'
+import { looksLikeEmail } from '@/lib/shared/email'
 
 /**
  * Brand kits (lib/shared/brandKit.ts): a user's saved looks, kept in brand_kits (the backend creates
@@ -216,7 +217,7 @@ export async function inviteToKit(userId: string, kitId: string, email: unknown,
   if (!seats) throw err('Sharing brand kits with your team is on the Agency plan.', 403)
   if (!(await sharesReady()) || !(await invitesReady())) throw err('Teams are being set up — try again in a few minutes.', 503)
   const mail = typeof email === 'string' ? email.trim().toLowerCase() : ''
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail) || mail.length > 200) throw err('Type their email address', 400)
+  if (mail.length > 200 || !looksLikeEmail(mail)) throw err('Type their email address', 400)
   if (mail === (await emailOf(userId))) throw err('That’s you — the kit is already yours.', 400)
   const r = cleanRole(role)
   const [member] = await sql<Omit<KitShare, 'role'>[]>`

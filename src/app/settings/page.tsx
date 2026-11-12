@@ -233,6 +233,7 @@ function ProfileCard({ account, onSaved, onPhoto }: { account: Account; onSaved:
               <span className="st-tile-value">{account.planName}</span>
             </div>
             <a href="/pricing" className="st-link">Plans &amp; billing →</a>
+            <a href="/billing" className="st-link">Credits, payments &amp; invoices →</a>
           </div>
         </div>
       </form>

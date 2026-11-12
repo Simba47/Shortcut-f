@@ -33,10 +33,22 @@ const UA = 'Mozilla/5.0 (compatible; ShortcutBrandKit/1.0; +https://shortcutapp.
 
 export type { LinkBrand } from '@/lib/shared/brandKit'
 
+/** The IPv4 address inside an IPv6 one (::ffff:a.b.c.d, ::a.b.c.d, 64:ff9b::a.b.c.d), dotted or in
+ *  hex: a parsed link writes [::ffff:127.0.0.1] as ::ffff:7f00:1, which still reaches 127.0.0.1 */
+function embeddedV4(ip: string): string | null {
+  const rest = /^(?:::(?:ffff:)?|64:ff9b::)(.+)$/i.exec(ip)?.[1]
+  if (!rest) return null
+  if (net.isIPv4(rest)) return rest
+  const h = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(rest)
+  if (!h) return null
+  const [a, b] = [parseInt(h[1], 16), parseInt(h[2], 16)]
+  return `${a >> 8}.${a & 255}.${b >> 8}.${b & 255}`
+}
+
 /** An address the server must never fetch: loopback, private, link-local, carrier NAT, multicast, reserved */
 export function privateAddress(ip: string): boolean {
-  const v4 = ip.startsWith('::ffff:') ? ip.slice(7) : ip
-  if (net.isIPv4(v4)) {
+  const v4 = net.isIPv4(ip) ? ip : embeddedV4(ip)
+  if (v4) {
     const [a, b] = v4.split('.').map(Number)
     return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b < 128) || (a === 169 && b === 254)
       || (a === 172 && b >= 16 && b < 32) || (a === 192 && b === 168) || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19))

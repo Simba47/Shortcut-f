@@ -1,18 +1,44 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { PLANS } from '@/lib/plans'
+import { FREE_SIGNUP_CREDITS, TOPUP_PACKS, TEST_PACK } from '@/lib/credits'
+import { planFeatureRows, creditUses, readingLabel } from '@/lib/planFeatures'
 import { BrandLogo } from '@/components/ui/brand-logo'
+import { CreditsBadge } from '@/components/ui/credits-badge'
+import { useCredits } from '@/lib/useCredits'
 
 const PLAN_ORDER = ['free', 'starter', 'creator', 'agency'] as const
 
+declare global {
+  interface Window { Razorpay: new (o: Record<string, unknown>) => { open: () => void; on: (e: string, cb: (r: never) => void) => void } }
+}
+
+function loadCheckoutScript(src: string): Promise<void> {
+  if (typeof window !== 'undefined' && window.Razorpay) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const el = document.createElement('script')
+    el.src = src
+    el.onload = () => resolve()
+    el.onerror = () => reject(new Error('The payment window could not load. Check your connection and try again.'))
+    document.body.appendChild(el)
+  })
+}
+
 export default function PricingPage() {
+  const { credits, refresh: refreshCredits } = useCredits()
   const { data: session } = useSession()
   const router = useRouter()
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  const [mine, setMine] = useState<{ plan: string; testMode: boolean; paymentsMode?: 'off' | 'mock' | 'test' | 'live'; testPack?: boolean; subscription: { status: string; expiresAt: string | null } | null } | null>(null)
+  useEffect(() => {
+    if (!session) return
+    fetch('/api/billing/plan').then(r => r.ok ? r.json() : null).then(d => d && setMine(d)).catch(() => {})
+  }, [session])
 
   async function handleSubscribe(planKey: string) {
     if (!session) { router.push('/login'); return }
@@ -27,7 +53,8 @@ export default function PricingPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Failed')
-      router.push('/dashboard')
+      if (data.test) { router.push('/dashboard'); return }   // a test copy without payments
+      await openCheckout(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
@@ -35,29 +62,139 @@ export default function PricingPage() {
     }
   }
 
+  /** Razorpay's payment window; after paying, the server checks the signature and turns the plan on */
+  async function openCheckout(d: { subscriptionId: string; keyId: string; planName: string; email?: string; checkoutScript?: string }) {
+    await loadCheckoutScript(d.checkoutScript ?? 'https://checkout.razorpay.com/v1/checkout.js')
+    await new Promise<void>((resolve, reject) => {
+      const rz = new window.Razorpay({
+        key: d.keyId,
+        subscription_id: d.subscriptionId,
+        name: 'Shortcut',
+        description: `${d.planName} plan, monthly`,
+        prefill: d.email ? { email: d.email } : undefined,
+        theme: { color: '#c8ff00' },
+        handler: async (r: { razorpay_payment_id: string; razorpay_subscription_id: string; razorpay_signature: string }) => {
+          try {
+            const res = await fetch('/api/billing/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(r) })
+            const out = await res.json()
+            if (!res.ok) throw new Error(out.error ?? 'The payment could not be verified. If money was taken, it will show here shortly.')
+            router.push('/dashboard')
+            resolve()
+          } catch (e) { reject(e) }
+        },
+        modal: { ondismiss: () => resolve() },
+      })
+      rz.on('payment.failed', (f: { error?: { description?: string } }) => reject(new Error(f.error?.description ?? 'The payment failed. Please try again.')))
+      rz.open()
+    })
+  }
+
+  const [topupBusy, setTopupBusy] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  /** Buying a credit pack: an order, Razorpay's payment window, then the server checks it and adds the credits */
+  async function handleTopup(packKey: string) {
+    if (!session) { router.push('/login'); return }
+    setTopupBusy(packKey); setError(null); setNotice(null)
+    try {
+      const res = await fetch('/api/billing/topup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pack: packKey }) })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error ?? 'Failed')
+      await loadCheckoutScript(d.checkoutScript ?? 'https://checkout.razorpay.com/v1/checkout.js')
+      await new Promise<void>((resolve, reject) => {
+        const rz = new window.Razorpay({
+          key: d.keyId, order_id: d.orderId, amount: d.amountPaise, currency: 'INR',
+          name: 'Shortcut', description: `${d.packName}, one time`,
+          prefill: d.email ? { email: d.email } : undefined, theme: { color: '#c8ff00' },
+          handler: async (r: { razorpay_payment_id: string; razorpay_order_id: string; razorpay_signature: string }) => {
+            try {
+              const v = await fetch('/api/billing/topup/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(r) })
+              const out = await v.json()
+              if (!v.ok) throw new Error(out.error ?? 'The payment could not be verified. If money was taken, the credits will show shortly.')
+              setNotice(`${out.credits} credits added. You now have ${out.balance}.`)
+              refreshCredits()
+              resolve()
+            } catch (e) { reject(e) }
+          },
+          modal: { ondismiss: () => resolve() },
+        })
+        rz.on('payment.failed', (f: { error?: { description?: string } }) => reject(new Error(f.error?.description ?? 'The payment failed. Please try again.')))
+        rz.open()
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong')
+    } finally {
+      setTopupBusy(null)
+    }
+  }
+
+  async function cancel() {
+    if (!window.confirm('Stop renewing? You keep your plan until the month you paid for ends.')) return
+    setError(null)
+    const res = await fetch('/api/billing/cancel', { method: 'POST' })
+    const out = await res.json().catch(() => ({}))
+    if (!res.ok) { setError(out.error ?? 'Could not cancel'); return }
+    setMine(m => m && { ...m, subscription: { status: 'cancelled', expiresAt: out.endsAt ?? m.subscription?.expiresAt ?? null } })
+  }
+
   return (
     <div className="min-h-screen" style={{ background: '#0d0d0d' }}>
       <nav className="flex items-center justify-between px-6 py-3 border-b" style={{ background: '#111', borderColor: 'rgba(255,255,255,0.07)' }}>
         {/* Same animated logo as every other page; colours pinned because this header is always dark */}
-        <a href="/dashboard" aria-label="Shortcut dashboard" style={{ '--text': '#F4F4F5', '--logo': '#C8FF00', textDecoration: 'none' } as React.CSSProperties}>
+        <a href={session ? '/dashboard' : '/'} aria-label={session ? 'Shortcut dashboard' : 'Shortcut home'} style={{ '--text': '#F4F4F5', '--logo': '#C8FF00', textDecoration: 'none' } as React.CSSProperties}>
           <BrandLogo shine />
         </a>
+        {/* Open signed out too (Razorpay's website review): a way in instead of the credits */}
+        {!session && (
+          <a href="/login" className="text-xs px-3 py-1.5 rounded-lg" style={{ color: '#000', background: '#c8ff00' }}>
+            Sign in
+          </a>
+        )}
         {session && (
+          <div className="flex items-center gap-2" style={{ color: 'rgba(255,255,255,0.8)' }}>
+          <CreditsBadge credits={credits} />
           <a href="/dashboard" className="text-xs px-3 py-1.5 rounded-lg" style={{ color: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
             Dashboard
           </a>
+          </div>
         )}
       </nav>
 
       <main className="max-w-5xl mx-auto px-6 pt-14 pb-20">
         <h1 className="text-3xl font-bold text-white text-center mb-2">Simple, transparent pricing</h1>
         <p className="text-center mb-3" style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.9rem' }}>
-          All plans include unlimited exports · Cancel anytime
+          Your plan gives you credits worth its price, and every action uses them, up to your plan&apos;s monthly limits. The editor is always free · Paid plans renew monthly · Cancel anytime
         </p>
 
-        <div className="mx-auto max-w-sm mb-10 rounded-xl px-4 py-2.5 text-center text-xs" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#f59e0b' }}>
-          Test mode — clicking Subscribe activates the plan instantly with no payment
-        </div>
+        {mine?.testMode && (
+          <div className="mx-auto max-w-sm mb-10 rounded-xl px-4 py-2.5 text-center text-xs" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#f59e0b' }}>
+            Test mode — clicking Subscribe activates the plan instantly with no payment
+          </div>
+        )}
+        {mine?.subscription && (
+          <p className="text-center text-xs mb-8" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            {mine.subscription.status === 'cancelled'
+              ? `Your plan ends on ${mine.subscription.expiresAt ? new Date(mine.subscription.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : 'the last day of this month'}. `
+              : `Renews${mine.subscription.expiresAt ? ` on ${new Date(mine.subscription.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}. `}
+            {mine.subscription.status !== 'cancelled' && (
+              <button onClick={cancel} className="underline" style={{ color: 'rgba(255,255,255,0.7)' }}>Cancel subscription</button>
+            )}
+            {' '}<a href="/billing" className="underline" style={{ color: 'rgba(255,255,255,0.7)' }}>Payments &amp; invoices</a>
+          </p>
+        )}
+
+        {mine?.paymentsMode === 'mock' && (
+          <div className="mx-auto max-w-md mb-6 rounded-xl px-4 py-2.5 text-center text-xs" style={{ background: 'rgba(51,149,255,0.08)', border: '1px solid rgba(51,149,255,0.25)', color: '#6cb3ff' }}>
+            Dummy payments: this runs with dummy Razorpay keys. Nothing is charged. Put real keys in the settings to take real payments.
+          </div>
+        )}
+        {mine?.paymentsMode === 'test' && (
+          <div className="mx-auto max-w-md mb-6 rounded-xl px-4 py-2.5 text-center text-xs" style={{ background: 'rgba(51,149,255,0.08)', border: '1px solid rgba(51,149,255,0.25)', color: '#6cb3ff' }}>
+            Razorpay test mode: use Razorpay&apos;s test cards. Nothing real is charged.
+          </div>
+        )}
+        {notice && (
+          <p className="text-center text-sm mb-6" style={{ color: '#c8ff00' }}>{notice}</p>
+        )}
 
         {error && (
           <p className="text-center text-sm mb-6" style={{ color: '#f87171' }}>{error}</p>
@@ -96,15 +233,20 @@ export default function PricingPage() {
                   )}
                 </div>
 
+                {/* What the plan gives, in credits: the number people compare first */}
+                <div className="mb-5 rounded-xl px-3 py-2.5" style={{ background: 'rgba(200,255,0,0.08)', border: '1px solid rgba(200,255,0,0.22)' }}>
+                  <div className="text-base font-bold" style={{ color: '#c8ff00' }}>
+                    {isPaid ? `${plan.monthlyCredits} credits` : `${FREE_SIGNUP_CREDITS} credits`}
+                    <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.5)' }}>{isPaid ? ' every month' : ' to start, once'}</span>
+                  </div>
+                  <div className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                    {readingLabel(plan.readingMinutes)} of video read {isPaid ? 'a month' : 'in total'}
+                    {isPaid ? ' · unused credits roll over one month' : ''}
+                  </div>
+                </div>
+
                 <ul className="flex-1 space-y-2.5 mb-6">
-                  {([
-                    [`${plan.maxVideos} video${plan.maxVideos === 1 ? '' : 's'}`, true],
-                    [`Up to ${plan.maxFileSizeGb} GB per video`, true],
-                    [plan.maxClips ? `${plan.maxClips} clips` : 'Unlimited clips', true],
-                    [`${plan.retentionDays} days history`, true],
-                    ['Auto captions', plan.autoCaption],
-                    ['No watermark', !plan.watermark],
-                  ] as [string, boolean][]).map(([label, included]) => (
+                  {planFeatureRows(plan).map(({ label, included }) => (
                     <li key={label} className="flex items-center gap-2 text-sm" style={{ color: included ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.2)' }}>
                       <span style={{ color: included ? '#c8ff00' : 'rgba(255,255,255,0.15)', fontSize: '1rem', lineHeight: '1' }}>
                         {included ? '✓' : '×'}
@@ -115,19 +257,27 @@ export default function PricingPage() {
                 </ul>
 
                 {isPaid ? (
-                  <button
-                    onClick={() => handleSubscribe(key)}
-                    disabled={!!loading}
-                    className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity"
-                    style={{
-                      background: isPopular ? '#c8ff00' : 'rgba(255,255,255,0.1)',
-                      color: isPopular ? '#000' : '#fff',
-                      opacity: loading && !busy ? 0.4 : 1,
-                      cursor: loading ? 'wait' : 'pointer',
-                    }}
-                  >
-                    {busy ? 'Activating…' : `Subscribe — ₹${plan.price}/mo`}
-                  </button>
+                  mine?.plan === key ? (
+                    // The plan they are on: a status, not a button (it must not look like something to press)
+                    <div aria-current="true" className="w-full py-2.5 rounded-xl text-sm font-semibold text-center cursor-default select-none"
+                      style={{ background: 'transparent', color: '#c8ff00', border: '1.5px solid rgba(200,255,0,0.55)' }}>
+                      ✓ Your plan — ₹{plan.price}/mo
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleSubscribe(key)}
+                      disabled={!!loading}
+                      className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity"
+                      style={{
+                        background: isPopular ? '#c8ff00' : 'rgba(255,255,255,0.1)',
+                        color: isPopular ? '#000' : '#fff',
+                        opacity: loading && !busy ? 0.4 : 1,
+                        cursor: loading ? 'wait' : 'pointer',
+                      }}
+                    >
+                      {busy ? 'Opening payment…' : `Subscribe — ₹${plan.price}/mo`}
+                    </button>
+                  )
                 ) : (
                   <div className="w-full py-2.5 rounded-xl text-sm font-semibold text-center" style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.06)' }}>
                     Default plan
@@ -137,6 +287,55 @@ export default function PricingPage() {
             )
           })}
         </div>
+        <p className="text-center text-xs mt-5" style={{ color: 'rgba(255,255,255,0.35)' }}>
+          A video gets at most 1 AI clip per minute of its length, and at most {PLANS.starter.ai.clipsPerDay}, {PLANS.creator.ai.clipsPerDay} or {PLANS.agency.ai.clipsPerDay} AI clips are made a day on Starter, Creator or Agency. Monthly limits reset on the 1st, India time.
+        </p>
+
+        <section className="mt-14">
+          <h2 className="text-xl font-bold text-white text-center mb-1">What a credit buys</h2>
+          <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>You see the price before every step. Nothing is charged by surprise, and a job that fails gives its credits back.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {creditUses().map(({ name, price, note }) => (
+              <div key={name} className="rounded-2xl p-4" style={{ background: '#161616', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div className="text-sm font-semibold text-white">{name}</div>
+                <div className="text-sm font-bold mt-1" style={{ color: '#c8ff00' }}>{price}</div>
+                <p className="text-xs mt-1.5" style={{ color: 'rgba(255,255,255,0.45)' }}>{note}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 id="topups" className="text-xl font-bold text-white text-center mb-1">Need more credits?</h2>
+          <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>Top-up packs for paid plans, paid once. Top-up credits last 12 months. Your plan&apos;s monthly limits stay the same: for more of those, upgrade.</p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[...TOPUP_PACKS, ...(mine?.testPack ? [TEST_PACK] : [])].map(pack => (
+              <div key={pack.key} className="rounded-2xl p-4 text-center" style={{ background: '#161616', border: '1px solid rgba(255,255,255,0.08)' }}>
+                <div className="text-2xl font-bold text-white">{pack.credits}</div>
+                <div className="text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>credits</div>
+                <div className="text-lg font-semibold text-white mt-2">₹{pack.price}</div>
+                {mine && (mine.plan !== 'free' || pack.key === 'test') ? (
+                  <button onClick={() => handleTopup(pack.key)} disabled={!!topupBusy}
+                    className="w-full mt-3 py-2 rounded-xl text-xs font-semibold transition-opacity"
+                    style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', opacity: topupBusy && topupBusy !== pack.key ? 0.4 : 1, cursor: topupBusy ? 'wait' : 'pointer' }}>
+                    {topupBusy === pack.key ? 'Opening…' : `Buy — ₹${pack.price}`}
+                  </button>
+                ) : (
+                  <div className="mt-3 py-2 rounded-xl text-xs font-semibold" style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.35)' }}>
+                    {session ? 'Choose a paid plan first' : 'Sign in to buy'}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <p className="text-center text-xs mt-14" style={{ color: 'rgba(255,255,255,0.35)' }}>
+          Prices include GST. See our{' '}
+          <a href="/refunds" className="underline" style={{ color: 'rgba(255,255,255,0.6)' }}>Refund and Cancellation Policy</a>,{' '}
+          <a href="/terms" className="underline" style={{ color: 'rgba(255,255,255,0.6)' }}>Terms</a> and{' '}
+          <a href="/privacy" className="underline" style={{ color: 'rgba(255,255,255,0.6)' }}>Privacy Policy</a>.
+        </p>
       </main>
     </div>
   )

@@ -52,7 +52,16 @@ export interface FoundClip {
 export type FinderMode = { kind: 'best' } | { kind: 'search'; criteria: string }
 
 /** Sends one prompt to the model and returns its raw text answer (`opts.temperature`: 0 for the same answer every time) */
-export type AskModel = (system: string, user: string, opts?: { temperature?: number }) => Promise<string>
+export type AskModel = (system: string, user: string, opts?: { temperature?: number; thinkingBudget?: number }) => Promise<string>
+
+/**
+ * Gemini's thinking (paid as output) per call, as in the worker's lib/clipFinder.ts: it was most of
+ * a search's cost (5 Nov: ~7,300 thinking tokens a window). Finding moments keeps some; capped, the
+ * picks agreed with uncapped ones as often as uncapped runs agree with each other.
+ */
+// (find 2048: the key's 'medium' thinking level, lib/gemini.ts thinkingLevel; on the 5 Nov test
+// gemini-3.5-flash-lite matched 16/24 at medium, 14/24 at low)
+export const THINKING = { find: 2048, edges: 256 }
 
 export const MIN_CLIP_MS = 15_000
 /** What the model is asked for; a clip may run on to HARD_MAX_CLIP_MS to finish its thought */
@@ -211,7 +220,7 @@ export function buildPrompt(mode: FinderMode, window: TranscriptLine[], duration
     + (taken.length ? `\nAlready made into clips (pick other moments, not these): ${taken.map(([a, b]) => `${mmss(a)}–${mmss(b)}`).join(', ')}.` : '')
 
   if (mode.kind === 'best') {
-    const system = `You are a viral short-clip detector for Reels and Shorts. From this part of a video transcript, pick up to ${perWindow} moments that would work best as standalone vertical clips. Fewer is fine if this part is weak.
+    const system = `You are a viral short-clip detector for Reels and Shorts. From this part of a video transcript, pick the ${perWindow} moments that would work best as standalone vertical clips, best first (each is scored: the app keeps only the best). Return fewer only if this part really has fewer usable moments.
 
 ${LINE_RULES}
 
@@ -341,7 +350,7 @@ ${LANGUAGE_RULES.split('\n')[0]}
 Return ONLY a JSON object, no other text: {"start_phrase":number,"end_phrase":number,"question_phrase":number or null,"question":"…" or null,"why":"what changed and why, max 12 words, in English"}`
   const user = `Clip: "${clip.title}" — ${clip.summary}\n\nTranscript:\n${shown}`
   try {
-    const text = await ask(system, user, { temperature: 0 })
+    const text = await ask(system, user, { temperature: 0, thinkingBudget: THINKING.edges })
     const m = text.match(/\{[\s\S]*\}/)
     if (!m) return { clip, why: null }
     const r = JSON.parse(m[0]) as Record<string, unknown>
@@ -464,7 +473,7 @@ export async function findClips(opts: {
   const perWindow = await mapLimit(windows, MAX_PARALLEL, async (window, i) => {
     try {
       const { system, user } = buildPrompt(opts.mode, window, opts.durationMs, opts.perWindow, opts.exclude)
-      return parseCandidates(await opts.ask(system, user), window, lines, i)
+      return parseCandidates(await opts.ask(system, user, { thinkingBudget: THINKING.find }), window, lines, i)
     } catch (e) {
       failures++
       log(`window ${i + 1}/${windows.length} failed: ${e instanceof Error ? e.message : String(e)}`)

@@ -785,6 +785,8 @@ a:hover > .brand .brand-bottom { translate: 12px 12px; }
   border-top: 1px solid var(--border);
 }
 .lp-root .footer-copy { font-size: 14px; font-weight: 600; color: var(--muted); }
+/* The speech model's credit (MODEL_CREDIT): its own line under the row */
+.lp-root .footer-credit { grid-column: 1 / -1; font-weight: 500; }
 
 /* Social buttons: a plain icon at rest; on hover a brand-coloured circle bounces
    up from below the clipped window (.social) to cover it. Faces are 50px with a

@@ -123,8 +123,10 @@ function AuthFlow({ mode, setMode, flip, google }: {
   }
   // (the nav's switch: from the code step too — back to the form, then the other tab)
   useEffect(() => { flip.current = next => { setStep('form'); switchTo(next) } })
-  async function signInNow(): Promise<boolean> {
+  /** true: signed in; false: wrong password; 'too_many': locked for a while after many wrong tries */
+  async function signInNow(): Promise<boolean | 'too_many'> {
     const res = await signIn('credentials', { email: norm(), password, redirect: false })
+    if (res?.code === 'too_many') return 'too_many'
     if (res?.error) return false
     router.push(takeNextPath())
     return true
@@ -153,8 +155,9 @@ function AuthFlow({ mode, setMode, flip, google }: {
       return
     }
     if (s === 'google') { setError(AUTH.errors.googleOnly, 'email'); return }
-    if (await signInNow()) return
-    setError(AUTH.errors.wrongPassword, 'password')
+    const signed = await signInNow()
+    if (signed === true) return
+    setError(signed === 'too_many' ? AUTH.errors.tooManyTries : AUTH.errors.wrongPassword, 'password')
   })
 
   // Create account: already one → signed in with the right password, else Sign in says so; new → the code
@@ -164,7 +167,9 @@ function AuthFlow({ mode, setMode, flip, google }: {
     if (!s) return
     if (s === 'google') { setError(AUTH.errors.googleOnly, 'email'); return }
     if (s === 'password') {
-      if (await signInNow()) return
+      const signed = await signInNow()
+      if (signed === true) return
+      if (signed === 'too_many') { setError(AUTH.errors.tooManyTries, 'password'); return }
       switchTo('signin', { error: { text: AUTH.errors.exists(norm()), at: 'password' } })
       setPassword('')
       setTimeout(() => passwordRef.current?.focus(), 50)
@@ -183,7 +188,7 @@ function AuthFlow({ mode, setMode, flip, google }: {
     const r = await fetch('/api/auth/verify-otp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: norm(), otp: code, purpose: 'signup' }) })
     const d = await r.json()
     if (!r.ok) { setError(d.error ?? AUTH.errors.badCode, 'code'); return }
-    if (await signInNow()) return
+    if ((await signInNow()) === true) return
     // (verified, but signing in failed — rare: say so, the account is ready)
     setStep('form')
     switchTo('signin', { notice: AUTH.notes.verifiedSignIn })
@@ -193,7 +198,8 @@ function AuthFlow({ mode, setMode, flip, google }: {
     setCooldown(RESEND_COOLDOWN); setError(null)
     const r = await fetch('/api/auth/verify-otp', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: norm(), purpose: 'signup' }) }).catch(() => null)
     setNotice(r?.ok ? AUTH.notes.newCodeSent(norm()) : null)
-    if (!r?.ok) setError(AUTH.errors.resendFailed)
+    // (too soon, or too many today: the server says why)
+    if (!r?.ok) { const d = r ? await r.json().catch(() => ({})) : {}; setError(r?.status === 429 && d.error ? d.error : AUTH.errors.resendFailed) }
   }
 
   const signup = mode === 'signup'

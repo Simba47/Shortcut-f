@@ -7,6 +7,8 @@ import type {
 } from '@chai-cut/shared'
 import { VideoPreview, OutputCanvas } from '@/components/editor/VideoPreview'
 import { computeCutRanges, reactionRanges, removedMs } from '@/lib/cuts'
+import { captionCredits, captionSpan } from '@/lib/credits'
+import { useCredits } from '@/lib/useCredits'
 import { SegmentTimeline } from '@/components/editor/SegmentTimeline'
 import { CaptionStyler } from '@/components/editor/CaptionStyler'
 import { TextOverlayPanel } from '@/components/editor/TextOverlayPanel'
@@ -458,11 +460,19 @@ export function EditorShellMobile({
     }
   }
 
-  /** Captions on: made now for this clip if it has none yet (nothing is captioned until asked) */
+  const { credits, refresh: refreshCredits } = useCredits()
+  /** Captions on: asks the price first, then makes them for this clip if it has none yet (nothing is captioned until asked) */
   function turnCaptions(on: boolean) {
     setShowCaptions(on)
-    const has = words.some(w => w.start_ms >= clip.start_ms && w.start_ms < clip.end_ms)
-    if (on && !has && !transcribing && !retranscribing && !isFreePlan) handleRetranscribe('unknown')
+    const span = captionSpan(clip.start_ms, clip.end_ms, words)
+    if (!on || !span || transcribing || retranscribing || isFreePlan) return
+    const price = captionCredits(span.end_ms - span.start_ms)
+    if (!credits || window.confirm(`Get captions for this clip (main video only)? ${price} credits. You have ${credits.balance}.`)) handleRetranscribe('unknown')
+  }
+  /** Regenerate reads all of the clip again */
+  function askRegenerate() {
+    const price = captionCredits(clip.end_ms - clip.start_ms)
+    if (!credits || window.confirm(`Regenerate captions? All of this clip is read again, and words you corrected are replaced. ${price} credits. You have ${credits.balance}.`)) handleRetranscribe('unknown', true)
   }
 
   // (`fresh`: Regenerate — read the clip again even where it has words; else only parts with none.
@@ -503,6 +513,7 @@ export function EditorShellMobile({
         body: JSON.stringify({ clip_id: clip.id, language_code: languageCode, ...(fresh ? { fresh: true } : {}) }),
       })
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Retranscription failed')
+      refreshCredits()
       const videoId = (clip as unknown as { video_id: string }).video_id
       const queuedAt = new Date().toISOString()
       const { job_id: jobId } = await res.json().catch(() => ({})) as { job_id?: string | null }
@@ -534,13 +545,6 @@ export function EditorShellMobile({
 
   // ── Every delete asks first ─────────────────────────────────────────────────
   const { confirm, dialog: confirmDialog } = useConfirm()
-  /** The refresh icon on Show captions: this clip's speech read again (its word edits go), once confirmed */
-  function askRegenerate() {
-    confirm({
-      title: 'Regenerate this clip’s captions?', body: 'Its speech is read again. Your word edits in this clip will be replaced.',
-      confirmLabel: 'Regenerate', tone: 'warning',
-    }, () => handleRetranscribe('unknown', true))
-  }
   function askResetPositions() {
     confirm({ title: 'Remove all crop positions except the first?', body: 'The first one will cover the whole clip.', confirmLabel: 'Remove' }, () => {
       const f = segments[0]; if (!f) return
@@ -854,7 +858,7 @@ export function EditorShellMobile({
                 <CaptionStyler
                   style={captionStyle} textCase={captionTextCase}
                   onChange={updateCaptionStyle} onTextCaseChange={setCaptionTextCase}
-                  onEditCaptions={() => {}} onRetranscribe={l => handleRetranscribe(l, lastFreshRef.current)}
+                  onEditCaptions={() => {}} onRetranscribe={l => (lastFreshRef.current ? askRegenerate() : handleRetranscribe(l, false))}
                   retranscribing={retranscribing} retranscribeElapsed={retranscribeElapsed} retranscribePlace={retranscribePlace} retranscribeError={retranscribeError}
                   hasWords={words.length > 0} hasRoman={hasRoman} romanize={romanize} romanizeLabel={scriptLabel} onRomanizeChange={setRomanize}
                 />
@@ -1081,7 +1085,7 @@ export function EditorShellMobile({
                       <CaptionStyler
                         style={captionStyle} textCase={captionTextCase}
                         onChange={updateCaptionStyle} onTextCaseChange={setCaptionTextCase}
-                        onEditCaptions={() => {}} onRetranscribe={l => handleRetranscribe(l, lastFreshRef.current)}
+                        onEditCaptions={() => {}} onRetranscribe={l => (lastFreshRef.current ? askRegenerate() : handleRetranscribe(l, false))}
                         retranscribing={retranscribing} retranscribeElapsed={retranscribeElapsed} retranscribePlace={retranscribePlace} retranscribeError={retranscribeError}
                         hasWords={words.length > 0} hasRoman={hasRoman} romanize={romanize} romanizeLabel={scriptLabel} onRomanizeChange={setRomanize}
                       />

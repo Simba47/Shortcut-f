@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyOtp, issueOtp } from '@/modules/auth/services'
+import { verifyOtp, resendOtp } from '@/modules/auth/services'
+import { clientIp } from '@/modules/auth/limits'
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,7 +12,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   } catch (err: unknown) {
     const e = err as Error & { status?: number }
-    return NextResponse.json({ error: e.message }, { status: e.status ?? 500 })
+    const status = e.status ?? 500
+    // (a server fault's own words can describe the database: they go to the log, the visitor gets a plain line)
+    if (status >= 500) console.error('[auth]', err)
+    return NextResponse.json({ error: status >= 500 ? 'Something went wrong. Please try again.' : e.message }, { status })
   }
 }
 
@@ -21,10 +25,14 @@ export async function PUT(req: NextRequest) {
     if (!email || !purpose) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
-    await issueOtp(email, purpose)
+    if (purpose !== 'signup' && purpose !== 'password_reset') return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+    await resendOtp(email, purpose, clientIp(req.headers))
     return NextResponse.json({ ok: true })
   } catch (err: unknown) {
     const e = err as Error & { status?: number }
-    return NextResponse.json({ error: e.message }, { status: e.status ?? 500 })
+    const status = e.status ?? 500
+    // (a server fault's own words can describe the database: they go to the log, the visitor gets a plain line)
+    if (status >= 500) console.error('[auth]', err)
+    return NextResponse.json({ error: status >= 500 ? 'Something went wrong. Please try again.' : e.message }, { status })
   }
 }

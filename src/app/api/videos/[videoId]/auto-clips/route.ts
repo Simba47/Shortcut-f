@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/server/auth'
 import { cancelAutoClips, confirmAutoClips, createAutoClips, getAutoClips } from '@/server/services/videos'
+import { apiError } from '@/lib/api-error'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -22,10 +23,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ vid
       captionLanguage: body?.caption_language, titleLanguage: body?.title_language,
       // 'default' (the account's default kit), 'none', or a kit's id
       brandKit: typeof body?.brand_kit === 'string' ? body.brand_kit : undefined,
+      // 'new': look for new moments instead of making more from the saved ones; pay: agreed to its credits
+      search: body?.search === 'new' ? 'new' : 'more', pay: body?.pay === true,
     }))
   } catch (err: unknown) {
-    const e = err as { message?: string; status?: number }
-    return NextResponse.json({ error: e.message ?? 'Failed' }, { status: e.status ?? 500 })
+    // (apiError keeps the 402 "this search costs N credits" details the page asks with)
+    return apiError(err)
   }
 }
 
