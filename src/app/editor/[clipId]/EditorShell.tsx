@@ -41,7 +41,6 @@ import { freezePart, restsOnSplit, splitTargets } from '@/modules/editor/split'
 import { AccountMenu, openShortcuts } from '@/components/ui/account-menu'
 import { CreditsBadge, TopUpLink } from '@/components/ui/credits-badge'
 import { friendlyError } from '@/lib/friendlyError'
-import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { BrandLogo } from '@/components/ui/brand-logo'
 import { BrandLoader } from '@/components/ui/brand-loader'
 import { SpinningBorderButton } from '@/components/ui/spinning-border-button'
@@ -6011,7 +6010,8 @@ export function EditorShell({
           aria-label={exporting ? 'Starting the export' : `Exporting, ${formatElapsed(renderElapsed)} so far`}>
           <span className="sbb-beam" aria-hidden="true" />
           <span className="sbb-surface gap-1.5 h-8 px-3.5 text-xs font-bold tabular-nums">
-            <ExportIcon /> {exporting ? 'Starting…' : `Exporting · ${formatElapsed(renderElapsed)}`}
+            {/* (user, 2026-11-13) Stop answers at once: "Stopping…" until the server confirms (it used to keep counting) */}
+            {cancelling ? <><span aria-hidden="true" className="w-3 h-3 rounded-full border-[1.5px] animate-spin shrink-0" style={{ borderColor: 'rgb(var(--ed-fg) / 0.55)', borderTopColor: 'transparent' }} /> Stopping…</> :<><ExportIcon /> {exporting ? 'Starting…' : `Exporting · ${formatElapsed(renderElapsed)}`}</>}
           </span>
         </span>
         {/* (once the export is on its way: while it starts there is nothing to stop yet) */}
@@ -6893,7 +6893,6 @@ export function EditorShell({
             </svg>
           </button>
           <CreditsBadge credits={credits} onClick={e => { e.preventDefault(); leave(() => { window.location.href = '/billing#credits' }) }} />
-          <ThemeSwitch />
           {/* Shared profile button; saves pending edits before leaving the editor */}
           <AccountMenu
             onNavigate={href => leave(() => { window.location.href = href })}

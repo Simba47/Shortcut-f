@@ -14,7 +14,6 @@ import type { Video } from '@chai-cut/shared'
 import { ACCEPTED_VIDEO_EXTENSIONS } from '@chai-cut/shared'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { AccountMenu } from '@/components/ui/account-menu'
-import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { DashSkeleton } from './DashSkeleton'
 import { FillButtonContent } from '@/components/ui/fill-button'
 import { useVideoUpload, formatBytes, uploadPace } from '@/modules/upload/useVideoUpload'
@@ -270,7 +269,6 @@ export default function DashboardPage() {
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2" /><circle cx="17.5" cy="10.5" r="2" /><circle cx="8.5" cy="7.5" r="2" /><circle cx="6.5" cy="12.5" r="2" /><path d="M12 22a10 10 0 110-20 9 9 0 019 9c0 3-2 4-4 4h-2a2 2 0 00-1 3.7A2 2 0 0112 22z" /></svg>
             <span>Brand kits</span>
           </button>
-          <ThemeSwitch />
           <AccountMenu planInfo={planInfo} />
         </div>
       </nav>

@@ -20,7 +20,6 @@ import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { AccountMenu } from '@/components/ui/account-menu'
 import { CreditsBadge, TopUpLink } from '@/components/ui/credits-badge'
 import { useConfirm } from '@/components/editor/ConfirmDialog'
-import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { openBrandKits } from '@/components/brand/brandKitsEvents'
 import { BrandLoader, BrandLoaderScreen } from '@/components/ui/brand-loader'
 import { ClipPlayer } from '@/components/clips/ClipPlayer'
@@ -2097,7 +2096,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           <span>Brand kits</span>
         </button>
         <CreditsBadge credits={credits} />
-        <ThemeSwitch />
         <AccountMenu />
       </nav>
 

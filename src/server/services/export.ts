@@ -89,24 +89,36 @@ export const RENDER_CANCELLED = 'Cancelled by the user'
  * couple of seconds and stops (queue.ts) — is cancelled, and the clip goes back to how it was before:
  * its last export if it has one, else a draft. Both in one go, so the worker never sees one without
  * the other. A render still to come after its captions (render_after) isn't queued (transcribe.ts).
+ *
+ * (user, 2026-11-13: Stop took 4–5 s) One statement, so one trip to the database: the clip is read with
+ * its owner, and — only when it's the user's — put back and its job cancelled, all at once (a single
+ * statement is atomic, as the transaction was). It was a read, then BEGIN, two updates and COMMIT: five
+ * trips of ~0.3 s each from far away, the database work itself well under a millisecond.
  */
 export async function cancelRender(userId: string, clipId: string): Promise<{ status: string; output_storage_path: string | null }> {
   const [row] = await sql`
-    SELECT c.status, c.output_storage_path, v.user_id FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.id = ${clipId}
-  `
-  if (!row) throw Object.assign(new Error('Clip not found'), { status: 404 })
-  if (row.user_id !== userId) throw Object.assign(new Error('Forbidden'), { status: 403 })
-  const done = await sql.begin(async tx => {
-    const [clip] = await tx`
+    WITH c AS (
+      SELECT c.id, c.status, c.output_storage_path, v.user_id = ${userId} AS mine
+      FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.id = ${clipId}
+    ), put_back AS (
       UPDATE clips SET status = CASE WHEN output_storage_path IS NOT NULL THEN 'done' ELSE 'draft' END
-      WHERE id = ${clipId} AND status = 'rendering' RETURNING status, output_storage_path
-    `
-    await tx`
+      WHERE id IN (SELECT id FROM c WHERE mine) AND status = 'rendering'
+      RETURNING status, output_storage_path
+    ), stopped AS (
       UPDATE jobs SET status = 'failed', error = ${RENDER_CANCELLED}
       WHERE type = 'render' AND payload->>'clip_id' = ${clipId} AND status IN ('queued', 'processing')
-    `
-    return clip
-  })
+        AND EXISTS (SELECT 1 FROM c WHERE mine)
+      RETURNING id
+    )
+    SELECT c.mine, c.status, c.output_storage_path,
+      p.status AS new_status, p.output_storage_path AS new_output_storage_path,
+      (SELECT count(*) FROM stopped)::int AS jobs_stopped
+    FROM c LEFT JOIN put_back p ON true
+  `
+  if (!row) throw Object.assign(new Error('Clip not found'), { status: 404 })
+  if (!row.mine) throw Object.assign(new Error('Forbidden'), { status: 403 })
   // (not exporting any more: finished or failed meanwhile — as it is now)
-  return done ? { status: done.status, output_storage_path: done.output_storage_path } : { status: row.status, output_storage_path: row.output_storage_path }
+  return row.new_status
+    ? { status: row.new_status, output_storage_path: row.new_output_storage_path }
+    : { status: row.status, output_storage_path: row.output_storage_path }
 }

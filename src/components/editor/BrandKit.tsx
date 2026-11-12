@@ -504,13 +504,13 @@ const STEPS: Array<{ id: StepId; name: string }> = [
   { id: 'style', name: 'Text & captions' },
 ]
 
-/** The Brand kit's Next / Done: lime, a dark dot that fills it on hover, the label back in lime with an arrow */
-const KIT_NEXT_BTN = 'w-auto h-9 px-5 py-0 rounded-lg border-0 bg-[#c8ff00] text-[#0a0a0a] text-xs font-bold [&_svg]:size-3.5'
-// (the dot waits in the left padding, not over the label: these buttons are wider than the component's own)
-const KIT_NEXT_FILL = 'left-[7px] top-[calc(50%-4px)] bg-[#0a0a0a] group-hover:bg-[#0a0a0a]'
-// (pinned to the left edge: without it the layer started where the label ends, so the label and arrow
-// were pushed right and the arrow cut off — user, 2026-10-31)
-const KIT_NEXT_HOVER_TEXT = 'left-0 text-[#c8ff00]'
+/** The Brand kit's Next / Done: lime with a small dark dot; on hover a dark circle covers it and the label stays
+    put in lime with an arrow (user, 2026-11-13: the button rebuilt — components/ui/interactive-hover-button.tsx) */
+// (its own background turns dark too once the circle has covered it, so no lime hairline shows round the corners)
+const KIT_NEXT_BTN = 'h-9 px-5 rounded-lg bg-[#c8ff00] text-[#0a0a0a] text-xs font-bold transition-[background-color] duration-100 enabled:hover:bg-[#0a0a0a] enabled:hover:delay-300 enabled:focus-visible:bg-[#0a0a0a] enabled:focus-visible:delay-300'
+// (a faint light edge, so the dark button still reads against the dark window)
+const KIT_NEXT_FILL = 'bg-[#0a0a0a] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.14)]'
+const KIT_NEXT_HOVER_TEXT = 'text-[#c8ff00]'
 
 export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onClose, closeLabel = 'Back to the video', clipMock = true }: Partial<BrandSwitchProps> & {
   brand: BrandKits; onClose: () => void

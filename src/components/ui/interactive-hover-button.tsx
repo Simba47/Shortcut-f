@@ -3,18 +3,23 @@ import { ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * A button whose label slides out on hover while a dot grows to fill it and the label comes back in
- * with an arrow (from 21st.dev's "interactive hover button"). Used by the Brand kit's Next / Done
- * (user, 2026-10-31). The app has no shadcn colour tokens (primary, background), so the colours can be
- * passed in: `fillClassName` for the dot that fills it, `hoverTextClassName` for the label shown over the
- * fill. The defaults are shadcn's.
+ * A button that fills on hover: at rest its label with a small dot before it; pointed at (or focused from
+ * the keyboard) a circle grows from the middle and covers the whole button, the label stays exactly where it
+ * was in the fill's colours and an arrow slides in after it. (Idea from 21st.dev's "interactive hover
+ * button"; used by the Brand kit's Save & next / Save & finish — user, 2026-10-31.)
+ *
+ * (user, 2026-11-13: rebuilt — the old one scaled a rounded square, which left the button's colour showing in
+ * the corners, and slid two different labels 48 px across each other, so the words jumped.) Both layers lay
+ * out the same three slots — dot · label · arrow — with the one they don't show kept invisible, so the label
+ * never moves. Styles: .ihb in globals.css. `fillClassName` colours the fill, `hoverTextClassName` the label
+ * and arrow on it.
  */
 interface InteractiveHoverButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   text?: string;
-  /** The dot that grows to fill the button on hover */
+  /** The fill that covers the button on hover (its background colour) */
   fillClassName?: string;
-  /** The label and arrow shown over the fill */
+  /** The label and arrow shown on the fill (their colour) */
   hoverTextClassName?: string;
 }
 
@@ -22,23 +27,26 @@ const InteractiveHoverButton = React.forwardRef<
   HTMLButtonElement,
   InteractiveHoverButtonProps
 >(({ text = "Button", className, fillClassName, hoverTextClassName, ...props }, ref) => {
+  const slots = (dot: boolean, arrow: boolean) => (
+    <span className="ihb-row">
+      <span className="ihb-dot" style={dot ? undefined : { visibility: "hidden" }} />
+      <span>{text}</span>
+      <ArrowRight className="ihb-arrow" style={arrow ? undefined : { visibility: "hidden" }} aria-hidden />
+    </span>
+  );
   return (
     <button
       ref={ref}
       className={cn(
-        "group relative w-32 cursor-pointer overflow-hidden rounded-full border bg-background p-2 text-center font-semibold",
+        "ihb group relative inline-flex cursor-pointer items-center justify-center overflow-hidden rounded-full font-semibold",
         className,
       )}
       {...props}
     >
-      <span className="inline-block translate-x-1 transition-all duration-300 group-hover:translate-x-12 group-hover:opacity-0">
-        {text}
+      {slots(true, false)}
+      <span aria-hidden className={cn("ihb-fill", fillClassName, hoverTextClassName)}>
+        {slots(false, true)}
       </span>
-      <div className={cn("absolute top-0 z-10 flex h-full w-full translate-x-12 items-center justify-center gap-2 text-primary-foreground opacity-0 transition-all duration-300 group-hover:-translate-x-1 group-hover:opacity-100", hoverTextClassName)}>
-        <span>{text}</span>
-        <ArrowRight />
-      </div>
-      <div className={cn("absolute left-[20%] top-[40%] h-2 w-2 scale-[1] rounded-lg bg-primary transition-all duration-300 group-hover:left-[0%] group-hover:top-[0%] group-hover:h-full group-hover:w-full group-hover:scale-[1.8] group-hover:bg-primary", fillClassName)}></div>
     </button>
   );
 });

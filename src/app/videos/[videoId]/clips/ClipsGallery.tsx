@@ -7,7 +7,6 @@ import type { CaptionStyle, Overlay, SegmentLocal, TextOverlay, TranscriptWord }
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { BrandLoaderScreen } from '@/components/ui/brand-loader'
 import { AccountMenu } from '@/components/ui/account-menu'
-import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { ClipPlayer } from '@/components/clips/ClipPlayer'
 import { PostText } from '@/components/clips/PostText'
 import { FilterChip } from '@/components/ui/filter-chip'
@@ -170,7 +169,6 @@ export function ClipsGallery({ video, videoUrl, needsProxy, stockUrls, job, clip
           { label: 'AI edits' },
         ]} />
         <div className="flex-1" />
-        <ThemeSwitch />
         <AccountMenu />
       </nav>
 

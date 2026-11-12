@@ -2089,6 +2089,9 @@ body {
 .st-tile-ico[data-lime] { color: #C8FF00; background: rgba(200,255,0,0.1); }
 .st-tile-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: rgba(244,244,245,0.4); }
 .st-tile-value { display: block; margin-top: 1px; font-size: 13.5px; font-weight: 600; color: rgba(244,244,245,0.92); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the Plan tile's links, under its name: one row that wraps when the tile is narrow */
+.st-tile-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; }
+.st-tile-links .st-link { flex-shrink: 1; min-width: 0; }
 @media (max-width: 640px) {
   .st-tiles { grid-template-columns: 1fr; }
   .st-hero { padding: 22px 18px 18px; }
@@ -4871,3 +4874,23 @@ html[data-theme="light"] .sp-mode-pill { background: linear-gradient(135deg, rgb
 /* A clip's download that didn't work: why, under its time (ClipPickerShell .cb-dl-error, user 2026-11-12) */
 .cb-dl-error { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 11px; line-height: 1.4; color: #f87171; cursor: default; }
 .cb-dl-error .credits-topup { font-weight: 700; }
+
+/* The fill-on-hover button (components/ui/interactive-hover-button.tsx — Brand kit's Save & next; user,
+   2026-11-13): at rest dot · label; pointed at or keyboard-focused, a circle grows from the middle and covers
+   the whole button (clip-path: no corners left showing), the label stays put and an arrow slides in. Nothing
+   while it's disabled (Saving…); an instant swap for reduced motion. */
+.ihb { isolation: isolate; }
+.ihb-row { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.ihb-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.ihb-arrow { flex-shrink: 0; width: 14px; height: 14px; }
+.ihb-fill {
+  position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center;
+  clip-path: circle(0% at 50% 50%); transition: clip-path .45s cubic-bezier(.22, .8, .25, 1);
+}
+.ihb-fill .ihb-arrow { transform: translateX(-5px); opacity: 0; transition: transform .35s .08s cubic-bezier(.22, .8, .25, 1), opacity .25s .08s; }
+.ihb:is(:hover, :focus-visible):not(:disabled) .ihb-fill { clip-path: circle(75% at 50% 50%); }
+.ihb:is(:hover, :focus-visible):not(:disabled) .ihb-fill .ihb-arrow { transform: none; opacity: 1; }
+.ihb:focus-visible { outline: 2px solid #c8ff00; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .ihb-fill, .ihb-fill .ihb-arrow { transition: none; }
+}
