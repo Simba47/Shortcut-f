@@ -55,7 +55,7 @@ test('what a credit buys does not call AI features free without limits', () => {
   assert.match(text, /5 credits per 10 minutes/)       // a search past the free one
   assert.match(text, /15 credits per 10 minutes/)      // reading
   assert.match(text, /7 credits per Ask AI search/)
-  assert.match(text, /5 credits per AI clip/)
+  assert.match(text, /6 credits per AI clip/)
   assert.match(text, /2 credits per clip minute/)
   assert.match(text, /Subjects/)                       // charged like captions
   assert.match(text, /per started hour/)               // Ask AI on a long video
