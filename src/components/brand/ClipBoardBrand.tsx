@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  */
 
 interface KitLite { id: string; name: string; isDefault: boolean; main: string; accent: string }
-/** "None" in the kit picker (user, 2026-11-10): the bar's button then takes the brand off */
+/** "Off" in the kit picker (user, 2026-11-10; "None" until 2026-11-12, and picked first since then): the bar's button then takes the brand off */
 const NO_KIT = 'none'
 
 export interface ClipBrands {
@@ -63,7 +63,8 @@ export function useClipBrands(videoId: string, clipIds: string[], onChanged?: (c
       .then(d => {
         const ks = d.kits.map(k => ({ id: k.id, name: k.name, isDefault: !!k.data.is_default, main: k.data.colors.main, accent: k.data.colors.accent }))
         setKits(ks)
-        setPick(p => (p === NO_KIT || ks.some(k => k.id === p) ? p : (ks.find(k => k.isDefault) ?? ks[0])?.id ?? ''))
+        // (user, 2026-11-12) Off until a kit is picked — not the default kit by itself; a kit picked stays picked
+        setPick(p => (p === NO_KIT || ks.some(k => k.id === p) ? p : NO_KIT))
       }).catch(() => { /* no kits shown */ })
   }, [kitsRead])
   useEffect(() => { loadClips() }, [loadClips, clipsKey])
@@ -129,7 +130,7 @@ const Dots = ({ k }: { k: Pick<KitLite, 'main' | 'accent'> }) => (
 
 /**
  * Which kit (user, 2026-10-28: a designed menu, not the browser's own list): the picked kit's colours and
- * name; open, None first, then each kit with its colours, Default marked, the picked one ticked. ↑ / ↓,
+ * name; open, Off first, then each kit with its colours, Default marked, the picked one ticked. ↑ / ↓,
  * Enter, Esc; a click outside closes it.
  */
 function KitPick({ kits, value, onChange, disabled }: { kits: KitLite[]; value: string; onChange: (id: string) => void; disabled?: boolean }) {
@@ -159,9 +160,9 @@ function KitPick({ kits, value, onChange, disabled }: { kits: KitLite[]; value: 
         else if (e.key === 'Tab') setOpen(false)
       }}>
       <button ref={btn} type="button" className="cbb-pick-btn" disabled={disabled} aria-haspopup="listbox" aria-expanded={open}
-        aria-label={`The brand kit to put on the clips: ${cur?.name ?? 'none'}`} onClick={() => (open ? setOpen(false) : show())}>
+        aria-label={`The brand kit to put on the clips: ${cur?.name ?? 'off'}`} onClick={() => (open ? setOpen(false) : show())}>
         {cur && <Dots k={cur} />}
-        <span className="cbb-pick-name">{cur?.name ?? 'None'}</span>
+        <span className="cbb-pick-name">{cur?.name ?? 'Off'}</span>
         {cur?.isDefault && <span className="cbb-pick-def">Default</span>}
         <svg className="cbb-pick-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
@@ -171,7 +172,7 @@ function KitPick({ kits, value, onChange, disabled }: { kits: KitLite[]; value: 
             onMouseEnter={() => setActive(0)} onClick={() => pick(NO_KIT)}>
             {/* (empty dots: the name lines up with the kits' names) */}
             <span style={{ visibility: 'hidden' }}><Dots k={{ main: '', accent: '' }} /></span>
-            <span className="cbb-pick-name">None</span>
+            <span className="cbb-pick-name">Off</span>
             {value === NO_KIT && tick}
           </li>
           {kits.map((k, i) => (
@@ -235,7 +236,7 @@ export function BrandAllBar({ b, total, selected = [] }: { b: ClipBrands; total:
           title={none ? 'Take the brand off, putting back what it changed'
             : some ? `Put ${kit?.name ?? 'this kit'} on the ${selected.length} clip${selected.length === 1 ? '' : 's'} you ticked`
             : allOn ? 'Put it on again: a clip whose kit changed gets the newest version' : `Put ${kit?.name ?? 'this kit'} on all ${total} clips`}>
-          {b.busy === 'all' ? 'Working…' : `${none ? 'Take off' : 'Put on'} ${some ? `${selected.length} selected` : `all ${total}`}`}
+          {b.busy === 'all' ? 'Working…' : `${none ? 'Turn off on' : 'Put on'} ${some ? `${selected.length} selected` : `all ${total}`}`}
         </button>
       </div>
       {b.note && <span role={b.note.bad ? 'alert' : 'status'} className="cbb-note text-[10.5px]" style={{ color: b.note.bad ? '#f87171' : '#c8ff00' }}>{b.note.text}</span>}

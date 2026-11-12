@@ -38,8 +38,9 @@ import { shownSegment, addedVideoBox, isGapPart, isMainShot, STAND_IN_SUFFIX } f
 import { placeInRow, liftToRow, lowerToRow, liftBlock, fillUncovered } from '@/modules/editor/place'
 import { frameOffMedia, frameOnMedia, mediaForFrame, type RowMedia } from '@/modules/editor/frameOnMedia'
 import { freezePart, restsOnSplit, splitTargets } from '@/modules/editor/split'
-import { AccountMenu } from '@/components/ui/account-menu'
+import { AccountMenu, openShortcuts } from '@/components/ui/account-menu'
 import { CreditsBadge, TopUpLink } from '@/components/ui/credits-badge'
+import { friendlyError } from '@/lib/friendlyError'
 import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { BrandLogo } from '@/components/ui/brand-logo'
 import { BrandLoader } from '@/components/ui/brand-loader'
@@ -205,7 +206,7 @@ const TOOLS: { id: Tool; label: string; title: string; hint: string; icon: React
     icon: <><rect x="2.5" y="5" width="19" height="14" rx="3" stroke="currentColor" strokeWidth="1.8" fill="none" /><path d="M10 10.2a2.2 2.2 0 100 3.6M17 10.2a2.2 2.2 0 100 3.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" /></>,
   },
   {
-    id: 'transitions', label: 'Transition', title: 'Transitions',
+    id: 'transitions', label: 'Transitions', title: 'Transitions',
     hint: 'How one part of the clip gives way to the next: a dissolve, a slide, a wipe… Pick one for each join; it plays in the preview and the export.',
     icon: <><rect x="2.5" y="5" width="8" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" fill="none" /><rect x="13.5" y="5" width="8" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" fill="none" strokeDasharray="2.4 2" /><path d="M8.5 12h7M13.5 9.5L16 12l-2.5 2.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" /></>,
   },
@@ -824,6 +825,24 @@ export function EditorShell({
   const [pendingBrollMs, setPendingBrollMs] = useState<number | null>(null)
   const [clipStatus, setClipStatus] = useState<string>(clip.status)
   const [outputUrl, setOutputUrl] = useState<string | null>(clip.output_url)
+  // Edited since the last export (user, 2026-11-12: Download gave the old file, without the latest edits, and
+  // nothing said so). Any edit sets it; an export that starts clears it (back if that export fails or is
+  // cancelled). Kept with the clip (clips.layers.editedSinceExport), so it's still true when the clip is opened again
+  const [editedSinceExport, setEditedSinceExportState] = useState(
+    () => (savedClip as unknown as { layers?: { editedSinceExport?: unknown } | null }).layers?.editedSinceExport === true)
+  const editedSinceExportRef = useRef(editedSinceExport)
+  const setEditedSinceExport = (on: boolean) => { editedSinceExportRef.current = on; setEditedSinceExportState(on) }
+  /** An edit was made: the last export (if any) no longer has it */
+  function noteEdited() { if (!editedSinceExportRef.current) setEditedSinceExport(true) }
+  // (the state before an export started: put back if that export fails or is cancelled)
+  const staleBeforeExportRef = useRef(false)
+  const restoreStaleAfterExport = () => {
+    if (staleBeforeExportRef.current && !editedSinceExportRef.current) {
+      setEditedSinceExport(true)
+      unsavedRef.current = true
+      latestHandleSaveRef.current()
+    }
+  }
   const [exporting, setExporting] = useState(false)
   // Remove pauses and filler words (the cut is made by the export; see src/lib/cuts.ts)
   const [removeFillers, setRemoveFillersState] = useState(!!(clip as Clip & { remove_fillers?: boolean }).remove_fillers)
@@ -833,7 +852,11 @@ export function EditorShell({
     const c = clip as Clip & { title?: string | null; post_caption?: string | null; hashtags?: string[] | null }
     return { title: c.title ?? null, post_caption: c.post_caption ?? null, hashtags: c.hashtags ?? null }
   })
-  const [exportError, setExportError] = useState<string | null>(null)
+  // The export's problem (user, 2026-11-12): what failed (title), why in plain words (detail: friendlyError —
+  // never the server's raw text) and what Try again does
+  const [exportError, setExportErrorState] = useState<{ title: string; detail: string; retry: 'export' | 'cancel' } | null>(null)
+  const setExportError = (title: string | null, e?: unknown, retry: 'export' | 'cancel' = 'export') =>
+    setExportErrorState(title ? { title, detail: friendlyError(e), retry } : null)
   // What exports have always been rendered at (the worker ignored the 2160p asked for here)
   const renderQuality = '1080p' as const
   const [renderStuckSince, setRenderStuckSince] = useState<number | null>(clip.status === 'rendering' ? Date.now() : null)
@@ -900,6 +923,7 @@ export function EditorShell({
     if (originalLoadedRef.current) { originalLoadedRef.current = false; return }
     // A change is saved like any other edit (2.5 s later)
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    noteEdited()
     unsavedRef.current = true
     editVersionRef.current++
     autoSaveTimerRef.current = setTimeout(() => latestHandleSaveRef.current(), 2500)
@@ -1126,8 +1150,10 @@ export function EditorShell({
   const [exportPress, setExportPress] = useState(false)
   function pressExport() {
     if (exportPress) return
+    // (user, 2026-11-12) the export starts at once; the press animation plays alongside, never before it
     setExportPress(true)
-    setTimeout(() => { setExportPress(false); requestExport() }, 750)
+    requestExport()
+    setTimeout(() => setExportPress(false), 750)
   }
   // Click counters that replay each toolbar button's own animation (keys remount the icon)
   const [formatPlay, setFormatPlay] = useState<{ id: LayoutType; n: number } | null>(null)
@@ -1362,7 +1388,7 @@ export function EditorShell({
         fetch(`/api/transcribe/words?video_id=${videoId}`).then(r => r.ok ? r.json() : null)
           .then(d => { if (d?.words?.length) setWords(d.words) }).catch(() => {})
       }
-      if (data.status === 'failed') setExportError('Render failed. Try exporting again.')
+      if (data.status === 'failed') { setExportError('The export didn’t finish'); restoreStaleAfterExport() }
       if (data.status !== 'rendering') clearInterval(poll)
     }, 3000)
     return () => { clearInterval(poll); clearInterval(tick) }
@@ -1377,6 +1403,7 @@ export function EditorShell({
       editedSinceLoadRef.current = true
     }
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    noteEdited()
     unsavedRef.current = true
     editVersionRef.current++
     autoSaveTimerRef.current = setTimeout(() => latestHandleSaveRef.current(), 2500)
@@ -1498,8 +1525,9 @@ export function EditorShell({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           segments: saved.rows,
-          layers: withGroupsSaved(withCaptionParts(withLanes(saved.layers, [...overlays, ...textOverlays, ...audioTracks], belowRowsRef.current), useCaptionStore.getState().captionParts),
+          layers: withExportMark(withGroupsSaved(withCaptionParts(withLanes(saved.layers, [...overlays, ...textOverlays, ...audioTracks], belowRowsRef.current), useCaptionStore.getState().captionParts),
             cleanGroups(useGroupStore.getState().groups, id => editor.segments.some(s => s.id === id) || [...overlays, ...textOverlays, ...audioTracks].some(x => x.id === id))),
+            editedSinceExportRef.current),
           captionStyle, textOverlays, audioTracks, transitions, filters,
           // A photo on a higher track is drawn over one on a lower track (the export orders photos by z_index)
           overlays: overlays.map(o => (o.type === 'image' && o.track != null ? { ...o, z_index: o.track + 1 } : o)),
@@ -1558,6 +1586,30 @@ export function EditorShell({
     }
   }, [])
 
+  // ── Never lose an edit (user, 2026-11-12) ──
+  // Closing the tab, reloading or the browser's Back while something isn't saved yet (the 2.5 s wait, a save
+  // on its way, offline and retrying, a refused save): the browser's own "Leave site?" asks first. Nothing
+  // unsaved: no question. And a tab put away (another tab, the window minimised) saves at once, without the wait.
+  // (Leaving by the editor's own links saves first: leave() below.)
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!unsavedRef.current) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    const onHidden = () => {
+      if (document.visibilityState !== 'hidden' || !unsavedRef.current) return
+      if (autoSaveTimerRef.current) { clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = null }
+      latestHandleSaveRef.current()
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    document.addEventListener('visibilitychange', onHidden)
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload)
+      document.removeEventListener('visibilitychange', onHidden)
+    }
+  }, [])
+
   // Leaving the editor: flush a pending auto-save first so the last edit isn't lost
   const [leaving, setLeaving] = useState(false)
   async function leaveTo(e: React.MouseEvent<HTMLAnchorElement>, href: string) {
@@ -1578,6 +1630,9 @@ export function EditorShell({
   // retranscribe: Re-render also regenerates captions (Gemini) before rendering
   async function handleExport(retranscribe = false) {
     setExporting(true); setExportError(null)
+    // This export will have every edit made so far (saved first, below): not "edited since" any more
+    staleBeforeExportRef.current = editedSinceExportRef.current
+    setEditedSinceExport(false)
     try {
       await handleSave()
       // Rendering now would export the previous version and silently drop the latest edits
@@ -1586,11 +1641,12 @@ export function EditorShell({
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clip_id: clip.id, quality: renderQuality, retranscribe, remove_fillers: removeFillersRef.current }),
       })
-      if (!res.ok) throw new Error((await res.json()).error ?? 'Export failed')
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? '')
       refreshWordsOnDoneRef.current = retranscribe
       setClipStatus('rendering')
     } catch (err) {
-      setExportError(err instanceof Error ? err.message : 'Export failed')
+      setExportError('Couldn’t export your reel', err)
+      restoreStaleAfterExport()
     } finally {
       setExporting(false)
     }
@@ -1609,11 +1665,13 @@ export function EditorShell({
     try {
       const res = await fetch(`/api/clips/${clip.id}/cancel-export`, { method: 'POST' })
       const d = await res.json().catch(() => null) as { status?: string; output_url?: string | null; error?: string } | null
-      if (!res.ok || !d?.status) throw new Error(d?.error ?? 'Couldn’t cancel the export. Try again.')
+      if (!res.ok || !d?.status) throw new Error(d?.error ?? '')
       refreshWordsOnDoneRef.current = false
       setClipStatus(d.status); setOutputUrl(d.output_url ?? null); setRenderStuckSince(null); setRenderElapsed(0)
+      // (the last export is back as it was: it still doesn't have the edits it didn't have before)
+      restoreStaleAfterExport()
     } catch (err) {
-      setExportError(err instanceof Error ? err.message : 'Couldn’t cancel the export. Try again.')
+      setExportError('Couldn’t cancel the export', err, 'cancel')
     } finally {
       setCancelling(false)
     }
@@ -1639,6 +1697,13 @@ export function EditorShell({
   function changeWord(id: string, text: string) {
     const field = romanize ? 'word_roman' : 'word'
     updateWord(id, text, field)
+    // (a corrected word is in the next export, not the last one: the flag is saved with the clip's next save)
+    if (!editedSinceExportRef.current) {
+      setEditedSinceExport(true)
+      unsavedRef.current = true
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+      autoSaveTimerRef.current = setTimeout(() => latestHandleSaveRef.current(), 2500)
+    }
     fetch('/api/transcribe/words', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, field, text }) })
       .then(r => { if (!r.ok) throw new Error(String(r.status)) })
       .catch(() => notifyLocked('That caption correction wasn’t saved. Check your connection and type it again.'))
@@ -1650,14 +1715,14 @@ export function EditorShell({
     await handleSave()
     handleRetranscribe('unknown')
   }
-  /** Captions on or off. Nothing is read until Get CC is pressed: it costs credits, so the price comes first */
+  /** Captions on or off. Nothing is read until Get captions is pressed: it costs credits, so the price comes first */
   function turnCaptions(on: boolean) {
     setShowCaptions(on)
   }
   const { credits, refresh: refreshCredits } = useCredits()
   // An export taken, finished, cancelled or failed (which gives its credits back): the balance follows
   useEffect(() => { refreshCredits() }, [clipStatus, refreshCredits])
-  /** The part of the clip Get CC reads, and its price: the server works it out the same way (captionSpan) */
+  /** The part of the clip Get captions reads, and its price: the server works it out the same way (captionSpan) */
   function captionQuote() {
     const kept = trim.kept
     const start = kept[0]?.[0] ?? clip.start_ms, end = kept[kept.length - 1]?.[1] ?? clip.end_ms
@@ -1672,7 +1737,7 @@ export function EditorShell({
     confirm({
       title: `Get captions for ${q.credits} credits?`,
       body: `This needs the clip's captions first, from its main video. You have ${credits.balance} credits.`,
-      confirmLabel: 'Get CC', cancelLabel: 'Not now', onCancel: notNow, tone: 'warning',
+      confirmLabel: 'Get captions', cancelLabel: 'Not now', onCancel: notNow, tone: 'warning',
     }, go)
   }
   /** Regenerate reads all of the clip again, words or no words */
@@ -5890,6 +5955,120 @@ export function EditorShell({
 
   const rendering = clipStatus === 'rendering' || exporting
   const hasOutput = !!outputUrl && clipStatus === 'done'
+
+  // ── "Your reel is ready" (user, 2026-11-12) ──
+  // An export that finishes says so: a small note slides up at the bottom, stays 5 s (longer while it's pointed
+  // at or focused) and fades away by itself — never in the way. In another tab when it finished: the tab's
+  // name says "✓ Ready" until the user comes back, and the note's 5 s start only then, so it's seen.
+  const [readyNote, setReadyNote] = useState<'in' | 'out' | null>(null)
+  const readyHoldRef = useRef(false)
+  const readyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prevClipStatusRef = useRef(clipStatus)
+  const hideReadyNote = () => {
+    if (readyTimerRef.current) clearTimeout(readyTimerRef.current)
+    setReadyNote(n => (n ? 'out' : n))
+    readyTimerRef.current = setTimeout(() => setReadyNote(null), 260)
+  }
+  const scheduleReadyHide = (ms: number) => {
+    if (readyTimerRef.current) clearTimeout(readyTimerRef.current)
+    readyTimerRef.current = setTimeout(() => { if (!readyHoldRef.current) hideReadyNote() }, ms)
+  }
+  useEffect(() => {
+    const was = prevClipStatusRef.current
+    prevClipStatusRef.current = clipStatus
+    // (a new export starting: the old note goes)
+    if (clipStatus === 'rendering') { if (readyTimerRef.current) clearTimeout(readyTimerRef.current); setReadyNote(null); return }
+    if (was !== 'rendering' || clipStatus !== 'done') return
+    readyHoldRef.current = false
+    setReadyNote('in')
+    if (document.visibilityState === 'visible') { scheduleReadyHide(5000); return }
+    // In another tab: the tab's name says so, and the note waits for the user to come back
+    const title = document.title
+    document.title = `✓ Ready · ${title}`
+    const back = () => {
+      if (document.visibilityState !== 'visible') return
+      document.title = title
+      document.removeEventListener('visibilitychange', back)
+      scheduleReadyHide(5000)
+    }
+    document.addEventListener('visibilitychange', back)
+    return () => { document.removeEventListener('visibilitychange', back); document.title = title }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clipStatus])
+  useEffect(() => () => { if (readyTimerRef.current) clearTimeout(readyTimerRef.current) }, [])
+
+  // The export, always in the top bar's right end (user, 2026-11-12: it was in the preview column, gone when
+  // that was closed). One place that says how things are: Export · Exporting (Cancel) · Download · Export again
+  const exportOutdated = hasOutput && editedSinceExport
+  const exportPrice = credits && clipLengthMs <= MAX_CLIP_MS ? ` · ${exportCredits(clipLengthMs)} credit${exportCredits(clipLengthMs) === 1 ? '' : 's'}` : ''
+  const exportControls = (
+    <div data-tour="export" className="flex items-center gap-1.5 shrink-0">
+      {rendering ? (
+        // While the reel renders, the Export button stays and keeps playing its download animation on a loop
+        // (.ed-export[data-busy] in globals.css) until it's done; beside it, Cancel stops the export
+        <>
+        <span className="sbb ed-export" data-busy role="status"
+          aria-label={exporting ? 'Starting the export' : `Exporting, ${formatElapsed(renderElapsed)} so far`}>
+          <span className="sbb-beam" aria-hidden="true" />
+          <span className="sbb-surface gap-1.5 h-8 px-3.5 text-xs font-bold tabular-nums">
+            <ExportIcon /> {exporting ? 'Starting…' : `Exporting · ${formatElapsed(renderElapsed)}`}
+          </span>
+        </span>
+        {/* (once the export is on its way: while it starts there is nothing to stop yet) */}
+        {clipStatus === 'rendering' && (
+          <button onClick={cancelExport} disabled={cancelling} aria-label="Cancel the export" data-tip="Cancel the export" data-tip-below data-tip-end
+            className="ed-tip w-8 h-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-60"
+            style={{ color: '#f87171', background: 'rgba(239,68,68,0.12)', boxShadow: 'inset 0 0 0 1px rgba(239,68,68,0.25)' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        )}
+        </>
+      ) : exportOutdated ? (
+        // Edited since the export: export again is the thing to do; the old file stays one quiet click away
+        <>
+          <a href={`/api/clips/${clip.id}/download`} download aria-label="Download the older version, without your latest edits"
+            data-tip="Older version, without your latest edits" data-tip-below
+            className="ed-tip flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[11.5px] font-semibold transition-colors hover:bg-[rgb(var(--ed-fg)/0.08)]"
+            style={{ color: 'rgb(var(--ed-fg) / 0.7)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }}>
+            <DownloadIcon /> Old version
+          </a>
+          <SpinningBorderButton onClick={askRender} aria-label="Export again with your latest edits"
+            className="ed-export rounded-[10px]" surfaceClassName="gap-1.5 h-8 px-3.5 text-xs font-bold">
+            <ExportIcon /> Export again{exportPrice}
+          </SpinningBorderButton>
+        </>
+      ) : hasOutput ? (
+        <>
+          {/* (with the captions as they are: read again only where part of the clip has none — it was
+              made longer. Reading the whole clip again every time changed its words from the ones
+              in the preview and threw corrections away: user, 2026-11-04) */}
+          <button onClick={askRender} aria-label="Export again" data-tip="Export again" data-tip-below
+            className="ed-tip w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
+            style={{ color: 'rgb(var(--ed-fg) / 0.75)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7" />
+            </svg>
+          </button>
+          <a href={`/api/clips/${clip.id}/download`} download aria-label="Download your reel"
+            className="flex items-center gap-1.5 h-8 px-3.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-90"
+            style={{ background: ACCENT, color: '#000' }}>
+            <DownloadIcon /> Download
+          </a>
+        </>
+      ) : (
+        // Lime button with a light spinning round its border on hover (SpinningBorderButton);
+        // clicking plays the download animation (.ed-export) before the render starts
+        <SpinningBorderButton onClick={pressExport}
+          aria-label="Export your reel"
+          aria-busy={exportPress || undefined}
+          data-pressed={exportPress || undefined}
+          className="ed-export rounded-[10px]"
+          surfaceClassName="gap-1.5 h-8 px-3.5 text-xs font-bold">
+          <ExportIcon /> Export{exportPrice}
+        </SpinningBorderButton>
+      )}
+    </div>
+  )
   // ── Captions on demand (Post and Cleanup work from the clip's words) ──────────
   // A clip without captions gets them made (as the Captions tool does, not shown on the video);
   // this waits for them. Rejects with what to tell the user when they can't be made.
@@ -6066,6 +6245,7 @@ export function EditorShell({
     if (on && (hasInserts || hasFreeze)) { notifyLocked(hasFreeze ? 'Remove pauses can\u2019t be used with a freeze (yet)' : 'Remove pauses can\u2019t be used with a video put in between (yet)'); return }
     setRemoveFillersState(on)
     removeFillersRef.current = on
+    noteEdited()
     unsavedRef.current = true
     editVersionRef.current++
     latestHandleSaveRef.current()
@@ -6265,6 +6445,12 @@ export function EditorShell({
   /** One caption style for the whole clip again: the first part's */
   function oneCaptionStyle() {
     useCaptionStore.getState().setCaptionParts([])
+    // (the parts aren't among what starts an auto-save: saved like any other edit, so it isn't lost — 2026-11-12)
+    noteEdited()
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    unsavedRef.current = true
+    editVersionRef.current++
+    autoSaveTimerRef.current = setTimeout(() => latestHandleSaveRef.current(), 2500)
   }
 
   // ── Hide / mute / lock ──────────────────────────────────────────────────────
@@ -6691,11 +6877,19 @@ export function EditorShell({
           {/* The brand kit on this clip, one click away (brand kit Phase 2) */}
           <EditorBrandMenu kits={brand.kits} loading={brand.loading} onKitId={brandOn?.kit_id ?? null}
             onTurnOn={turnBrandOn} onTurnOff={turnBrandOff} onEdit={id => { if (id) brand.select(id); setKitStudio(true); openSettings('brand') }} />
-          <button type="button" onClick={() => setTourOpen(true)} aria-label="Show the editor tour" title="How the editor works"
-            className="w-8 h-8 flex items-center justify-center rounded-full transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
+          <button type="button" onClick={() => setTourOpen(true)} aria-label="Show the editor tour" data-tip="How the editor works" data-tip-below
+            className="ed-tip w-8 h-8 flex items-center justify-center rounded-full transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
             style={{ color: 'rgb(var(--ed-fg) / 0.7)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 015 .5c0 1.5-2.5 2-2.5 3.5M12 17h.01" />
+            </svg>
+          </button>
+          {/* The keyboard shortcuts, one click away (user, 2026-11-12; "?" opens them too) */}
+          <button type="button" onClick={openShortcuts} aria-label="Keyboard shortcuts" data-tip="Keyboard shortcuts · ?" data-tip-below
+            className="ed-tip w-8 h-8 flex items-center justify-center rounded-full transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
+            style={{ color: 'rgb(var(--ed-fg) / 0.7)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="2.5" y="6" width="19" height="12" rx="2.5" /><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M8 14h8" />
             </svg>
           </button>
           <CreditsBadge credits={credits} onClick={e => { e.preventDefault(); leave(() => { window.location.href = '/billing#credits' }) }} />
@@ -6705,14 +6899,57 @@ export function EditorShell({
             onNavigate={href => leave(() => { window.location.href = href })}
             onSignOut={() => leave(() => { signOut({ callbackUrl: '/login' }) })}
           />
+          {/* The export, at the far right: always there, whatever panels are open (user, 2026-11-12) */}
+          <div className="w-px h-6 shrink-0" style={{ background: 'rgb(var(--ed-fg) / 0.1)' }} aria-hidden="true" />
+          {exportControls}
         </div>
       </header>
 
+      {/* The export's problem (user, 2026-11-12): a calm card under the Export button — what failed, why in
+          plain words, Try again — not a red strip of raw server text across the screen (styles: .ed-alert) */}
       {exportError && (
-        <div role="alert" className="shrink-0 flex items-center gap-3 px-4 py-2 text-xs"
-          style={{ background: 'rgba(239,68,68,0.12)', borderBottom: '1px solid rgba(239,68,68,0.25)', color: '#fca5a5' }}>
-          <span className="flex-1">{exportError}<TopUpLink message={exportError} /></span>
-          <button onClick={() => setExportError(null)} className="px-2 py-0.5 rounded hover:bg-[rgb(var(--ed-fg)/0.1)]" aria-label="Dismiss">✕</button>
+        <div role="alert" className="ed-alert">
+          <span className="ed-alert-ico" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5.5M12 16.5h.01" /></svg>
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="ed-alert-title">{exportError.title}</span>
+            <span className="ed-alert-text">{exportError.detail}<TopUpLink message={exportError.detail} /></span>
+            <button type="button" className="ed-alert-retry"
+              onClick={() => {
+                const what = exportError.retry
+                setExportError(null)
+                if (what === 'cancel') void cancelExport()
+                else if (hasOutput) askRender()
+                else requestExport()
+              }}>
+              Try again
+            </button>
+          </span>
+          <button type="button" onClick={() => setExportError(null)} aria-label="Dismiss this message" className="ed-alert-x">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+      )}
+
+      {/* "Your reel is ready": slides up, stays 5 s (while pointed at or focused: until let go), fades away
+          (styles: .ed-ready; the logic beside hasOutput) */}
+      {readyNote && hasOutput && (
+        <div role="status" aria-live="polite" className="ed-ready" data-state={readyNote}
+          onMouseEnter={() => { readyHoldRef.current = true; if (readyTimerRef.current) clearTimeout(readyTimerRef.current) }}
+          onMouseLeave={() => { readyHoldRef.current = false; scheduleReadyHide(1500) }}
+          onFocus={() => { readyHoldRef.current = true; if (readyTimerRef.current) clearTimeout(readyTimerRef.current) }}
+          onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { readyHoldRef.current = false; scheduleReadyHide(1500) } }}>
+          <span className="ed-ready-ico" aria-hidden="true">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+          </span>
+          <span className="ed-ready-text">Your reel is ready</span>
+          <a href={`/api/clips/${clip.id}/download`} download onClick={hideReadyNote} className="ed-ready-dl">
+            <DownloadIcon /> Download
+          </a>
+          <button type="button" onClick={hideReadyNote} aria-label="Close this message" className="ed-ready-x">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
         </div>
       )}
 
@@ -6741,8 +6978,8 @@ export function EditorShell({
           onDrop={e => { if (!e.dataTransfer.files.length) return; e.preventDefault(); setSidebarDrop(false); dropFiles([...e.dataTransfer.files], currentTimeMs, null) }}>
           {sidebarDrop && (
             <div className="absolute inset-2 z-50 flex flex-col items-center justify-center gap-1 rounded-xl pointer-events-none text-center px-4"
-              style={{ border: '2px dashed #c8ff00', background: 'rgba(12,12,12,0.86)' }}>
-              <span className="text-sm font-bold" style={{ color: '#c8ff00' }}>Drop to add at {msToLabel(currentTimeMs)}</span>
+              style={{ border: '2px dashed rgba(255,255,255,0.55)', background: 'rgba(12,12,12,0.86)' }}>
+              <span className="text-sm font-bold" style={{ color: '#fff' }}>Drop to add at {msToLabel(currentTimeMs)}</span>
               <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>
                 {tool === 'media' && mediaSection === 'library' ? 'A video goes in as B-roll' : 'Videos, photos or music'}
               </span>
@@ -6786,7 +7023,7 @@ export function EditorShell({
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold text-[var(--ed-text)]">Sections</span>
                   <span className="h-5 min-w-5 px-1.5 flex items-center justify-center rounded-full text-[11px] font-bold tabular-nums"
-                    style={{ background: 'rgba(200,255,0,0.12)', color: 'var(--ed-accent-text)' }}>
+                    style={{ background: 'rgb(var(--ed-fg) / 0.1)', color: 'rgb(var(--ed-fg) / 0.75)' }}>
                     {cropPositions.length}
                   </span>
                   <div className="flex-1" />
@@ -6848,22 +7085,22 @@ export function EditorShell({
                         aria-label={`Section ${i + 1}: ${name}, ${msToLabel(seg.start_ms)} to ${msToLabel(seg.end_ms)}`}
                         className="group relative flex flex-col rounded-xl cursor-pointer overflow-hidden transition-[background,box-shadow,opacity] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(200,255,0,0.6)]"
                         style={{
-                          background: isActiveSeg ? 'linear-gradient(180deg, rgba(200,255,0,0.06), rgba(200,255,0,0.015))' : 'rgb(var(--ed-fg) / 0.03)',
-                          boxShadow: isActiveSeg ? 'inset 0 0 0 1px rgba(200,255,0,0.45), 0 8px 22px -16px rgba(200,255,0,0.5)' : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.07)',
+                          background: isActiveSeg ? 'rgb(var(--ed-fg) / 0.07)' : 'rgb(var(--ed-fg) / 0.03)',
+                          boxShadow: isActiveSeg ? 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.32)' : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.07)',
                           opacity: faded ? 0.45 : 1,
                         }}
                         onClick={() => { setActiveSegmentId(seg.id); setPickedSegId(seg.id); seekToMs(seg.start_ms) }}
                         onKeyDown={e => { if (e.key === 'Enter') { setActiveSegmentId(seg.id); setPickedSegId(seg.id); seekToMs(seg.start_ms) } }}>
                         <div className="flex items-start gap-2.5 pl-2.5 pr-1.5 pt-2 pb-1.5">
                           <span className="shrink-0 w-8 h-8 mt-px flex items-center justify-center rounded-lg"
-                            style={{ background: isActiveSeg ? 'rgba(200,255,0,0.1)' : 'rgb(var(--ed-fg) / 0.06)' }}>
-                            <LayoutGlyph layout={shown} color={isActiveSeg ? '#c8ff00' : '#9ca3af'} active={isActiveSeg} />
+                            style={{ background: isActiveSeg ? 'rgb(var(--ed-fg) / 0.1)' : 'rgb(var(--ed-fg) / 0.06)', color: 'var(--ed-text)' }}>
+                            <LayoutGlyph layout={shown} color={isActiveSeg ? 'currentColor' : '#9ca3af'} active={isActiveSeg} />
                           </span>
                           <div className="flex-1 min-w-0 flex flex-col">
                             {/* Line 1: name · time range · open */}
                             <div className="flex items-center gap-2 min-w-0 h-6">
                               <span className="text-[13px] font-semibold truncate text-[var(--ed-text)]">{name}</span>
-                              {isActiveSeg && <span className="shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: '#c8ff00' }} title="Under the playhead" />}
+                              {isActiveSeg && <span className="shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: 'rgb(var(--ed-fg) / 0.7)' }} title="Under the playhead" />}
                               <span className="ml-auto shrink-0 whitespace-nowrap text-[11px] tabular-nums" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
                                 {msToLabel(seg.start_ms)} – {msToLabel(seg.end_ms)}
                               </span>
@@ -6896,7 +7133,7 @@ export function EditorShell({
                                 <button onClick={() => { pause(); seekToMs(seg.start_ms); setActiveSegmentId(seg.id); setPickedSegId(seg.id) }}
                                   title={`Main video · ${msToLabel(seg.start_ms)}–${msToLabel(seg.end_ms)}`}
                                   className="flex-1 min-w-0 h-8 flex items-center gap-2 pl-2 pr-1 text-left transition-colors hover:bg-[rgb(var(--ed-fg)/0.05)]">
-                                  <span className="w-[18px] h-[18px] shrink-0 flex items-center justify-center rounded-[5px]" style={{ background: 'rgba(200,255,0,0.14)', color: 'var(--ed-accent-text)' }}>
+                                  <span className="w-[18px] h-[18px] shrink-0 flex items-center justify-center rounded-[5px]" style={{ background: 'rgb(var(--ed-fg) / 0.1)', color: 'rgb(var(--ed-fg) / 0.75)' }}>
                                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                                       <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4" />
                                     </svg>
@@ -7025,8 +7262,9 @@ export function EditorShell({
                     <path d="M8 11V8a4 4 0 118 0v3" stroke="rgb(var(--ed-fg) / 0.6)" strokeWidth="1.8" strokeLinecap="round" />
                   </svg>
                   <div>
-                    <p className="text-sm font-semibold text-[var(--ed-text)]">Auto-captions are a paid feature</p>
-                    <p className="text-xs mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>Available on Starter and above.</p>
+                    {/* (user, 2026-11-12) one upgrade message for captions, the same as in the Captions card */}
+                    <p className="text-sm font-semibold text-[var(--ed-text)]">Captions are on Starter and above</p>
+                    <p className="text-xs mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>Upgrade to add captions to your clips.</p>
                   </div>
                   <a href="/pricing" className="px-4 py-2 rounded-lg text-xs font-bold" style={{ background: ACCENT, color: '#000' }}>See plans</a>
                 </div>
@@ -7229,7 +7467,7 @@ export function EditorShell({
               <div className="mx-4 mt-4 p-3 flex flex-col gap-2.5 rounded-xl"
                 style={{ background: 'rgb(var(--ed-fg) / 0.04)', border: '1px solid rgb(var(--ed-fg) / 0.1)' }}>
                 <div className="flex items-center gap-2.5">
-                  <span className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg" style={{ background: 'rgba(200,255,0,0.12)', color: 'var(--ed-accent-text)' }}>
+                  <span className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg" style={{ background: 'rgb(var(--ed-fg) / 0.1)', color: 'rgb(var(--ed-fg) / 0.75)' }}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <rect x="2" y="5" width="15" height="14" rx="2" /><path d="M17 10l5-3v10l-5-3z" />
                     </svg>
@@ -7441,10 +7679,10 @@ export function EditorShell({
             <button
               onClick={() => setMotionMode(m => !m)}
               aria-pressed={motionMode}
-              title={motionMode
-                ? 'Motion is on: drag the view while the video plays and it follows your hand smoothly'
-                : 'Motion is off: moving the view changes it from the playhead on (a cut). Turn on to record a smooth follow while the video plays'}
-              className="ed-motion select-none" data-on={motionMode || undefined}
+              // (user, 2026-11-12: explained by a tip on the video while it's on, not a long hover text)
+              aria-label={motionMode ? 'Motion is on: drag the box while the video plays, and the view follows' : 'Motion: record a smooth camera move'}
+              data-tip={motionMode ? 'Turn Motion off' : 'Record a smooth camera move'} data-tip-below
+              className="ed-motion ed-tip select-none" data-on={motionMode || undefined}
             >
               <span className="ed-motion-dot" aria-hidden="true" />
               {motionMode ? 'Recording motion' : 'Motion'}
@@ -7469,6 +7707,12 @@ export function EditorShell({
                 ? <div className="ed-pv-tag absolute top-3 left-3 pointer-events-none"><i style={{ background: '#c8ff00' }} />Inserted video</div>
                 : <div className="ed-pv-tag absolute top-3 left-3 pointer-events-none"><i style={{ background: '#f97316' }} />B-roll</div>
               )}
+              {/* Motion on (user, 2026-11-12): what to do, said on the video itself */}
+              {motionMode && (
+                <div className="ed-pv-tag ed-motion-tip absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none" role="status">
+                  <i style={{ background: '#ef4444' }} />Drag the box while it plays, and the view follows
+                </div>
+              )}
               {/* Holding ← / →: how fast it's skipping */}
               {skipRate !== null && (
                 <div className="ed-pv-tag ed-skip absolute top-3 left-1/2 -translate-x-1/2 pointer-events-none" role="status">
@@ -7489,14 +7733,14 @@ export function EditorShell({
               className="ed-fold" data-dir="left" data-active>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path className="fold-arrow" d="M14.5 6.5L9 12l5.5 5.5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </button>
-            <button onClick={() => togglePreview(true)} title="Open the preview to watch and export"
+            <button onClick={() => togglePreview(true)} aria-label="Open the preview"
               className="text-[11px] font-semibold tracking-wide transition-colors hover:text-[var(--ed-text)]"
               style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', color: 'rgb(var(--ed-fg) / 0.5)' }}>
-              Preview · Export
+              Preview
             </button>
           </div>
         )}
-        <aside data-tour="export" data-layout-panel="Preview" aria-hidden={!previewOpen} className="ed-preview-col relative shrink-0 flex flex-col min-h-0 overflow-hidden" data-open={previewOpen || undefined} data-resizing={resizing === 'preview' || undefined}
+        <aside data-layout-panel="Preview" aria-hidden={!previewOpen} className="ed-preview-col relative shrink-0 flex flex-col min-h-0 overflow-hidden" data-open={previewOpen || undefined} data-resizing={resizing === 'preview' || undefined}
           style={{ width: previewOpen ? shownPreviewW : 0, background: 'var(--ed-panel)' }}
           {...(!previewOpen ? { inert: true } : {})}>
           {/* Its left edge: drag to make the preview wider or narrower */}
@@ -7533,63 +7777,15 @@ export function EditorShell({
               )
             })}
           </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              {rendering ? (
-                // While the reel renders, the Export button stays and keeps playing its download
-                // animation on a loop (.ed-export[data-busy] in globals.css) until it's done; beside
-                // it, Cancel stops the export
-                <>
-                <span className="sbb ed-export" data-busy role="status"
-                  aria-label={exporting ? 'Starting the export' : `Exporting, ${formatElapsed(renderElapsed)} so far`}
-                  title={exporting ? 'Starting…' : `Exporting · ${formatElapsed(renderElapsed)}`}>
-                  <span className="sbb-beam" aria-hidden="true" />
-                  <span className="sbb-surface gap-1.5 h-8 px-3.5 text-xs font-bold">
-                    <ExportIcon /> <span className="ed-pv-act-word">Exporting</span>
-                  </span>
-                </span>
-                {/* (once the export is on its way: while it starts there is nothing to stop yet) */}
-                {clipStatus === 'rendering' && (
-                  <button onClick={cancelExport} disabled={cancelling} aria-label="Cancel the export" title="Cancel the export"
-                    className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-60"
-                    style={{ color: '#f87171', background: 'rgba(239,68,68,0.12)', boxShadow: 'inset 0 0 0 1px rgba(239,68,68,0.25)' }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-                  </button>
-                )}
-                </>
-              ) : hasOutput ? (
-                <>
-                  {/* (with the captions as they are: read again only where part of the clip has none — it was
-                      made longer. Reading the whole clip again every time changed its words from the ones
-                      in the preview and threw corrections away: user, 2026-11-04) */}
-                  <button onClick={askRender} aria-label="Re-render"
-                    title="Render again with your latest edits"
-                    className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors hover:bg-[rgb(var(--ed-fg)/0.1)]"
-                    style={{ color: 'rgb(var(--ed-fg) / 0.75)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.14)' }}>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M20 11a8 8 0 10-2.3 5.7M20 4v7h-7" />
-                    </svg>
-                  </button>
-                  <a href={`/api/clips/${clip.id}/download`} download aria-label="Download" title="Download"
-                    className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold transition-opacity hover:opacity-90"
-                    style={{ background: ACCENT, color: '#000' }}>
-                    <DownloadIcon /> <span className="ed-pv-act-word">Download</span>
-                  </a>
-                </>
-              ) : (
-                // Lime button with a light spinning round its border on hover (SpinningBorderButton);
-                // clicking plays the download animation (.ed-export) before the render starts
-                <SpinningBorderButton onClick={pressExport}
-                  title="Render the reel so you can download it"
-                  aria-busy={exportPress || undefined}
-                  data-pressed={exportPress || undefined}
-                  className="ed-export rounded-[10px]"
-                  surfaceClassName="gap-1.5 h-8 px-3.5 text-xs font-bold">
-                  <ExportIcon /> Export{credits && clipLengthMs <= MAX_CLIP_MS ? ` · ${exportCredits(clipLengthMs)} credit${exportCredits(clipLengthMs) === 1 ? '' : 's'}` : ''}
-                </SpinningBorderButton>
-              )}
-            </div>
           </div>
 
+          {/* Edited since the export (user, 2026-11-12): said where the reel is watched; the top bar's Export again fixes it */}
+          {exportOutdated && !rendering && (
+            <p role="status" className="ed-pv-stale shrink-0 mx-2 mt-2 flex items-start gap-2 px-2.5 py-2 rounded-lg text-[11px] leading-snug">
+              <span className="ed-pv-stale-dot" aria-hidden="true" />
+              <span>Your latest edits aren&apos;t in the downloaded file yet. Press <b>Export again</b> to add them.</span>
+            </p>
+          )}
           {/* Preview fills the column: as wide as it can be while the full 9:16 frame fits the height */}
           <div ref={previewBodyRef} className="flex-1 min-h-0 px-2 py-1.5 overflow-hidden">
             <AmbientGlow videoRef={videoRef} />
@@ -7610,15 +7806,9 @@ export function EditorShell({
                   <div className="text-center flex flex-col gap-1 px-6">
                     <p className="text-sm font-semibold text-[var(--ed-text)]">Rendering your reel…</p>
                     <p className="text-xs" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>Usually takes a minute or two. You can keep editing.</p>
-                    {renderElapsed > 0 && <p className="text-xs tabular-nums mt-1" style={{ color: 'rgba(200,255,0,0.75)' }}>{formatElapsed(renderElapsed)}</p>}
                   </div>
-                  {clipStatus === 'rendering' && (
-                    <button onClick={cancelExport} disabled={cancelling}
-                      className="text-xs px-4 py-1.5 rounded-lg disabled:opacity-60"
-                      style={{ color: '#f87171', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)' }}>
-                      {cancelling ? 'Stopping…' : 'Cancel export'}
-                    </button>
-                  )}
+                  {/* (user, 2026-11-12: two Cancels and two clocks) the time and Cancel are the top bar's
+                      "Exporting · 0:09 ✕" only — always there, whatever panels are open */}
                 </div>
               ) : (
                 <OutputCanvas live segmentAt={viewAt} transitionCuts={transitionCuts} watermark={showWatermark} timelineToVideo={timelineToVideo} clock={hasInserts || hasFreeze ? liveTime.get : undefined}
@@ -8176,6 +8366,12 @@ function withCaptionParts<L extends object>(layers: L | null, parts: CaptionPart
   return { ...(layers ?? { v: 1 as const, rows: [], cut: [], parts: [] }), captionParts: parts } as L & { captionParts: CaptionPart[] }
 }
 
+/** Edited since the last export (clips.layers.editedSinceExport, user 2026-11-12): saved only while true */
+function withExportMark<L extends object>(layers: L | null, edited: boolean): L | { v: 1; rows: string[]; cut: never[]; parts: string[]; editedSinceExport: true } | null {
+  if (!edited) return layers
+  return { ...(layers ?? { v: 1 as const, rows: [], cut: [], parts: [] }), editedSinceExport: true } as L & { editedSinceExport: true }
+}
+
 /** The timeline's groups saved beside the rows (clips.layers.groups: groups.ts); none: left out */
 function withGroupsSaved<L extends object>(layers: L | null, groups: Groups): L | { v: 1; rows: string[]; cut: never[]; parts: string[]; groups: Groups } | null {
   if (!groups.length) return layers
@@ -8280,7 +8476,7 @@ function SectionGroupHead({ label, layout, count, lengthMs, open, playing, onTog
       {layout && <LayoutGlyph layout={layout} color="#9ca3af" active={false} />}
       <span className="text-[12px] font-semibold truncate text-[var(--ed-text)]">{label}</span>
       <span className="shrink-0 px-1.5 rounded-full text-[10.5px] font-semibold tabular-nums" style={{ background: 'rgb(var(--ed-fg) / 0.08)', color: 'rgb(var(--ed-fg) / 0.7)' }}>{count}</span>
-      {!open && playing && <span className="shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: '#c8ff00' }} title="Under the playhead" />}
+      {!open && playing && <span className="shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: 'rgb(var(--ed-fg) / 0.7)' }} title="Under the playhead" />}
       <span className="ml-auto shrink-0 text-[11px] tabular-nums" style={{ color: 'rgb(var(--ed-fg) / 0.42)' }}>{lengthLabel(lengthMs)}</span>
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
         className="shrink-0" style={{ color: 'rgb(var(--ed-fg) / 0.55)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}><path d="M6 9l6 6 6-6" /></svg>
@@ -8411,27 +8607,30 @@ function UndoRedo() {
 }
 
 function SaveIndicator({ state, leaving, onRetry }: { state: SaveState; leaving?: boolean; onRetry: () => void }) {
-  const chip = 'flex items-center gap-1.5 shrink-0 h-6 px-2 rounded-full text-[11px] font-medium'
+  // (user, 2026-11-12) plain words, and the link says what it does ("Save now", not "Now"); grey while all is
+  // well, a soft amber or red only for a real problem (styles: .ed-save)
+  const chip = 'ed-save flex items-center gap-1.5 shrink-0 h-6 px-2.5 rounded-full text-[11px] font-medium'
+  const dot = <span className="ed-save-dot" aria-hidden="true" />
   if (state === 'error') {
     return (
-      <span role="alert" className={chip} style={{ color: '#fca5a5', background: 'rgba(239,68,68,0.12)' }}>
-        Couldn&apos;t save · <button onClick={onRetry} className="underline hover:opacity-80">Retry</button>
+      <span role="alert" className={chip} data-tone="bad">
+        {dot}Not saved · <button onClick={onRetry} className="ed-save-act">Retry</button>
       </span>
     )
   }
   if (state === 'retrying') {
+    // (no answer at all: the connection — the edits are kept here and save by themselves once it's back)
     return (
-      <span className={chip} style={{ color: '#fcd34d', background: 'rgba(245,158,11,0.12)' }} aria-live="polite"
-        title="The connection dropped — your changes are kept here and will save as soon as it's back">
-        Connection lost · retrying… <button onClick={onRetry} className="underline hover:opacity-80">Now</button>
+      <span className={chip} data-tone="warn" aria-live="polite">
+        {dot}Offline · will save when you&apos;re back · <button onClick={onRetry} className="ed-save-act">Save now</button>
       </span>
     )
   }
   if (state === 'refused') {
+    // (the server turned it down: kept here, tried again by itself)
     return (
-      <span className={chip} style={{ color: '#fcd34d', background: 'rgba(245,158,11,0.12)' }} aria-live="polite"
-        title="The server couldn't save your changes — they're kept here and it keeps trying. If this stays, let us know">
-        Couldn&apos;t save · trying again… <button onClick={onRetry} className="underline hover:opacity-80">Now</button>
+      <span className={chip} data-tone="warn" aria-live="polite">
+        {dot}Not saved yet · trying again · <button onClick={onRetry} className="ed-save-act">Save now</button>
       </span>
     )
   }
@@ -8460,9 +8659,10 @@ function SwitchRow({ label, description, checked, onChange }: { label: string; d
       </div>
       <button role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)}
         className="relative shrink-0 rounded-full transition-colors"
-        style={{ width: 40, height: 22, background: checked ? ACCENT : 'rgb(var(--ed-fg) / 0.15)' }}>
-        <span className="absolute rounded-full bg-white transition-all"
-          style={{ top: 3, left: checked ? 21 : 3, width: 16, height: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+        style={{ width: 40, height: 22, background: checked ? 'var(--ed-text)' : 'rgb(var(--ed-fg) / 0.15)' }}>
+        {/* (user, 2026-11-12: on is the text colour, not lime) the knob the page's colour on it, white off it */}
+        <span className="absolute rounded-full transition-all"
+          style={{ top: 3, left: checked ? 21 : 3, width: 16, height: 16, background: checked ? 'var(--ed-app)' : '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
       </button>
     </div>
   )
@@ -8524,8 +8724,9 @@ function GetCaptions({ lengthMs, price, newPart, balance, freePlan, hasAddedVide
   if (freePlan) {
     return (
       <div className="mt-3 flex flex-col gap-2 text-[11.5px] leading-snug" style={muted}>
-        <span>Captions aren&rsquo;t part of the Free plan.</span>
-        <a href="/pricing" className="cap-link justify-center font-semibold">Upgrade to get captions</a>
+        {/* (user, 2026-11-12) the same upgrade message as the Captions tool's */}
+        <span>Captions are on Starter and above.</span>
+        <a href="/pricing" className="cap-link justify-center font-semibold">See plans</a>
       </div>
     )
   }
@@ -8553,7 +8754,7 @@ function GetCaptions({ lengthMs, price, newPart, balance, freePlan, hasAddedVide
       ) : (
         <button type="button" onClick={onGet} className="h-9 rounded-lg text-[12.5px] font-bold transition-opacity hover:opacity-90"
           style={{ background: ACCENT, color: '#0a0a0a' }}>
-          Get CC
+          Get captions
         </button>
       )}
     </div>
@@ -8585,7 +8786,7 @@ function ZoomSlider({ zoom, onZoom }: { zoom: number; onZoom: (z: number) => voi
       <button onClick={() => onZoom(1)} disabled={i === 0} aria-live="polite" aria-label={`Zoom ${zoomLabel(zoom)}x${i ? ', back to 1x' : ''}`}
         title={i ? 'Back to the whole clip (1x)' : 'Whole clip'}
         className="h-7 min-w-[46px] px-2 rounded-md text-xs font-semibold tabular-nums transition-colors disabled:cursor-default"
-        style={i ? { background: 'rgba(200,255,0,0.14)', color: 'var(--ed-accent-text)', boxShadow: 'inset 0 0 0 1px rgba(200,255,0,0.35)' }
+        style={i ? { background: 'rgb(var(--ed-fg) / 0.12)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.22)' }
           : { color: 'rgb(var(--ed-fg) / 0.7)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.12)' }}>
         {zoomLabel(zoom)}x
       </button>
