@@ -153,10 +153,11 @@ export function EditorShellMobile({
 
   // ── Hydrate stores from server props ─────────────────────────────────────────
   useEffect(() => {
-    // (videos put in between make the clip longer than its stretch of the video: nothing after them is cut off)
+    // (videos put in between, and parts played again, make the clip longer than its stretch of the
+    // video: nothing after them is cut off — as loadRows.ts)
     const rows = rowsToLocal(initialSegments)
     const vid = (clip as unknown as { video_id: string }).video_id
-    const lenMs = clip.end_ms - clip.start_ms + insertedMs(insertsOf(rows, vid))
+    const lenMs = Math.max(clip.end_ms - clip.start_ms + insertedMs(insertsOf(rows, vid)), ...rows.map(s => s.end_ms))
     // (time no part covers gets a Vertical part of its own: no "default framing" anywhere)
     const localSegments = fillUncovered(normalizeCoverage(rows, lenMs), lenMs, vid)
     const initialKeyframeMap: KeyframeMap = {}

@@ -6,7 +6,7 @@ import { OutputCanvas } from '@/components/editor/VideoPreview'
 import { getBoxPositionAtLerp } from '@/lib/interpolation'
 import { BorrowedPool, isBorrowedSlot } from '@/modules/editor/brollSources'
 import { createFrameMediaPool } from '@/modules/editor/frameMedia'
-import { insertsOf, piecesOf, piecesLength, pieceAt, videoAtPieces, timelineAtPieces, pieceVideoMs, type Piece } from '@/modules/editor/inserts'
+import { insertsOf, piecesOf, piecesLength, pieceAt, videoAtPieces, timelineAtPieces, pieceVideoMs, wordPlaces, type Piece } from '@/modules/editor/inserts'
 
 /** The video plays a piece at its speed (a part played faster or slower): its voice natural unless its pitch follows */
 function rateFor(v: HTMLVideoElement, p: Piece | null | undefined) {
@@ -187,10 +187,12 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
         if (rel < 0) return [w]
         const mid = (w.start_ms + w.end_ms) / 2 - startMs
         if (!pieces.some(p => p.from != null && mid >= p.from && mid < p.from + pieceVideoMs(p))) return []   // (in video cut out)
-        // (both ends: in a part played faster or slower the word is shorter or longer too)
-        const a = timelineAtPieces(pieces, rel), b = Math.max(a + 1, timelineAtPieces(pieces, w.end_ms - startMs))
-        return a === rel && b === w.end_ms - startMs ? [w] : [{ ...w, start_ms: startMs + a, end_ms: startMs + b }]
-      })
+        // (both ends: in a part played faster or slower the word is shorter or longer too; a part
+        // duplicated says it again)
+        const e0 = w.end_ms - startMs
+        return wordPlaces(pieces, rel, e0).map(([a, b], i) => (!i && a === rel && b === e0 ? w
+          : { ...w, ...(i ? { id: `${w.id}~r${i}` } : {}), start_ms: startMs + a, end_ms: startMs + b }))
+      }).sort((x, y) => x.start_ms - y.start_ms)
       : words
     return captionStyle?.language === 'roman' ? placed.map(w => ({ ...w, word: w.word_roman ?? w.word, source_word: w.word })) : placed
   }, [words, captionStyle?.language, pieces, startMs])

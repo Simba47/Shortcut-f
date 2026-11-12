@@ -38,6 +38,11 @@ interface Props {
    * phone): every text a card that opens with all its settings
    */
   layout?: 'stack' | 'tabs'
+  /**
+   * Copy style (user, 2026-11-12): take the picked text's look, put it on the picked texts, or on every
+   * text of the clip. Null: not now (no text picked / nothing copied). `look`: the copied look (its button shows it)
+   */
+  styleTools?: { copy: (() => void) | null; paste: (() => void) | null; pasteAll: (() => void) | null; look: Partial<TextOverlay> | null }
 }
 
 /** The Text panel's sub-tabs (tabbed layout), as the Captions panel's */
@@ -66,7 +71,7 @@ const SHADOWS: { v: NonNullable<TextOverlay['shadow']>; label: string }[] = [
  * capitals, size, spacing, colour, outline, background box, shadow / glow, opacity, rotation and an
  * entrance animation. One text is open for styling at a time. (styles: .cap-* / .tx-* in globals.css)
  */
-export function TextOverlayPanel({ overlays, currentTimeMs, clipDurationMs, onAdd, onUpdate, onRemove, focusId, onFocused, selectedId = null, onSelect, brand = null, layout = 'stack' }: Props) {
+export function TextOverlayPanel({ overlays, currentTimeMs, clipDurationMs, onAdd, onUpdate, onRemove, focusId, onFocused, selectedId = null, onSelect, brand = null, layout = 'stack', styleTools }: Props) {
   const [newText, setNewText] = useState('')
   const [openId, setOpenId] = useState<string | null>(selectedId)
   const tabs = layout === 'tabs'
@@ -208,6 +213,24 @@ export function TextOverlayPanel({ overlays, currentTimeMs, clipDurationMs, onAd
               {picked ? (picked.text || 'Text') : 'Your text'}
             </span>
           </div>
+          {/* Copy style: the picked text's look onto other texts (Ctrl+Alt+C / Ctrl+Alt+V); "Aa" in the look copied */}
+          {styleTools && (
+            <div className="tx-style-bar" role="group" aria-label="Copy style">
+              <button type="button" className="tx-style-btn" disabled={!styleTools.copy} onClick={() => styleTools.copy?.()}
+                title={styleTools.copy ? 'Copy this text’s style (Ctrl+Alt+C)' : 'Pick one text to copy its style'}>
+                Copy style
+              </button>
+              <button type="button" className="tx-style-btn" disabled={!styleTools.paste} onClick={() => styleTools.paste?.()}
+                title={!styleTools.look ? 'Copy a text’s style first' : styleTools.paste ? 'Put the copied style on the picked text (Ctrl+Alt+V)' : 'Pick the texts to put the copied style on'}>
+                {styleTools.look && <span className="tx-style-aa" aria-hidden="true" style={{ ...textCss(styleTools.look), fontSize: 13, animation: 'none' }}>Aa</span>}
+                Paste style
+              </button>
+              <button type="button" className="tx-style-btn" disabled={!styleTools.pasteAll} onClick={() => styleTools.pasteAll?.()}
+                title={styleTools.look ? 'Put the copied style on every text and frame text of this clip (locked ones stay)' : 'Copy a text’s style first'}>
+                Paste to all
+              </button>
+            </div>
+          )}
           {/* Sub-bar: one kind of setting at a time; Style, Look and Motion need a text picked. (user, 2026-11-09:
               "looks so ordinary") each with its icon, a raised pill sliding under the one open, its icon lime */}
           <div role="tablist" aria-label="Text settings" className="ed-subtabs mt-2"

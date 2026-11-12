@@ -322,6 +322,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
     // Where in the main video this part is (its main box's moment: with videos put in between or
     // parts cut, not always its start on the timeline)
     const mainAt = seg.crop_boxes.find(b => !b.source_video_id && !b.image_path)?.source_offset_ms ?? seg.start_ms
+    const partMirrored = seg.crop_boxes.some(b => !b.source_video_id && !b.image_path && b.mirror)
     const crop_boxes: CropBoxLocal[] = Array.from({ length: LAYOUT_SLOT_COUNT[layout] }, (_, i) => {
       // (inside the video's picture: never into its black bars — framePicture.ts)
       const keyframes = [{ t_ms: seg.start_ms, ...inFramePicture(framing?.[i] ?? defaultCropForSlot(layout, i, videoAR, i === 0 ? centerX : undefined)) }]
@@ -331,7 +332,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
         ? { ...old, source_video_id: null, source_offset_ms: mainAt, image_path: null, image_url: null, image_motion: null }
         : old ? { ...old, image_path: null, image_url: null, image_motion: null } : old
       // New boxes show the main video from this format's own point in it
-      return kept ? { ...kept, keyframes } : { ...makeBox(i, layout, seg.start_ms, keyframes), source_offset_ms: mainAt, volume: 1, muted: false }
+      // (a part mirrored: its new slots too)
+      return kept ? { ...kept, keyframes } : { ...makeBox(i, layout, seg.start_ms, keyframes), source_offset_ms: mainAt, volume: 1, muted: false, ...(partMirrored ? { mirror: true } : {}) }
     })
     // Switching between frames keeps what's on the lanes the new frame still has. Leaving frames
     // keeps the frame settings unused, so switching back brings them back.
@@ -379,7 +381,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
         // Main video only, playing on without a jump
         && a.crop_boxes.every(box => {
           const other = b.crop_boxes.find(x => x.slot_index === box.slot_index)
-          return !!other && !box.source_video_id && !other.source_video_id
+          return !!other && !box.source_video_id && !other.source_video_id && !!box.mirror === !!other.mirror
             && Math.abs((box.source_offset_ms + (b.start_ms - a.start_ms) * speedOfSeg(a)) - other.source_offset_ms) <= 2
         })
       // Glue b onto a: a's boxes carry both parts' views. a's view is held right up to where b
@@ -475,6 +477,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set, get) =
         source_offset_ms: box.source_offset_ms + (tMs - seg.start_ms) * (box.source_video_id || box.image_path ? 1 : speedOfSeg(seg)) - (box.source_video_id || box.image_path ? 0 : frameHeldBefore(seg.frame, tMs - seg.start_ms)),
         // A video on top (or an inserted one) cut in two: both halves keep its sound and hide switches
         ...(onTop(s, seg) || inserted(seg) ? { volume: box.volume, muted: box.muted !== false, ...(box.hidden ? { hidden: true } : {}) } : {}),
+        // (mirrored / turned: both halves)
+        ...(box.mirror ? { mirror: true } : {}), ...(box.turn ? { turn: box.turn } : {}),
       }))
       return {
         segments: [

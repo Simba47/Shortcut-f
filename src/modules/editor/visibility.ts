@@ -54,6 +54,8 @@ export function shownSegment(seg: SegmentLocal, mainVideoId: string | null | und
         ? { sound_only: { video_id: box.source_video_id, offset_ms: box.source_offset_ms ?? 0, volume: box.volume } } : {}),
       crop_boxes: [{
         ...box, id: `${box.id}${STAND_IN_SUFFIX}`, source_video_id: null, source_offset_ms: seg.start_ms, muted: false, hidden: false,
+        // (the main video as filmed: the added video's mirror and turn aren't its)
+        mirror: undefined, turn: undefined,
         keyframes: [{ t_ms: seg.start_ms, ...inFramePicture(defaultCropForSlot('vertical', 0, videoAR)) }],
       }],
     }

@@ -146,9 +146,17 @@ function toLocal(s: SegmentRow): SegmentLocal {
       volume: b.volume ?? 1,
       muted: b.muted ?? false,
       ...(b.hidden ? { hidden: true } : {}),
+      ...(b.mirror ? { mirror: true } : {}),
+      ...(turnOf(b.turn) ? { turn: turnOf(b.turn) } : {}),
       keyframes: b.box_keyframes,
     })),
   })
+}
+
+/** A picture's turn as saved: 90, 180 or 270 degrees clockwise, else 0 */
+export function turnOf(v: unknown): number {
+  const n = Math.round(Number(v) / 90) * 90 % 360
+  return Number.isFinite(n) && n > 0 ? n : 0
 }
 
 export function msToLabel(ms: number) {
