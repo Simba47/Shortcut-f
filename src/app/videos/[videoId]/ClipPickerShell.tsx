@@ -505,6 +505,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // Which section of the clip list is showing
   // Manual edit (picked on the dashboard): no AI tools, and only "Your clips" and "Favorites" in the list
   const manualOnly = startWith === 'manual'
+  // The board being opened from the switch by the breadcrumb (its button spins until the page changes)
+  const [switching, setSwitching] = useState<'ai' | 'manual' | null>(null)
   // The editor remembers which board it was opened from, so its "Clip board" link comes back to this one
   const editorHref = (id: string) => `/editor/${id}${startWith ? `?from=${startWith}` : ''}`
   const [clipTab, setClipTab] = useState<ClipTab>(manualOnly ? 'yours' : 'all')
@@ -541,7 +543,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const [lenF, setLenF] = useState<'all' | 'short' | 'mid' | 'long'>('all')
   const [expF, setExpF] = useState<'all' | 'yes' | 'no'>('all')
   // (user, 2026-11-09: Shortest / Longest first kept in Sort as well)
-  const [sortBy, setSortBy] = useState<'new' | 'old' | 'video' | 'short' | 'long'>('new')
+  // (length is the Length filter's alone: Sort's "Shortest / Longest first" were the same thing twice — out
+  // 2026-11-09, back with a merge, out again 2026-11-12)
+  const [sortBy, setSortBy] = useState<'new' | 'old' | 'video'>('new')
   const lenOf = (c: { start_ms: number; end_ms: number }) => c.end_ms - c.start_ms
   const exported = (c: { status: string; output_url: string | null }) => c.status === 'done' && !!c.output_url
   const clipFiltering = lenF !== 'all' || expF !== 'all'
@@ -555,8 +559,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   })
   if (sortBy === 'old') shownClips.reverse()
   else if (sortBy === 'video') shownClips.sort((a, b) => a.start_ms - b.start_ms)
-  else if (sortBy === 'short') shownClips.sort((a, b) => lenOf(a) - lenOf(b))
-  else if (sortBy === 'long') shownClips.sort((a, b) => lenOf(b) - lenOf(a))
   const clearClipFilters = () => { setLenF('all'); setExpF('all') }
   // Clip preview plays 9:16 clips as edited: in Manual edit only the edited ones
   const previewable = manualOnly ? byTime.filter(isEdited) : boardClips
@@ -1982,6 +1984,15 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       <nav className="cb-nav app-nav relative z-10 flex items-center gap-3 px-4 shrink-0" style={{ height: 56 }}>
         {/* Where am I: Shortcut | Dashboard › Clip board */}
         <Breadcrumbs shine items={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Clip board' }]} />
+        {/* Which board this is, and the way to the other for the same video (user, 2026-11-12: both said only
+            "Clip board"; a plain switch didn't look right — a chip saying where you are, its menu both boards with
+            what each does). AI edit opens without starting a reading (it costs credits: it starts from Make my clips
+            or Ask AI, with its price first) */}
+        <BoardPicker manual={manualOnly} disabled={!!busy} switching={switching}
+          onPick={mode => {
+            setSwitching(mode)
+            router.push(mode === 'manual' ? `/videos/${video.id}?start=manual` : `/videos/${video.id}`)
+          }} />
         <div className="flex-1" />
         {/* The account's brand kits, in the popup (as on the dashboard — user, 2026-10-31) */}
         <button type="button" onClick={() => openBrandKits()} className="cb-brand-link" title="Your logo, colours and caption look — on every clip">
@@ -2087,11 +2098,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                   <>
                     <FilterChip size="xs" label="Sort" value={sortBy} onChange={setSortBy}
                       icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 4v16M3.5 16.5L7 20l3.5-3.5M17 20V4M13.5 7.5L17 4l3.5 3.5" /></svg>}
-                      options={[['new', 'Newest first'], ['old', 'Oldest first'], ['video', 'Order in the video'], ['short', 'Shortest first'], ['long', 'Longest first']]} />
+                      options={[['new', 'Newest first'], ['old', 'Oldest first'], ['video', 'Order in the video']]} />
                     <FilterChip size="xs" label="Length" value={lenF} onChange={setLenF} clearable
                       options={[['all', 'Any length'], ['short', 'Under 30s'], ['mid', '30–60s'], ['long', 'Over 1 min']]} />
                     <FilterChip size="xs" label="Exported" value={expF} onChange={setExpF} clearable
-                      options={[['all', 'Any'], ['yes', 'Exported'], ['no', 'Not exported yet']]} />
+                      options={[['all', 'Any'], ['yes', 'Exported'], ['no', 'Not exported']]} />
                   </>
                 )}
                 {/* Select (user, 2026-11-09): starts with nothing ticked; Cancel leaves, clearing the ticks. Without
@@ -2170,6 +2181,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 onStopDownload={() => stopDownload(clip.id)}
                 manual={manualOnly}
                 edited={manualOnly && isEdited(clip)}
+                downloadError={typeof dlState[clip.id] === 'object' ? (dlState[clip.id] as { error: string }).error : null}
                 download={dlState[clip.id] === 'stopping' ? 'stopping'
                   : dlState[clip.id] === 'exporting' || clip.status === 'rendering' ? 'preparing'
                   : typeof dlState[clip.id] === 'object' ? 'failed' : 'ready'}
@@ -2253,6 +2265,40 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
 }
 
 // ── Pieces ────────────────────────────────────────────────────────────────────
+
+const BOARDS = [
+  { mode: 'ai' as const, name: 'AI edit',
+    icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" opacity=".6" /></svg> },
+  { mode: 'manual' as const, name: 'Manual edit',
+    icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12" /></svg> },
+]
+
+/**
+ * Which clip board this is, and the way to the other, by the breadcrumb (user, 2026-11-12: a plain switch didn't
+ * look right; a chip with ▾ didn't say it switches). One pill in two parts: where you are (its icon and name, a soft
+ * light travelling round the pill's edge), then "⇄ Switch to …" — the other board for the same video in one click.
+ * (styles: .cb-board* in globals.css)
+ */
+function BoardPicker({ manual, disabled, switching, onPick }: {
+  manual: boolean; disabled: boolean; switching: 'ai' | 'manual' | null; onPick: (mode: 'ai' | 'manual') => void
+}) {
+  const here = BOARDS.find(b => (b.mode === 'manual') === manual)!
+  const other = BOARDS.find(b => b !== here)!
+  return (
+    <div className="cb-board" role="group" aria-label="Clip board">
+      <span className="cb-board-here" aria-label={`You're in ${here.name}`}>
+        <span className="cb-board-here-icon">{here.icon}</span>
+        {here.name}
+      </span>
+      <button type="button" className="cb-board-switch" disabled={disabled || !!switching} onClick={() => onPick(other.mode)}>
+        {switching ? <Spinner /> : (
+          <svg className="cb-board-swap" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 7h12l-3.5-3.5M17 17H5l3.5 3.5" /></svg>
+        )}
+        {switching ? 'Opening…' : <span>Switch to <b>{other.name}</b></span>}
+      </button>
+    </div>
+  )
+}
 
 /**
  * Make my clips' Captions / Title / Brand choice (user, 2026-11-09: a designed menu, not the browser's
@@ -2880,7 +2926,7 @@ function SubEditOverlay({ startedAt, estimate, ahead, onStop }: { startedAt: num
   )
 }
 
-function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, onStopDownload, download, onSubEdited, manual, edited, brandTag, onRename, defaultTitle }: {
+function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, onStopDownload, download, downloadError, onSubEdited, manual, edited, brandTag, onRename, defaultTitle }: {
   id: string
   /** Renamed from its card (✎ or a double-click on the name): the new name, or null for `defaultTitle` again */
   onRename?: (title: string | null) => void
@@ -2900,6 +2946,8 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
   onStopDownload: () => void
   /** preparing: exporting, saves by itself when ready (the button is Stop) · failed: the last try didn't work */
   download: 'ready' | 'preparing' | 'stopping' | 'failed'
+  /** Why the last download didn't work (e.g. not enough credits to export): shown on the card */
+  downloadError?: string | null
   videoUrl: string
   favorite: boolean
   /** Why AI picked it (Make my clips), when we have it */
@@ -3035,6 +3083,13 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
               {brandTag}
               {sub.busy && <SubEditInline startedAt={sub.startedAt} estimate={sub.estimate} ahead={sub.ahead} onStop={sub.stop} />}
             </span>
+            {/* Why the download didn't work (user, 2026-11-12: it only turned into Retry) — out of credits, with
+                the way to get more */}
+            {download === 'failed' && downloadError && (
+              <span role="alert" className="cb-dl-error" onClick={e => e.stopPropagation()}>
+                {downloadError}<TopUpLink message={downloadError} />
+              </span>
+            )}
           </span>
         </span>
         <span className="cb-reveal" data-open={menu ? '' : undefined}>
@@ -3154,6 +3209,9 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
       {reason && !selecting && <p className="mt-2 text-[11px] leading-relaxed line-clamp-2" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>{reason}</p>}
       {/* Edit · Download (a click on the card itself previews it); a Sub-edit already running still shows its overlay */}
       {!selecting && sub.error && <p role="alert" className="mt-2 text-[11px]" style={{ color: '#f87171' }}>{sub.error}</p>}
+      {!selecting && download === 'failed' && downloadError && (
+        <p role="alert" className="cb-dl-error mt-2" onClick={e => e.stopPropagation()}>{downloadError}<TopUpLink message={downloadError} /></p>
+      )}
       {!selecting && (
         <div className={`mt-2.5 grid gap-1.5 ${onRename ? 'grid-cols-3' : 'grid-cols-2'}`}>
           <button onClick={e => { e.stopPropagation(); onEdit() }} disabled={disabled}

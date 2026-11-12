@@ -4511,3 +4511,38 @@ html[data-theme="light"] .sp-mode-pill { background: linear-gradient(135deg, rgb
 .credits-badge.is-low { border-color: #f59e0b; }
 .credits-badge.is-low svg { color: #f59e0b; }
 .credits-topup { margin-left: 6px; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; color: inherit; white-space: nowrap; }
+
+/* The clip board's AI edit / Manual edit, by the breadcrumb (ClipPickerShell BoardPicker, user 2026-11-12: a plain
+   switch didn't look right, a chip with ▾ didn't say it switches). One pill in two parts: where you are — its icon in
+   a lime disc and its name — and "⇄ Switch to …", a plain button whose arrows turn on hover. A soft lime light
+   travels slowly round the pill's edge (a conic gradient in a 1px ring; still for reduced motion) */
+@property --cb-board-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.cb-board { position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding: 3px;
+  border-radius: 999px; background: linear-gradient(180deg, rgb(var(--cb-fg) / 0.08), rgb(var(--cb-fg) / 0.04));
+  box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.12), inset 0 1px 0 rgb(var(--cb-fg) / 0.08); }
+.cb-board::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: conic-gradient(from var(--cb-board-a), transparent 0deg 250deg, rgba(200, 255, 0, 0.7) 300deg, transparent 340deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); animation: cb-board-spin 5s linear infinite; }
+@keyframes cb-board-spin { to { --cb-board-a: 360deg; } }
+.cb-board-here { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px 0 4px; font-size: 12.5px; font-weight: 700;
+  white-space: nowrap; color: var(--cb-text); }
+.cb-board-here-icon { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; color: #0c0c0e; background: #c8ff00;
+  box-shadow: 0 2px 10px -3px rgba(200, 255, 0, 0.6); }
+.cb-board-switch { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 999px; white-space: nowrap;
+  font-size: 12px; font-weight: 500; color: rgb(var(--cb-fg) / 0.7); background: rgb(var(--cb-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.1);
+  transition: background-color .15s, color .15s, box-shadow .15s, transform .12s; }
+.cb-board-switch b { font-weight: 700; color: var(--cb-text); }
+.cb-board-switch:hover:not(:disabled) { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.12); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.2); }
+.cb-board-switch:active:not(:disabled) { transform: scale(.97); }
+.cb-board-switch:disabled { cursor: default; opacity: .6; }
+.cb-board-switch:focus-visible { outline: 2px solid rgba(200, 255, 0, 0.6); outline-offset: 2px; }
+.cb-board-swap { flex-shrink: 0; transition: transform .35s cubic-bezier(.34, 1.4, .64, 1); }
+.cb-board-switch:hover:not(:disabled) .cb-board-swap { transform: rotate(180deg); }
+[data-theme="light"] .cb-board-here-icon { background: #b4e600; }
+[data-theme="light"] .cb-board::before { background: conic-gradient(from var(--cb-board-a), transparent 0deg 250deg, rgba(110, 150, 0, 0.8) 300deg, transparent 340deg); }
+@media (prefers-reduced-motion: reduce) { .cb-board::before { animation: none; --cb-board-a: 300deg; } .cb-board-swap, .cb-board-switch { transition: none; } }
+
+/* A clip's download that didn't work: why, under its time (ClipPickerShell .cb-dl-error, user 2026-11-12) */
+.cb-dl-error { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 11px; line-height: 1.4; color: #f87171; cursor: default; }
+.cb-dl-error .credits-topup { font-weight: 700; }

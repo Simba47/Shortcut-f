@@ -1224,7 +1224,7 @@ function EditModeDialog({ videoId, title, videoUrl, posterUrl, durationMs, credi
 
         <p className="emd-foot">
           {credits && <><b>{credits.balance} credits</b> left. </>}
-          Not sure? Either way opens the clip board, where both are there, so you can switch any time{credits ? ' (switching to AI later reads the video then)' : ''}.
+          Not sure? You can switch between AI edit and Manual edit any time at the top of the clip board{credits ? ' (switching to AI later reads the video then)' : ''}.
         </p>
       </div>
     </div>
