@@ -23,6 +23,9 @@ const LOOP_MS = 2400
 const HOLD_AT_MS = 1550
 /** The box, width : height (half the height it had, user 2026-11-10) */
 const ASPECT = 6
+/** How tall the box may grow for a big caption (user, 2026-11-12: a bigger Size has to look bigger — a line
+ *  on to two lines no longer fitted the strip, so it was drawn smaller) */
+const MIN_ASPECT = 2.4
 /** The line is drawn on a taller canvas (room for the styles that stack a word a line), then placed in the box */
 const DRAW_ASPECT = 1.2
 /** How the line is measured: on a small canvas of this width, at this many moments of its loop (a pop's peak is short) */
@@ -42,8 +45,11 @@ const MAX_ZOOM = 3
 /** Where a line reaches over its whole loop, as shares of the canvas */
 interface Ink { left: number; right: number; top: number; bottom: number }
 /** The zoom that makes a line fill that share of the box's width or height */
-const zoomToFill = (ink: Ink, w: number, h: number) =>
-  Math.min(w / (ink.right - ink.left), (h * DRAW_ASPECT) / (ASPECT * (ink.bottom - ink.top)))
+const zoomToFill = (ink: Ink, w: number, h: number, aspect = ASPECT) =>
+  Math.min(w / (ink.right - ink.left), (h * DRAW_ASPECT) / (aspect * (ink.bottom - ink.top)))
+/** The box's width : height that lets a line be drawn at `zoom` (no flatter than ASPECT, no taller than MIN_ASPECT) */
+const aspectFor = (ink: Ink, zoom: number) =>
+  Math.max(MIN_ASPECT, Math.min(ASPECT, (LIMIT_H * DRAW_ASPECT) / (zoom * (ink.bottom - ink.top))))
 
 export function CaptionPreview({ style, textCase, dim }: {
   style: Partial<CaptionStyle>
@@ -67,12 +73,12 @@ export function CaptionPreview({ style, textCase, dim }: {
     measuring.height = Math.round(MEASURE_W / DRAW_ASPECT)
     const m = measuring.getContext('2d', { willReadFrequently: true })
     if (!ctx || !d || !m) return
-    let placedFor = '', fittedFor = '', fitZoom = 1
+    let placedFor = '', fittedFor = '', fitZoom = 1, aspect = ASPECT
     // (drawn at the screen's own pixels: the caption sizes follow the canvas width, as on the video)
     const fit = () => {
       const dpr = window.devicePixelRatio || 1
       const w = Math.max(1, Math.round(canvas.clientWidth * dpr))
-      const h = Math.max(1, Math.round(w / ASPECT))
+      const h = Math.max(1, Math.round(w / aspect))
       if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; placedFor = '' }
     }
     fit()
@@ -81,18 +87,22 @@ export function CaptionPreview({ style, textCase, dim }: {
     let raf = 0, perLine = -1, chunks: ReturnType<typeof buildCaptionChunks> = []
     let lastStyle: Partial<CaptionStyle> | null = null, lastCase: TextCase | null = null, styleKey = '', fitKey = ''
     let centreX = 0.5, centreY = 0.5, fontCount = -1
+    /** One word at a time (a perLine-1 style): each word placed on its own — when it starts, its zoom and centre.
+     *  Fitted together, a short word made huge by a bigger Size shrank the long ones (user, 2026-11-12:
+     *  at 100 "SHORTCUT" was smaller than at 54) */
+    let perWord: Array<{ from: number; zoom: number; cx: number; cy: number }> = [], shownWord = -1
     const paint = (on: CanvasRenderingContext2D, st: Partial<CaptionStyle>, ms: number) => {
       on.setTransform(1, 0, 0, 1, 0, 0)
       on.clearRect(0, 0, on.canvas.width, on.canvas.height)
       // (centred wherever the captions sit on the video)
       drawCaptions(on, chunks, ms, { ...st, position_x: 0.5, position_y: 0.5 }, caseRef.current, null, undefined, false)
     }
-    /** Where the line reaches over its whole loop; null: nothing is drawn */
-    const inkOf = (st: Partial<CaptionStyle>): Ink | null => {
+    /** Where the line reaches over its whole loop (or from `from` to `to`); null: nothing is drawn */
+    const inkOf = (st: Partial<CaptionStyle>, from = 0, to = HOLD_AT_MS): Ink | null => {
       const W = measuring.width, H = measuring.height
       let left = W, right = -1, top = H, bottom = -1
       for (let i = 0; i < MEASURE_MOMENTS; i++) {
-        paint(m, st, (HOLD_AT_MS * i) / (MEASURE_MOMENTS - 1))
+        paint(m, st, from + ((to - from) * i) / (MEASURE_MOMENTS - 1))
         const px = m.getImageData(0, 0, W, H).data
         for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
           if (px[(y * W + x) * 4 + 3] <= 24) continue
@@ -112,11 +122,36 @@ export function CaptionPreview({ style, textCase, dim }: {
         const ink = inkOf({ ...st, size: FIT_AT_SIZE })
         fitZoom = ink ? Math.min(MAX_ZOOM, zoomToFill(ink, FIT_W, FIT_H)) : 1
       }
-      const ink = inkOf(st)
-      const zoom = ink ? Math.min(fitZoom, zoomToFill(ink, LIMIT_W, LIMIT_H)) : 1
-      centreX = ink ? (ink.left + ink.right) / 2 : 0.5
-      centreY = ink ? (ink.top + ink.bottom) / 2 : 0.5
-      // (drawn at that zoom, not stretched afterwards: the text stays sharp)
+      // (one word at a time: each word from its start to the next one's; the last held to the loop's hold)
+      const oneByOne = perLine === 1 && chunks.length > 1
+      const inks = oneByOne
+        ? chunks.map((c, j) => ({ from: c[0].start_ms, ink: inkOf(st, c[0].start_ms, j + 1 < chunks.length ? chunks[j + 1][0].start_ms - 1 : HOLD_AT_MS) }))
+        : [{ from: 0, ink: inkOf(st) }]
+      // The box as tall as the biggest of them needs at its zoom (kept the same while the words change)
+      const want = (ink: Ink) => Math.min(fitZoom, LIMIT_W / (ink.right - ink.left))
+      const tall = Math.min(ASPECT, ...inks.map(({ ink }) => (ink ? aspectFor(ink, want(ink)) : ASPECT)))
+      if (Math.abs(tall - aspect) > 0.01) {
+        aspect = tall
+        canvas.style.aspectRatio = `${aspect} / 1`
+        fit()
+      }
+      const placeOf = (ink: Ink | null) => ({
+        zoom: ink ? Math.min(fitZoom, zoomToFill(ink, LIMIT_W, LIMIT_H, aspect)) : 1,
+        cx: ink ? (ink.left + ink.right) / 2 : 0.5, cy: ink ? (ink.top + ink.bottom) / 2 : 0.5,
+      })
+      perWord = []
+      shownWord = -1
+      if (oneByOne) {
+        perWord = inks.map(({ from, ink }) => ({ from, ...placeOf(ink) }))
+        return
+      }
+      const one = placeOf(inks[0].ink)
+      centreX = one.cx
+      centreY = one.cy
+      size(one.zoom)
+    }
+    // (drawn at that zoom, not stretched afterwards: the text stays sharp)
+    const size = (zoom: number) => {
       drawn.width = Math.max(1, Math.round(canvas.width * zoom))
       drawn.height = Math.max(1, Math.round(drawn.width / DRAW_ASPECT))
     }
@@ -134,7 +169,13 @@ export function CaptionPreview({ style, textCase, dim }: {
         fitKey = JSON.stringify([{ ...st, size: null }, lastCase])
       }
       if (placedFor !== styleKey) { placedFor = styleKey; place(st) }
-      paint(d, st, Math.min((now - t0) % LOOP_MS, HOLD_AT_MS))
+      const ms = Math.min((now - t0) % LOOP_MS, HOLD_AT_MS)
+      if (perWord.length) {
+        let j = 0
+        while (j + 1 < perWord.length && perWord[j + 1].from <= ms) j++
+        if (j !== shownWord) { shownWord = j; centreX = perWord[j].cx; centreY = perWord[j].cy; size(perWord[j].zoom) }
+      }
+      paint(d, st, ms)
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       ctx.drawImage(drawn, Math.round(canvas.width / 2 - centreX * drawn.width), Math.round(canvas.height / 2 - centreY * drawn.height))
       raf = requestAnimationFrame(frame)

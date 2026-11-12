@@ -55,7 +55,7 @@ function ConfirmDialog({ title, body, confirmLabel = 'Delete', cancelLabel = 'Ca
   // glow in the action's colour, an animated icon (the bin's lid lifts), and two buttons that
   // show their keys (Esc / Enter)
   return (
-    <div className="cfm-backdrop fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 100 }}
+    <div className="cfm-backdrop fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 400 }}
       onPointerDown={e => { if (e.target === e.currentTarget) dismissRef.current() }}>
       <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby={body ? 'confirm-body' : undefined}
         className="editor-theme cfm-card" data-tone={tone}>

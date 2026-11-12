@@ -1494,8 +1494,11 @@ function drawPresetCaptions(
   // these are drawn bold (libass thickens them: the style asks for bold)
   const latin = style.language === 'roman' || isLatinText(chunk.map(w => w.word).join(' '))
   const plain = captionFont(style.language === 'roman' ? 'roboto' : style.font)
-  const baseFont: DrawFont = (tpl && latin ? templateFont(tpl.font) : null) ?? { family: plain.family, em: plain.em, weight: 700, italic: false }
-  const liveFont = tpl?.liveFont && latin ? templateFont(tpl.liveFont) : null
+  // A font picked over the caption style's own (user, 2026-11-12) is drawn instead of it.
+  // ⚠️ The export (backend) still draws the style's own font: to be matched there
+  const ownFont = tpl && latin && !style.font
+  const baseFont: DrawFont = (ownFont ? templateFont(tpl.font) : null) ?? { family: plain.family, em: plain.em, weight: 700, italic: false }
+  const liveFont = ownFont && tpl.liveFont ? templateFont(tpl.liveFont) : null
   // The caption size as libass takes it: every font is sized so its full height is this
   const lineH = (style.size ?? 52) * (tpl && latin ? tpl.size / 100 : 1) * k
   const fontOf = (f: DrawFont, scale: number) =>
@@ -1657,7 +1660,7 @@ function drawCaptionsCentred(
   const tpl = templateOf(style)
   if (tpl?.look) {
     const person = tpl.look === 'behind' && withPerson ? personMask(ctx.canvas, tMs) : null
-    const rect = drawCreatorCaptions(ctx, chunk, chunks.indexOf(chunk), chunk[chunk.length - 1].end_ms, tMs, style, tpl, person)
+    const rect = drawCreatorCaptions(ctx, chunk, chunks.indexOf(chunk), chunk[chunk.length - 1].end_ms, tMs, style, tpl, person, style.font ? captionFont(style.font) : null)
     if (out) out.rect = rect
     return
   }

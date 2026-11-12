@@ -11,10 +11,11 @@ import { openBrandKits, BRAND_KITS_CLOSED } from '@/components/brand/brandKitsEv
 import { InteractiveHoverButton } from '@/components/ui/interactive-hover-button'
 import { BrandStart, BrandCard, type Found } from '@/components/brand/BrandMaker'
 import type { KitInviteIn } from '@/lib/shared/brandTeam'
+import * as kitHistory from '@/modules/brand/kitHistory'
 import { templateOf, templateFontFamily } from '@/modules/captions/templates'
 import {
   MAX_BRAND_FONTS,
-  brandCaptionStyle, logoBox, showHandle, brandTextStyle, DEFAULT_BRAND_KIT, type LinkBrand,
+  brandCaptionStyle, captionCaseOf, logoBox, showHandle, brandTextStyle, DEFAULT_BRAND_KIT, type LinkBrand,
   type BrandKit, type BrandKitData, type BrandCaptions,
 } from '@/lib/shared/brandKit'
 
@@ -31,6 +32,8 @@ const CURRENT_KEY = 'shortcut:brandKit'
 const SAVE_AFTER_MS = 600
 /** A save that didn't land is sent again after this long, longer each time (up to RETRY_MAX_MS) */
 const RETRY_FIRST_MS = 2000, RETRY_MAX_MS = 30000
+/** Inputs that aren't typed in: Ctrl+Z there is the kit's Undo, not the box's own */
+const NOT_TYPED = new Set(['range', 'color', 'checkbox', 'radio', 'button', 'file'])
 
 export interface BrandKits {
   kits: BrandKit[]
@@ -42,8 +45,17 @@ export interface BrandKits {
   select: (id: string) => void
   /** A new kit (picked): it's given back */
   create: () => Promise<BrandKit>
-  /** logo_url: the new logo's link, for showing it (not saved) */
-  update: (id: string, patch: KitPatch) => void
+  /** logo_url: the new logo's link, for showing it (not saved). `track` false: not a step Undo takes back */
+  update: (id: string, patch: KitPatch, track?: boolean) => void
+  /** Undo / Redo / Start over in the kit window (modules/brand/kitHistory): kept from `beginHistory` on */
+  beginHistory: () => void
+  undo: () => void
+  redo: () => void
+  canUndo: boolean
+  canRedo: boolean
+  /** The kit as it was when the window opened (one step: Undo takes it back) */
+  startOver: (id: string) => void
+  canStartOver: (id: string) => boolean
   /** What's waiting for a kit sent now, and waited for: null once it's saved, else why it isn't */
   saveNow: (id: string) => Promise<string | null>
   remove: (id: string) => Promise<void>
@@ -209,7 +221,25 @@ export function useBrandKits(): BrandKits {
     return () => { window.removeEventListener('online', online); window.removeEventListener('beforeunload', leaving) }
   }, [flush])
 
-  const update = useCallback((id: string, { logo_url, ...patch }: KitPatch) => {
+  // Undo / Redo / Start over: the kits as they were before each step (kitHistory). `kitsRef`: the kits
+  // as they are, read when a step is taken
+  const history = useRef(kitHistory.emptyHistory())
+  const [, setHistoryVersion] = useState(0)
+  const kitsRef = useRef(kits)
+  kitsRef.current = kits
+  const stateOf = (id: string): kitHistory.KitState | undefined => {
+    const k = kitsRef.current.find(x => x.id === id)
+    return k ? { name: k.name, data: k.data, logo_url: k.logo_url ?? null } : undefined
+  }
+  const setHistory = (h: kitHistory.KitHistory) => { history.current = h; setHistoryVersion(v => v + 1) }
+
+  /** A change on screen, then saved shortly (no step of its own) */
+  const apply = useCallback((id: string, { logo_url, ...patch }: KitPatch) => {
+    // (the kits as they'll be, for a step taken before the screen updates: Make default's two kits)
+    kitsRef.current = kitsRef.current.map(k => (k.id === id ? {
+      ...k, ...(patch.name !== undefined ? { name: patch.name } : {}), ...(patch.data ? { data: patch.data } : {}),
+      ...(logo_url !== undefined ? { logo_url } : {}),
+    } : k))
     setKits(ks => ks.map(k => (k.id === id ? {
       ...k, ...(patch.name !== undefined ? { name: patch.name } : {}), ...(patch.data ? { data: patch.data } : {}),
       ...(logo_url !== undefined ? { logo_url } : {}),
@@ -225,6 +255,37 @@ export function useBrandKits(): BrandKits {
     timers.current.set(id, setTimeout(() => flush(id), SAVE_AFTER_MS))
     setSaveState('saving')
   }, [flush])
+
+  const update = useCallback((id: string, patch: KitPatch, track = true) => {
+    const before = stateOf(id)
+    if (track && before) setHistory(kitHistory.record(history.current, id, before, Date.now()))
+    apply(id, patch)
+  }, [apply]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** What a step puts back, on screen and saved; the kit it changed is shown */
+  const putBack = (put: Record<string, kitHistory.KitState>) => {
+    const ids = Object.keys(put)
+    for (const id of ids) apply(id, { name: put[id].name, data: put[id].data, logo_url: put[id].logo_url })
+    if (ids.length) setCurrentId(cur => (cur && ids.includes(cur) ? cur : ids[ids.length - 1]))
+  }
+  const beginHistory = useCallback(() => setHistory(kitHistory.emptyHistory()), [])
+  const undo = useCallback(() => {
+    const r = kitHistory.undo(history.current, stateOf)
+    if (r) { setHistory(r.h); putBack(r.put) }
+  }, [apply]) // eslint-disable-line react-hooks/exhaustive-deps
+  const redo = useCallback(() => {
+    const r = kitHistory.redo(history.current, stateOf)
+    if (r) { setHistory(r.h); putBack(r.put) }
+  }, [apply]) // eslint-disable-line react-hooks/exhaustive-deps
+  const startOver = useCallback((id: string) => {
+    const was = history.current.first[id]
+    const now = stateOf(id)
+    if (!was || !now || kitHistory.sameState(was, now)) return
+    // (a step of its own: Undo takes the start over back)
+    setHistory(kitHistory.record(history.current, id, now, Date.now(), true))
+    putBack({ [id]: was })
+  }, [apply]) // eslint-disable-line react-hooks/exhaustive-deps
+  const canStartOver = (id: string) => kitHistory.changedSinceOpen(history.current, id, stateOf(id))
 
   const saveNow = useCallback(async (id: string) => {
     if (pending.current.has(id)) flush(id)
@@ -285,7 +346,10 @@ export function useBrandKits(): BrandKits {
   }, [select])
 
   const current = kits.find(k => k.id === currentId) ?? null
-  return { kits, limit, plan, loading, error, current, select, create, update, saveNow, remove, leave, invites, answerInvite, uploadLogo, fromLink, saveState, saveError, reload: load }
+  return {
+    kits, limit, plan, loading, error, current, select, create, update, saveNow, remove, leave, invites, answerInvite, uploadLogo, fromLink, saveState, saveError, reload: load,
+    beginHistory, undo, redo, canUndo: history.current.undo.length > 0, canRedo: history.current.redo.length > 0, startOver, canStartOver,
+  }
 }
 
 /**
@@ -468,6 +532,24 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
   const nameRef = useRef<HTMLInputElement>(null)
   const { confirm, dialog: confirmDialog } = useConfirm()
   useEffect(() => { loadVideoFonts() }, [])
+  // Undo / Redo / Start over (user, 2026-11-12): from this opening of the window on; Ctrl/⌘+Z and
+  // Ctrl/⌘+Shift+Z (or Ctrl+Y) — not while typing in a box (its own text undo), and never the clip's
+  // edits behind it in the editor
+  const { beginHistory, undo, redo } = brand
+  useEffect(() => { beginHistory() }, [beginHistory])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return
+      const key = e.key.toLowerCase()
+      if (key !== 'z' && key !== 'y') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'TEXTAREA' || t.isContentEditable || (t.tagName === 'INPUT' && !NOT_TYPED.has((t as HTMLInputElement).type)))) return
+      e.preventDefault(); e.stopPropagation()
+      if (key === 'y' || e.shiftKey) redo(); else undo()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [undo, redo])
 
   if (!kit) {
     return (
@@ -531,8 +613,8 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
             <button type="button" className="kit-name-btn" data-danger aria-label="Delete this kit" title="Delete"
               onClick={() => confirm({
                 title: `Delete “${kit.name}”?`,
-                body: 'The kit goes from your account. Clips it was put on keep their look.',
-                confirmLabel: 'Delete kit',
+                body: 'Are you sure you want to delete this brand kit? This can’t be undone.',
+                confirmLabel: 'Delete',
               }, () => { brand.remove(kit.id).catch(e => setNotSaved(e instanceof Error ? e.message : String(e))) })}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 002 2h8a2 2 0 002-2l1-12M9 7V4h6v3" /></svg>
             </button>
@@ -543,6 +625,27 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
           : <span role="status" className="text-[11px] shrink-0" style={{ color: brand.saveState === 'error' ? '#fca5a5' : 'rgb(var(--ed-fg) / 0.45)' }}>
             {saveLabel(brand)}
           </span>}
+        {!readOnly && (
+          <div className="kit-hist shrink-0" role="group" aria-label="Undo changes">
+            <button type="button" className="kit-name-btn" onClick={undo} disabled={!brand.canUndo} aria-label="Undo" title="Undo the last change (Ctrl+Z)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 14L4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 010 11H11" /></svg>
+            </button>
+            <button type="button" className="kit-name-btn" onClick={redo} disabled={!brand.canRedo} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 14l5-5-5-5" /><path d="M20 9H9.5a5.5 5.5 0 000 11H13" /></svg>
+            </button>
+            {brand.canStartOver(kit.id) && (
+              <button type="button" className="kit-hist-over" title="Put this kit back as it was when you opened it"
+                onClick={() => confirm({
+                  title: 'Start over?',
+                  body: `\u201c${kit.name}\u201d goes back to how it was when you opened it. You can still Undo this.`,
+                  confirmLabel: 'Start over', tone: 'warning',
+                }, () => brand.startOver(kit.id))}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 109-9 9.7 9.7 0 00-6.7 2.8L3 8" /><path d="M3 3v5h5" /></svg>
+                Start over
+              </button>
+            )}
+          </div>
+        )}
         {onTurnOn && onTurnOff && <div className="shrink-0"><BrandOnSwitch kit={kit} onKitId={onKitId} onTurnOn={onTurnOn} onTurnOff={onTurnOff} /></div>}
         {/* (a clear way out: "Done", and Esc in the editor — user, 2026-10-28) */}
         <button type="button" onClick={onClose} aria-label={closeLabel} title={`${closeLabel} (Esc)`}
@@ -675,10 +778,10 @@ export function ClipMock({ kit, platform = 'off', onPlace }: { kit: BrandKit; pl
     window.addEventListener('pointerup', up)
   }
   return (
-    <div className="absolute inset-0" style={{ containerType: 'inline-size' }}>
+    <div className="absolute inset-0 overflow-hidden" style={{ containerType: 'inline-size' }}>
       <div className="absolute inset-0" style={{ background: 'linear-gradient(160deg, #3a4150 0%, #1d2129 55%, #2c2a24 100%)' }} />
       <div className="absolute rounded-full" style={{ left: '28%', top: '30%', width: '44%', height: '25%', background: 'rgba(255,255,255,0.08)' }} />
-      <div className="absolute inset-x-0 text-center px-3" style={{ top: '18%', fontFamily: d.title.font ?? 'sans-serif', fontWeight: 700, fontSize: d.title.size * K, color: d.title.color, lineHeight: 1.15, textShadow: '0 1px 3px rgba(0,0,0,0.6)' }}>
+      <div className="absolute inset-x-0 text-center px-3" style={{ top: '18%', fontFamily: d.title.font ?? 'sans-serif', fontWeight: 700, fontSize: d.title.size * K, color: d.title.color, lineHeight: 1.15, textShadow: '0 1px 3px rgba(0,0,0,0.6)', overflowWrap: 'anywhere' }}>
         Your text here
       </div>
       {d.captions.on && <CaptionSample c={d.captions} />}
@@ -697,12 +800,13 @@ export function ClipMock({ kit, platform = 'off', onPlace }: { kit: BrandKit; pl
 /** A caption line in the kit's caption style, where captions sit (the spoken word in the highlight colour) */
 function CaptionSample({ c }: { c: BrandCaptions }) {
   const tpl = templateOf({ template: c.template })
-  const font = c.font ?? (tpl ? templateFontFamily(tpl.font) : 'sans-serif')
+  // (a font picked, else the caption style's own)
+  const font = c.font ?? (tpl ? `"${templateFontFamily(tpl.font)}"` : 'sans-serif')
   const words = ['Your', 'captions', 'look', 'like', 'this']
   return (
     <div className="absolute inset-x-0 flex flex-wrap justify-center gap-x-[0.3em] px-3 text-center" style={{
-      top: '66%', fontFamily: font, fontWeight: 800, fontSize: c.size * K * 1.1, lineHeight: 1.15,
-      textTransform: c.uppercase ? 'uppercase' : undefined, textShadow: '0 1px 2px rgba(0,0,0,0.85), 0 0 2px rgba(0,0,0,0.85)',
+      top: '66%', fontFamily: font, fontWeight: 800, fontSize: c.size * K * 1.1, lineHeight: 1.15, overflowWrap: 'anywhere',
+      textTransform: c.uppercase ? 'uppercase' : c.lowercase ? 'lowercase' : undefined, textShadow: '0 1px 2px rgba(0,0,0,0.85), 0 0 2px rgba(0,0,0,0.85)',
     }}>
       {words.map((w, i) => <span key={i} style={{ color: i === 1 && c.animation !== 'none' ? c.highlight_color : c.color }}>{w}</span>)}
     </div>
@@ -785,10 +889,11 @@ function BrandFonts({ fonts, onChange }: { fonts: Array<{ family: string; name: 
     <div className="flex flex-col gap-2">
       {fonts.map((f, i) => (
         <div key={f.family} className="flex items-center gap-2">
-          <span className="w-10 text-center text-lg shrink-0" style={{ fontFamily: f.family, color: 'var(--ed-text)' }} aria-hidden="true">Aa</span>
+          {/* One box: the font's name in the font itself, kept inside it (user, 2026-11-12: no separate "Aa"
+              box, no letters past the edge) */}
           <input value={f.name} maxLength={40} aria-label={`Name of brand font ${i + 1}`}
             onChange={e => onChange(fonts.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
-            className="flex-1 min-w-0 h-8 px-2 rounded-md text-sm text-[var(--ed-text)] outline-none"
+            className="flex-1 min-w-0 h-9 px-3 rounded-md text-sm leading-normal text-[var(--ed-text)] outline-none overflow-hidden text-ellipsis"
             style={{ fontFamily: f.family, background: 'rgb(var(--ed-fg) / 0.06)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)' }} />
           <button type="button" aria-label={`Remove brand font ${f.name}`} onClick={() => onChange(fonts.filter((_, j) => j !== i))}
             className="w-7 h-7 shrink-0 rounded-md text-sm" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>×</button>
@@ -845,13 +950,13 @@ interface KitChip { name: string; hex: string }
 // (only when the step is open: it brings the editor's drawing code with it)
 const CaptionPreview = lazy(() => import('./CaptionPreview').then(m => ({ default: m.CaptionPreview })))
 
-type KitTab = 'captions' | 'style' | 'look' | 'text' | 'fonts'
+type KitTab = 'captions' | 'style' | 'look' | 'fonts'
 const KIT_TABS: Array<{ id: KitTab; label: string; tip: string }> = [
   { id: 'captions', label: 'Captions', tip: 'Brand captions on or off' },
   { id: 'style', label: 'Style', tip: 'How the captions look and move' },
-  { id: 'look', label: 'Look', tip: 'Colours, font, size and capitals' },
-  { id: 'text', label: 'Text', tip: 'The title style, and frame corners' },
-  { id: 'fonts', label: 'Fonts', tip: 'Your own font files' },
+  { id: 'look', label: 'Look', tip: 'Caption colours' },
+  // (user, 2026-11-12: no Text tab — its Title style is under Fonts, its Corners card gone)
+  { id: 'fonts', label: 'Fonts', tip: 'Caption font, size and capitals, the title style, and your own font files' },
 ]
 
 /**
@@ -861,23 +966,28 @@ const KIT_TABS: Array<{ id: KitTab; label: string; tip: string }> = [
  */
 function TextAndCaptions({ d, now, set }: { d: BrandKitData; now: () => BrandKitData; set: (data: BrandKitData) => void }) {
   const [picked, setPicked] = useState<KitTab>('style')
+  // Fonts: the sample on top shows the card last touched — the captions', or the title's (user, 2026-11-12)
+  const [sampleOf, setSampleOf] = useState<'caption' | 'title'>('caption')
   useEffect(() => { d.fonts.forEach(f => { ensureBrandFont(f.family) }) }, [d.fonts])
   const setCaptions = (c: Partial<BrandCaptions>) => { const cur = now(); set({ ...cur, captions: { ...cur.captions, ...c } }) }
   // (captions off: their Style and Look wait, as in the Captions panel)
   const tab: KitTab = !d.captions.on && (picked === 'style' || picked === 'look') ? 'captions' : picked
-  const isText = tab === 'text' || tab === 'fonts'
+  // (Fonts: the captions' font, size and capitals — user, 2026-11-12: moved from Look — so their sample,
+  // while captions are on)
+  const isText = tab === 'fonts' && (!d.captions.on || sampleOf === 'title')
   const style = brandCaptionStyle(d.captions)
-  const textCase: TextCase = d.captions.uppercase ? 'upper' : 'title'
+  const textCase: TextCase = captionCaseOf(d.captions)
   const suggest: KitChip[] = [
     { name: 'Primary', hex: d.colors.main }, { name: 'Secondary', hex: d.colors.accent },
     ...d.colors.extra.map((hex, i) => ({ name: `Colour ${i + 3}`, hex })),
   ]
   const sample = brandTextStyle(d, 'title')
-  const styler = (section: 'style' | 'look') => (
-    <div role="tabpanel" aria-label={section === 'style' ? 'Style' : 'Look'} className="kit-cc -mx-4">
+  const styler = (section: 'style' | 'colours' | 'font') => (
+    // (the font part sits inside the Fonts tab's own panel)
+    <div role={section === 'font' ? undefined : 'tabpanel'} aria-label={section === 'style' ? 'Style' : section === 'font' ? undefined : 'Look'} className="kit-cc -mx-4">
       <CaptionStyler section={section} style={style} textCase={textCase}
         onChange={u => setCaptions(captionPatch(u))}
-        onTextCaseChange={(c: TextCase) => setCaptions({ uppercase: c === 'upper' })}
+        onTextCaseChange={(c: TextCase) => setCaptions({ uppercase: c === 'upper', lowercase: c === 'lower' })}
         onEditCaptions={() => {}} onRetranscribe={() => {}} retranscribing={false} hasWords={false} />
     </div>
   )
@@ -906,7 +1016,7 @@ function TextAndCaptions({ d, now, set }: { d: BrandKitData; now: () => BrandKit
             const on = tab === t.id
             const off = !d.captions.on && (t.id === 'style' || t.id === 'look')
             return (
-              <button key={t.id} type="button" role="tab" aria-selected={on} disabled={off} onClick={() => setPicked(t.id)}
+              <button key={t.id} type="button" role="tab" aria-selected={on} disabled={off} onClick={() => { setPicked(t.id); setSampleOf('caption') }}
                 title={off ? 'Turn on Brand captions first' : t.tip}
                 className="h-8 px-1 rounded-md text-[12px] font-semibold whitespace-nowrap transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 style={on ? { background: 'rgb(var(--ed-fg) / 0.12)', color: 'var(--ed-accent-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.08)' } : { color: 'rgb(var(--ed-fg) / 0.6)' }}>
@@ -936,35 +1046,29 @@ function TextAndCaptions({ d, now, set }: { d: BrandKitData; now: () => BrandKit
         </div>
       )}
       {tab === 'style' && styler('style')}
-      {tab === 'look' && styler('look')}
-      {tab === 'text' && (
-        <div role="tabpanel" aria-label="Text" className="flex flex-col gap-3">
-            <Section title="Title style">
-              <p className="text-[11px] -mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>For text on the clip and frame titles: new text starts in it.</p>
-              <FontPicker stayOpen value={d.title.font} onChange={font => set({ ...now(), title: { ...now().title, font: font === 'sans-serif' ? null : font } })} />
-              <ColorRow label="Colour" value={d.title.color} onChange={color => set({ ...now(), title: { ...now().title, color } })} suggest={suggest} />
-              <RangeRow label="Size" min={24} max={160} step={2} value={d.title.size} text={`${d.title.size}`}
-                onChange={size => set({ ...now(), title: { ...now().title, size } })} />
-            </Section>
-          <Section title="Corners">
-            <label className="cap-row cursor-pointer select-none">
-              <span className="flex flex-col min-w-0">
-                <span className="cap-label">Brand corners</span>
-                <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>
-                  {d.frames.corners !== null ? 'While the brand kit is on, every frame’s video is rounded like this' : 'Off: frames keep their own corners'}
-                </span>
-              </span>
-              <Switch on={d.frames.corners !== null} label="Brand corners" onChange={on => set({ ...now(), frames: { ...now().frames, corners: on ? 80 : null } })} />
-            </label>
-            {d.frames.corners !== null && (
-              <RangeRow label="Rounding" min={0} max={100} step={5} value={d.frames.corners} text={`${d.frames.corners}%`}
-                onChange={corners => set({ ...now(), frames: { ...now().frames, corners } })} />
-            )}
-          </Section>
-        </div>
-      )}
+      {tab === 'look' && styler('colours')}
       {tab === 'fonts' && (
-        <div role="tabpanel" aria-label="Fonts">
+        <div role="tabpanel" aria-label="Fonts" className="flex flex-col gap-3">
+          {/* The captions' font, size and capitals (user, 2026-11-12: here, not under Look), in a card named
+              for them beside Title style — "Font" alone didn't say whose */}
+          <div onPointerDownCapture={() => setSampleOf('caption')} onFocusCapture={() => setSampleOf('caption')}>
+          <Section title="Caption font">
+            <p className="text-[11px] -mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>For the captions on your clips: the words as they're spoken.</p>
+            {d.captions.on
+              // (the styler's own padding taken back: the card has its own)
+              ? <div className="-mt-2 -mb-5">{styler('font')}</div>
+              : <p className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>Turn on Brand captions (the Captions tab) to set their font, size and capitals.</p>}
+          </Section>
+          </div>
+          <div onPointerDownCapture={() => setSampleOf('title')} onFocusCapture={() => setSampleOf('title')}>
+          <Section title="Title style">
+            <p className="text-[11px] -mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>For text on the clip and frame titles: new text starts in it.</p>
+            <FontPicker stayOpen value={d.title.font} onChange={font => set({ ...now(), title: { ...now().title, font: font === 'sans-serif' ? null : font } })} />
+            <ColorRow label="Colour" value={d.title.color} onChange={color => set({ ...now(), title: { ...now().title, color } })} suggest={suggest} />
+            <RangeRow label="Size" min={24} max={160} step={2} value={d.title.size} text={`${d.title.size}`}
+              onChange={size => set({ ...now(), title: { ...now().title, size } })} />
+          </Section>
+          </div>
           <Section title="Your fonts">
             <BrandFonts fonts={d.fonts} onChange={fonts => set({ ...now(), fonts })} />
           </Section>
