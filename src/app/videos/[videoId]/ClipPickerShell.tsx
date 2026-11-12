@@ -26,7 +26,6 @@ import { ClipPlayer } from '@/components/clips/ClipPlayer'
 import type { ClipPreviewData } from '@/server/services/clipPreview'
 import type { SegmentLocal } from '@chai-cut/shared'
 import { defaultCropForSlot, makeBox } from '@/modules/editor/utils'
-import { MODEL_CREDIT } from '@/lib/company'
 import { insidePicture, pictureOrWhole, type PictureBox } from '@/modules/editor/pictureBox'
 
 interface VideoData {
@@ -72,8 +71,14 @@ const CLIP_TABS: Array<{ id: ClipTab; label: string; empty: string }> = [
   { id: 'edited', label: 'Edited clips', empty: 'Clips you open in the editor show here.' },
   { id: 'fav', label: 'Favorites', empty: 'Tap the heart on a clip to keep it here.' },
 ]
+/** The title over a section's empty message (its text is CLIP_TABS' `empty`) */
+const TAB_EMPTY_TITLE: Partial<Record<ClipTab, string>> = {
+  yours: 'No clips of yours yet', ask: 'No Ask AI clips yet', auto: 'No AI-made clips yet',
+  edited: 'No edited clips yet', fav: 'No favorites yet',
+}
 /** Ask AI: one-tap searches */
-const ASK_CHIPS = ['emotional', 'funny', 'aesthetic', 'action']
+// (user, 2026-11-12) what people look for in talking videos (podcasts, interviews), not "aesthetic" / "action"
+const ASK_CHIPS = ['Funny moments', 'Emotional', 'Hot takes', 'Big reveals']
 const ORIGIN_BADGE: Record<ClipOrigin, { label: string; color: string }> = {
   yours: { label: 'Yours', color: 'rgb(var(--cb-fg) / 0.6)' },
   ask: { label: 'Ask AI', color: '#38bdf8' },
@@ -229,6 +234,23 @@ function useWide() {
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
+/**
+ * Why a clip action failed, in plain words (user, 2026-11-12): no connection → say so; a clear reason from the
+ * server ("The clip is too short") → as it is; anything technical (a database message, "NaN", "Failed to fetch",
+ * broken JSON, a stack line) or nothing at all → a plain "something went wrong", never the raw text.
+ */
+function friendlyError(e: unknown): string {
+  const msg = (e instanceof Error ? e.message : typeof e === 'string' ? e : '').trim()
+  const offline = typeof navigator !== 'undefined' && navigator.onLine === false
+  if (offline || /failed to fetch|networkerror|network request failed|load failed|err_internet/i.test(msg)) {
+    return 'Check your connection and try again.'
+  }
+  const technical = !msg || msg.length > 160 || /\bNaN\b/.test(msg) ||
+    /\bundefined\b|\bnull\b|syntax|unexpected token|json|invalid input|violates|constraint|relation |column |type integer|uuid|econn|timeout|internal server|stack|\bat \S+ \(|^\d{3}\b|^error:?$/i.test(msg)
+  if (technical) return 'Something went wrong on our side. Please try again.'
+  return /[.!?]$/.test(msg) ? msg : `${msg}.`
+}
+
 function parseTime(str: string): number | null {
   const parts = str.trim().split(':').map(Number)
   if (parts.some(isNaN) || parts.length === 0) return null
@@ -285,7 +307,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const [formEnd, setFormEnd] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const [clipError, setClipError] = useState<string | null>(null)
+  // The Clipboard's error banner (user, 2026-11-12): what failed (title) and why, in plain words (detail)
+  const [clipError, setClipErrorState] = useState<{ title: string; detail: string } | null>(null)
+  const setClipError = (title: string | null, e?: unknown) => setClipErrorState(title ? { title, detail: friendlyError(e) } : null)
   // (Best moments: removed 2026-11-09 (user), kept commented)
   // const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null)
   // const [momentsNote, setMomentsNote] = useState<string | null>(null)
@@ -479,12 +503,12 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       await exportAsks.current.get(id)
       const res = await fetch(`/api/clips/${id}/cancel-export`, { method: 'POST' })
       const d = await res.json().catch(() => null) as { status?: string; output_url?: string | null; error?: string } | null
-      if (!res.ok || !d?.status) throw new Error(d?.error ?? 'Couldn’t stop the export. Try again.')
+      if (!res.ok || !d?.status) throw new Error(d?.error ?? '')
       setClips(cs => cs.map(x => x.id === id ? { ...x, status: d.status!, output_url: d.output_url ?? null } : x))
       setDlState(s => { const n = { ...s }; delete n[id]; return n })
     } catch (e) {
       setDlState(s => ({ ...s, [id]: 'exporting' }))
-      setClipError(e instanceof Error ? e.message : 'Couldn’t stop the export. Try again.')
+      setClipError('Couldn’t stop the export', e)
     }
   }
   // While a download waits on its export, check (usePolling's rhythm); save it the moment it's done
@@ -666,11 +690,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     setClips(prev => prev.map(c => c.id === id ? { ...c, favorite: !was } : c))
     try {
       const res = await fetch(`/api/clips/${id}/favorite`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ favorite: !was }) })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not save the favourite')
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? '')
     } catch (e) {
       noteSaved(id, { favorite: was })
       setClips(prev => prev.map(c => c.id === id ? { ...c, favorite: was } : c))
-      setClipError(e instanceof Error ? e.message : 'Could not save the favourite')
+      setClipError(was ? 'Couldn’t remove the favourite' : 'Couldn’t save the favourite', e)
     }
   }
   /** A clip renamed on its card: saved with the clip (put back if it couldn't be). null: the plain "Clip N" again */
@@ -681,23 +705,23 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     setClips(prev => prev.map(c => c.id === id ? { ...c, title } : c))
     try {
       const res = await fetch(`/api/clips/${id}/title`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Could not rename the clip')
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? '')
     } catch (e) {
       noteSaved(id, { title: was })
       setClips(prev => prev.map(c => c.id === id ? { ...c, title: was } : c))
-      setClipError(e instanceof Error ? e.message : 'Could not rename the clip')
+      setClipError('Couldn’t rename the clip', e)
     }
   }
   /** One clip's ⋮ menu → Delete */
   async function deleteOne(id: string) {
     try {
       const res = await fetch('/api/clips', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [id] }) })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Delete failed')
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? '')
       setClips(prev => prev.filter(c => c.id !== id))
       if (previewId === id) { setPreviewId(null); setViewMode('video') }
       router.refresh()
     } catch (e) {
-      setClipError(e instanceof Error ? e.message : 'Delete failed')
+      setClipError('Couldn’t delete the clip', e)
     }
   }
 
@@ -719,13 +743,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids }),
       })
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Delete failed')
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? '')
       const gone = new Set(ids)
       setClips(prev => prev.filter(c => !gone.has(c.id)))
       stopSelecting()
       router.refresh()
     } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : 'Delete failed')
+      // (the same plain words as the Clipboard's banner: what failed, then why)
+      setDeleteError(`Couldn’t delete ${ids.length === 1 ? 'the clip' : `${ids.length} clips`}. ${friendlyError(e)}`)
     } finally {
       setDeleting(false)
     }
@@ -872,7 +897,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           ...(from ? { from: { source: from.source, suggestion: suggestionLog(from.s) } } : {}),
         }),
       })
-      if (!res.ok) throw new Error((await res.json()).error ?? 'Failed to create clip')
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? '')
       const { clip_id } = await res.json()
       if (!open) {
         // Add to board: the clip joins "Your clips" here, highlighted; the editor isn't opened
@@ -895,7 +920,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     } catch (e) {
       console.error(e)
       setBusy(null)
-      setClipError(e instanceof Error ? e.message : 'Failed to create clip. Please try again.')
+      setClipError('Couldn’t create the clip', e)
     }
   }
 
@@ -1287,7 +1312,26 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           segments={previewSegments([], momentPreview.s.end_ms - momentPreview.s.start_ms, ratio, pictureOrWhole(video.picture_box as Partial<PictureBox> | null))}
           words={[]} captionStyle={null} textOverlays={[]} />
       ) : !previewed ? (
-        <p className="text-sm px-6 text-center" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>No clips yet. Make a clip, then preview it here.</p>
+        // (user, 2026-11-12) Manual edit previews only clips opened in the editor: with clips but none opened yet
+        // it said "No clips yet", which wasn't true
+        (() => {
+          const kind = boardClips.length === 0 ? 'none' : manualOnly && previewable.length === 0 ? 'unedited' : 'pick'
+          return (
+        <div className="flex flex-col items-center gap-2 px-6 text-center max-w-[300px]">
+          <EmptyIcon kind={kind === 'unedited' ? 'edit' : 'clips'} />
+          <p className="text-sm font-medium" style={{ color: 'rgb(var(--cb-fg) / 0.8)' }}>
+            {kind === 'none' ? 'No clips to preview yet' : kind === 'unedited' ? 'None of your clips is edited yet' : 'Pick a clip to preview'}
+          </p>
+          <p className="text-xs leading-relaxed" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>
+            {kind === 'none'
+              ? 'Make a clip, then watch it here as a vertical reel.'
+              : kind === 'unedited'
+                ? 'Clip preview plays clips you’ve opened in the editor. Press Edit on a clip once, and it plays here.'
+                : 'Click a clip in the Clipboard to watch it here as a vertical reel.'}
+          </p>
+        </div>
+          )
+        })()
       ) : previewData === 'loading' || previewData === undefined ? (
         <BrandLoader size={36} label="Loading preview…" />
       ) : 'error' in previewData ? (
@@ -1339,6 +1383,12 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           </div>
         )
       })()}
+      {/* (user, 2026-11-12) Manual edit: why Clip preview has fewer clips than the Clipboard */}
+      {manualOnly && viewMode === 'preview' && !momentPreview && previewable.length > 0 && previewable.length < boardClips.length && (
+        <p className="text-[11px] text-center" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>
+          Showing {previewable.length} of your {boardClips.length} clips: the ones you’ve opened in the editor
+        </p>
+      )}
       {viewMode === 'preview' && !momentPreview && previewed && (
         <div className="w-full max-w-xl mx-auto flex items-center gap-2">
           <button type="button" aria-label="Previous clip" disabled={previewIdx <= 0}
@@ -1363,6 +1413,32 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const editingMoment = viewMode === 'preview' && momentPreview ? momentPreview : null
   // Manual edit: the form is always there, except while a clip is previewed (then only Edit this clip)
   const formOpen = manualOnly ? !(editingPreviewed || editingMoment) : showForm
+  // "Now" (user, 2026-11-12): the source video's time this moment, read from the player itself (onTime can
+  // trail a click by a frame or two); only while the video itself is shown — Clip preview plays a clip
+  const canUseNow = isReady && !!videoUrl && viewMode === 'video'
+  const videoNowMs = () => {
+    const v = videoRef.current
+    const ms = v && Number.isFinite(v.currentTime) ? v.currentTime * 1000 : nowMs
+    return Math.max(0, maxMs > 0 ? Math.min(ms, maxMs) : ms)
+  }
+  // The Clipboard's empty state points at the next step (user, 2026-11-12): Manual — the Start time under
+  // the video (back to the video first if Clip preview is showing); AI — the Make my clips button
+  const goToNewClip = () => {
+    if (viewMode !== 'video') { setMomentPreview(null); setViewMode('video') }
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`clip-start-${withHours ? 'h' : 'm'}`) as HTMLInputElement | null
+      if (!el) return
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      el.focus({ preventScroll: true })
+      requestAnimationFrame(() => el.select())
+    })
+  }
+  const goToMakeClips = () => {
+    const card = mmcRef.current
+    if (!card) return
+    card.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    card.querySelector<HTMLButtonElement>('.mmc-go:not(:disabled)')?.focus({ preventScroll: true })
+  }
   const newClipBar = formOpen ? (
     <form className="cb-form shrink-0 p-4 flex flex-col gap-3"
       onSubmit={e => { e.preventDefault(); submitForm(true) }}>
@@ -1381,28 +1457,30 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         </div>
         {/* Start → how long → End */}
         <div className="flex items-center gap-2.5">
-          <div style={{ width: withHours ? 140 : 100 }}>
-            <TimeField id="clip-start" label="Start" value={formStart} onChange={setFormStart} showHours={withHours} nextId="clip-end" />
+          <div style={{ width: withHours ? 182 : 142 }}>
+            <TimeField id="clip-start" label="Start" value={formStart} onChange={setFormStart} showHours={withHours} nextId="clip-end"
+              onNow={() => setFormStart(msToDisplay(videoNowMs()))} nowDisabled={!canUseNow} />
           </div>
           {(() => {
             const a = parseTime(formStart), z = parseTime(formEnd)
             const ok = a != null && z != null && z > a
             return (
-              <button type="button" className="shrink-0 flex flex-col items-center gap-1 rounded-lg px-1 py-1 transition-colors hover:bg-white/5" title="Clip length · go to the end time"
+              <button type="button" className="shrink-0 flex flex-col items-center gap-1 rounded-lg px-1 py-1 transition-colors hover:bg-white/5"
                 aria-label="Go to the end time"
                 onClick={() => { const el = document.getElementById(`clip-end-${withHours ? 'h' : 'm'}`) as HTMLInputElement | null; el?.focus(); requestAnimationFrame(() => el?.select()) }}>
                 <span className="px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums"
-                  style={ok ? { color: ACCENT, background: 'rgba(200,255,0,0.1)' } : { color: 'rgb(var(--cb-fg) / 0.35)', background: 'rgb(var(--cb-fg) / 0.05)' }}>
+                  style={ok ? { color: 'var(--cb-text)', background: 'rgb(var(--cb-fg) / 0.1)' } : { color: 'rgb(var(--cb-fg) / 0.35)', background: 'rgb(var(--cb-fg) / 0.05)' }}>
                   {ok ? msToDisplay(z! - a!) : '–'}
                 </span>
                 <svg width="34" height="6" viewBox="0 0 34 6" fill="none" aria-hidden="true">
-                  <path d="M1 3h31M29 1l3 2-3 2" stroke={ok ? ACCENT : 'rgb(var(--cb-fg) / 0.3)'} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M1 3h31M29 1l3 2-3 2" stroke={ok ? 'rgb(var(--cb-fg) / 0.6)' : 'rgb(var(--cb-fg) / 0.3)'} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </button>
             )
           })()}
-          <div style={{ width: withHours ? 140 : 100 }}>
-            <TimeField id="clip-end" label="End" value={formEnd} onChange={setFormEnd} showHours={withHours} prevId="clip-start" />
+          <div style={{ width: withHours ? 182 : 142 }}>
+            <TimeField id="clip-end" label="End" value={formEnd} onChange={setFormEnd} showHours={withHours} prevId="clip-start"
+              onNow={() => setFormEnd(msToDisplay(videoNowMs()))} nowDisabled={!canUseNow} />
           </div>
         </div>
         <div className="flex gap-2">
@@ -1412,7 +1490,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           </button>
           {/* Save it to the clip board only (edit it later) */}
           <button type="button" onClick={() => submitForm(false)} disabled={!!busy}
-            title="Save this clip to your clip board without opening the editor"
             className="cb-ghost h-[52px] flex items-center gap-2 px-4 rounded-xl text-sm font-semibold disabled:opacity-50">
             {busy === 'board' ? <Spinner /> : (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1438,7 +1515,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     <div className="shrink-0 flex flex-wrap justify-center gap-3 w-full mx-auto">
       {(editingPreviewed || editingMoment) && (
         <button onClick={editingMoment ? () => editMoment(editingMoment.s, editingMoment.source) : () => { setBusy('open'); router.push(editorHref(previewId!)) }} disabled={!!busy}
-          title={editingMoment ? 'Open the moment you’re previewing in the editor' : 'Open the clip you’re previewing in the editor'}
           className="h-12 flex items-center justify-center gap-2 px-5 rounded-xl text-sm font-semibold transition-colors hover:bg-white/10 disabled:opacity-40"
           style={{ color: 'rgb(var(--cb-fg) / 0.9)', border: '1px solid rgb(var(--cb-fg) / 0.16)', background: 'rgb(var(--cb-fg) / 0.03)' }}>
           {busy === 'open' || busy === editingMoment?.s.id ? <Spinner /> : (
@@ -1470,11 +1546,19 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           </span>
           <h2 className="flex-1 min-w-0 flex items-center gap-1.5 text-sm font-semibold text-white">
             Make my clips
-            <InfoTip label="About Make my clips">AI picks the best moments of the video and frames each one vertically. Choose how many clips (up to {AUTO_MAX} at a time) and what each one gets. You can change everything in the editor afterwards.</InfoTip>
+            <InfoTip label="About Make my clips">
+              AI picks the best moments of the video and frames each one vertically. Choose how many clips (up to {AUTO_MAX} at a time) and what each one gets. You can change everything in the editor afterwards.
+              {/* (user, 2026-11-12: no hover tooltips) what each option does, here instead of on the tiles */}
+              <span className="mmc-tip-list">
+                {AUTO_OPTIONS.map(o => <span key={o.id}><b>{o.label}:</b> {o.tip}</span>)}
+              </span>
+            </InfoTip>
           </h2>
           {autoClips.length > 0 && !autoRunning && (
-            <button type="button" onClick={() => router.push(`/videos/${video.id}/clips`)} className="mmc-link">
-              View {autoClips.length} clip{autoClips.length === 1 ? '' : 's'}
+            // (user, 2026-11-12: "View 7 clips" read as the Clipboard's list again) what that page is: the clips as reels
+            <button type="button" onClick={() => router.push(`/videos/${video.id}/clips`)} className="mmc-link"
+              aria-label={`Watch the ${autoClips.length} AI clip${autoClips.length === 1 ? '' : 's'} as reels`}>
+              Watch as reels
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M9 6l6 6-6 6" /></svg>
             </button>
           )}
@@ -1534,11 +1618,15 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           </div>
         </div>
 
+        {/* (user, 2026-11-12) the tiles and the language / brand rows under one heading, closer together:
+            how many → what each clip gets → Make clips */}
+        <div className="flex flex-col gap-2">
+        <p id={`mmc-gets-${video.id}`} className="mmc-heading">Each clip gets</p>
         {/* What AI adds: four tiles, each a checkbox — its little picture turns white and a lime tick
             shows on the right when it's on (styles: .mmc-opt in globals.css) */}
-        <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="What AI adds to each clip">
+        <div className="grid grid-cols-2 gap-1.5" role="group" aria-labelledby={`mmc-gets-${video.id}`}>
           {AUTO_OPTIONS.map(o => (
-            <label key={o.id} title={o.tip} className="mmc-opt" data-on={autoOpts[o.id] || undefined} data-off={autoRunning || undefined}>
+            <label key={o.id} className="mmc-opt" data-on={autoOpts[o.id] || undefined} data-off={autoRunning || undefined}>
               <input type="checkbox" className="sr-only" checked={autoOpts[o.id]} disabled={autoRunning}
                 onChange={() => toggleAutoOpt(o.id)} />
               <span className="mmc-opt-icon" aria-hidden="true">
@@ -1597,6 +1685,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             )
           })()}
         </div>
+        </div>
 
         {autoError && <p className="text-xs" style={{ color: '#f87171' }}>{autoError}<TopUpLink message={autoError} /></p>}
         {autoNote && !autoError && <p className="text-xs" style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}>{autoNote}</p>}
@@ -1644,7 +1733,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 {autoJob.status === 'running' && autoJob.progress < 20 ? ' · a long video takes a while to read; you can leave this page, it carries on' : ''}
               </p>
               <button type="button" onClick={stopMakingClips} disabled={autoStopping}
-                title="Stop making clips (clips already made are kept)"
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors hover:bg-red-500/20 disabled:opacity-50"
                 style={{ color: '#fca5a5', border: '1px solid rgba(239,68,68,0.35)' }}>
                 {autoStopping ? <Spinner /> : <span aria-hidden="true" className="w-2 h-2 rounded-[2px]" style={{ background: 'currentColor' }} />}
@@ -1666,7 +1754,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               : <>Making clips failed{autoJob.error ? `: ${autoJob.error}` : ''}. Try again, or make clips by hand below.</>}
           </p>
         )}
-        {/* Main action last: quiet — a lime tint and lime words, not a filled block (.mmc-go). Wide: it
+        {/* Main action last: solid lime, black words (.mmc-go — user, 2026-11-12: the quiet tint wasn't seen). Wide: it
             stays at the card's bottom however small the card is dragged (user, 2026-11-09: it was cut off) */}
         <div className={wide ? 'mmc-foot' : 'contents'}>
           <button type="button" onClick={() => { setMakePulse(n => n + 1); makeClips() }} disabled={autoRunning || autoStarting}
@@ -1684,29 +1772,45 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             const c = allowance.clips
             const searchesLeft = Math.max(0, c.searchesIncluded - c.searchesUsed)
             const searchPrice = c.nextSearchCredits > 0 ? `${c.nextSearchCredits} credit${c.nextSearchCredits === 1 ? '' : 's'}` : `${searchesLeft} of ${c.searchesIncluded} left`
+            // (user, 2026-11-12: three lines of numbers looked like a bill) one line: what's left by the limit that
+            // runs out first — this month, today or this video — and the full breakdown in its ⓘ
+            const month = Math.max(0, c.monthLeft), day = Math.max(0, c.dayLeft), vid = Math.max(0, c.videoLeft)
+            const left = Math.min(month, day, vid)
+            const by = left === vid && vid < month && vid < day ? 'for this video' : left === day && day < month ? 'today' : 'this month'
+            const leftLine = left === 0 ? `No AI clips left ${by}` : `${left} AI clip${left === 1 ? '' : 's'} left ${by}`
             return (
-              <div className="flex flex-col gap-1 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>
-                <span>{c.savedLeft > 0 ? `From ${c.savedLeft} saved moment${c.savedLeft === 1 ? '' : 's'} · no new search` : `Looks for moments · new search ${searchPrice}`}</span>
-                <span>AI clips: {Math.min(c.clipsThisMonth, c.clipsPerMonth)} of {c.clipsPerMonth} used · {c.clipCredits} credits each</span>
-                <span>Today: {c.clipsToday} of {c.clipsPerDay} · This video: {c.videoClips} of {c.videoCap}</span>
+              <div className="flex flex-col gap-2">
+                <p className="flex items-center justify-center gap-1.5 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.55)' }}>
+                  <span><b className="font-semibold" style={{ color: left === 0 ? '#f87171' : 'rgb(var(--cb-fg) / 0.85)' }}>{leftLine}</b> · {c.clipCredits} credits each</span>
+                  <InfoTip label="Your AI clip limits" size={12}>
+                    <span className="mmc-tip-list" style={{ marginTop: 0, paddingTop: 0, borderTop: 0 }}>
+                      <span><b>This month:</b> {Math.min(c.clipsThisMonth, c.clipsPerMonth)} of {c.clipsPerMonth} used</span>
+                      <span><b>Today:</b> {c.clipsToday} of {c.clipsPerDay} used</span>
+                      <span><b>This video:</b> {c.videoClips} of {c.videoCap} used</span>
+                      <span><b>Each clip:</b> {c.clipCredits} credits</span>
+                      <span>{c.savedLeft > 0
+                        ? <><b>Next run:</b> uses {c.savedLeft} saved moment{c.savedLeft === 1 ? '' : 's'}, no new search needed</>
+                        : <><b>Next run:</b> looks for new moments · search {searchPrice}</>}</span>
+                    </span>
+                  </InfoTip>
+                </p>
                 {c.savedLeft > 0 && (
                   <button type="button" onClick={() => makeClips('new')} disabled={autoRunning || autoStarting}
-                    className="self-start underline disabled:opacity-40" style={{ color: 'rgb(var(--cb-fg) / 0.7)' }}>
+                    className="mmc-new self-center flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold disabled:opacity-40">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
                     Find new moments · {searchPrice}
                   </button>
                 )}
               </div>
             )
           })()}
-          {/* Required by the speech model's licence (lib/company.ts MODEL_CREDIT) */}
-          <p className="text-[10px] text-center" style={{ color: 'rgb(var(--cb-fg) / 0.4)' }}>{MODEL_CREDIT}</p>
         </div>
       </section>
 
       {/* The bar between the two (wide): drag to share the height, double-click for the usual split */}
       {wide && (
         <div role="separator" aria-orientation="horizontal" aria-label="Resize Make my clips and Ask AI"
-          title="Drag to resize · double-click to reset" className="cb-row-handle" data-on={resizing === 'split' || undefined}
+          className="cb-row-handle" data-on={resizing === 'split' || undefined}
           onPointerDown={startSplitResize} onDoubleClick={() => setMmcH(null)} />
       )}
 
@@ -1780,10 +1884,10 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               </span>
             )}
           </div>
-          <button type="submit" disabled={loadingAi || !aiCriteria.trim()} aria-label="Find" title="Find matching clips"
+          <button type="submit" disabled={loadingAi || !aiCriteria.trim()} aria-label="Find matching clips"
             data-busy={loadingAi || undefined}
             className="ai-btn ai-find shrink-0 w-10 flex items-center justify-center rounded-lg disabled:opacity-40"
-            style={{ background: ACCENT, color: '#000' }}>
+            style={{ background: 'rgb(var(--cb-fg) / 0.1)', color: 'var(--cb-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--cb-fg) / 0.14)' }}>
             <span key={findPulse} className={`ai-scan${findPulse ? ' is-on' : ''}`} aria-hidden="true" />
             {loadingAi ? <Spinner /> : (
               <svg key={`p${findPulse}`} className={`ai-ping${findPulse ? ' is-on' : ''}`} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
@@ -1815,8 +1919,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           <div className="shrink-0 flex items-center gap-2 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
             <span className="flex-1 min-w-0 truncate">Saved results for “{askFrom}”</span>
             <button type="button" onClick={() => { setFindPulse(n => n + 1); findByCriteria(askFrom, true) }}
-              title="Ask AI again for fresh results"
-              className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold transition-colors hover:bg-white/10" style={{ color: ACCENT }}>
+              className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold transition-colors hover:bg-white/10" style={{ color: 'var(--cb-text)' }}>
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
               Search again
             </button>
@@ -1824,8 +1927,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         )}
         {loadingAi && (
           <div className="flex items-center gap-2 py-1.5">
-            <p className="flex-1 flex items-center gap-2 text-xs" style={{ color: ACCENT }}><Spinner /> Scanning the transcript…</p>
-            <CancelButton onClick={cancelAsk} title="Stop this search" />
+            <p className="flex-1 flex items-center gap-2 text-xs" style={{ color: 'rgb(var(--cb-fg) / 0.7)' }}><Spinner /> Scanning the transcript…</p>
+            <CancelButton onClick={cancelAsk} />
           </div>
         )}
         {!loadingAi && aiSuggestions && aiSuggestions.length === 0 && (
@@ -1862,7 +1965,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         {loadingSuggestions && (
           <div className="flex items-center gap-2 py-1.5">
             <p className="flex-1 flex items-center gap-2 text-xs" style={{ color: ACCENT }}><Spinner /> Finding moments…</p>
-            <CancelButton onClick={cancelMoments} title="Stop finding moments" />
+            <CancelButton onClick={cancelMoments} />
           </div>
         )}
         {suggestionsError && <p className="text-xs" style={{ color: '#f87171' }}>{suggestionsError}</p>}
@@ -1881,7 +1984,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         ))}
         </div>
         {suggestions && !loadingSuggestions && (
-          <button onClick={() => findMoments()} title="Find more moments (ones already listed or in your clips are skipped)"
+          <button onClick={() => findMoments()}
             className="shrink-0 self-center flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-md transition-colors hover:bg-white/10" style={{ color: ACCENT }}>
             View more suggestions
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
@@ -1995,7 +2098,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           }} />
         <div className="flex-1" />
         {/* The account's brand kits, in the popup (as on the dashboard — user, 2026-10-31) */}
-        <button type="button" onClick={() => openBrandKits()} className="cb-brand-link" title="Your logo, colours and caption look — on every clip">
+        <button type="button" onClick={() => openBrandKits()} className="cb-brand-link" aria-label="Brand kits: your logo, colours and caption look, on every clip">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2" /><circle cx="17.5" cy="10.5" r="2" /><circle cx="8.5" cy="7.5" r="2" /><circle cx="6.5" cy="12.5" r="2" /><path d="M12 22a10 10 0 110-20 9 9 0 019 9c0 3-2 4-4 4h-2a2 2 0 00-1 3.7A2 2 0 0112 22z" /></svg>
           <span>Brand kits</span>
         </button>
@@ -2016,7 +2119,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         {/* The bars between the columns: drag to resize, double-click for the usual width */}
         {aiShown && (
           <div role="separator" aria-orientation="vertical" aria-label="Resize the AI tools"
-            title="Drag to resize · double-click to reset" className="cb-col-handle" data-on={resizing === 'ai' || undefined}
+            className="cb-col-handle" data-on={resizing === 'ai' || undefined}
             onPointerDown={e => startColumnResize(e, 'ai')} onDoubleClick={() => setAiW(null)} />
         )}
 
@@ -2049,7 +2152,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         </main>
 
         <div role="separator" aria-orientation="vertical" aria-label="Resize the clipboard"
-          title="Drag to resize · double-click to reset" className="cb-col-handle" data-on={resizing === 'clips' || undefined}
+          className="cb-col-handle" data-on={resizing === 'clips' || undefined}
           onPointerDown={e => startColumnResize(e, 'clips')} onDoubleClick={() => setClipsW(null)} />
 
         {/* ── Right: your clips (cb-clips: its cards follow its width, not the window's) ── */}
@@ -2131,26 +2234,45 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             )}
           </div>
           {clipError && (
-            <div role="alert" className="mx-4 mb-2 px-3 py-2 rounded-lg flex items-center justify-between gap-2" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)' }}>
-              <span className="text-xs" style={{ color: '#f87171' }}>{clipError}</span>
-              <button onClick={() => setClipError(null)} aria-label="Dismiss" className="shrink-0 px-1 rounded hover:bg-white/10" style={{ color: 'rgba(239,68,68,0.7)' }}>✕</button>
+            // (user, 2026-11-12) calm, not alarming: a neutral card with a soft red edge and icon; what failed, then
+            // why in plain words (styles: .cb-alert in globals.css)
+            <div role="alert" className="cb-alert mx-4 mb-2">
+              <span className="cb-alert-ico" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5.5M12 16.5h.01" /></svg>
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="cb-alert-title">{clipError.title}</span>
+                <span className="cb-alert-text">{clipError.detail}<TopUpLink message={clipError.detail} /></span>
+              </span>
+              <button type="button" onClick={() => setClipError(null)} aria-label="Dismiss this message" className="cb-alert-x">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
             </div>
           )}
           <div className="cb-clip-list flex-1 min-h-0 overflow-y-auto px-4 pb-4">
+            {/* Empty (user, 2026-11-12): an icon, one line and the next step — never a blank list */}
             {boardClips.length === 0 && !isReady && (
-              <p className="text-xs leading-relaxed" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
-                You can start clipping once the video has finished processing.
-              </p>
+              <EmptyState icon="wait" title="Getting your video ready"
+                text="You can start clipping once it has finished processing." />
             )}
+            {boardClips.length === 0 && isReady && (manualOnly ? (
+              <EmptyState icon="clips" title="No clips yet"
+                text="Set where a clip starts and ends under the video, then press Add to board or Create & edit."
+                action={{ label: 'New clip', onClick: goToNewClip }} />
+            ) : (
+              <EmptyState icon="auto" title="No clips yet"
+                text="Let AI make clips from the best moments, or describe what you want in Ask AI."
+                action={aiShown ? { label: 'Make my clips', onClick: goToMakeClips } : undefined} />
+            ))}
             {boardClips.length > 0 && tabClips.length === 0 && (
-              <p className="text-xs leading-relaxed" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
-                {CLIP_TABS.find(t => t.id === clipTab)?.empty}
-              </p>
+              <EmptyState icon={clipTab === 'fav' ? 'heart' : clipTab === 'edited' ? 'edit' : clipTab === 'ask' ? 'ask' : clipTab === 'auto' ? 'auto' : 'clips'}
+                title={TAB_EMPTY_TITLE[clipTab] ?? 'Nothing here yet'}
+                text={CLIP_TABS.find(t => t.id === clipTab)?.empty ?? ''} />
             )}
             {tabClips.length > 0 && shownClips.length === 0 && (
-              <p className="text-xs leading-relaxed" style={{ color: 'rgb(var(--cb-fg) / 0.55)' }}>
-                No clips match these filters. <button type="button" onClick={clearClipFilters} className="font-semibold underline underline-offset-2">Clear filters</button>
-              </p>
+              <EmptyState icon="filter" title="No clips match these filters"
+                text="Try other filters, or show every clip again."
+                action={{ label: 'Clear filters', onClick: clearClipFilters }} />
             )}
             {shownClips.map(clip => (
               <ClipCard
@@ -2392,7 +2514,8 @@ function MmcPick({ value, options, onChange, disabled, label }: {
  * Under an hour of video (`showHours` false) the hours part isn't shown: the box reads 4:05.
  * `nextId`: the time field to go on to once the seconds are typed (Start → End).
  */
-function TimeField({ id, label, value, onChange, showHours = true, nextId, prevId }: { id: string; label: string; value: string; onChange: (v: string) => void; showHours?: boolean; nextId?: string; /** ← from the first part goes back to this field's seconds */ prevId?: string }) {
+function TimeField({ id, label, value, onChange, showHours = true, nextId, prevId, onNow, nowDisabled }: { id: string; label: string; value: string; onChange: (v: string) => void; showHours?: boolean; nextId?: string; /** ← from the first part goes back to this field's seconds */ prevId?: string
+  /** "Now": puts the video's current time in this field (user, 2026-11-12) */ onNow?: () => void; nowDisabled?: boolean }) {
   type Parts = [string, string, string]
   const pad = (n: number) => String(n).padStart(2, '0')
   const split = (v: string): Parts => {
@@ -2524,8 +2647,8 @@ function TimeField({ id, label, value, onChange, showHours = true, nextId, prevI
   }
   const names = ['hours', 'minutes', 'seconds']
   return (
-    <div className="cb-input flex items-center justify-center h-[52px] px-3 rounded-xl">
-      <div className="min-w-0 flex flex-col items-center justify-center">
+    <div className={`cb-input flex items-center h-[52px] rounded-xl ${onNow ? 'gap-1 pl-3 pr-1.5' : 'justify-center px-3'}`}>
+      <div className={`min-w-0 flex flex-col items-center justify-center${onNow ? ' flex-1' : ''}`}>
         <label htmlFor={`${id}-${'hms'[first]}`} className="text-[10px] font-semibold uppercase leading-none" style={{ color: 'rgb(var(--cb-fg) / 0.45)', letterSpacing: '0.08em' }}>{label}</label>
         <div className="flex items-center mt-[5px] text-[18px] font-semibold tabular-nums leading-none text-white">
           {parts.map((p, i) => {
@@ -2554,14 +2677,21 @@ function TimeField({ id, label, value, onChange, showHours = true, nextId, prevI
           })}
         </div>
       </div>
+      {/* Now: this field takes the video's current time (the video isn't moved or paused) */}
+      {onNow && (
+        <button type="button" onClick={onNow} disabled={nowDisabled} aria-label={`Set ${label.toLowerCase()} to the video's current time`}
+          className="cb-now shrink-0 h-7 px-2 rounded-lg text-[11px] font-semibold">
+          Now
+        </button>
+      )}
     </div>
   )
 }
 
 /** A small "✕ Cancel" for a running AI search */
-function CancelButton({ onClick, title }: { onClick: () => void; title: string }) {
+function CancelButton({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} title={title}
+    <button type="button" onClick={onClick}
       className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors hover:bg-white/10 hover:text-white"
       style={{ color: 'rgb(var(--cb-fg) / 0.7)', border: '1px solid rgb(var(--cb-fg) / 0.16)' }}>
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6L6 18" /></svg>
@@ -2673,6 +2803,37 @@ function Spinner() {
   return <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
 }
 
+type EmptyKind = 'clips' | 'edit' | 'heart' | 'filter' | 'wait' | 'ask' | 'auto'
+/** A small round icon for an empty place (styles: .cb-empty-ico in globals.css) */
+function EmptyIcon({ kind }: { kind: EmptyKind }) {
+  const paths: Record<EmptyKind, React.ReactNode> = {
+    clips: <><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12" /></>,
+    edit: <><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></>,
+    heart: <path d="M12 21s-7.5-4.6-9.5-9.2C1 8 3.4 4.5 7 4.5c2 0 3.6 1.1 5 3 1.4-1.9 3-3 5-3 3.6 0 6 3.5 4.5 7.3C19.5 16.4 12 21 12 21z" />,
+    filter: <path d="M4 5h16l-6 7.5V19l-4 1.5v-8z" />,
+    wait: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    ask: <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>,
+    auto: <path d="M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9z" />,
+  }
+  return (
+    <span className="cb-empty-ico" aria-hidden="true">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[kind]}</svg>
+    </span>
+  )
+}
+
+/** An empty list or section (user, 2026-11-12): an icon, a short title, one line and, when there is one, the next step */
+function EmptyState({ icon, title, text, action }: { icon: EmptyKind; title: string; text: string; action?: { label: string; onClick: () => void } }) {
+  return (
+    <div className="cb-empty" role="status">
+      <EmptyIcon kind={icon} />
+      <p className="cb-empty-title">{title}</p>
+      {text && <p className="cb-empty-text">{text}</p>}
+      {action && <button type="button" onClick={action.onClick} className="cb-empty-btn">{action.label}</button>}
+    </div>
+  )
+}
+
 /** A clip's picture: a frame from its start, with its number on it */
 function ClipThumb({ videoUrl, atMs, w, h }: { videoUrl: string; atMs: number; w: number; h: number }) {
   const src = useFrameAt(videoUrl, atMs)
@@ -2733,8 +2894,8 @@ function ResultCard({ s, videoUrl, busy, inClips, open, onOpen, onClose, onEdit,
           </span>
         </span>
         <button type="button" onClick={onAdd} disabled={!!busy} aria-label={inClips ? 'In your clips — show it' : 'Add to your clips'}
-          className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-opacity hover:opacity-90 disabled:opacity-40"
-          style={inClips ? { color: ACCENT, border: `1px solid ${ACCENT}` } : { background: ACCENT, color: '#000' }}>
+          // (user, 2026-11-12: a column of lime squares) neutral, lime when pointed at; added: a quiet grey ✓
+          className="cb-add shrink-0 w-7 h-7 rounded-lg flex items-center justify-center disabled:opacity-40" data-in={inClips || undefined}>
           {working ? <Spinner /> : addIcon}
         </button>
       </div>
@@ -2744,7 +2905,7 @@ function ResultCard({ s, videoUrl, busy, inClips, open, onOpen, onClose, onEdit,
   return (
     <div role="button" tabIndex={0} onClick={click} onKeyDown={keys}
       className="shrink-0 rounded-xl p-2.5 cursor-pointer transition-colors hover:bg-white/[0.04] focus-visible:outline focus-visible:outline-2"
-      style={{ background: 'rgba(200,255,0,0.03)', border: `1px solid ${ACCENT}`, outlineColor: ACCENT }}>
+      style={{ background: 'rgb(var(--cb-fg) / 0.05)', border: '1px solid rgb(var(--cb-fg) / 0.28)', outlineColor: ACCENT }}>
       <div className="flex items-start gap-3">
         <ClipThumb videoUrl={videoUrl} atMs={s.start_ms} w={112} h={64} />
         <div className="flex-1 min-w-0 flex flex-col gap-1">
@@ -2753,7 +2914,7 @@ function ResultCard({ s, videoUrl, busy, inClips, open, onOpen, onClose, onEdit,
             <ClockIcon />{msToDisplay(s.start_ms)} – {msToDisplay(s.end_ms)}
             <span style={{ color: 'rgb(var(--cb-fg) / 0.35)' }}>· {durLabel(s.start_ms, s.end_ms)}</span>
           </span>
-          {inClips && <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: ACCENT }}>✓ In your clips</span>}
+          {inClips && <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}>✓ In your clips</span>}
         </div>
       </div>
       {(s.summary || s.reason) && (
@@ -2762,7 +2923,7 @@ function ResultCard({ s, videoUrl, busy, inClips, open, onOpen, onClose, onEdit,
       {/* Preview (playing now) · Edit · Add */}
       <div className="mt-2.5 grid grid-cols-3 gap-1.5">
         <span className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-semibold"
-          style={{ color: ACCENT, border: '1px solid rgba(200,255,0,0.5)' }}>
+          style={{ color: 'rgb(var(--cb-fg) / 0.6)', border: '1px solid rgb(var(--cb-fg) / 0.14)', background: 'rgb(var(--cb-fg) / 0.04)' }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>
           Previewing
         </span>
@@ -2773,8 +2934,9 @@ function ResultCard({ s, videoUrl, busy, inClips, open, onOpen, onClose, onEdit,
           Edit
         </button>
         <button type="button" onClick={onAdd} disabled={!!busy}
+          // (the open result's one action: Add in solid lime; once added, a quiet grey "Added")
           className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-90 disabled:opacity-40"
-          style={inClips ? { color: ACCENT, border: `1px solid ${ACCENT}` } : { background: ACCENT, color: '#000' }}>
+          style={inClips ? { color: 'rgb(var(--cb-fg) / 0.7)', border: '1px solid rgb(var(--cb-fg) / 0.2)' } : { background: ACCENT, color: '#000' }}>
           {working ? <Spinner /> : addIcon}
           {inClips ? 'Added' : 'Add'}
         </button>
@@ -2878,11 +3040,11 @@ function SubEditInline({ startedAt, estimate, ahead, onStop }: { startedAt: numb
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, [])
   const left = (estimate ?? 30_000) - (startedAt === null ? 0 : Math.max(0, now - startedAt))
   return (
-    <span className="flex items-center gap-1" style={{ color: ACCENT }}>
+    <span className="flex items-center gap-1" style={{ color: 'rgb(var(--cb-fg) / 0.8)' }}>
       · <Spinner /> {startedAt === null
         ? `Waiting for the worker${ahead ? ` · ${ahead} ahead` : ''}`
         : `Sub-editing${left > 3000 ? ` · about ${aboutLabel(left)} left` : ' · almost done'}`}
-      <button type="button" onClick={e => { e.stopPropagation(); onStop() }} title="Stop the Sub-edit"
+      <button type="button" onClick={e => { e.stopPropagation(); onStop() }} aria-label="Stop the Sub-edit"
         className="ml-1 px-1.5 rounded text-[10.5px] font-semibold hover:bg-white/10" style={{ color: '#f87171' }}>Stop</button>
     </span>
   )
@@ -2907,7 +3069,7 @@ function SubEditOverlay({ startedAt, estimate, ahead, onStop }: { startedAt: num
     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-[inherit] px-4 text-center"
       style={{ background: 'rgba(10,10,10,0.86)', backdropFilter: 'blur(2px)' }} role="status" aria-live="polite"
       onClick={e => e.stopPropagation()}>
-      <div className="flex items-center gap-2 text-sm font-bold" style={{ color: ACCENT }}>
+      <div className="flex items-center gap-2 text-sm font-bold" style={{ color: '#fff' }}>
         <Spinner /> Sub-editing
       </div>
       <p className="text-[11.5px]" style={{ color: 'rgb(var(--cb-fg) / 0.75)' }}>{step}…</p>

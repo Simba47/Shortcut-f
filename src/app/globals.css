@@ -531,6 +531,59 @@ body {
   animation: ai-ping .6s ease-out forwards;
 }
 @keyframes ai-ping { from { transform: scale(.4); opacity: .8; } to { transform: scale(2.6); opacity: 0; } }
+/* (user, 2026-11-12: lime only for the main action) Ask AI's search button is neutral: its ring and hover in ink */
+.ai-find .ai-ping.is-on::after { border-color: currentColor; }
+/* Make my clips ⓘ: what each option does, one line each under the description */
+.mmc-tip-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(127,127,127,0.25); }
+.mmc-tip-list b { font-weight: 700; }
+/* Clipboard: the error banner (user, 2026-11-12) — calm: a neutral card, a soft red edge and icon, what failed
+   in bold and why underneath; a real ✕ button */
+.cb-alert { display: flex; align-items: flex-start; gap: 10px; padding: 10px 8px 10px 10px; border-radius: 12px;
+  background: rgb(var(--cb-fg) / 0.04); box-shadow: inset 0 0 0 1px rgba(239,68,68,0.28), inset 3px 0 0 rgba(239,68,68,0.55);
+  animation: cb-alert-in .22s cubic-bezier(.2,.8,.3,1); }
+@keyframes cb-alert-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.cb-alert-ico { flex-shrink: 0; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; color: #f87171; background: rgba(239,68,68,0.12); }
+.cb-alert-title { display: block; font-size: 12.5px; font-weight: 600; line-height: 1.35; color: var(--cb-text); }
+.cb-alert-text { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: rgb(var(--cb-fg) / 0.6); }
+.cb-alert-x { flex-shrink: 0; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; color: rgb(var(--cb-fg) / 0.5); transition: background-color .15s, color .15s; }
+.cb-alert-x:hover { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.08); }
+.cb-alert-x:focus-visible { outline: 2px solid rgb(var(--cb-fg) / 0.5); outline-offset: 1px; }
+[data-theme="light"] .cb-alert-ico { color: #dc2626; background: rgba(220,38,38,0.1); }
+[data-theme="light"] .cb-alert { box-shadow: inset 0 0 0 1px rgba(220,38,38,0.25), inset 3px 0 0 rgba(220,38,38,0.5); }
+@media (prefers-reduced-motion: reduce) { .cb-alert { animation: none; } }
+/* Ask AI results: "+" neutral at rest, lime when pointed at (user, 2026-11-12: a column of lime squares);
+   added: a grey ✓ in an outline */
+.cb-add { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.08); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.16); transition: background-color .15s, color .15s, box-shadow .15s, transform .1s; }
+.cb-add:not(:disabled):not([data-in]):hover { color: #0a0a0a; background: #c8ff00; box-shadow: none; }
+.cb-add:not(:disabled):active { transform: scale(.92); }
+.cb-add[data-in] { color: rgb(var(--cb-fg) / 0.7); background: transparent; box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.2); }
+.cb-add[data-in]:not(:disabled):hover { background: rgb(var(--cb-fg) / 0.06); }
+.cb-add:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
+[data-theme="light"] .cb-add:focus-visible { outline-color: #18181b; }
+/* Make my clips: the small heading over what each clip gets (user, 2026-11-12) */
+.mmc-heading { margin: 0; padding: 0 2px; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgb(var(--cb-fg) / 0.45); }
+/* Clipboard and Clip preview: empty places — an icon, a title, one line and the next step (user, 2026-11-12) */
+.cb-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; max-width: 280px; margin: 28px auto 8px; padding: 0 8px; }
+.cb-empty-ico { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 4px; border-radius: 12px;
+  color: rgb(var(--cb-fg) / 0.6); background: rgb(var(--cb-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.1); }
+.cb-empty-title { margin: 0; font-size: 13px; font-weight: 600; color: rgb(var(--cb-fg) / 0.85); }
+.cb-empty-text { margin: 0; font-size: 11.5px; line-height: 1.5; color: rgb(var(--cb-fg) / 0.5); }
+.cb-empty-btn { margin-top: 6px; height: 30px; padding: 0 14px; border-radius: 9px; font-size: 12px; font-weight: 600;
+  color: var(--cb-text); background: rgb(var(--cb-fg) / 0.08); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.16); transition: background-color .15s, box-shadow .15s, transform .1s; }
+.cb-empty-btn:hover { background: rgb(var(--cb-fg) / 0.13); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.26); }
+.cb-empty-btn:active { transform: scale(.97); }
+.cb-empty-btn:focus-visible { outline: 2px solid rgb(var(--cb-fg) / 0.5); outline-offset: 2px; }
+/* New clip: "Now" inside the Start / End box — puts the video's current time there; quiet until pointed at */
+.cb-now { color: rgb(var(--cb-fg) / 0.75); background: rgb(var(--cb-fg) / 0.07); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.12); transition: background-color .15s, color .15s, transform .1s; }
+.cb-now:not(:disabled):hover { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.14); }
+.cb-now:not(:disabled):active { transform: scale(.94); }
+.cb-now:disabled { opacity: .35; cursor: not-allowed; }
+.cb-now:focus-visible { outline: 2px solid rgb(var(--cb-fg) / 0.5); outline-offset: 1px; }
+/* Make my clips: "Find new moments" as a small outlined button, not an underlined line of text */
+.mmc-new { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.05); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.16); transition: background-color .15s, box-shadow .15s; }
+.mmc-new:not(:disabled):hover { background: rgb(var(--cb-fg) / 0.1); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.26); }
+.mmc-new:focus-visible { outline: 2px solid rgb(var(--cb-fg) / 0.5); outline-offset: 2px; }
+.ai-find:not(:disabled):hover { filter: none; background: rgb(var(--cb-fg) / 0.16) !important; }
 
 @media (prefers-reduced-motion: reduce) {
   .ai-btn *, .ai-btn *::after { animation: none !important; }
@@ -707,17 +760,21 @@ body {
 .mmc-step:disabled { opacity: .3; cursor: not-allowed; }
 .mmc-input::selection { background: rgba(200,255,0,0.3); }
 
-/* The main button, kept quiet: a faint lime tint with a thin lime edge and lime words (no filled
-   block, no glow). Its click effects (.ai-spark, .ai-fire) are toned to match. */
+/* The main button (user, 2026-11-12: it was too quiet to be seen as the one to press): solid lime with
+   black words, as Add clip on the Manual board (.cb-page .cb-cta). Its click effects (.ai-spark, .ai-fire)
+   in black and white on the lime. */
 .mmc-go {
-  color: #c8ff00; background: rgba(200,255,0,0.06); box-shadow: inset 0 0 0 1px rgba(200,255,0,0.22);
+  color: #0a0a0a; background: #c8ff00; box-shadow: 0 8px 20px -12px rgba(200,255,0,0.5);
   transition: transform .12s ease, background-color .2s, box-shadow .2s;
 }
-.mmc-go:not(:disabled):hover { filter: none; background: rgba(200,255,0,0.11); box-shadow: inset 0 0 0 1px rgba(200,255,0,0.4); }
+.mmc-go:not(:disabled):hover { filter: none; background: #d4ff3a; box-shadow: 0 10px 24px -12px rgba(200,255,0,0.6); }
+.mmc-go:disabled { box-shadow: none; }
 .mmc-go:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
+[data-theme="light"] .mmc-go { box-shadow: 0 6px 16px -10px rgba(77,100,0,0.45); }
+[data-theme="light"] .mmc-go:focus-visible { outline-color: #18181b; }
 .mmc-go .ai-spark i { background: currentColor; }
 .mmc-go .ai-fire.is-on, .mmc-go[data-busy] .ai-fire {
-  background-image: linear-gradient(105deg, transparent 30%, rgba(200,255,0,0.22) 50%, transparent 70%);
+  background-image: linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.6) 50%, transparent 70%);
 }
 
 /* Video ⇄ Clip preview switch (clip board): a pill track with two equal halves and a lime knob
