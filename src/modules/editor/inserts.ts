@@ -362,6 +362,26 @@ export function timelineAtPieces(pieces: Piece[], v: number): number {
 }
 
 /**
+ * Where a word of the main video (its moment [s, e), clip ms) is heard on the timeline: where it is
+ * seen first (as timelineAtPieces), then again in every other piece that plays it (a duplicated
+ * part says it again), each kept to its piece. The first one is no longer than the word lasts there
+ * (a part played again right after: the word at its end doesn't run on over the copy). [start, end)s.
+ */
+export function wordPlaces(pieces: Piece[], s: number, e: number): [number, number][] {
+  const mid = (s + e) / 2
+  const plays = (p: Piece) => p.from != null && !p.blank && mid >= p.from && mid < p.from + pieceVideoMs(p)
+  const a = timelineAtPieces(pieces, s)
+  const sp = pieceAt(pieces, a)?.speed ?? 1
+  const out: [number, number][] = [[a, Math.max(a + 1, Math.min(timelineAtPieces(pieces, e), a + (e - s) / sp))]]
+  for (const p of pieces.filter(plays).slice(1)) {
+    const k = p.speed ?? 1
+    const from = Math.max(p.at, p.at + (s - p.from!) / k), to = Math.min(p.at + p.ms, p.at + (e - p.from!) / k)
+    out.push([from, Math.max(from + 1, to)])
+  }
+  return out
+}
+
+/**
  * Timeline [a, b) cut out of a clip of pieces, the gap closed (as rippleDelete does), with every
  * part keeping which moment of the main video it starts at — so what comes after a cut part
  * starts later in the video, skipping the piece cut. Parts running across a or b are cut in two first.

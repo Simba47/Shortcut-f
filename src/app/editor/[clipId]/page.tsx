@@ -1,4 +1,5 @@
 import { withSavedStyle } from '@/modules/editor/textStyle'
+import { repeatedVideoMs } from '@/modules/editor/duplicate'
 import { redirect, notFound } from 'next/navigation'
 import { headers } from 'next/headers'
 import { requireUser } from '@/server/auth'
@@ -78,6 +79,7 @@ export default async function EditorPage({
             'source_video_id', cb.source_video_id, 'source_offset_ms', cb.source_offset_ms,
             'image_path', cb.image_path, 'image_motion', cb.image_motion,
             'volume', cb.volume, 'muted', cb.muted, 'hidden', (to_jsonb(cb)->>'hidden')::boolean,
+            'mirror', (to_jsonb(cb)->>'mirror')::boolean, 'turn', (to_jsonb(cb)->>'turn')::int,
             'box_keyframes', COALESCE(
               (SELECT json_agg(bk.* ORDER BY bk.t_ms) FROM box_keyframes bk WHERE bk.box_id = cb.id),
               '[]'
@@ -129,7 +131,14 @@ export default async function EditorPage({
   const speedMs = segments
     .filter(s => !(s.crop_boxes?.[0]?.source_video_id && s.crop_boxes[0].source_video_id !== clip.video_id) && Number(s.speed) > 0 && Number(s.speed) !== 1)
     .reduce((t, s) => t + (Number(s.end_ms) - Number(s.start_ms)) * (1 - Number(s.speed)), 0)
-  const clipDuration = clip.end_ms - clip.start_ms + insertedMs + Math.max(0, speedMs)
+  // Parts of the main video played again (Duplicate): the time they repeat is the clip's too
+  const repeatedMs = repeatedVideoMs(segments
+    .filter(s => s.video_offset_ms == null)
+    .flatMap(s => {
+      const box = (s.crop_boxes ?? []).find((b: { source_video_id?: string | null; image_path?: string | null }) => (!b.source_video_id || b.source_video_id === clip.video_id) && !b.image_path)
+      return box ? [{ from: Number(box.source_offset_ms ?? 0), ms: (Number(s.end_ms) - Number(s.start_ms)) * (Number(s.speed) > 0 ? Number(s.speed) : 1) }] : []
+    }))
+  const clipDuration = clip.end_ms - clip.start_ms + insertedMs + Math.max(0, speedMs) + repeatedMs
   const healPromises: Promise<unknown>[] = []
   for (const seg of segments) {
     if (seg.start_ms >= clipDuration || seg.end_ms > clipDuration) {

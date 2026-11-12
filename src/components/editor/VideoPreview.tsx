@@ -813,11 +813,11 @@ function paintFrame(
       // Shown whole: the video isn't cropped here — unless the slot crops the main video to its own
       // view (mainCrop: Screen + face cam's Screen, with Same video)
       if (contain && !(area.kind === 'slot' && area.mainCrop)) {
-        inSlot(ctx, frame.main_corners?.[String(area.slot)], a, dimWhen(ctx, dimMain, (dx, dy, dw, dh) => containSource(ctx, video, vW, vH, dx, dy, dw, dh)), mainRect(frame, area.slot), 'none', { w: vW, h: vH })
+        inSlot(ctx, frame.main_corners?.[String(area.slot)], a, dimWhen(ctx, dimMain, mirrored(ctx, box?.mirror, (dx, dy, dw, dh) => containSource(ctx, video, vW, vH, dx, dy, dw, dh))), mainRect(frame, area.slot), 'none', { w: vW, h: vH })
       } else if (box) {
         const p = getPositionAt(box.id, tMs)
         inSlot(ctx, frame.main_corners?.[String(area.slot)], a,
-          dimWhen(ctx, dimMain, (dx, dy, dw, dh) => coverCrop(ctx, video, p.x * vW, p.y * vH, p.w * vW, p.h * vH, dx, dy, dw, dh)),
+          dimWhen(ctx, dimMain, mirrored(ctx, box.mirror, (dx, dy, dw, dh) => coverCrop(ctx, video, p.x * vW, p.y * vH, p.w * vW, p.h * vH, dx, dy, dw, dh))),
           mainRect(frame, area.slot), ring)
       }
     }
@@ -832,17 +832,20 @@ function paintFrame(
         const m = photoMotion(it.motion, (tMs - from) / Math.max(1, to - from))
         // The part of it picked (dragged / zoomed in the preview), unless a motion moves it
         const pz = (!it.motion || it.motion === 'none') && it.pan ? it.pan : null
-        inSlot(ctx, it.corners, a, put(img, img.naturalWidth, img.naturalHeight, pz ? Math.max(1, pz.zoom ?? 1) : m.zoom, m.panX, pz), boxRect(it.rect), contain ? fill : ring, contain ? { w: img.naturalWidth, h: img.naturalHeight } : true)
+        // (turned before it fills its box, mirrored as shown: render.py the same)
+        const t = turnedSource(img, img.naturalWidth, img.naturalHeight, it.turn, it.id)
+        inSlot(ctx, it.corners, a, mirrored(ctx, it.mirror, put(t.src, t.w, t.h, pz ? Math.max(1, pz.zoom ?? 1) : m.zoom, m.panX, pz)), boxRect(it.rect), contain ? fill : ring, contain ? { w: t.w, h: t.h } : true)
       }
       continue
     }
     const v = pool?.video(it)
     if (v && v.readyState >= 2) {
       // (the part of it picked: dragged / zoomed in the preview, as a photo)
-      const draw = put(v, v.videoWidth, v.videoHeight, it.pan ? Math.max(1, it.pan.zoom ?? 1) : 1, 0, it.pan)
+      const t = turnedSource(v, v.videoWidth, v.videoHeight, it.turn, it.id)
+      const draw = mirrored(ctx, it.mirror, put(t.src, t.w, t.h, it.pan ? Math.max(1, it.pan.zoom ?? 1) : 1, 0, it.pan))
       // Frozen (or in a freeze stretch) and dimmed: the picture at 55% brightness (render.py _dim_filter)
       const dimmed = dimWhen(ctx, (!!it.dim && itemSourceAt(it, tMs).held) || (!!frame.freeze?.dim && frameHeldAt(seg, tMs, it.id)), draw)
-      inSlot(ctx, it.corners, a, dimmed, boxRect(it.rect), contain ? fill : ring, contain ? { w: v.videoWidth, h: v.videoHeight } : true)
+      inSlot(ctx, it.corners, a, dimmed, boxRect(it.rect), contain ? fill : ring, contain ? { w: t.w, h: t.h } : true)
     }
   }
   for (const w of words) w()
@@ -1141,6 +1144,36 @@ function drawTransition(ctx: CanvasRenderingContext2D, a: HTMLCanvasElement, b: 
   ctx.restore()
 }
 
+// ── Mirror and turn (user, 2026-11-12; render.py _turn_filter / _mirror_filter) ──────────────────
+const turnedCanvases = new Map<string, HTMLCanvasElement>()
+/**
+ * A picture turned `turn` degrees clockwise (90° steps: a sideways recording put right), drawn into a
+ * canvas of its own (one per thing turned, kept) — what's then cropped or fitted is the turned picture.
+ * Not turned: the picture itself.
+ */
+function turnedSource(src: CanvasImageSource, sw: number, sh: number, turn: number | undefined, key: string): { src: CanvasImageSource; w: number; h: number } {
+  const t = ((Math.round((turn ?? 0) / 90) % 4) + 4) % 4
+  if (!t || !sw || !sh) return { src, w: sw, h: sh }
+  // (no bigger than 1280 on its long side: it's drawn again every frame)
+  const k = Math.min(1, 1280 / Math.max(sw, sh))
+  const w0 = Math.round(sw * k), h0 = Math.round(sh * k)
+  const [w, h] = t % 2 ? [h0, w0] : [w0, h0]
+  let c = turnedCanvases.get(key)
+  if (!c) { c = document.createElement('canvas'); turnedCanvases.set(key, c) }
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h }
+  const g = c.getContext('2d')!
+  g.setTransform(1, 0, 0, 1, 0, 0)
+  g.clearRect(0, 0, w, h)
+  g.translate(w / 2, h / 2)
+  g.rotate((t * Math.PI) / 2)
+  g.drawImage(src, -w0 / 2, -h0 / 2, w0, h0)
+  return { src: c, w, h }
+}
+/** A draw into a box, mirrored left to right round the box's middle when `on` */
+function mirrored(ctx: CanvasRenderingContext2D, on: boolean | undefined, draw: DrawIn): DrawIn {
+  return on ? (dx, dy, dw, dh) => { ctx.save(); ctx.translate(2 * dx + dw, 0); ctx.scale(-1, 1); draw(dx, dy, dw, dh); ctx.restore() } : draw
+}
+
 function paintSegment(
   ctx: CanvasRenderingContext2D,
   video: HTMLVideoElement,
@@ -1169,17 +1202,22 @@ function paintSegment(
   if (layout === 'vertical' || layout === 'spotlight' || layout === 'centered') {
     const box = crop_boxes[0]; if (!box) return
     const p = getPositionAt(box.id, tMs)
-    const srcW = p.w * vW, srcH = p.h * vH
+    // A video on a row turned (its view framing the turned picture) and / or mirrored as shown
+    const t = turnedSource(video, vW, vH, box.turn, box.id)
+    const sW = t.w, sH = t.h
+    const srcW = p.w * sW, srcH = p.h * sH
     const srcAR = srcW / (srcH || 1), dstAR = W / H
-    if (srcAR > dstAR) {
-      const fitW = srcH * dstAR
-      ctx.drawImage(video, p.x * vW + (srcW - fitW) / 2, p.y * vH, fitW, srcH, 0, 0, W, H)
-    } else if (srcAR < dstAR) {
-      const fitH = srcW / dstAR
-      ctx.drawImage(video, p.x * vW, p.y * vH + (srcH - fitH) / 2, srcW, fitH, 0, 0, W, H)
-    } else {
-      ctx.drawImage(video, p.x * vW, p.y * vH, srcW, srcH, 0, 0, W, H)
-    }
+    mirrored(ctx, box.mirror, () => {
+      if (srcAR > dstAR) {
+        const fitW = srcH * dstAR
+        ctx.drawImage(t.src, p.x * sW + (srcW - fitW) / 2, p.y * sH, fitW, srcH, 0, 0, W, H)
+      } else if (srcAR < dstAR) {
+        const fitH = srcW / dstAR
+        ctx.drawImage(t.src, p.x * sW, p.y * sH + (srcH - fitH) / 2, srcW, fitH, 0, 0, W, H)
+      } else {
+        ctx.drawImage(t.src, p.x * sW, p.y * sH, srcW, srcH, 0, 0, W, H)
+      }
+    })(0, 0, W, H)
   } else if (layout === 'split' || layout === 'trio') {
     const n = layout === 'split' ? 2 : 3
     const slotH = H / n
@@ -1192,19 +1230,21 @@ function paintSegment(
       const sW = own ? own.videoWidth || vW : vW, sH = own ? own.videoHeight || vH : vH
       // A slot framing the whole picture (a related visual) shows it whole, fitted with bars,
       // as the export does (render.py _is_full_frame)
+      // (a part mirrored: each slot flipped in its own place)
       if (p.x < 0.005 && p.y < 0.005 && p.w > 0.995 && p.h > 0.995) {
         const k = Math.min(W / sW, slotH / sH)
-        ctx.drawImage(src, 0, 0, sW, sH, (W - sW * k) / 2, i * slotH + (slotH - sH * k) / 2, sW * k, sH * k)
+        mirrored(ctx, box.mirror, () => ctx.drawImage(src, 0, 0, sW, sH, (W - sW * k) / 2, i * slotH + (slotH - sH * k) / 2, sW * k, sH * k))(0, i * slotH, W, slotH)
         return
       }
-      coverCrop(ctx, src, p.x * sW, p.y * sH, p.w * sW, p.h * sH, 0, i * slotH, W, slotH)
+      mirrored(ctx, box.mirror, (dx, dy, dw, dh) => coverCrop(ctx, src, p.x * sW, p.y * sH, p.w * sW, p.h * sH, dx, dy, dw, dh))(0, i * slotH, W, slotH)
     })
   } else if (layout === 'horizontal') {
     const box = crop_boxes[0]; if (!box) return
     const p = getPositionAt(box.id, tMs)
-    const srcAR = (p.w * vW) / (p.h * vH || 1)
+    const t = turnedSource(video, vW, vH, box.turn, box.id)
+    const srcAR = (p.w * t.w) / (p.h * t.h || 1)
     const dH = W / (srcAR || 1)
-    ctx.drawImage(video, p.x * vW, p.y * vH, p.w * vW, p.h * vH, 0, (H - dH) / 2, W, dH)
+    mirrored(ctx, box.mirror, () => ctx.drawImage(t.src, p.x * t.w, p.y * t.h, p.w * t.w, p.h * t.h, 0, (H - dH) / 2, W, dH))(0, 0, W, H)
   }
 }
 
@@ -3390,7 +3430,7 @@ function OverlayBox({ overlay, isActive, onChange, onSelect, onDelete }: Overlay
     >
       {/* Image content: the whole picture stretched to fill its box, whatever its width and height
           (the export stretches it the same way: render.py image overlays) */}
-      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', ...(overlay.mirror ? { transform: 'scaleX(-1)' } : {}) }}>
       {overlay.type === 'video' && overlay.preview_url
         ? <PipVideo overlay={overlay} />
         : imageUrl
@@ -3405,7 +3445,7 @@ function OverlayBox({ overlay, isActive, onChange, onSelect, onDelete }: Overlay
           The frame is drawn over the picture, never round it: a border of the box itself took 2 px off
           each side of the picture, so a logo showed about a tenth smaller than the export draws it */}
       <div aria-hidden="true" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', border: `2px solid ${isActive ? color : hover ? `${color}66` : 'transparent'}` }} />
-      {isActive && overlay.type === 'image' && (
+      {isActive && (
         <RotateHandle boxRef={ref} rotation={overlay.rotation ?? 0} onRotate={deg => onChange({ rotation: deg || null })} />
       )}
 
