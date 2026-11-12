@@ -622,7 +622,7 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
   const ended = useRef(false)
   const canOpen = video.status === 'ready' && !selecting && !renaming
   // "Open clips" (user, 2026-11-11: a video with clips opens them — no "AI or Manual?" question): only the AI's,
-  // or only ones cut by hand: straight to that board; both: a small menu (AI clips · n, Your clips · n, + Make new
+  // or only ones cut by hand: straight to that board; both: a small menu (AI edits · n, Manual edits · n, + Make new
   // clips). No clips yet — or how many of each isn't known — Make clips asks AI or Manual, as before
   const total = video.clip_count ?? 0
   const manualN = video.manual_clip_count ?? null
@@ -855,11 +855,11 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
                 }}>
                 <button type="button" role="menuitem" className="dash-menu-item" autoFocus onClick={() => { setMenu(false); onGo('ai') }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" /></svg>
-                  <span className="vcard-menu-label">AI clips</span><span className="vcard-menu-n">{aiN}</span>
+                  <span className="vcard-menu-label">AI edits</span><span className="vcard-menu-n">{aiN}</span>
                 </button>
                 <button type="button" role="menuitem" className="dash-menu-item" onClick={() => { setMenu(false); onGo('manual') }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12" /></svg>
-                  <span className="vcard-menu-label">Your clips</span><span className="vcard-menu-n">{manualN}</span>
+                  <span className="vcard-menu-label">Manual edits</span><span className="vcard-menu-n">{manualN}</span>
                 </button>
                 <span className="vcard-menu-line" aria-hidden="true" />
                 <button type="button" role="menuitem" className="dash-menu-item" onClick={() => { setMenu(false); onOpen() }}>
