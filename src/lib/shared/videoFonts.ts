@@ -3,7 +3,8 @@
  * has them too). Shared so the server can match a website's fonts to one of them (brandFromLink.ts).
  */
 export const VIDEO_FONTS = [
-  { name: 'Default',           family: 'sans-serif' },
+  // (user, 2026-11-12: "Default" read as "the caption style's font" — it's the plain font)
+  { name: 'Standard',          family: 'sans-serif' },
   { name: 'Roboto',            family: 'Roboto' },
   { name: 'Montserrat',        family: 'Montserrat' },
   { name: 'Poppins',           family: 'Poppins' },

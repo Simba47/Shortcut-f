@@ -27,15 +27,22 @@ export function loadVideoFonts() {
   document.head.appendChild(link)
 }
 
+/** Creator looks that shrink their text to fit the width (creator.ts: behind — one word, it can't go on to a
+ *  second line; split / subtitle / scribble do since 2026-11-12) */
+const FITS_WIDTH = new Set(['behind'])
+
 interface FontPickerProps {
   value: string | null
   onChange: (family: string) => void
   /** The list stays open after a font is picked, so fonts can be tried one after another; a click
    *  outside it (or Escape) closes it (user, 2026-11-01: the Brand kit's title font closed on each pick) */
   stayOpen?: boolean
+  /** A caption style's own font, offered first and shown while no font is picked (`value` null);
+   *  `onPick` goes back to it (user, 2026-11-12: "the default should be the one I picked in Style") */
+  styleFont?: { name: string; style: React.CSSProperties; onPick: () => void } | null
 }
 
-export function FontPicker({ value, onChange, stayOpen = false }: FontPickerProps) {
+export function FontPicker({ value, onChange, stayOpen = false, styleFont = null }: FontPickerProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   // A brand kit's own fonts first (components/editor/brandFonts.ts)
@@ -46,6 +53,7 @@ export function FontPicker({ value, onChange, stayOpen = false }: FontPickerProp
   const all = lock?.fonts.length ? allFonts.filter(f => lock.fonts.includes(f.family)) : allFonts
   const current = all.find(f => f.family === (value ?? 'sans-serif')) ?? (value && value.startsWith('BrandFont-') ? { family: value, name: 'Brand font' } : VIDEO_FONTS[0])
   useEffect(() => { ensureBrandFont(value) }, [value])
+  const onStyleFont = !!styleFont && !value
 
   useEffect(() => { loadVideoFonts() }, [])
 
@@ -68,16 +76,25 @@ export function FontPicker({ value, onChange, stayOpen = false }: FontPickerProp
         {/* Trigger button */}
         <button
           onClick={() => setOpen(o => !o)}
-          className="w-full flex items-center justify-between px-3 py-2 rounded-lg"
+          // (no letters past the box: a font with tall or wide letters is cut at its edge — user, 2026-11-12)
+          className="w-full flex items-center justify-between px-3 py-2 rounded-lg overflow-hidden"
           style={{
             background: 'rgb(var(--ed-fg) / 0.06)',
             border: `1px solid ${open ? 'rgba(200,255,0,0.5)' : 'rgb(var(--ed-fg) / 0.1)'}`,
             cursor: 'pointer',
           }}
         >
-          <span style={{ fontFamily: current.family, fontSize: 14, fontWeight: 700, color: 'var(--ed-text)' }}>
-            {current.name}
-          </span>
+          {onStyleFont ? (
+            <span className="min-w-0 flex items-baseline gap-2 overflow-hidden">
+              {/* (user, 2026-11-12: the style's font is "Default", its name beside it) */}
+              <span className="truncate" style={{ ...styleFont!.style, fontSize: 14, color: 'var(--ed-text)' }}>Default</span>
+              <span className="truncate text-[11px] font-medium" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>{styleFont!.name}</span>
+            </span>
+          ) : (
+            <span className="min-w-0 truncate" style={{ fontFamily: current.family, fontSize: 14, fontWeight: 700, color: 'var(--ed-text)' }}>
+              {current.name}
+            </span>
+          )}
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0, marginLeft: 8 }}>
             <path d={open ? 'M2 8l4-4 4 4' : 'M2 4l4 4 4-4'} stroke="rgb(var(--ed-fg) / 0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
@@ -98,17 +115,25 @@ export function FontPicker({ value, onChange, stayOpen = false }: FontPickerProp
               scrollbarWidth: 'thin',
             }}
           >
+            {styleFont && (
+              <button type="button" onClick={() => { styleFont.onPick(); if (!stayOpen) setOpen(false) }}
+                className="w-full text-left px-4 py-2.5 flex items-baseline gap-2 overflow-hidden whitespace-nowrap"
+                style={{ background: onStyleFont ? 'rgba(200,255,0,0.1)' : 'transparent', borderBottom: '1px solid rgb(var(--ed-fg) / 0.08)', cursor: 'pointer' }}>
+                <span style={{ ...styleFont.style, fontSize: 14, color: onStyleFont ? 'var(--ed-accent-text)' : 'rgb(var(--ed-fg) / 0.75)' }}>Default</span>
+                <span className="text-[10.5px] font-semibold" style={{ color: 'rgb(var(--ed-fg) / 0.4)' }}>{styleFont.name}</span>
+              </button>
+            )}
             {brandFonts.length > 0 && (
               <div className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'rgb(var(--ed-fg) / 0.4)' }}>Brand fonts</div>
             )}
             {all.map((f, i) => {
-              const active = current.family === f.family
+              const active = !onStyleFont && current.family === f.family
               return (
                 <button
                   key={f.family}
                   data-brand-font={i < brandFonts.length || undefined}
                   onClick={() => { onChange(f.family); if (!stayOpen) setOpen(false) }}
-                  className="w-full text-left px-4 py-2.5"
+                  className="w-full text-left px-4 py-2.5 overflow-hidden whitespace-nowrap text-ellipsis"
                   style={{
                     fontFamily: f.family,
                     fontSize: 14,
@@ -149,8 +174,9 @@ interface Props {
   romanize?: boolean
   romanizeLabel?: string
   onRomanizeChange?: (v: boolean) => void
-  /** One part of the panel only (the editor's Captions sub-tabs); none: all of it, as on mobile */
-  section?: 'style' | 'look' | 'keywords'
+  /** One part of the panel only (the editor's Captions sub-tabs); none: all of it, as on mobile.
+   *  'colours' / 'font': Look's two halves on their own (the brand kit: font, size and capitals under Fonts) */
+  section?: 'style' | 'look' | 'keywords' | 'colours' | 'font'
 }
 
 const PRESET_COLORS = [
@@ -626,22 +652,27 @@ export function CaptionStyler({
       {shows('keywords') && usesKeyWords(style) && <CaptionKeyWords style={style} tpl={tpl} onChange={onChange} />}
 
       {/* ── Look: colours, font, size and capitals ── */}
-      {shows('look') && <section className="flex flex-col gap-4">
+      {(shows('look') || section === 'colours' || section === 'font') && <section className="flex flex-col gap-4">
         {!section && <h3 className="cap-heading">Look</h3>}
 
       {/* Colours: a live sample, one-click themes, then a field per colour that opens a palette */}
-      <ColourChooser
+      {section !== 'font' && <ColourChooser
         text={color} highlight={hl}
         showHighlight={!!tpl || ANIMATED.includes(animation)}
         highlightLabel={(tpl ? tpl.base === 'highlight' || tpl.box === 'hl' : animation === 'highlight') ? 'Box' : tpl?.base === 'glow' ? 'Glow' : 'Highlight'}
         onText={c => onChange({ color: c })}
         onHighlight={c => onChange({ highlight_color: c })}
         sample={!section}
-      />
+      />}
 
       {/* Font; beside it on a wide page, Size and Capitals (user, 2026-11-10) */}
-      <div className="cap-font-row">
-      <FontPicker value={style.font ?? null} onChange={family => onChange({ font: family })} />
+      {section !== 'colours' && <div className="cap-font-row">
+      <FontPicker value={style.font ?? null} onChange={family => onChange({ font: family })}
+        styleFont={tpl && TEMPLATE_FONTS[tpl.font] ? {
+          name: TEMPLATE_FONTS[tpl.font].family,
+          style: { fontFamily: `"${templateFontFamily(tpl.font)}", sans-serif`, fontWeight: TEMPLATE_FONTS[tpl.font].weight, fontStyle: TEMPLATE_FONTS[tpl.font].italic ? 'italic' : 'normal' },
+          onPick: () => onChange({ font: null }),
+        } : null} />
 
       <div className="cap-font-rest">
       {/* Size */}
@@ -654,6 +685,13 @@ export function CaptionStyler({
           onChange={e => onChange({ size: Number(e.target.value) })}
           aria-label="Caption size"
           className="ed-zoom-range w-full" style={{ '--p': `${(((style.size ?? 52) - 20) / 80) * 100}%` } as React.CSSProperties} />
+        {/* Styles that narrow their words to fit the width (modules/captions/creator.ts): a long word stops
+            growing early, so Size seemed to do nothing (user, 2026-11-12) */}
+        {tpl?.look && FITS_WIDTH.has(tpl.look) && (
+          <span className="text-[11px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
+            This style shows one big word at a time. Long words are shrunk to fit the screen, so Size mainly changes short words.
+          </span>
+        )}
       </div>
 
       {/* Case */}
@@ -671,7 +709,7 @@ export function CaptionStyler({
         </div>
       </div>
       </div>
-      </div>
+      </div>}
       </section>}
 
     </div>

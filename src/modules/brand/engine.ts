@@ -1,6 +1,6 @@
 import type { AudioTrack, BoxKeyframe, CaptionStyle, FrameItem, FrameSettings, Overlay, SegmentLocal, TextOverlay, Transition } from '@chai-cut/shared'
 import { isLatinText } from '@/modules/captions/templates'
-import { brandCaptionStyle, brandCaptionStyleOn, brandLogoBox, cardLookOf, isBrandLogo, logoBox, logoSpan, showHandle, type BrandKit, type BrandKitData, type FrameRect, type LogoCorner } from '@/lib/shared/brandKit'
+import { brandCaptionStyle, brandCaptionStyleOn, brandLogoBox, captionCaseOf, cardLookOf, isBrandLogo, logoBox, logoSpan, showHandle, type BrandKit, type BrandKitData, type FrameRect, type LogoCorner } from '@/lib/shared/brandKit'
 import type { BrandBefore, FrameBefore } from '@/lib/shared/brandOn'
 import { DEFAULT_BAND, frameOf, frameSlotCount, isFrameLayout, isTextLane, newItemCorners, textLaneLook } from '@/modules/editor/frames'
 import { isShot } from '@/modules/editor/shots'
@@ -70,7 +70,7 @@ const titleFont = (d: BrandKitData) => d.title.font ?? 'sans-serif'
  */
 const textFontOf = (d: BrandKitData, x: TextOverlay) => (isLatinText(x.text ?? '') ? titleFont(d) : x.font)
 /** The caption case a kit's captions give */
-const caseOf = (d: BrandKitData) => (d.captions.uppercase ? 'upper' : 'title')
+const caseOf = (d: BrandKitData) => captionCaseOf(d.captions)
 /** A frame's band colour under a kit (a Branded card has its own) */
 const bandBgOf = (d: BrandKitData, card: boolean) => (card ? d.card.bg.color : d.colors.main)
 /** The colour a kit gives a frame's text item */
