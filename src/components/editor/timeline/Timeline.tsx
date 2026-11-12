@@ -223,7 +223,8 @@ const ROW_H = 30
 /** A row of videos, photos and text: its bars as tall as the main video's parts (BLOCK_H) */
 const VIS_ROW_H = BLOCK_H + 4
 const ROW_GAP = 3
-const FRAME_LANE_H = 26
+// (user, 2026-11-12) a frame lane's bar 70% of the main video strip's height: 32 − 2 × 2 px = 28 px of BLOCK_H's 40
+const FRAME_LANE_H = 32
 /** The picked frame's name and time over its rows */
 const FRAME_HEAD_H = 16
 const LEFT_W = 52

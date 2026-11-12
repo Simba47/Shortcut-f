@@ -95,6 +95,8 @@ export default async function VideoPickerPage({
 
   return (
     <ClipPickerShell
+      // (AI edit and Manual edit are separate boards: switching between them starts the other afresh)
+      key={startWith === 'manual' ? 'manual' : 'ai'}
       video={video}
       videoUrl={videoUrl}
       // (names the file across visits: the clip board keeps its download under it)

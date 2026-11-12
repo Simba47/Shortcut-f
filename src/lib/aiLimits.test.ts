@@ -54,9 +54,9 @@ test('rewrites past the allowance cost 1 credit for every 5 (charged on the 1st,
   assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 10].map(rewriteCredits), [1, 0, 0, 0, 0, 1, 0, 1])
 })
 
-test('AI clips past the month\'s included ones cost 5 credits each; the included ones are used first', () => {
-  assert.equal(clipCredits(1), 5)
-  assert.equal(clipCredits(5), 25)
+test('AI clips past the month\'s included ones cost 6 credits each; the included ones are used first', () => {
+  assert.equal(clipCredits(1), 6)
+  assert.equal(clipCredits(5), 30)
 })
 
 test('each plan includes fewer AI clips a month than its credits could pay to read (1 clip per video minute)', () => {

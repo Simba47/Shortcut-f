@@ -24,7 +24,7 @@ import { InsightsSection, ProblemSection, ProofSection } from '@/components/land
 import { neutralStyle, useLiteMotion } from '@/components/ui/use-lite-motion'
 import { PLANS } from '@/lib/plans'
 import { readingLabel } from '@/lib/planFeatures'
-import { COMPANY, MODEL_CREDIT } from '@/lib/company'
+import { COMPANY } from '@/lib/company'
 import { GMAIL_COMPOSE, openMailAppOnPhones } from '@/components/ui/email-link'
 
 const free = PLANS.free
@@ -737,8 +737,6 @@ export function LandingPage() {
             <Link href="/support">Support</Link>
           </div>
           <Link href="/delete-account" className="footer-delete">Delete account</Link>
-          {/* Required by the speech model's licence (lib/company.ts MODEL_CREDIT) */}
-          <span className="footer-copy footer-credit">{MODEL_CREDIT}</span>
         </FooterReveal>
       </footer>
     </div>

@@ -20,7 +20,7 @@ export const EDITOR_TOUR: TourStep[] = [
   {
     target: 'timeline',
     title: 'Trim on the timeline',
-    body: 'Click anywhere to jump, or click a section to select it. Drag its ends to resize it, or press ✂ Trim (S) to cut it in two.',
+    body: 'Click anywhere to jump, or click a section to select it. Drag its ends to resize it, or press ✂ Split (S) to cut it in two.',
   },
   {
     target: 'tools',
@@ -30,7 +30,7 @@ export const EDITOR_TOUR: TourStep[] = [
   {
     target: 'export',
     title: 'Export your reel',
-    body: 'See how it looks on Instagram or YouTube, then press Export. You can keep editing while it renders.',
+    body: 'Check it in the preview on the right, then press Export at the top right. You can keep editing while it renders.',
   },
 ]
 

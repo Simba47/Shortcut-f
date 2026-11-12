@@ -25,19 +25,45 @@ type PlanSummary = { planName: string; maxVideos: number; usage: { videos: numbe
 
 const SUPPORT_WHATSAPP = 'https://wa.me/917702404917'
 
-/** Keys the editor understands (see EditorShell's keydown handler) */
-const SHORTCUTS: { keys: string[]; what: string }[] = [
-  { keys: ['Space'], what: 'Play or pause' },
-  { keys: ['←', '→'], what: 'Move 1 second back or forward' },
-  { keys: ['Shift', '← / →'], what: 'Move 5 seconds back or forward' },
-  { keys: ['S'], what: 'Trim: cut the section in two at the playhead' },
-  { keys: ['['], what: 'Trim the selected section’s start to the playhead' },
-  { keys: [']'], what: 'Trim the selected section’s end to the playhead' },
-  { keys: ['Delete'], what: 'Delete what’s selected' },
-  { keys: ['Ctrl', 'Z'], what: 'Undo' },
-  { keys: ['Ctrl', 'Shift', 'Z'], what: 'Redo' },
-  { keys: ['Esc'], what: 'Close a menu or dialog' },
+/**
+ * Keys the editor understands, exactly as EditorShell's keydown handler does them (user, 2026-11-12: the list
+ * said ←/→ moved a second and S trimmed; ←/→ move one frame and S splits). Grouped as they're used.
+ * "Ctrl" shows as ⌘ on a Mac.
+ */
+const SHORTCUT_GROUPS: { title: string; items: { keys: string[]; what: string }[] }[] = [
+  { title: 'Play', items: [
+    { keys: ['Space'], what: 'Play or pause' },
+    { keys: ['←', '→'], what: 'One frame back or forward' },
+    { keys: ['Shift', '← / →'], what: '5 seconds back or forward' },
+    { keys: ['Hold ← / →'], what: 'Skip fast (faster the longer you hold)' },
+  ] },
+  { title: 'Edit', items: [
+    { keys: ['S'], what: 'Split at the playhead' },
+    { keys: ['['], what: 'Trim the selected part’s start to the playhead' },
+    { keys: [']'], what: 'Trim the selected part’s end to the playhead' },
+    { keys: ['Delete'], what: 'Delete what’s selected' },
+    { keys: ['Ctrl', 'D'], what: 'Duplicate what’s selected' },
+    { keys: ['Ctrl', 'C'], what: 'Copy what’s selected' },
+    { keys: ['Ctrl', 'X'], what: 'Cut what’s selected' },
+    { keys: ['Ctrl', 'V'], what: 'Paste at the playhead (into any clip)' },
+    { keys: ['Ctrl', 'Alt', 'C'], what: 'Copy the selected text’s style' },
+    { keys: ['Ctrl', 'Alt', 'V'], what: 'Paste that style on the selected texts' },
+    { keys: ['Ctrl', 'G'], what: 'Group what’s selected' },
+    { keys: ['Ctrl', 'Shift', 'G'], what: 'Ungroup' },
+  ] },
+  { title: 'Undo', items: [
+    { keys: ['Ctrl', 'Z'], what: 'Undo' },
+    { keys: ['Ctrl', 'Shift', 'Z'], what: 'Redo (or Ctrl + Y)' },
+    { keys: ['?'], what: 'Show these shortcuts' },
+    { keys: ['Esc'], what: 'Close a menu or dialog' },
+  ] },
 ]
+
+/** Opens the keyboard shortcuts from anywhere (the editor's ⌨ button): the account menu shows them */
+const OPEN_SHORTCUTS = 'shortcut:open-shortcuts'
+export function openShortcuts() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(OPEN_SHORTCUTS))
+}
 
 /** The saved photo is checked against the session once per page load, not once per menu */
 let photoChecked = false
@@ -102,8 +128,11 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
       if (t?.closest('input, textarea, select, [contenteditable="true"]')) return
       e.preventDefault(); setOpen(false); setShortcutsOpen(true)
     }
+    // (and the editor's ⌨ button: openShortcuts())
+    const onOpen = () => { setOpen(false); setShortcutsOpen(true) }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener(OPEN_SHORTCUTS, onOpen)
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener(OPEN_SHORTCUTS, onOpen) }
   }, [])
   // Close on outside click or Escape
   useEffect(() => {
@@ -220,6 +249,7 @@ function ShortcutsDialog({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [onClose])
   if (typeof document === 'undefined') return null
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform)
   return createPortal(
     <div className="cfm-backdrop fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 300 }}
       onPointerDown={e => { if (e.target === e.currentTarget) onClose() }}>
@@ -230,18 +260,24 @@ function ShortcutsDialog({ onClose }: { onClose: () => void }) {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
           </button>
         </div>
-        <p className="am-sc-sub">In the editing board</p>
-        <ul className="am-sc-list">
-          {SHORTCUTS.map(sc => (
-            <li key={sc.what}>
-              <span>{sc.what}</span>
-              <span className="flex items-center gap-1 shrink-0">
-                {sc.keys.map(k => <kbd key={k} className="am-kbd">{k}</kbd>)}
-              </span>
-            </li>
+        {/* In the editing board, grouped as they're used; Ctrl is ⌘ on a Mac */}
+        <div className="am-sc-groups">
+          {SHORTCUT_GROUPS.map(g => (
+            <section key={g.title}>
+              <p className="am-sc-sub">{g.title}</p>
+              <ul className="am-sc-list">
+                {g.items.map(sc => (
+                  <li key={sc.what}>
+                    <span>{sc.what}</span>
+                    <span className="flex items-center gap-1 shrink-0">
+                      {sc.keys.map(k => <kbd key={k} className="am-kbd">{mac && k === 'Ctrl' ? '⌘' : k}</kbd>)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
-        <p className="am-sc-sub" style={{ marginTop: 14 }}>On a Mac, use ⌘ instead of Ctrl.</p>
+        </div>
       </div>
     </div>,
     document.body,

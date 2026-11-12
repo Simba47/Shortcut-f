@@ -135,7 +135,7 @@ test('credit history says in plain words what each row was', () => {
 
 test('a plan gives credits worth what it costs: 1 credit = ₹1', () => {
   for (const p of Object.values(PLANS)) if (p.price) assert.equal(p.monthlyCredits, p.price, p.key)
-  assert.equal(FREE_SIGNUP_CREDITS, 95)   // what Free's limits use (30 min, 3 clips, 3 Ask AI, 20 rewrites) and 10 to export
+  assert.equal(FREE_SIGNUP_CREDITS, 95)   // what Free's limits use (30 min, 3 clips, 3 Ask AI, 20 rewrites: 88) and 7 to export
 })
 
 test('a video costs 15 credits per started 10 minutes', () => {

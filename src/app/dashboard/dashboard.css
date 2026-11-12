@@ -220,6 +220,11 @@
     radial-gradient(ellipse 60% 70% at 50% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%),
     var(--surface);
 }
+/* (user, 2026-11-12) the first-run card 10% smaller — 90% of the column's width, centred, and 10% shorter
+   (61px above and below instead of 80px); what's inside keeps its size. Wider screens only: phones as before */
+@media (min-width: 721px) {
+  .dash-drop.is-empty { width: 90%; margin-left: auto; margin-right: auto; padding-top: 61px; padding-bottom: 61px; }
+}
 .dash-drop.is-empty .dash-drop-icon { width: 64px; height: 64px; border-radius: 20px; }
 .dash-drop.is-empty .dash-drop-text p:first-child {
   font-size: clamp(24px, 3vw, 32px); font-weight: 900; letter-spacing: -0.03em; margin-bottom: 8px;
