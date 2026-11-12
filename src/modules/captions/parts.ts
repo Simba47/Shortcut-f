@@ -1,4 +1,5 @@
 import type { CaptionStyle } from '@chai-cut/shared'
+import { sameGradient } from './gradient'
 
 // ── Caption parts: a different caption style from one moment of the clip to the next ──────────
 // The clip's caption style (caption_styles) is the look of its first part. A split (as a video
@@ -13,7 +14,7 @@ import type { CaptionStyle } from '@chai-cut/shared'
 export interface CaptionPart { id: string; start_ms: number; style: Partial<CaptionStyle> }
 
 /** What a part's look is made of (the Captions panel's style, colours, size, font, case) */
-export const LOOK_KEYS = ['template', 'animation', 'color', 'highlight_color', 'font', 'size', 'uppercase', 'stroke_width', 'words_per_line'] as const
+export const LOOK_KEYS = ['template', 'animation', 'color', 'highlight_color', 'font', 'size', 'uppercase', 'stroke_width', 'words_per_line', 'gradient'] as const
 
 /** A part as it plays: its stretch of the clip (clip ms) and its look over the clip's own */
 export interface PlayedPart { id: string | null; index: number; start_ms: number; end_ms: number; style: Partial<CaptionStyle> }
@@ -119,7 +120,7 @@ export function lookName(style: Partial<CaptionStyle>, templateName?: (id: strin
 
 /** Two looks the same (every look key) */
 function sameLook(a: Partial<CaptionStyle>, b: Partial<CaptionStyle>): boolean {
-  return LOOK_KEYS.every(k => (a[k] ?? null) === (b[k] ?? null))
+  return LOOK_KEYS.every(k => (k === 'gradient' ? sameGradient(a.gradient, b.gradient) : (a[k] ?? null) === (b[k] ?? null)))
 }
 
 /**

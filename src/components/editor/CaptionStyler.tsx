@@ -5,7 +5,8 @@ import { useBrandFonts, ensureBrandFont } from './brandFonts'
 import { CAPTION_TEMPLATE_LIST, TEMPLATE_FONTS, TEMPLATE_GROUPS, applyTemplate, templateFontFamily, templateOf, usesKeyWords, type CaptionTemplate } from '@/modules/captions/templates'
 import { CaptionKeyWords } from './CaptionKeyWords'
 import { useContext, useEffect, useRef, useState } from 'react'
-import type { AnimationType, CaptionStyle } from '@chai-cut/shared'
+import type { AnimationType, CaptionGradient, CaptionStyle } from '@chai-cut/shared'
+import { GRADIENT_PRESETS, gradientCss, gradientOf, sameGradient } from '@/modules/captions/gradient'
 import { SARVAM_LANGUAGES, DEFAULT_CAPTION_STYLE } from '@chai-cut/shared'
 import { VIDEO_FONTS } from '@/lib/shared/videoFonts'
 
@@ -398,13 +399,17 @@ function hexToHue(hex: string): number {
   return Math.round(((h * 60) + 360) % 360)
 }
 
-function ColourChooser({ text, highlight, showHighlight, highlightLabel, onText, onHighlight, sample = true }: {
+function ColourChooser({ text, highlight, showHighlight, highlightLabel, onText, onHighlight, sample = true, gradient, onGradient }: {
   text: string; highlight: string; showHighlight: boolean; highlightLabel: string
   onText: (c: string) => void; onHighlight: (c: string) => void
   /** The two colours on a sample line (false: the editor's Captions preview over the panel shows them) */
   sample?: boolean
+  /** The text colour as a gradient (null: solid); with onGradient, a Solid | Gradient choice is offered */
+  gradient?: CaptionGradient | null
+  onGradient?: (g: CaptionGradient | null) => void
 }) {
-  const [open, setOpen] = useState<'text' | 'highlight' | null>(null)
+  const [open, setOpen] = useState<'text' | 'highlight' | 'from' | 'to' | null>(null)
+  const toggle = (k: 'text' | 'highlight' | 'from' | 'to') => setOpen(o => (o === k ? null : k))
   // In a brand kit's settings: both colours from its Primary and Secondary, in one click (user, 2026-11-10)
   const kit = useContext(KitColoursContext)
   const brandThemes = kit ? [
@@ -419,7 +424,7 @@ function ColourChooser({ text, highlight, showHighlight, highlightLabel, onText,
     <div className="flex flex-col gap-3">
       {/* Live sample of the two colours together */}
       {sample && <div className="cp-sample" aria-hidden="true">
-        <span style={{ color: text }}>Hey there </span>
+        <span style={gradient ? { background: gradientCss(gradient), WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' } : { color: text }}>Hey there </span>
         <span style={{ color: showHighlight ? highlight : text }}>friend</span>
       </div>}
 
@@ -460,12 +465,71 @@ function ColourChooser({ text, highlight, showHighlight, highlightLabel, onText,
 
       {/* Each colour on its own: a field that opens its palette */}
       <div className="flex flex-col gap-2">
-        <ColourField label="Text" value={text} onChange={onText}
-          open={open === 'text'} onToggle={() => setOpen(o => (o === 'text' ? null : 'text'))} />
+        {/* The text in one colour, or running from one to another across the line (user, 2026-11-13) */}
+        {onGradient && (
+          <div className="cap-row">
+            <span className="cap-label">Text fill</span>
+            <div role="radiogroup" aria-label="Text fill" className="cap-seg">
+              <button type="button" role="radio" aria-checked={!gradient} className="cap-seg-btn" data-on={!gradient || undefined}
+                title="The text in one colour" onClick={() => { if (gradient) onGradient(null) }}>Solid</button>
+              <button type="button" role="radio" aria-checked={!!gradient} className="cap-seg-btn" data-on={!!gradient || undefined}
+                title="The text running from one colour to another across each line (the spoken word and key words keep their own colour)"
+                onClick={() => { if (!gradient) onGradient({ from: GRADIENT_PRESETS[0].from, to: GRADIENT_PRESETS[0].to, dir: 'down' }) }}>Gradient</button>
+            </div>
+          </div>
+        )}
+        {gradient && onGradient ? (
+          <GradientFields gradient={gradient} onChange={onGradient} open={open} onToggle={toggle} />
+        ) : (
+          <ColourField label="Text" value={text} onChange={onText} open={open === 'text'} onToggle={() => toggle('text')} />
+        )}
         {showHighlight && (
           <ColourField label={highlightLabel} value={highlight} onChange={onHighlight}
-            open={open === 'highlight'} onToggle={() => setOpen(o => (o === 'highlight' ? null : 'highlight'))} />
+            open={open === 'highlight'} onToggle={() => toggle('highlight')} />
         )}
+      </div>
+    </div>
+  )
+}
+
+/** The gradient's settings: ready-made pairs, its two colours (and a swap), its direction */
+function GradientFields({ gradient, onChange, open, onToggle }: {
+  gradient: CaptionGradient; onChange: (g: CaptionGradient) => void
+  open: string | null; onToggle: (k: 'from' | 'to') => void
+}) {
+  const set = (g: Partial<CaptionGradient>) => onChange({ ...gradient, ...g })
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-4 gap-1.5">
+        {GRADIENT_PRESETS.map(p => {
+          const on = sameGradient({ ...p, dir: gradient.dir }, gradient)
+          return (
+            <button key={p.name} type="button" className="cp-theme" data-on={on || undefined} aria-pressed={on}
+              onClick={() => set({ from: p.from, to: p.to })} title={`${p.name}: ${colourName(p.from)} to ${colourName(p.to)}`}>
+              <span className="cp-grad-chip" style={{ background: gradientCss({ ...p, dir: gradient.dir }) }} aria-hidden="true" />
+              <span className="cp-theme-name">{p.name}</span>
+            </button>
+          )
+        })}
+      </div>
+      <ColourField label="Start" value={gradient.from} onChange={c => set({ from: c })} open={open === 'from'} onToggle={() => onToggle('from')} />
+      <ColourField label="End" value={gradient.to} onChange={c => set({ to: c })} open={open === 'to'} onToggle={() => onToggle('to')} />
+      <div className="cap-row">
+        <span className="cap-label">Direction</span>
+        <div className="flex items-center gap-1.5">
+          <div role="radiogroup" aria-label="Gradient direction" className="cap-seg">
+            {([['down', 'Top to bottom', 'M12 5v14M6 13l6 6 6-6'], ['right', 'Left to right', 'M5 12h14M13 6l6 6-6 6']] as const).map(([d, label, path]) => (
+              <button key={d} type="button" role="radio" aria-checked={gradient.dir === d} aria-label={label} title={label}
+                className="cap-seg-btn" data-on={gradient.dir === d || undefined} onClick={() => set({ dir: d })}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={path} /></svg>
+              </button>
+            ))}
+          </div>
+          <button type="button" className="cp-swap" onClick={() => set({ from: gradient.to, to: gradient.from })}
+            title="Swap the start and end colours" aria-label="Swap the gradient's colours">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4" /></svg>
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -634,9 +698,11 @@ export function CaptionStyler({
         text={color} highlight={hl}
         showHighlight={!!tpl || ANIMATED.includes(animation)}
         highlightLabel={(tpl ? tpl.base === 'highlight' || tpl.box === 'hl' : animation === 'highlight') ? 'Box' : tpl?.base === 'glow' ? 'Glow' : 'Highlight'}
-        onText={c => onChange({ color: c })}
+        onText={c => onChange({ color: c, ...(style.gradient ? { gradient: null } : {}) })}
         onHighlight={c => onChange({ highlight_color: c })}
         sample={!section}
+        gradient={gradientOf(style)}
+        onGradient={g => onChange({ gradient: g })}
       />
 
       {/* Font; beside it on a wide page, Size and Capitals (user, 2026-11-10) */}
