@@ -531,6 +531,59 @@ body {
   animation: ai-ping .6s ease-out forwards;
 }
 @keyframes ai-ping { from { transform: scale(.4); opacity: .8; } to { transform: scale(2.6); opacity: 0; } }
+/* (user, 2026-11-12: lime only for the main action) Ask AI's search button is neutral: its ring and hover in ink */
+.ai-find .ai-ping.is-on::after { border-color: currentColor; }
+/* Make my clips ⓘ: what each option does, one line each under the description */
+.mmc-tip-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(127,127,127,0.25); }
+.mmc-tip-list b { font-weight: 700; }
+/* Clipboard: the error banner (user, 2026-11-12) — calm: a neutral card, a soft red edge and icon, what failed
+   in bold and why underneath; a real ✕ button */
+.cb-alert { display: flex; align-items: flex-start; gap: 10px; padding: 10px 8px 10px 10px; border-radius: 12px;
+  background: rgb(var(--cb-fg) / 0.04); box-shadow: inset 0 0 0 1px rgba(239,68,68,0.28), inset 3px 0 0 rgba(239,68,68,0.55);
+  animation: cb-alert-in .22s cubic-bezier(.2,.8,.3,1); }
+@keyframes cb-alert-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.cb-alert-ico { flex-shrink: 0; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; color: #f87171; background: rgba(239,68,68,0.12); }
+.cb-alert-title { display: block; font-size: 12.5px; font-weight: 600; line-height: 1.35; color: var(--cb-text); }
+.cb-alert-text { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: rgb(var(--cb-fg) / 0.6); }
+.cb-alert-x { flex-shrink: 0; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; color: rgb(var(--cb-fg) / 0.5); transition: background-color .15s, color .15s; }
+.cb-alert-x:hover { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.08); }
+.cb-alert-x:focus-visible { outline: 2px solid rgb(var(--cb-fg) / 0.5); outline-offset: 1px; }
+[data-theme="light"] .cb-alert-ico { color: #dc2626; background: rgba(220,38,38,0.1); }
+[data-theme="light"] .cb-alert { box-shadow: inset 0 0 0 1px rgba(220,38,38,0.25), inset 3px 0 0 rgba(220,38,38,0.5); }
+@media (prefers-reduced-motion: reduce) { .cb-alert { animation: none; } }
+/* Ask AI results: "+" neutral at rest, lime when pointed at (user, 2026-11-12: a column of lime squares);
+   added: a grey ✓ in an outline */
+.cb-add { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.08); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.16); transition: background-color .15s, color .15s, box-shadow .15s, transform .1s; }
+.cb-add:not(:disabled):not([data-in]):hover { color: #0a0a0a; background: #c8ff00; box-shadow: none; }
+.cb-add:not(:disabled):active { transform: scale(.92); }
+.cb-add[data-in] { color: rgb(var(--cb-fg) / 0.7); background: transparent; box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.2); }
+.cb-add[data-in]:not(:disabled):hover { background: rgb(var(--cb-fg) / 0.06); }
+.cb-add:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
+[data-theme="light"] .cb-add:focus-visible { outline-color: #18181b; }
+/* Make my clips: the small heading over what each clip gets (user, 2026-11-12) */
+.mmc-heading { margin: 0; padding: 0 2px; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgb(var(--cb-fg) / 0.45); }
+/* Clipboard and Clip preview: empty places — an icon, a title, one line and the next step (user, 2026-11-12) */
+.cb-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; max-width: 280px; margin: 28px auto 8px; padding: 0 8px; }
+.cb-empty-ico { display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 4px; border-radius: 12px;
+  color: rgb(var(--cb-fg) / 0.6); background: rgb(var(--cb-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.1); }
+.cb-empty-title { margin: 0; font-size: 13px; font-weight: 600; color: rgb(var(--cb-fg) / 0.85); }
+.cb-empty-text { margin: 0; font-size: 11.5px; line-height: 1.5; color: rgb(var(--cb-fg) / 0.5); }
+.cb-empty-btn { margin-top: 6px; height: 30px; padding: 0 14px; border-radius: 9px; font-size: 12px; font-weight: 600;
+  color: var(--cb-text); background: rgb(var(--cb-fg) / 0.08); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.16); transition: background-color .15s, box-shadow .15s, transform .1s; }
+.cb-empty-btn:hover { background: rgb(var(--cb-fg) / 0.13); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.26); }
+.cb-empty-btn:active { transform: scale(.97); }
+.cb-empty-btn:focus-visible { outline: 2px solid rgb(var(--cb-fg) / 0.5); outline-offset: 2px; }
+/* New clip: "Now" inside the Start / End box — puts the video's current time there; quiet until pointed at */
+.cb-now { color: rgb(var(--cb-fg) / 0.75); background: rgb(var(--cb-fg) / 0.07); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.12); transition: background-color .15s, color .15s, transform .1s; }
+.cb-now:not(:disabled):hover { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.14); }
+.cb-now:not(:disabled):active { transform: scale(.94); }
+.cb-now:disabled { opacity: .35; cursor: not-allowed; }
+.cb-now:focus-visible { outline: 2px solid rgb(var(--cb-fg) / 0.5); outline-offset: 1px; }
+/* Make my clips: "Find new moments" as a small outlined button, not an underlined line of text */
+.mmc-new { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.05); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.16); transition: background-color .15s, box-shadow .15s; }
+.mmc-new:not(:disabled):hover { background: rgb(var(--cb-fg) / 0.1); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.26); }
+.mmc-new:focus-visible { outline: 2px solid rgb(var(--cb-fg) / 0.5); outline-offset: 2px; }
+.ai-find:not(:disabled):hover { filter: none; background: rgb(var(--cb-fg) / 0.16) !important; }
 
 @media (prefers-reduced-motion: reduce) {
   .ai-btn *, .ai-btn *::after { animation: none !important; }
@@ -707,17 +760,21 @@ body {
 .mmc-step:disabled { opacity: .3; cursor: not-allowed; }
 .mmc-input::selection { background: rgba(200,255,0,0.3); }
 
-/* The main button, kept quiet: a faint lime tint with a thin lime edge and lime words (no filled
-   block, no glow). Its click effects (.ai-spark, .ai-fire) are toned to match. */
+/* The main button (user, 2026-11-12: it was too quiet to be seen as the one to press): solid lime with
+   black words, as Add clip on the Manual board (.cb-page .cb-cta). Its click effects (.ai-spark, .ai-fire)
+   in black and white on the lime. */
 .mmc-go {
-  color: #c8ff00; background: rgba(200,255,0,0.06); box-shadow: inset 0 0 0 1px rgba(200,255,0,0.22);
+  color: #0a0a0a; background: #c8ff00; box-shadow: 0 8px 20px -12px rgba(200,255,0,0.5);
   transition: transform .12s ease, background-color .2s, box-shadow .2s;
 }
-.mmc-go:not(:disabled):hover { filter: none; background: rgba(200,255,0,0.11); box-shadow: inset 0 0 0 1px rgba(200,255,0,0.4); }
+.mmc-go:not(:disabled):hover { filter: none; background: #d4ff3a; box-shadow: 0 10px 24px -12px rgba(200,255,0,0.6); }
+.mmc-go:disabled { box-shadow: none; }
 .mmc-go:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
+[data-theme="light"] .mmc-go { box-shadow: 0 6px 16px -10px rgba(77,100,0,0.45); }
+[data-theme="light"] .mmc-go:focus-visible { outline-color: #18181b; }
 .mmc-go .ai-spark i { background: currentColor; }
 .mmc-go .ai-fire.is-on, .mmc-go[data-busy] .ai-fire {
-  background-image: linear-gradient(105deg, transparent 30%, rgba(200,255,0,0.22) 50%, transparent 70%);
+  background-image: linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.6) 50%, transparent 70%);
 }
 
 /* Video ⇄ Clip preview switch (clip board): a pill track with two equal halves and a lime knob
@@ -888,6 +945,53 @@ body {
   box-shadow: 0 6px 18px -6px rgba(0,0,0,0.6); opacity: 0; transition: opacity .15s, translate .15s;
 }
 .ed-tip:hover::after, .ed-tip:focus-visible::after { opacity: 1; translate: -50% 0; }
+/* (in the top bar: under the button, not off the top of the screen; at the bar's right end: lined up with
+   the button's right edge, so it stays on screen — user, 2026-11-12) */
+/* Editor: the export's problem (user, 2026-11-12) — a calm card under the top bar's Export, not a red strip:
+   a neutral card, a soft red edge and icon, what failed in bold, why underneath, Try again, a real ✕ */
+.ed-alert { position: fixed; top: 64px; right: 12px; z-index: 65; width: min(400px, calc(100vw - 24px)); display: flex; align-items: flex-start; gap: 10px;
+  padding: 11px 8px 11px 11px; border-radius: 12px; background: var(--ed-panel);
+  box-shadow: inset 0 0 0 1px rgba(239,68,68,0.3), inset 3px 0 0 rgba(239,68,68,0.6), 0 14px 34px -14px rgba(0,0,0,0.6);
+  animation: ed-alert-in .22s cubic-bezier(.2,.8,.3,1); }
+@keyframes ed-alert-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.ed-alert-ico { flex-shrink: 0; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; color: #f87171; background: rgba(239,68,68,0.12); }
+.ed-alert-title { display: block; font-size: 12.5px; font-weight: 600; line-height: 1.35; color: var(--ed-text); }
+.ed-alert-text { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: rgb(var(--ed-fg) / 0.6); }
+.ed-alert-retry { margin-top: 8px; height: 26px; padding: 0 11px; border-radius: 8px; font-size: 11.5px; font-weight: 600; color: var(--ed-text);
+  background: rgb(var(--ed-fg) / 0.08); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.16); transition: background-color .15s; }
+.ed-alert-retry:hover { background: rgb(var(--ed-fg) / 0.14); }
+.ed-alert-x { flex-shrink: 0; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; color: rgb(var(--ed-fg) / 0.5); transition: background-color .15s, color .15s; }
+.ed-alert-x:hover { color: var(--ed-text); background: rgb(var(--ed-fg) / 0.08); }
+.ed-alert-retry:focus-visible, .ed-alert-x:focus-visible { outline: 2px solid rgb(var(--ed-fg) / 0.5); outline-offset: 1px; }
+[data-theme="light"] .ed-alert { box-shadow: inset 0 0 0 1px rgba(220,38,38,0.25), inset 3px 0 0 rgba(220,38,38,0.5), 0 14px 34px -14px rgba(24,24,27,0.25); }
+[data-theme="light"] .ed-alert-ico { color: #dc2626; background: rgba(220,38,38,0.1); }
+
+/* Editor: "Your reel is ready" (user, 2026-11-12) — slides up at the bottom, stays 5 s, fades away by itself.
+   A dark pill in both themes (it floats over everything), the tick and Download the only lime */
+.ed-ready { position: fixed; left: 50%; bottom: 24px; z-index: 66; display: flex; align-items: center; gap: 10px; padding: 7px 7px 7px 10px;
+  border-radius: 999px; background: #18181b; color: #f4f4f5; box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 16px 40px -12px rgba(0,0,0,0.6);
+  translate: -50% 0; animation: ed-ready-in .32s cubic-bezier(.2,.9,.3,1.15); }
+.ed-ready[data-state="out"] { animation: ed-ready-out .26s ease forwards; }
+@keyframes ed-ready-in { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes ed-ready-out { to { opacity: 0; transform: translateY(10px) scale(.98); } }
+.ed-ready-ico { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; color: #0a0a0a; background: #c8ff00; }
+.ed-ready-text { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.ed-ready-dl { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #0a0a0a; background: #c8ff00; transition: filter .15s; }
+.ed-ready-dl:hover { filter: brightness(1.06); }
+.ed-ready-x { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 999px; color: rgba(244,244,245,0.55); transition: background-color .15s, color .15s; }
+.ed-ready-x:hover { color: #fff; background: rgba(255,255,255,0.1); }
+.ed-ready-dl:focus-visible, .ed-ready-x:focus-visible { outline: 2px solid rgba(255,255,255,0.6); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .ed-ready, .ed-ready[data-state="out"], .ed-alert { animation-duration: .01ms; } }
+
+/* The preview's note while the downloaded file is older than the edits: calm amber, not an error */
+.ed-pv-stale { color: rgb(var(--ed-fg) / 0.75); background: rgba(245,158,11,0.08); box-shadow: inset 0 0 0 1px rgba(245,158,11,0.22); }
+.ed-pv-stale b { color: var(--ed-text); font-weight: 600; }
+.ed-pv-stale-dot { flex-shrink: 0; width: 6px; height: 6px; margin-top: 5px; border-radius: 999px; background: #f59e0b; }
+[data-theme="light"] .ed-pv-stale-dot { background: #d97706; }
+.ed-tip[data-tip-below]::after { bottom: auto; top: calc(100% + 8px); translate: -50% -4px; }
+.ed-tip[data-tip-below]:hover::after, .ed-tip[data-tip-below]:focus-visible::after { translate: -50% 0; }
+.ed-tip[data-tip-end]::after { left: auto; right: 0; translate: 0 -4px; }
+.ed-tip[data-tip-end]:hover::after, .ed-tip[data-tip-end]:focus-visible::after { translate: 0 0; }
 .ed-tl-btn[data-active] { color: #c8ff00; background: rgba(200,255,0,0.1); }
 /* Fold buttons (the options panel's close, the preview's close / reopen): a round button with one
    chevron that nudges the way a click goes; quiet greys, a touch brighter while the panel is away */
@@ -1865,6 +1969,8 @@ body {
 .am-sc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .am-sc-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 13px; color: rgba(244,244,245,0.85); border-bottom: 1px solid rgba(255,255,255,0.06); }
 .am-sc-list li:last-child { border-bottom: 0; }
+/* (grouped: Play · Edit · Undo, user 2026-11-12) the groups scroll inside the card on a short screen */
+.am-sc-groups { display: flex; flex-direction: column; gap: 14px; max-height: min(64vh, 560px); overflow-y: auto; margin-right: -6px; padding-right: 6px; }
 
 /* ── Account settings page (app/settings/page.tsx) ── */
 .st-title { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: #fff; }
@@ -4511,3 +4617,38 @@ html[data-theme="light"] .sp-mode-pill { background: linear-gradient(135deg, rgb
 .credits-badge.is-low { border-color: #f59e0b; }
 .credits-badge.is-low svg { color: #f59e0b; }
 .credits-topup { margin-left: 6px; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; color: inherit; white-space: nowrap; }
+
+/* The clip board's AI edit / Manual edit, by the breadcrumb (ClipPickerShell BoardPicker, user 2026-11-12: a plain
+   switch didn't look right, a chip with ▾ didn't say it switches). One pill in two parts: where you are — its icon in
+   a lime disc and its name — and "⇄ Switch to …", a plain button whose arrows turn on hover. A soft lime light
+   travels slowly round the pill's edge (a conic gradient in a 1px ring; still for reduced motion) */
+@property --cb-board-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.cb-board { position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding: 3px;
+  border-radius: 999px; background: linear-gradient(180deg, rgb(var(--cb-fg) / 0.08), rgb(var(--cb-fg) / 0.04));
+  box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.12), inset 0 1px 0 rgb(var(--cb-fg) / 0.08); }
+.cb-board::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: conic-gradient(from var(--cb-board-a), transparent 0deg 250deg, rgba(200, 255, 0, 0.7) 300deg, transparent 340deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); animation: cb-board-spin 5s linear infinite; }
+@keyframes cb-board-spin { to { --cb-board-a: 360deg; } }
+.cb-board-here { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px 0 4px; font-size: 12.5px; font-weight: 700;
+  white-space: nowrap; color: var(--cb-text); }
+.cb-board-here-icon { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; color: #0c0c0e; background: #c8ff00;
+  box-shadow: 0 2px 10px -3px rgba(200, 255, 0, 0.6); }
+.cb-board-switch { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 999px; white-space: nowrap;
+  font-size: 12px; font-weight: 500; color: rgb(var(--cb-fg) / 0.7); background: rgb(var(--cb-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.1);
+  transition: background-color .15s, color .15s, box-shadow .15s, transform .12s; }
+.cb-board-switch b { font-weight: 700; color: var(--cb-text); }
+.cb-board-switch:hover:not(:disabled) { color: var(--cb-text); background: rgb(var(--cb-fg) / 0.12); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.2); }
+.cb-board-switch:active:not(:disabled) { transform: scale(.97); }
+.cb-board-switch:disabled { cursor: default; opacity: .6; }
+.cb-board-switch:focus-visible { outline: 2px solid rgba(200, 255, 0, 0.6); outline-offset: 2px; }
+.cb-board-swap { flex-shrink: 0; transition: transform .35s cubic-bezier(.34, 1.4, .64, 1); }
+.cb-board-switch:hover:not(:disabled) .cb-board-swap { transform: rotate(180deg); }
+[data-theme="light"] .cb-board-here-icon { background: #b4e600; }
+[data-theme="light"] .cb-board::before { background: conic-gradient(from var(--cb-board-a), transparent 0deg 250deg, rgba(110, 150, 0, 0.8) 300deg, transparent 340deg); }
+@media (prefers-reduced-motion: reduce) { .cb-board::before { animation: none; --cb-board-a: 300deg; } .cb-board-swap, .cb-board-switch { transition: none; } }
+
+/* A clip's download that didn't work: why, under its time (ClipPickerShell .cb-dl-error, user 2026-11-12) */
+.cb-dl-error { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 11px; line-height: 1.4; color: #f87171; cursor: default; }
+.cb-dl-error .credits-topup { font-weight: 700; }
