@@ -664,14 +664,15 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
 
   const ready = video.status === 'ready'
   const pct = video.download_progress ?? 0
-  // A video fetched from a Drive or Dropbox link (the worker's jobs/transcribe.ts: the file comes in up to 46%,
-  // is checked at 47, then kept in storage from 58; the video is ready right after — captions come later).
+  // A video fetched from a Drive or Dropbox link: the worker's steps (its lib/linkProgress.ts — keep in step):
+  // the file comes in 5 → 50, is checked at 51, is saved to storage 52 → 95, then 96 until it's ready.
   // (user, 2026-11-11) one plain journey: getting it, checking it, saving it — no "Transcribing" it never reached
+  // (user, 2026-11-12) the bar used to stop at 47% "Checking" for the whole save: it now moves through it
   const stageLabel =
-    pct < 5  ? 'Starting…' :
-    pct < 47 ? `Getting your video · ${pct}%` :
-    pct < 58 ? 'Checking your video…' :
-    pct < 99 ? 'Saving your video…' : 'Almost ready…'
+    pct < 5   ? 'Starting…' :
+    pct <= 50 ? `Getting your video · ${pct}%` :
+    pct < 52  ? 'Checking your video…' :
+    pct < 96  ? `Saving your video · ${pct}%` : 'Almost ready…'
 
   const created = new Date(video.created_at)
   const dateStr = created.toLocaleDateString('en-US', {
