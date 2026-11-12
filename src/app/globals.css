@@ -945,6 +945,53 @@ body {
   box-shadow: 0 6px 18px -6px rgba(0,0,0,0.6); opacity: 0; transition: opacity .15s, translate .15s;
 }
 .ed-tip:hover::after, .ed-tip:focus-visible::after { opacity: 1; translate: -50% 0; }
+/* (in the top bar: under the button, not off the top of the screen; at the bar's right end: lined up with
+   the button's right edge, so it stays on screen — user, 2026-11-12) */
+/* Editor: the export's problem (user, 2026-11-12) — a calm card under the top bar's Export, not a red strip:
+   a neutral card, a soft red edge and icon, what failed in bold, why underneath, Try again, a real ✕ */
+.ed-alert { position: fixed; top: 64px; right: 12px; z-index: 65; width: min(400px, calc(100vw - 24px)); display: flex; align-items: flex-start; gap: 10px;
+  padding: 11px 8px 11px 11px; border-radius: 12px; background: var(--ed-panel);
+  box-shadow: inset 0 0 0 1px rgba(239,68,68,0.3), inset 3px 0 0 rgba(239,68,68,0.6), 0 14px 34px -14px rgba(0,0,0,0.6);
+  animation: ed-alert-in .22s cubic-bezier(.2,.8,.3,1); }
+@keyframes ed-alert-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.ed-alert-ico { flex-shrink: 0; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; color: #f87171; background: rgba(239,68,68,0.12); }
+.ed-alert-title { display: block; font-size: 12.5px; font-weight: 600; line-height: 1.35; color: var(--ed-text); }
+.ed-alert-text { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: rgb(var(--ed-fg) / 0.6); }
+.ed-alert-retry { margin-top: 8px; height: 26px; padding: 0 11px; border-radius: 8px; font-size: 11.5px; font-weight: 600; color: var(--ed-text);
+  background: rgb(var(--ed-fg) / 0.08); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.16); transition: background-color .15s; }
+.ed-alert-retry:hover { background: rgb(var(--ed-fg) / 0.14); }
+.ed-alert-x { flex-shrink: 0; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; color: rgb(var(--ed-fg) / 0.5); transition: background-color .15s, color .15s; }
+.ed-alert-x:hover { color: var(--ed-text); background: rgb(var(--ed-fg) / 0.08); }
+.ed-alert-retry:focus-visible, .ed-alert-x:focus-visible { outline: 2px solid rgb(var(--ed-fg) / 0.5); outline-offset: 1px; }
+[data-theme="light"] .ed-alert { box-shadow: inset 0 0 0 1px rgba(220,38,38,0.25), inset 3px 0 0 rgba(220,38,38,0.5), 0 14px 34px -14px rgba(24,24,27,0.25); }
+[data-theme="light"] .ed-alert-ico { color: #dc2626; background: rgba(220,38,38,0.1); }
+
+/* Editor: "Your reel is ready" (user, 2026-11-12) — slides up at the bottom, stays 5 s, fades away by itself.
+   A dark pill in both themes (it floats over everything), the tick and Download the only lime */
+.ed-ready { position: fixed; left: 50%; bottom: 24px; z-index: 66; display: flex; align-items: center; gap: 10px; padding: 7px 7px 7px 10px;
+  border-radius: 999px; background: #18181b; color: #f4f4f5; box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 16px 40px -12px rgba(0,0,0,0.6);
+  translate: -50% 0; animation: ed-ready-in .32s cubic-bezier(.2,.9,.3,1.15); }
+.ed-ready[data-state="out"] { animation: ed-ready-out .26s ease forwards; }
+@keyframes ed-ready-in { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes ed-ready-out { to { opacity: 0; transform: translateY(10px) scale(.98); } }
+.ed-ready-ico { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; color: #0a0a0a; background: #c8ff00; }
+.ed-ready-text { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.ed-ready-dl { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #0a0a0a; background: #c8ff00; transition: filter .15s; }
+.ed-ready-dl:hover { filter: brightness(1.06); }
+.ed-ready-x { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 999px; color: rgba(244,244,245,0.55); transition: background-color .15s, color .15s; }
+.ed-ready-x:hover { color: #fff; background: rgba(255,255,255,0.1); }
+.ed-ready-dl:focus-visible, .ed-ready-x:focus-visible { outline: 2px solid rgba(255,255,255,0.6); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .ed-ready, .ed-ready[data-state="out"], .ed-alert { animation-duration: .01ms; } }
+
+/* The preview's note while the downloaded file is older than the edits: calm amber, not an error */
+.ed-pv-stale { color: rgb(var(--ed-fg) / 0.75); background: rgba(245,158,11,0.08); box-shadow: inset 0 0 0 1px rgba(245,158,11,0.22); }
+.ed-pv-stale b { color: var(--ed-text); font-weight: 600; }
+.ed-pv-stale-dot { flex-shrink: 0; width: 6px; height: 6px; margin-top: 5px; border-radius: 999px; background: #f59e0b; }
+[data-theme="light"] .ed-pv-stale-dot { background: #d97706; }
+.ed-tip[data-tip-below]::after { bottom: auto; top: calc(100% + 8px); translate: -50% -4px; }
+.ed-tip[data-tip-below]:hover::after, .ed-tip[data-tip-below]:focus-visible::after { translate: -50% 0; }
+.ed-tip[data-tip-end]::after { left: auto; right: 0; translate: 0 -4px; }
+.ed-tip[data-tip-end]:hover::after, .ed-tip[data-tip-end]:focus-visible::after { translate: 0 0; }
 .ed-tl-btn[data-active] { color: #c8ff00; background: rgba(200,255,0,0.1); }
 /* Fold buttons (the options panel's close, the preview's close / reopen): a round button with one
    chevron that nudges the way a click goes; quiet greys, a touch brighter while the panel is away */
@@ -1922,6 +1969,8 @@ body {
 .am-sc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .am-sc-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 13px; color: rgba(244,244,245,0.85); border-bottom: 1px solid rgba(255,255,255,0.06); }
 .am-sc-list li:last-child { border-bottom: 0; }
+/* (grouped: Play · Edit · Undo, user 2026-11-12) the groups scroll inside the card on a short screen */
+.am-sc-groups { display: flex; flex-direction: column; gap: 14px; max-height: min(64vh, 560px); overflow-y: auto; margin-right: -6px; padding-right: 6px; }
 
 /* ── Account settings page (app/settings/page.tsx) ── */
 .st-title { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em; color: #fff; }
