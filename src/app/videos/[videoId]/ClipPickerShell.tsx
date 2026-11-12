@@ -55,6 +55,10 @@ interface SavedClip {
   favorite?: boolean
   /** Why AI picked it (Make my clips), shown on its card */
   reason?: string | null
+  /** Changed in the editor since its last export (or never exported): its stage says Edited / Edited after export */
+  changed?: boolean
+  /** Opened in the editor at least once: Draft, not Unseen */
+  opened?: boolean
 }
 
 /** Where a clip came from, so the clip list can be split into sections */
@@ -484,7 +488,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         return
       }
     }
-    setClips(cs => cs.map(x => x.id === id ? { ...x, status: 'rendering', output_url: null } : x))
+    // (an export takes the edits in: the server clears the clip's edited-since-export mark, so does its card)
+    setClips(cs => cs.map(x => x.id === id ? { ...x, status: 'rendering', output_url: null, changed: false } : x))
   }
   /** Stop on a card while it exports (user, 2026-11-10): the export stops, nothing is saved, the clip as it was before */
   async function stopDownload(id: string) {
@@ -940,6 +945,24 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     else if (wasRunningRef.current && autoJob?.status === 'done') router.push(`/videos/${video.id}/clips`)
   }, [autoRunning, autoJob?.status, router, video.id])
   const autoRendering = autoClips.some(c => c.status === 'rendering')
+  // The AI column's panel that's working gets the room, the other is a slim bar (user, 2026-11-13): the one
+  // started last; when it's done the other one (still working) takes over, and with neither the usual split
+  // is back. A click on a bar opens that one instead
+  const [aiFocus, setAiFocus] = useState<'mmc' | 'ask' | null>(null)
+  const mmcBusy = autoRunning || autoStarting
+  const busyBefore = useRef({ mmc: false, ask: false })
+  // (the bar between them can be dragged any time — both then show at the dragged split — and the next task
+  // that starts or ends pops its panel up again as usual: user, 2026-11-13)
+  useEffect(() => {
+    const was = busyBefore.current
+    busyBefore.current = { mmc: mmcBusy, ask: loadingAi }
+    if (!mmcBusy && !loadingAi) { setAiFocus(null); return }
+    if (mmcBusy && !was.mmc) setAiFocus('mmc')
+    else if (loadingAi && !was.ask) setAiFocus('ask')
+    else if (!mmcBusy && !loadingAi) setAiFocus(null)
+    else if (!mmcBusy && was.mmc) setAiFocus('ask')
+    else if (!loadingAi && was.ask) setAiFocus('mmc')
+  }, [mmcBusy, loadingAi])
   // Show an earlier run on load, then poll (usePolling's rhythm) while the job runs or its clips export
   useEffect(() => { if (video.status === 'ready') loadAutoClips().catch(() => {}) }, [video.id, video.status]) // eslint-disable-line react-hooks/exhaustive-deps
   usePolling(() => loadAutoClips().catch(() => {}), autoRunning || autoRendering)
@@ -1190,7 +1213,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     if (e.button !== 0) return
     e.preventDefault(); e.stopPropagation()
     const y0 = e.clientY
-    const h0 = mmcRef.current?.getBoundingClientRect().height ?? 300
+    // (from the slim bar, or from all of the column: dragging shows both, at the split dragged to)
+    const h0 = mmcRef.current?.getBoundingClientRect().height ?? 44
+    setAiFocus(null)
     // (the column less its padding, the gap, and what Ask AI keeps)
     const colH = aiColRef.current?.clientHeight ?? 800
     const max = Math.max(MMC_MIN, colH - 24 - 12 - askMin)
@@ -1269,7 +1294,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         // (a fresh link after the old one stopped working: back to where the video was)
         if (resumeAt.current !== null) { v.currentTime = resumeAt.current; resumeAt.current = null }
       }}
-      onError={relink} />
+      onError={relink}
+      // (user, 2026-11-13: no Play while Make my clips works; as usual otherwise)
+      noPlay={autoRunning} />
   ) : (
     <div className="flex flex-col items-center gap-4 px-10 text-center">
       {video.status === 'failed' ? (
@@ -1520,15 +1547,60 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     </div>
   )
 
+  /** A click on a panel's title row pops that panel up (user, 2026-11-13: "when he clicks Make my clips / Ask AI,
+   *  do the popup") — not a click on a button or link in the row (ⓘ, Watch as reels) */
+  const popUp = (which: 'mmc' | 'ask') => (e: React.MouseEvent) => {
+    if (!wide || (e.target as HTMLElement).closest('button, a, [role="button"], input, label')) return
+    setAiFocus(which)
+  }
+
+  // The slim bars a panel becomes while the other one has the room: its name, and while it works how far it
+  // is (Make my clips: % and Stop) or what it's looking for (Ask AI); a click opens it (styles: .ai-bar)
+  const mmcBar = (
+    <div role="button" tabIndex={0} className="ai-bar" aria-label="Open Make my clips"
+      onClick={() => setAiFocus('mmc')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAiFocus('mmc') } }}>
+      <span className="ai-bar-icon" aria-hidden="true" style={{ color: ACCENT }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z" /></svg>
+      </span>
+      <span className="ai-bar-name">Make my clips</span>
+      {autoRunning && autoJob ? (
+        <>
+          <span className="ai-bar-track" aria-hidden="true"><i style={{ width: `${Math.max(3, autoShown)}%` }} /></span>
+          <span className="ai-bar-pct">{Math.floor(autoShown)}%</span>
+          <button type="button" className="ai-bar-stop" disabled={autoStopping}
+            onClick={e => { e.stopPropagation(); stopMakingClips() }} onKeyDown={e => e.stopPropagation()}>
+            {autoStopping ? 'Stopping…' : 'Stop'}
+          </button>
+        </>
+      ) : mmcBusy ? <span className="ai-bar-note">Starting…</span> : <span className="ai-bar-chev" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4.5l3 3 3-3" /></svg></span>}
+    </div>
+  )
+  const askBar = (
+    <div role="button" tabIndex={0} className="ai-bar" aria-label="Open Ask AI"
+      onClick={() => setAiFocus('ask')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAiFocus('ask') } }}>
+      <span className="ai-bar-icon" aria-hidden="true">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.8A8 8 0 1 1 21 12z" /></svg>
+      </span>
+      <span className="ai-bar-name">Ask AI</span>
+      {loadingAi
+        ? <><Spinner /><span className="ai-bar-note">Searching{askingFor ? ` “${askingFor}”` : ''}…</span></>
+        : aiSuggestions?.length
+          ? <span className="ai-bar-note">{aiSuggestions.length} moment{aiSuggestions.length === 1 ? '' : 's'} found</span>
+          : <span className="ai-bar-chev" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4.5l3 3 3-3" /></svg></span>}
+    </div>
+  )
+
   // ── AI tools: Ask AI + Best moments (left column on wide screens, under the video otherwise) ──
   const aiToolsOpen = (
     <>
       {/* (styles: .mmc-* in globals.css) */}
       {/* (wide: its height is shared with Ask AI at the bar under it; what doesn't fit scrolls, no scrollbar) */}
+      {wide && aiFocus === 'ask' ? mmcBar : (
       <section ref={mmcRef} className={`mmc p-3.5 flex flex-col gap-3 rounded-2xl ${wide ? 'cb-split-top cb-noscroll' : 'shrink-0'}`} data-start-target="ai"
-        style={wide ? { flex: `0 1 ${mmcH ?? MMC_H}px` } : undefined}>
-        {/* Header: a spark badge (glass, the spark lime), the title and its ⓘ; on the right, the way to the clips already made */}
-        <div className="flex items-center gap-2.5">
+        style={wide ? { flex: aiFocus === 'mmc' ? '1 1 0' : `0 1 ${mmcH ?? MMC_H}px` } : undefined}>
+        {/* Header: a spark badge (glass, the spark lime), the title and its ⓘ; on the right, the way to the clips already made.
+            A click on it pops Make my clips up */}
+        <div className="flex items-center gap-2.5" data-popup={wide || undefined} onClick={popUp('mmc')}>
           <span aria-hidden="true" className="shrink-0 w-8 h-8 rounded-[10px] grid place-items-center"
             style={{ background: 'rgb(var(--cb-fg) / 0.06)', color: ACCENT, boxShadow: 'inset 0 0 0 1px rgb(var(--cb-fg) / 0.1)' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -1660,9 +1732,10 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                   <span className="shrink-0 w-[52px]">Brand</span>
                   <MmcPick value={brandPick} disabled={autoRunning} onChange={setBrandPick} label="The brand kit the clips get"
                     options={[
+                      // (user, 2026-11-09: "No brand kit" taken out; 2026-11-13: back as "Off", at the top — the worker reads 'none')
+                      { id: 'none', label: 'Off' },
                       { id: 'default', label: def ? `Default · ${def.name}` : 'Default (none set)' },
                       ...brandKits.filter(k => !k.isDefault).map(k => ({ id: k.id, label: k.name })),
-                      // (user, 2026-11-09: "No brand kit" taken out of the list — the worker still reads 'none')
                     ]} />
                 </div>
                 {kitOn && missing.length > 0 && !autoRunning && (
@@ -1798,8 +1871,10 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           })()}
         </div>
       </section>
+      )}
 
-      {/* The bar between the two (wide): drag to share the height, double-click for the usual split */}
+      {/* The bar between the two (wide): drag to share the height, double-click for the usual split; also while one
+          of them has the room — dragging it then shows both (user, 2026-11-13) */}
       {wide && (
         <div role="separator" aria-orientation="horizontal" aria-label="Resize Make my clips and Ask AI"
           className="cb-row-handle" data-on={resizing === 'split' || undefined}
@@ -1807,8 +1882,10 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       )}
 
       {/* Ask AI (Best moments: removed 2026-11-09 (user), kept commented: it shared this card through a switch at the top, commented below) */}
+      {wide && aiFocus === 'mmc' ? askBar : (
       <section className="flex-1 p-3.5 flex flex-col gap-2.5 rounded-2xl" style={{ ...CARD, minHeight: askMin }}>
-        <div className="shrink-0 flex items-center gap-2">
+        {/* (a click on the title row pops Ask AI up) */}
+        <div className="shrink-0 flex items-center gap-2" data-popup={wide || undefined} onClick={popUp('ask')}>
           <h3 className="flex-1 flex items-center gap-2 text-[13px] font-semibold" style={{ color: 'var(--cb-text)' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.8A8 8 0 1 1 21 12z" />
@@ -1985,6 +2062,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         </>)}
         */}
       </section>
+      )}
     </>
   )
 
@@ -2128,14 +2206,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               <div className="cb-player rounded-2xl overflow-hidden flex items-center justify-center bg-black"
                 style={{ width: `min(100cqw, calc(100cqh * ${frameRatio}))`, aspectRatio: `${frameRatio}` }}>
                 {/* The video stays mounted (hidden) while a clip previews, so it keeps its place */}
-                <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<AiScan label={scanLabel} mode={scanMode} query={askingFor} durationMs={initialVideo.duration_ms} /></div>
+                <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<AiScan label={scanLabel} mode={scanMode} query={askingFor} durationMs={initialVideo.duration_ms} full={autoRunning} /></div>
                 {viewMode === 'preview' && previewPane}
               </div>
             </div>
           ) : (
             <div className="cb-player w-full rounded-2xl overflow-hidden flex items-center justify-center bg-black shrink-0"
               style={{ aspectRatio: `${frameRatio}`, maxHeight: '70vh', margin: '0 auto', width: `min(100%, calc(70vh * ${frameRatio}))` }}>
-              <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<AiScan label={scanLabel} mode={scanMode} query={askingFor} durationMs={initialVideo.duration_ms} /></div>
+              <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<AiScan label={scanLabel} mode={scanMode} query={askingFor} durationMs={initialVideo.duration_ms} full={autoRunning} /></div>
               {viewMode === 'preview' && previewPane}
             </div>
           )}
@@ -2288,7 +2366,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 outputUrl={clip.output_url}
                 playing={nowMs >= clip.start_ms && nowMs < clip.end_ms}
                 onSeek={() => seek(clip.start_ms)}
-                onEdit={() => { setBusy('open'); router.push(editorHref(clip.id)) }}
+                onEdit={() => { setBusy('open'); setClips(cs => cs.map(x => (x.id === clip.id ? { ...x, opened: true } : x))); router.push(editorHref(clip.id)) }}
                 onPreview={() => openClip(clip)}
                 previewing={viewMode === 'preview' && previewId === clip.id}
                 open={previewId === clip.id}
@@ -2297,6 +2375,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 onStopDownload={() => stopDownload(clip.id)}
                 manual={manualOnly}
                 edited={manualOnly && isEdited(clip)}
+                changed={!!clip.changed}
+                opened={!!clip.opened || (manualOnly && isEdited(clip))}
                 downloadError={typeof dlState[clip.id] === 'object' ? (dlState[clip.id] as { error: string }).error : null}
                 download={dlState[clip.id] === 'stopping' ? 'stopping'
                   : dlState[clip.id] === 'exporting' || clip.status === 'rendering' ? 'preparing'
@@ -2420,7 +2500,7 @@ function BoardPicker({ manual, disabled, switching, onPick }: {
  * Make my clips' Captions / Title / Brand choice (user, 2026-11-09: a designed menu, not the browser's
  * list; each language with an example, "e.g. Namaste"). The menu floats over the page (a portal), as
  * the card it sits in scrolls; it opens under the box, or over it when there's no room below.
- * ↑ / ↓, Enter, Esc; a click outside, a scroll or a resize closes it.
+ * ↑ / ↓, Enter, Esc; a click outside or a scroll closes it; it follows its panel when a column is resized.
  */
 function MmcPick({ value, options, onChange, disabled, label }: {
   value: string; options: Array<{ id: string; label: string; example?: string }>; onChange: (id: string) => void
@@ -2434,15 +2514,26 @@ function MmcPick({ value, options, onChange, disabled, label }: {
   const btn = useRef<HTMLButtonElement>(null)
   const list = useRef<HTMLUListElement>(null)
   const cur = options.find(o => o.id === value) ?? options[0]
-  const show = () => {
+  /** Where the list goes: under (or over) the box, kept inside the panel it opens from — the nearest box that
+   *  scrolls or clips, else the window (user, 2026-11-13: the Brand list ran over the panel's edge) */
+  const placeList = () => {
     const r = btn.current?.getBoundingClientRect()
-    if (!r) return
-    const width = Math.max(r.width, 230)
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8))
+    if (!r) return null
+    let panel: Element | null = btn.current!.parentElement
+    while (panel && panel !== document.body && getComputedStyle(panel).overflowX === 'visible') panel = panel.parentElement
+    const p = panel && panel !== document.body ? panel.getBoundingClientRect() : { left: 0, right: window.innerWidth }
+    const lo = Math.max(8, p.left + 4), hi = Math.min(window.innerWidth - 8, p.right - 4)
+    const width = Math.max(0, Math.min(Math.max(r.width, 230), hi - lo))
+    const left = Math.max(lo, Math.min(r.left, hi - width))
     const below = window.innerHeight - r.bottom - 8
-    setAt(below >= options.length * 36 + 14 || below >= r.top
+    return below >= options.length * 36 + 14 || below >= r.top
       ? { left, width, top: r.bottom + 6 }
-      : { left, width, bottom: window.innerHeight - r.top + 6 })
+      : { left, width, bottom: window.innerHeight - r.top + 6 }
+  }
+  const show = () => {
+    const at = placeList()
+    if (!at) return
+    setAt(at)
     setActive(Math.max(0, options.findIndex(o => o.id === value)))
     setOpen(true)
   }
@@ -2454,17 +2545,25 @@ function MmcPick({ value, options, onChange, disabled, label }: {
       const t = e.target as Node
       if (!btn.current?.contains(t) && !list.current?.contains(t)) setOpen(false)
     }
-    // (it's placed where the box was: anything moving the box closes it)
+    // (it follows the box while open: a column's edge dragged — user, 2026-11-13 — moves it with the panel)
+    let raf = 0, last = ''
+    const follow = () => {
+      const at = placeList()
+      const key = JSON.stringify(at)
+      if (at && key !== last) { last = key; setAt(at) }
+      raf = requestAnimationFrame(follow)
+    }
+    raf = requestAnimationFrame(follow)
+    // (scrolling the page away from it closes it)
     const moved = () => setOpen(false)
     window.addEventListener('pointerdown', away)
     window.addEventListener('scroll', moved, true)
-    window.addEventListener('resize', moved)
     return () => {
       window.removeEventListener('pointerdown', away)
       window.removeEventListener('scroll', moved, true)
-      window.removeEventListener('resize', moved)
+      cancelAnimationFrame(raf)
     }
-  }, [open])
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
   const onKey = (e: React.KeyboardEvent) => {
     if (!open) { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); show() } return }
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => (i + 1) % options.length) }
@@ -3082,7 +3181,25 @@ function SubEditOverlay({ startedAt, estimate, ahead, onStop }: { startedAt: num
   )
 }
 
-function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, onStopDownload, download, downloadError, onSubEdited, manual, edited, brandTag, onRename, defaultTitle }: {
+/**
+ * Where a clip stands, on its card (user, 2026-11-13: "he wants to know at what stage he is on that video"):
+ * Unseen (never opened) → Draft (opened, not changed) → Edited (changed in the editor) → Exporting → Exported;
+ * changed again after that: Edited after export (the download is the old one); Export failed. `changed`: the
+ * editor's editedSinceExport mark; `edited`: your own clip laid out in the editor (manual board); `opened`:
+ * opened in the editor (clips.layers.opened)
+ */
+function clipState(status: string, outputUrl: string | null, edited: boolean, changed = false, opened = false) {
+  if (status === 'rendering') return { key: 'exporting', label: 'Exporting', color: ACCENT }
+  if (status === 'failed') return { key: 'failed', label: 'Export failed', color: '#f87171' }
+  if (status === 'done' && outputUrl) return changed
+    ? { key: 'stale', label: 'Edited after export', color: '#fbbf24' }
+    : { key: 'exported', label: 'Exported', color: '#4ade80' }
+  if (edited || changed) return { key: 'edited', label: 'Edited', color: ACCENT }
+  if (opened) return { key: 'draft', label: 'Draft', color: 'rgb(var(--cb-fg) / 0.6)' }
+  return { key: 'unseen', label: 'Unseen', color: 'rgb(var(--cb-fg) / 0.45)' }
+}
+
+function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, onStopDownload, download, downloadError, onSubEdited, manual, edited, changed, opened, brandTag, onRename, defaultTitle }: {
   id: string
   /** Renamed from its card (✎ or a double-click on the name): the new name, or null for `defaultTitle` again */
   onRename?: (title: string | null) => void
@@ -3094,6 +3211,10 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
   manual?: boolean
   /** Manual edit board: opened in the editor already (a small green label) */
   edited?: boolean
+  /** Changed in the editor since its last export */
+  changed?: boolean
+  /** Opened in the editor at least once */
+  opened?: boolean
   /** Sub-edit finished: the clip's framing changed (the board reloads it) */
   onSubEdited?: () => void
   /** Download: saves the file, exporting it first if it isn't exported yet (e.g. AI's clips) */
@@ -3181,11 +3302,12 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
     document.addEventListener('pointerdown', away)
     return () => document.removeEventListener('pointerdown', away)
   }, [open, selecting, id, onClose])
-  const chip =
-    status === 'rendering' ? { label: 'Rendering', color: ACCENT } :
-    status === 'done' ? { label: 'Exported', color: '#4ade80' } :
-    status === 'failed' ? { label: 'Render failed', color: '#f87171' } :
-    { label: 'Draft', color: 'rgb(var(--cb-fg) / 0.45)' }
+  const chip = clipState(status, outputUrl, !!edited, !!changed, !!opened)
+  const stateTag = (
+    <span className="cb-state" data-state={chip.key} style={{ '--c': chip.color } as React.CSSProperties} title={chip.key === 'stale' ? 'Changed after its last export: export again for a download with the changes' : `This clip: ${chip.label}`}>
+      {chip.key === 'exporting' ? <Spinner /> : <i aria-hidden="true" />}{chip.label}
+    </span>
+  )
   const heart = (
     <button type="button" onClick={e => { e.stopPropagation(); onFavorite() }} aria-pressed={favorite}
       aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'}
@@ -3231,10 +3353,8 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
             </span>
             <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] tabular-nums" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>
               <ClockIcon />{manual ? <><span className="cb-range" style={{ color: ACCENT }}>{msToDisplay(startMs)} – {msToDisplay(endMs)}</span> · {durLabel(startMs, endMs)}</> : durLabel(startMs, endMs)}
-              {edited && (
-                <span className="cb-edited px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide" style={{ color: ACCENT, background: 'rgba(200,255,0,0.12)' }}>Edited</span>
-              )}
-              {status === 'rendering' && <span className="flex items-center gap-1" style={{ color: ACCENT }}>· <Spinner /> Exporting</span>}
+              {/* Where it stands: Draft, Edited, Exporting, Exported, Export failed (user, 2026-11-13) */}
+              {stateTag}
               {/* Which brand kit is on it, at a glance (user, 2026-11-10: the slim cards didn't say) */}
               {brandTag}
               {sub.busy && <SubEditInline startedAt={sub.startedAt} estimate={sub.estimate} ahead={sub.ahead} onStop={sub.stop} />}
@@ -3354,10 +3474,7 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
                 {ORIGIN_BADGE[origin].label}
               </span>
             )}
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide" style={{ color: chip.color }}>
-              {status === 'rendering' ? <Spinner /> : <span className="w-1.5 h-1.5 rounded-full" style={{ background: chip.color }} />}
-              {chip.label}
-            </span>
+            {stateTag}
             {!selecting && brandTag}
           </div>
         </div>

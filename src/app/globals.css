@@ -563,6 +563,28 @@ body {
 .cb-add:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
 [data-theme="light"] .cb-add:focus-visible { outline-color: #18181b; }
 /* Make my clips: the small heading over what each clip gets (user, 2026-11-12) */
+/* The AI column's slim bar (user, 2026-11-13): the panel that isn't working while the other has the room —
+   its name, and how far it is (Make my clips: a thin line, %, Stop) or what it looks for (Ask AI); a click opens it */
+/* A panel's title row in the AI column: a click pops that panel up */
+[data-popup] { cursor: pointer; }
+.ai-bar { flex: 0 0 auto; height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 12px; border-radius: 14px; cursor: pointer;
+  min-width: 0; overflow: hidden; background: rgb(var(--cb-fg) / 0.035); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.09);
+  color: var(--cb-text); transition: background-color .2s ease, box-shadow .2s ease; animation: ai-bar-in .25s ease-out; }
+.ai-bar:hover { background: rgb(var(--cb-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.16); }
+.ai-bar:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
+.ai-bar-icon { flex-shrink: 0; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; background: rgb(var(--cb-fg) / 0.06); }
+.ai-bar-name { flex-shrink: 0; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.ai-bar-note { flex: 1 1 auto; min-width: 0; font-size: 11px; color: rgb(var(--cb-fg) / 0.55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ai-bar-track { flex: 1 1 auto; min-width: 24px; height: 4px; border-radius: 99px; overflow: hidden; background: rgb(var(--cb-fg) / 0.08); }
+.ai-bar-track > i { display: block; height: 100%; border-radius: 99px; background: #c8ff00; transition: width .5s linear; }
+.ai-bar-pct { flex-shrink: 0; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: #c8ff00; }
+html[data-theme="light"] .ai-bar-pct { color: #4d7c0f; }
+.ai-bar-stop { flex-shrink: 0; height: 26px; padding: 0 9px; border-radius: 8px; font-size: 11px; font-weight: 700; color: #fca5a5;
+  background: rgba(248,113,113,0.08); box-shadow: inset 0 0 0 1px rgba(248,113,113,0.35); }
+.ai-bar-stop:hover:not(:disabled) { background: rgba(248,113,113,0.15); }
+.ai-bar-chev { margin-left: auto; flex-shrink: 0; font-size: 12px; color: rgb(var(--cb-fg) / 0.45); }
+@keyframes ai-bar-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .ai-bar { animation: none; } .ai-bar-track > i { transition: none; } }
 .mmc-heading { margin: 0; padding: 0 2px; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgb(var(--cb-fg) / 0.45); }
 /* Clipboard and Clip preview: empty places — an icon, a title, one line and the next step (user, 2026-11-12) */
 .cb-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; max-width: 280px; margin: 28px auto 8px; padding: 0 8px; }
@@ -2928,6 +2950,8 @@ html[data-theme="light"] .editor-theme .ed-subtabs-pill::after { background: #8f
 .vscan-corner[data-c="tr"] { top: var(--vscan-m); right: var(--vscan-m); border-width: 1.5px 1.5px 0 0; border-top-right-radius: 5px; }
 .vscan-corner[data-c="bl"] { bottom: var(--vscan-foot); left: var(--vscan-m); border-width: 0 0 1.5px 1.5px; border-bottom-left-radius: 5px; }
 .vscan-corner[data-c="br"] { bottom: var(--vscan-foot); right: var(--vscan-m); border-width: 0 1.5px 1.5px 0; border-bottom-right-radius: 5px; }
+/* Make my clips working: the player's controls are hidden, so the scan reaches the video's bottom (user, 2026-11-13) */
+.vscan[data-full] { --vscan-foot: var(--vscan-m); }
 /* the pill: frosted glass at the top centre; a small ring turning, and the words with a slow shimmer */
 .vscan-pill {
   position: absolute; top: calc(var(--vscan-m) + 10px); left: 50%; transform: translateX(-50%);
@@ -3313,6 +3337,16 @@ div:has(> .vscan[data-on][data-mode="find"]) > .sp .sp-controls { opacity: 0; vi
 .cbb-tag button:hover { color: rgb(var(--cb-fg) / 0.95); background: rgb(var(--cb-fg) / 0.1); }
 .cbb-tag[data-add] { padding: 1px 6px; color: rgb(var(--cb-fg) / 0.5); background: transparent; border: 1px dashed rgb(var(--cb-fg) / 0.2); }
 .cbb-tag[data-none] { padding: 1px 6px; color: rgb(var(--cb-fg) / 0.42); background: transparent; border: 1px solid rgb(var(--cb-fg) / 0.12); }
+/* A clip's status on its card (user, 2026-11-13): Draft · Edited · Exporting · Exported · Export failed — the size of
+   the brand tag, a dot (or the spinner) and the word in the status's colour (--c), kept inside the pill */
+.cb-state { display: inline-flex; align-items: center; gap: 4px; max-width: 140px; padding: 1px 6px; border-radius: 6px; font-size: 10px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+  background: color-mix(in srgb, var(--c) 8%, transparent); }
+.cb-state > i { flex-shrink: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--c); }
+.cb-state[data-state="draft"] { background: transparent; }
+/* Unseen: never opened — an open ring, not a dot */
+.cb-state[data-state="unseen"] { background: transparent; border-style: dashed; }
+.cb-state[data-state="unseen"] > i { background: transparent; box-shadow: inset 0 0 0 1px var(--c); }
 .cbb-tag[data-add]:hover { color: rgb(var(--cb-fg) / 0.9); border-color: rgba(200,255,0,0.5); }
 .cb-tab { border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.02); transition: background-color .15s, border-color .15s, color .15s; }
 .cb-tab:hover { background: rgba(255, 255, 255, 0.06); }
@@ -4248,7 +4282,6 @@ html .editor-theme .ed-body .ed-player .ed-play:focus-visible .ed-play-ring { fi
 .cb-page .cb-card[data-on] { border-color: rgb(var(--cb-fg) / 0.4); background: rgb(var(--cb-fg) / 0.06); }
 .cb-page .cb-thumb { border-radius: 9px; box-shadow: 0 0 0 1px var(--cbx-line); }
 .cb-page .cb-range { color: rgb(var(--cb-fg) / 0.75) !important; }
-.cb-page .cb-edited { color: rgb(var(--cb-fg) / 0.5) !important; background: var(--cbx-soft) !important; font-weight: 600 !important; letter-spacing: .04em; }
 .cb-page .cb-act { border-color: var(--cbx-line); background: var(--cbx-soft); }
 
 /* ── The Clipboard's head (user, 2026-11-09: "very messy"): sections, brand and filters as one block ── */

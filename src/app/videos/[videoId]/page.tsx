@@ -54,6 +54,10 @@ export default async function VideoPickerPage({
     status: string; output_storage_path: string | null; created_at: string
     layout: string | null; auto: boolean
     favorite?: boolean | null; reason?: string | null
+    /** Changed in the editor since its last export (the editor's clips.layers.editedSinceExport) */
+    changed?: boolean | null
+    /** Opened in the editor at least once (clips.layers.opened): Draft, not Unseen */
+    opened?: boolean | null
   }
 
   const clipsRaw = await sql<RawClip[]>`
@@ -62,7 +66,10 @@ export default async function VideoPickerPage({
       -- Made by "Make my clips" (read through to_jsonb so this works before the worker adds the column)
       (to_jsonb(c)->>'ai_edit_job_id') IS NOT NULL AS auto,
       COALESCE((to_jsonb(c)->>'favorite')::boolean, false) AS favorite,
-      to_jsonb(c)->>'ai_reason' AS reason
+      to_jsonb(c)->>'ai_reason' AS reason,
+      -- (its stage on the card, user 2026-11-13: Edited / Edited after export)
+      COALESCE(to_jsonb(c)->'layers'->>'editedSinceExport' = 'true', false) AS changed,
+      COALESCE(to_jsonb(c)->'layers'->>'opened' = 'true', false) AS opened
     FROM clips c
     WHERE c.video_id = ${videoId}
     ORDER BY c.created_at ASC
@@ -90,7 +97,7 @@ export default async function VideoPickerPage({
       : null,
     created_at: c.created_at,
     layout: c.layout ?? null, index: idx + 1, origin: originOf(c),
-    favorite: !!c.favorite, reason: c.reason ?? null,
+    favorite: !!c.favorite, reason: c.reason ?? null, changed: !!c.changed, opened: !!c.opened,
   })))
 
   return (

@@ -407,6 +407,13 @@ export function EditorShell({
   const loadedStateRef = useRef<EditableSnapshot | null>(null)
   const editedSinceLoadRef = useRef(false)
 
+  // Opened: the Clipboard's "Unseen" becomes "Draft" (user, 2026-11-13). Only a mark beside the clip's note
+  // (api/clips/[clipId]/opened), once, not waited for: the clip's edits and its export state aren't touched
+  useEffect(() => {
+    if ((savedClip as unknown as { layers?: { opened?: unknown } | null }).layers?.opened === true) return
+    fetch(`/api/clips/${savedClip.id}/opened`, { method: 'POST' }).catch(() => {})
+  }, [savedClip.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Hydrate stores from server props (once on mount) ─────────────────────────
   useEffect(() => {
     const ownVideoId = (savedClip as unknown as { video_id: string }).video_id
