@@ -323,6 +323,8 @@ body {
   font-size: 11px; font-weight: 600; letter-spacing: .01em; color: rgba(255,255,255,0.88);
   background: rgba(10,10,10,0.55); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1); }
 .ed-pv-tag i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+/* Motion on (user, 2026-11-12): the tip at the bottom of the video, on one line */
+.ed-pv-tag.ed-motion-tip { white-space: nowrap; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; }
 .ed-pv-tag.ed-skip { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; padding: 0 11px; }
 .ed-play { position: relative; background: rgb(var(--ed-fg) / 0.07); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.14); transition: background-color .15s, box-shadow .15s; }
 .ed-play:hover { background: rgb(var(--ed-fg) / 0.12); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.22); }
@@ -947,6 +949,35 @@ body {
 .ed-tip:hover::after, .ed-tip:focus-visible::after { opacity: 1; translate: -50% 0; }
 /* (in the top bar: under the button, not off the top of the screen; at the bar's right end: lined up with
    the button's right edge, so it stays on screen — user, 2026-11-12) */
+/* Editor: the page shown when it couldn't open (error.tsx, user 2026-11-12) — the editor's own colours, so
+   light and dark both; a calm icon as the editor's other notices; Try again and back to the clip board */
+.ed-crash { min-height: 100dvh; display: flex; flex-direction: column; background: var(--ed-app); color: var(--ed-text); }
+.ed-crash-head { height: 56px; flex-shrink: 0; display: flex; align-items: center; padding: 0 16px; background: var(--ed-panel); border-bottom: 1px solid rgb(var(--ed-fg) / 0.07); }
+.ed-crash-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; }
+.ed-crash-ico { display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 6px; border-radius: 16px; color: #f87171;
+  background: rgba(239,68,68,0.1); box-shadow: inset 0 0 0 1px rgba(239,68,68,0.22); }
+.ed-crash-title { margin: 0; font-size: 18px; font-weight: 700; color: var(--ed-text); }
+.ed-crash-text { margin: 0 0 14px; max-width: 320px; font-size: 13px; line-height: 1.6; color: rgb(var(--ed-fg) / 0.55); }
+.ed-crash-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.ed-crash-btn { display: inline-flex; align-items: center; height: 40px; padding: 0 18px; border-radius: 12px; font-size: 13px; font-weight: 600;
+  color: var(--ed-text); background: rgb(var(--ed-fg) / 0.07); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.12); transition: background-color .15s, filter .15s; }
+.ed-crash-btn:hover { background: rgb(var(--ed-fg) / 0.12); }
+.ed-crash-btn[data-primary] { color: #0a0a0a; background: #c8ff00; box-shadow: none; font-weight: 700; }
+.ed-crash-btn[data-primary]:hover { filter: brightness(1.05); background: #c8ff00; }
+.ed-crash-btn:focus-visible { outline: 2px solid rgb(var(--ed-fg) / 0.5); outline-offset: 2px; }
+[data-theme="light"] .ed-crash-ico { color: #dc2626; background: rgba(220,38,38,0.08); }
+
+/* Editor: the save status beside the clip's name (user, 2026-11-12) — grey while all is well; a soft amber
+   (offline, trying again) or red (not saved) chip with a dot only for a real problem; "Save now" / "Retry" as links */
+.ed-save[data-tone="warn"] { color: #fbbf24; background: rgba(245,158,11,0.1); box-shadow: inset 0 0 0 1px rgba(245,158,11,0.22); }
+.ed-save[data-tone="bad"] { color: #fca5a5; background: rgba(239,68,68,0.1); box-shadow: inset 0 0 0 1px rgba(239,68,68,0.25); }
+.ed-save-dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; flex-shrink: 0; }
+.ed-save-act { font-weight: 600; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: currentColor; }
+.ed-save-act:hover { opacity: .8; }
+.ed-save-act:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 3px; }
+[data-theme="light"] .ed-save[data-tone="warn"] { color: #b45309; background: rgba(245,158,11,0.12); }
+[data-theme="light"] .ed-save[data-tone="bad"] { color: #b91c1c; background: rgba(239,68,68,0.1); }
+
 /* Editor: the export's problem (user, 2026-11-12) — a calm card under the top bar's Export, not a red strip:
    a neutral card, a soft red edge and icon, what failed in bold, why underneath, Try again, a real ✕ */
 .ed-alert { position: fixed; top: 64px; right: 12px; z-index: 65; width: min(400px, calc(100vw - 24px)); display: flex; align-items: flex-start; gap: 10px;
@@ -992,7 +1023,8 @@ body {
 .ed-tip[data-tip-below]:hover::after, .ed-tip[data-tip-below]:focus-visible::after { translate: -50% 0; }
 .ed-tip[data-tip-end]::after { left: auto; right: 0; translate: 0 -4px; }
 .ed-tip[data-tip-end]:hover::after, .ed-tip[data-tip-end]:focus-visible::after { translate: 0 0; }
-.ed-tl-btn[data-active] { color: #c8ff00; background: rgba(200,255,0,0.1); }
+/* (user, 2026-11-12: lime only where it matters) a toolbar button that's on: the text colour on a soft grey */
+.ed-tl-btn[data-active] { color: var(--ed-text); background: rgb(var(--ed-fg) / 0.12); }
 /* Fold buttons (the options panel's close, the preview's close / reopen): a round button with one
    chevron that nudges the way a click goes; quiet greys, a touch brighter while the panel is away */
 .ed-fold { width: 30px; height: 30px; flex-shrink: 0; display: grid; place-items: center; border-radius: 50%; cursor: pointer;
@@ -3626,7 +3658,7 @@ html:not([data-theme="light"]) .editor-theme [data-layout-panel="Editing panel"]
 [data-theme="light"] .editor-theme .ed-tl-btn { color: #232327; }
 [data-theme="light"] .editor-theme .ed-tl-btn:hover:not(:disabled) { color: #18181b; background: rgba(24, 24, 27, 0.05); }
 [data-theme="light"] .editor-theme .ed-tl-btn:disabled { opacity: 1; color: rgba(15, 15, 17, 0.3); }
-[data-theme="light"] .editor-theme .ed-tl-btn[data-active] { color: var(--ed-lime-text); background: rgba(155, 203, 0, 0.14); }
+[data-theme="light"] .editor-theme .ed-tl-btn[data-active] { color: var(--ed-text); background: rgb(var(--ed-fg) / 0.1); }
 [data-theme="light"] .editor-theme .ed-tl-btn.ed-tl-fold { background: var(--ed-raise); box-shadow: inset 0 0 0 1px var(--ed-line), var(--ed-shadow-soft); }
 [data-theme="light"] .editor-theme .ed-tl-sep { background: var(--ed-hair); }
 [data-theme="light"] .editor-theme .ed-time { font-weight: 500 !important; color: #26262b !important; }
