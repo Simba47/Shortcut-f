@@ -353,6 +353,15 @@ export interface CaptionStyle {
    * null = none. `animation` then holds its base preset, drawn where templates aren't known.
    */
   template?: string | null
+  /** The text colour as a gradient across each caption line (modules/captions/gradient.ts); null = the solid `color` */
+  gradient?: CaptionGradient | null
+}
+
+/** A caption text gradient: from one colour to another, top to bottom ('down') or left to right ('right') */
+export interface CaptionGradient {
+  from: string
+  to: string
+  dir: 'down' | 'right'
 }
 
 export interface TextOverlay {

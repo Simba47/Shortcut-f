@@ -29,6 +29,7 @@ import { isBrandFont } from '@/lib/shared/brandKit'
 import { VIDEO_FONTS } from '@/lib/shared/videoFonts'
 import { ensureBrandFont } from './brandFonts'
 import { CaptionScan } from './CaptionScan'
+import { gradientOf, gradientContext, emptyBox, type TextBox } from '@/modules/captions/gradient'
 
 const BOX_COLORS = ['#22c55e', '#3b82f6', '#f59e0b']
 /** The layout's name on its frames' tag (user, 2026-10-31: the corners in the layout's colour, as on the timeline, so it's plain which format it is) */
@@ -1670,6 +1671,68 @@ export function drawCaptions(
   /** "Behind" finds the person in the picture (false: the Captions panel's preview, no picture —
    *  the cut-out keeps one frame at a time, the video preview's) */
   person = true,
+) {
+  // The text colour as a gradient across the line (modules/captions/gradient.ts)
+  const gradient = gradientOf(style)
+  if (!gradient) { drawCaptionsPlaced(ctx, chunks, tMs, style, textCase, band, out, person); return }
+  const chunk = findCaptionChunk(chunks, tMs)
+  if (!chunk) return
+  const tpl = templateOf(style)
+  const text = style.color ?? (tpl?.look ? tpl.color : null) ?? '#FFFFFF'
+  const box = captionLineBox(ctx.canvas, chunks, chunk, style, textCase, band, text)
+  drawCaptionsPlaced(box ? gradientContext(ctx, text, { gradient, box }) : ctx, chunks, tMs, style, textCase, band, out, person)
+}
+
+/** Per canvas: the caption line last measured and where it is drawn */
+const lineBoxes = new WeakMap<HTMLCanvasElement, {
+  chunk: FlatWord[]; style: Partial<CaptionStyle>; textCase: TextCase; band: string; w: number; h: number; box: TextBox | null
+}>()
+let measureCanvas: HTMLCanvasElement | null = null
+
+/**
+ * Where a caption line is drawn, in canvas pixels, for its gradient: drawn once unseen as it ends
+ * (every word shown, done popping), as the export measures the whole line (caption_gradient.py)
+ */
+function captionLineBox(canvas: HTMLCanvasElement, chunks: FlatWord[][], chunk: FlatWord[], style: Partial<CaptionStyle>,
+  textCase: TextCase, band: { y: number; h: number } | null | undefined, text: string): TextBox | null {
+  const bandKey = band ? `${band.y},${band.h}` : ''
+  const known = lineBoxes.get(canvas)
+  if (known && known.chunk === chunk && known.style === style && known.textCase === textCase && known.band === bandKey
+    && known.w === canvas.width && known.h === canvas.height) return known.box
+  measureCanvas ??= document.createElement('canvas')
+  if (measureCanvas.width !== canvas.width || measureCanvas.height !== canvas.height) {
+    measureCanvas.width = canvas.width
+    measureCanvas.height = canvas.height
+  }
+  const m = measureCanvas.getContext('2d')
+  let box: TextBox | null = null
+  if (m) {
+    m.setTransform(1, 0, 0, 1, 0, 0)
+    m.clearRect(0, 0, measureCanvas.width, measureCanvas.height)
+    // (its last word a moment in, before the next line starts)
+    const last = chunk[chunk.length - 1]
+    const next = chunks[chunks.indexOf(chunk) + 1]
+    let at = Math.min(last.end_ms, last.start_ms + 400)
+    if (next) at = Math.min(at, next[0].start_ms - 1)
+    at = Math.max(at, chunk[0].start_ms)
+    const seen = emptyBox()
+    drawCaptionsPlaced(gradientContext(m, text, null, seen), chunks, at, style, textCase, band, undefined, false)
+    if (seen.x1 > seen.x0 && seen.y1 > seen.y0) box = seen
+  }
+  lineBoxes.set(canvas, { chunk, style, textCase, band: bandKey, w: canvas.width, h: canvas.height, box })
+  return box
+}
+
+/** The captions drawn where they were moved left or right */
+function drawCaptionsPlaced(
+  ctx: CanvasRenderingContext2D,
+  chunks: FlatWord[][],
+  tMs: number,
+  style: Partial<CaptionStyle>,
+  textCase: TextCase,
+  band: { y: number; h: number } | null | undefined,
+  out: CaptionRectOut | undefined,
+  person: boolean,
 ) {
   // Moved left or right (position_x): drawn centred there, as the export does (render.py
   // _caption_x); in a frame's text band they stay in its middle

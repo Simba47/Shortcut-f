@@ -3069,6 +3069,13 @@ div:has(> .vscan[data-on][data-mode="find"]) > .sp .sp-controls { opacity: 0; vi
 .cp-theme:active { transform: scale(.96); }
 .cp-theme[data-on] { background: rgba(200,255,0,0.07); box-shadow: inset 0 0 0 1.5px #c8ff00; }
 .cp-theme-dots { display: flex; }
+/* A gradient pair's chip (Look → Text fill: Gradient), and the button that swaps its two colours */
+.cp-grad-chip { width: 36px; height: 18px; border-radius: 9px; box-shadow: 0 0 0 2px #17171a, inset 0 0 0 1px rgba(0,0,0,0.15); }
+.cp-swap {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; color: rgb(var(--ed-fg) / 0.7);
+  background: rgb(var(--ed-fg) / 0.05); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.07); transition: color .15s, background .15s;
+}
+.cp-swap:hover { color: rgb(var(--ed-fg) / 0.95); background: rgb(var(--ed-fg) / 0.1); }
 .cp-theme-dots > span { width: 18px; height: 18px; border-radius: 50%; box-shadow: 0 0 0 2px #17171a, inset 0 0 0 1px rgba(0,0,0,0.15); }
 .cp-theme-dots > span + span { margin-left: -6px; }
 .cp-theme-name { font-size: 10.5px; font-weight: 500; color: rgb(var(--ed-fg) / 0.6); }

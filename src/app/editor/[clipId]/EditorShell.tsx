@@ -19,7 +19,8 @@ import { VideoPanel, type PanelVideo } from '@/components/editor/VideoPanel'
 import { VideoPartModal, type VideoPart } from '@/components/editor/VideoPartChooser'
 import { MediaLibrary, type LibraryItem, type MediaSection } from '@/components/editor/MediaLibrary'
 import { PhotoSearch } from '@/components/editor/PhotoSearch'
-import { MemesPanel } from '@/components/editor/MemesPanel'
+// Media ▸ Memes: hidden 2026-11-13 (user) until KLIPY/GIPHY approve saving copies — tab + panel commented below
+// import { MemesPanel } from '@/components/editor/MemesPanel'
 import { useBrollSources, useBorrowedSlots } from '@/modules/editor/brollSources'
 import { SOUND_DEFAULTS, type SoundItem, type SoundKind } from '@/modules/editor/soundCatalog'
 import { Timeline } from '@/components/editor/timeline/Timeline'
@@ -8046,13 +8047,14 @@ export function EditorShell({
               </>
             )}
 
-            {/* Media: Import · B-roll · Photos · Memes (the switch on its own row: the names don't fit beside the header's buttons) */}
+            {/* Media: Import · B-roll · Photos (the switch on its own row: the names don't fit beside the header's buttons)
+                (Memes hidden 2026-11-13 until KLIPY/GIPHY approve: was grid-cols-4 with 'memes' last) */}
             {tool === 'media' && (() => {
               return (
                 <div className="flex flex-col h-full min-h-0">
-                <div role="tablist" aria-label="Media" className="shrink-0 grid grid-cols-4 gap-0.5 p-0.5 mx-3 mt-2 rounded-lg"
+                <div role="tablist" aria-label="Media" className="shrink-0 grid grid-cols-3 gap-0.5 p-0.5 mx-3 mt-2 rounded-lg"
                   style={{ background: 'rgb(var(--ed-fg) / 0.06)', border: '1px solid rgb(var(--ed-fg) / 0.07)' }}>
-                  {(['media', 'library', 'photos', 'memes'] as const).map(sec => {
+                  {(['media', 'library', 'photos'] as const).map(sec => {
                     const on = mediaSection === sec
                     return (
                       <button key={sec} type="button" role="tab" aria-selected={on} onClick={() => setMediaSection(sec)}
@@ -8135,11 +8137,12 @@ export function EditorShell({
                     <PhotoSearch clipId={clip.id} currentTimeMs={currentTimeMs}
                       onAdd={p => { addPhotoPathAt(p.storage_path, p.preview_url, currentTimeMs); loadLibrary() }} />
                   }
-                  memes={
-                    <MemesPanel currentTimeMs={currentTimeMs}
-                      onAddVideo={addStockBroll}
-                      onAddPhoto={p => { addPhotoPathAt(p.storage_path, p.preview_url, currentTimeMs); loadLibrary() }} />
-                  }
+                  // (Memes hidden 2026-11-13 until KLIPY/GIPHY approve)
+                  // memes={
+                  //   <MemesPanel currentTimeMs={currentTimeMs}
+                  //     onAddVideo={addStockBroll}
+                  //     onAddPhoto={p => { addPhotoPathAt(p.storage_path, p.preview_url, currentTimeMs); loadLibrary() }} />
+                  // }
                 />
                 </div>
                 </div>
