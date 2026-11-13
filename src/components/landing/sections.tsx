@@ -189,7 +189,7 @@ function TrendRows() {
 // ── Earnings dashboard ──────────────────────────────────────────────────────────
 // TODO(content): the client's page leaves these numbers as [X]; this card is an illustration
 const DASH_STATS = [{ label: 'Views', value: '[X]' }, { label: 'Clips posted', value: '[X]' }, { label: 'Earnings', value: '₹[X]' }]
-const DASH_CHANNELS = ['All channels', 'YouTube Shorts', 'Reels', 'TikTok']
+const DASH_CHANNELS = ['All channels', 'Instagram Reels', 'YouTube Shorts']
 // Little trend lines under each stat (shape only, no numbers)
 const SPARKS = ['M0 13 L10 11 L20 12 L30 8 L40 9 L50 5 L60 3', 'M0 12 L10 12 L20 9 L30 10 L40 6 L50 6 L60 4', 'M0 14 L10 12 L20 13 L30 9 L40 7 L50 4 L60 1']
 const TOP_CLIPS = [{ name: 'Side hustle myths', w: 88 }, { name: 'First salary rule', w: 70 }, { name: 'Gold or index fund?', w: 52 }]
@@ -246,7 +246,7 @@ type BoardId = 'trends' | 'earnings' | 'clips' | 'hours' | 'views'
 type BoardCell = { id: BoardId; label: string; meta: string; title?: string; desc?: string; size: 'wide' | 'side' | 'stat' }
 const BOARD: BoardCell[] = [
   { id: 'trends', label: 'Trends', meta: 'Updated daily', size: 'wide', title: 'Know what’s hot before you clip', desc: 'Topics, hooks and clip lengths getting the most views in your niche right now. AI flags the moments in your uploads that match.' },
-  { id: 'earnings', label: 'Analytics', meta: 'Every channel', size: 'side', title: 'See exactly what’s earning', desc: 'Views, watch time and earnings for every clip across Shorts, Reels and TikTok. Shortcut learns from your best performers.' },
+  { id: 'earnings', label: 'Analytics', meta: 'Every channel', size: 'side', title: 'See exactly what’s earning', desc: 'Views, watch time and earnings for every clip across Instagram Reels and YouTube Shorts. Shortcut learns from your best performers.' },
   { id: 'clips', label: 'Output', meta: 'Per upload', size: 'stat' },
   { id: 'hours', label: 'Speed', meta: 'Per video', size: 'stat' },
   { id: 'views', label: 'Formats', meta: 'Ready to post', size: 'stat' },
@@ -384,7 +384,7 @@ const PROOF_STATS: { value: string; label: string; kind: 'clips' | 'hours' | 'vi
   // Pre-launch: what the product does, not usage counts. Swap in real totals (e.g. '50,000+') once live.
   { value: '1 → 10', label: 'one long video in, ready-to-post clips out', kind: 'clips' },
   { value: 'Minutes', label: 'not hours, from upload to posted', kind: 'hours' },
-  { value: '9:16', label: 'made for Shorts, Reels and TikTok', kind: 'views' },
+  { value: '9:16', label: 'made for Instagram Reels and YouTube Shorts', kind: 'views' },
 ]
 const QUOTES = [
   { quote: '[Quote about speed or volume, like going from 5 to 40 clips a week.]', who: '[Name], [niche] clipper', tag: 'More clips' },

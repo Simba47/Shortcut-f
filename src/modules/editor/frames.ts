@@ -189,7 +189,7 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
     offers: [{ video: false, photo: true }, { video: true, photo: false }],
   },
   frame_comment: {
-    name: 'Comment reply', description: 'A comment bubble over the video, like TikTok\u2019s "reply to comment".',
+    name: 'Comment reply', description: 'A comment bubble over the video, like an Instagram "reply to comment".',
     areas: [
       { kind: 'slot', slot: 0, x: 0, y: 0, w: 1, h: 1, label: 'Video' },
       { kind: 'band', lane: 'band', x: 0.07, y: 0.1, w: 0.86, h: 0.13, radius: 28, bg: '#ffffff', color: '#111111', size: 46, label: 'Comment' },

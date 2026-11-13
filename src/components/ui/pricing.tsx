@@ -106,6 +106,9 @@ function InteractiveStarfield({
 }
 
 // --- PRICING COMPONENT LOGIC ---
+// (user, 2026-11-14) Monthly / Annual switch back with its sliding pill and confetti, while the plans are still being
+// decided. NOTE: annual billing doesn't exist yet — the annual prices are for show; the buttons still lead to the
+// monthly plans. Up to 4 plans side by side on a desktop; a line under them for GST and the full list.
 
 export interface PricingFeature {
   text: string
@@ -117,7 +120,7 @@ export interface PricingPlan {
   price: number
   /** Discounted per-month rate when billed annually */
   yearlyPrice: number
-  /** Bold one-line summary of the main limit, e.g. "Upload 5 long videos" */
+  /** Bold one-line summary under the price, e.g. "999 credits every month" */
   headline: string
   subline: string
   features: PricingFeature[]
@@ -157,10 +160,11 @@ export function PricingSection({
   locale = 'en-IN',
 }: PricingSectionProps) {
   const [isMonthly, setIsMonthly] = useState(true)
-  const wide = plans.length > 2
   const containerRef = useRef<HTMLDivElement>(null)
   const [mousePosition, setMousePosition] = useState<MousePos>({ x: null, y: null })
   const frame = useRef<number | null>(null)
+  // (the grid follows the number of plans: 4 → four across on a desktop)
+  const cols = plans.length >= 4 ? 'md:grid-cols-2 xl:grid-cols-4' : plans.length === 3 ? 'md:grid-cols-2 lg:grid-cols-3' : 'md:grid-cols-2'
 
   // Throttle to one update per animation frame
   const handleMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -185,23 +189,24 @@ export function PricingSection({
         className="relative w-full py-24 sm:py-32"
       >
         <InteractiveStarfield mousePosition={mousePosition} containerRef={containerRef} />
-        <div className="relative z-10 mx-auto max-w-5xl px-6">
+        <div className="relative z-10 mx-auto max-w-7xl px-6">
           <div className="mx-auto mb-8 max-w-5xl text-center">
             {eyebrow && <p className="mb-4 text-base font-medium text-[var(--muted)]">{eyebrow}</p>}
             <h2 className="section-title">{title}</h2>
             <p className="mt-4 whitespace-pre-line text-lg text-[var(--muted)]">{description}</p>
           </div>
           <PricingToggle />
-          <div
-            className={cn(
-              'mx-auto mt-8 grid grid-cols-1 items-stretch gap-5',
-              wide ? 'max-w-6xl md:grid-cols-2 lg:grid-cols-3' : 'max-w-4xl md:grid-cols-2',
-            )}
-          >
+          <div className={cn('mx-auto mt-8 grid grid-cols-1 items-stretch gap-5', cols)}>
             {plans.map((plan, index) => (
               <PricingCard key={plan.name} plan={plan} index={index} />
             ))}
           </div>
+          <p className="mt-8 text-center text-sm text-[var(--muted)]">
+            Prices include GST ·{' '}
+            <Link href="/pricing" className="font-semibold text-[var(--text)] underline-offset-4 hover:underline">
+              Compare all features →
+            </Link>
+          </p>
         </div>
       </div>
     </PricingContext.Provider>
@@ -292,7 +297,6 @@ function addClickRipple(e: React.PointerEvent<HTMLElement>) {
 function PricingCard({ plan, index }: { plan: PricingPlan; index: number }) {
   const { isMonthly, currency, locale } = useContext(PricingContext)
   const isFree = plan.price === 0
-
   // In the annual view the big number is the yearly total, with the full-price year struck through
   const showAnnual = !isMonthly && !isFree
   const annualTotal = plan.yearlyPrice * 12
@@ -303,6 +307,7 @@ function PricingCard({ plan, index }: { plan: PricingPlan; index: number }) {
   const symbol =
     new Intl.NumberFormat(locale, { style: 'currency', currency }).formatToParts(0).find(p => p.type === 'currency')?.value ?? currency
 
+  // (user, 2026-11-14: the original card's look, restored — sizes, lime ticks, "It's free" / "Billed monthly")
   return (
     <motion.div
       initial={{ y: 40, opacity: 0 }}
@@ -335,12 +340,7 @@ function PricingCard({ plan, index }: { plan: PricingPlan; index: number }) {
       <div className="mt-5 flex items-baseline gap-2">
         <span className="text-lg font-semibold text-[var(--muted)]">{symbol}</span>
         <span className="text-5xl font-extrabold tracking-[-0.045em] text-[var(--text)]">
-          <NumberFlow
-            value={showAnnual ? annualTotal : plan.price}
-            locales={locale}
-            format={{ maximumFractionDigits: 0 }}
-            className="tabular-nums"
-          />
+          <NumberFlow value={showAnnual ? annualTotal : plan.price} locales={locale} format={{ maximumFractionDigits: 0 }} className="tabular-nums" />
         </span>
         {showAnnual && (
           <span className="text-xl font-bold text-[var(--dim)] line-through decoration-2">

@@ -24,64 +24,52 @@ import { InsightsSection, ProblemSection, ProofSection } from '@/components/land
 import { neutralStyle, useLiteMotion } from '@/components/ui/use-lite-motion'
 import { PLANS } from '@/lib/plans'
 import { readingLabel } from '@/lib/planFeatures'
+import { FREE_SIGNUP_CREDITS } from '@/lib/credits'
 import { COMPANY } from '@/lib/company'
 import { GMAIL_COMPOSE, openMailAppOnPhones } from '@/components/ui/email-link'
 
 const free = PLANS.free
-const pro = PLANS.starter // shown as "Pro" on the landing page
-const business = PLANS.agency // shown as "Business"
 
-// Annual pricing is display-only for now: billing only supports monthly.
-// Every card lists the same rows (✓/✗) so plans are easy to compare.
-// Notes: hours of video are a month on paid plans, once only on Free; AI clip
-// suggestions need a transcript, which only plans with auto-captions get.
+// (user, 2026-11-14) The landing page shows the real plans, read from lib/plans.ts — the same source as the
+// Pricing page and the app — so its names, prices and limits can't drift apart again. (It used to have its own
+// copy: Starter shown as "Pro", Agency as "Business", Creator left out, and an Annual price billing doesn't offer.)
+// The key facts only; the Pricing page lists every limit.
+const LANDING_PLANS = ['free', 'starter', 'creator', 'agency'] as const
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 function planFeatures(plan: (typeof PLANS)[keyof typeof PLANS]) {
+  // (Free's allowances are once only; a paid plan's renew every month)
+  const per = plan.allowancesOnce ? 'in total' : 'a month'
   return [
-    { text: 'AI finds the best moments', included: plan.autoCaption },
+    { text: `${readingLabel(plan.readingMinutes)} of video read ${per}`, included: true },
+    { text: `${count(plan.uploadsPerMonth, 'upload', 'uploads')} ${per}`, included: true },
+    { text: plan.maxClips ? `${count(plan.maxClips, 'clip', 'clips')} in total` : `${plan.ai.clipsPerMonth} AI clips a month`, included: true },
+    { text: 'Unlimited clips you cut yourself', included: !plan.maxClips },
     { text: `Up to ${plan.maxFileSizeGb} GB per video`, included: true },
-    { text: `${plan.retentionDays}-day history`, included: true },
-    { text: 'Captions on AI clips in Telugu, Hindi & Hinglish', included: plan.autoCaption },
-    { text: 'Your logo on your clips', included: true },
+    { text: 'Captions on AI clips', included: plan.autoCaption },
     { text: 'No watermark', included: !plan.watermark },
+    { text: 'Priority exports', included: plan.priorityExports },
   ]
 }
 
-
-const PRICING_PLANS: PricingPlan[] = [
-  {
-    name: 'Free',
-    price: free.price,
-    yearlyPrice: free.price,
-    headline: `Process ${readingLabel(free.readingMinutes)} of video`,
-    subline: `Cut up to ${free.maxClips} clips`,
-    features: planFeatures(free),
-    buttonText: 'Start for free',
-    href: '/signup',
-  },
-  {
-    name: 'Pro',
-    price: pro.price,
-    yearlyPrice: Math.round(pro.price * 0.8),
-    headline: `Process ${readingLabel(pro.readingMinutes)} of video a month`,
-    subline: 'Cut as many clips as you want',
-    features: planFeatures(pro),
-    buttonText: 'Go Pro',
-    href: '/signup',
-    badge: 'Most popular',
-    isPopular: true,
-  },
-  {
-    name: 'Business',
-    price: business.price,
-    yearlyPrice: Math.round(business.price * 0.8),
-    headline: `Process ${readingLabel(business.readingMinutes)} of video a month`,
-    subline: 'Cut as many clips as you want',
-    features: planFeatures(business),
-    buttonText: 'Go Business',
-    href: '/signup',
-    badge: 'For agencies',
-  },
-]
+const PRICING_PLANS: PricingPlan[] = LANDING_PLANS.map(key => {
+  const plan = PLANS[key]
+  const paid = plan.price > 0
+  return {
+    name: plan.name,
+    price: plan.price,
+    // (user, 2026-11-14) Annual shown for now while the plans are discussed: 20% off the monthly price.
+    // Billing is monthly only — the buttons still lead to the monthly plans.
+    yearlyPrice: Math.round(plan.price * 0.8),
+    headline: paid ? `${plan.monthlyCredits.toLocaleString('en-IN')} credits every month` : `${FREE_SIGNUP_CREDITS} credits to start`,
+    subline: paid ? 'Unused credits roll over one month' : 'No credit card needed',
+    features: planFeatures(plan),
+    buttonText: paid ? `Choose ${plan.name}` : 'Start for free',
+    // A paid plan: sign up first (landing visitors are signed out), then straight to the Pricing page to pay
+    // (lib/nextPath.ts keeps ?callbackUrl through the email code and Google)
+    href: paid ? '/signup?callbackUrl=%2Fpricing' : '/signup',
+    ...(key === 'creator' ? { badge: 'Most popular', isPopular: true } : {}),
+  }
+})
 
 // FAQ between Pricing and the closing section. Plan-by-plan differences live in Pricing, not here.
 const FAQS: FaqItem[] = [
@@ -96,7 +84,7 @@ const FAQS: FaqItem[] = [
   },
   {
     question: 'Which platforms can I post to?',
-    answer: 'YouTube Shorts, Instagram Reels and TikTok. Connect your channels once and post in one tap.',
+    answer: 'Instagram Reels and YouTube Shorts. Connect your channels once and post in one tap.',
   },
   {
     question: 'How do trending topics work?',
@@ -156,7 +144,7 @@ const FEATURES: CarouselItem[] = [
   { id: 'brand', tag: 'Brand', icon: featureIcon('◈', 'fi-purple'), title: 'Every clip looks like yours', description: 'Your fonts, colors and logo applied to every clip automatically.' },
   { id: 'layouts', tag: 'Layouts', icon: featureIcon('▤', 'fi-blue'), title: 'Ready-made layouts', description: 'Video with text on top, split screen, video with photo, and more.' },
   { id: 'export', tag: 'Speed', icon: featureIcon('⬆', 'fi-green'), title: 'No waiting to export', description: 'Clips render while you edit, so they’re ready the moment you finish.' },
-  { id: 'post', tag: 'Publish', icon: featureIcon('➚', 'fi-cyan'), title: 'Post everywhere at once', description: 'Send clips straight to YouTube Shorts, Reels and TikTok from one place.' },
+  { id: 'post', tag: 'Publish', icon: featureIcon('➚', 'fi-cyan'), title: 'Post everywhere at once', description: 'Send clips straight to Instagram Reels and YouTube Shorts from one place.' },
 ]
 
 const CONTACT = COMPANY
@@ -639,7 +627,7 @@ export function LandingPage() {
           plans={PRICING_PLANS}
           eyebrow="Pricing"
           title="Simple pricing. Serious reels."
-          description={'Start free. Go Pro when your content takes off.'}
+          description={'Start free. Upgrade when your content takes off. Cancel anytime.'}
         />
       </SectionTransition>
 
