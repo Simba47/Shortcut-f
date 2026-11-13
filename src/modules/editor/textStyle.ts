@@ -193,3 +193,58 @@ export function textCss(o: TextStyle & { size?: number | null }, bare = false): 
     } : {}),
   }
 }
+
+// ── Copy style (Ctrl+Alt+C / Ctrl+Alt+V, the Text panel's buttons; user, 2026-11-12) ────────────────
+// A text's look — its font, size and colour and the rest of the Text-tool look — taken from one text
+// and put on others, which keep their words, place, rotation and timing. Kept in the browser (apart
+// from Ctrl+C's copy), so it pastes onto texts in any clip. A frame's text (title band, name tag) has
+// only a font, size, colour and background: copied from one, only those; pasted onto one, only those.
+
+/** What a look is made of (the text's own fields) */
+export const LOOK_KEYS = ['font', 'size', 'color', ...TEXT_STYLE_KEYS] as const
+export type LookKey = typeof LOOK_KEYS[number]
+/** A copied look: each of its keys a value, or null = not set (pasted, that part of the look goes back to plain) */
+export type CopiedLook = Partial<Record<LookKey, unknown>>
+
+/** A text's whole look (everything, set or not: pasted, it replaces the other text's look entirely) */
+export function textLook(t: Partial<TextOverlay>): CopiedLook {
+  return Object.fromEntries(LOOK_KEYS.map(k => [k, t[k] ?? null]))
+}
+
+/** A frame text's look: its font, size, colour and background (a colour; see-through or the band's own: none) */
+export function frameTextLook(it: { font?: string | null; size?: number; color?: string; bg?: string }): CopiedLook {
+  return { font: it.font ?? null, size: it.size ?? null, color: it.color ?? null, bg_color: it.bg && /^#[0-9a-f]{6}$/i.test(it.bg) ? it.bg : null }
+}
+
+/** A copied look as a text's settings (what it doesn't set: back to plain) */
+export function lookOnText(look: CopiedLook): Partial<TextOverlay> {
+  const out: Record<string, unknown> = {}
+  for (const k of LOOK_KEYS) if (k in look) out[k] = look[k] ?? undefined
+  return out as Partial<TextOverlay>
+}
+
+/** A copied look as a frame text's settings: its font, size and colour, and a background colour when the look has one */
+export function lookOnFrameText(look: CopiedLook): { font?: string | null; size?: number; color?: string; bg?: string } {
+  return {
+    ...('font' in look ? { font: typeof look.font === 'string' ? look.font : null } : {}),
+    ...(typeof look.size === 'number' ? { size: look.size } : {}),
+    ...(typeof look.color === 'string' ? { color: look.color } : {}),
+    ...(typeof look.bg_color === 'string' ? { bg: look.bg_color } : {}),
+  }
+}
+
+const LOOK_KEY = 'shortcut.textStyle.v1'
+let lookInTab: CopiedLook | null = null
+export function writeCopiedLook(look: CopiedLook) {
+  lookInTab = look
+  try { localStorage.setItem(LOOK_KEY, JSON.stringify(look)) } catch { /* storage off: this tab keeps it */ }
+}
+/** The look copied last (in any clip), if any */
+export function readCopiedLook(): CopiedLook | null {
+  try {
+    const raw = localStorage.getItem(LOOK_KEY)
+    const v = raw ? JSON.parse(raw) : null
+    if (v && typeof v === 'object' && !Array.isArray(v)) return Object.fromEntries(Object.entries(v).filter(([k]) => (LOOK_KEYS as readonly string[]).includes(k))) as CopiedLook
+  } catch { /* unreadable: this tab's */ }
+  return lookInTab
+}

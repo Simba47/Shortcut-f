@@ -4,6 +4,7 @@ import sql from '@/lib/db'
 import { cleanSuggestion } from './suggestionEvents'
 import { cleanTrims, trimMap, MAX_CLIP_MS, MIN_CLIP_MS } from '@/lib/trims'
 import { cleanCardLook, cleanFrameBackground } from '@/lib/shared/brandCard'
+import { turnOf } from '@/modules/editor/utils'
 import { cleanBrandOn } from '@/lib/shared/brandOn'
 import { lockCaption, lockClipLook, lockHolds, lockSetOf } from '@/lib/shared/brandTeam'
 import type { SegmentLocal, BoxKeyframeLocal, CaptionStyle, TextOverlay, AudioTrack, Transition, Overlay, FrameSettings, FrameItem, CornerStyle, BrollAlt, BrollPick } from '@chai-cut/shared'
@@ -170,6 +171,8 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
     ...(hasInsertField ? { video_offset_ms: holdOf(seg) } : {}),
     ...(hasSpeedField ? { speed: speedOfRow(seg), smooth: !!seg.smooth && speedOfRow(seg) < 1, pitch: !!seg.pitch && speedOfRow(seg) !== 1 } : {}),
   }))
+  // A video on a row mirrored / turned (user, 2026-11-12), once the worker has added the fields
+  const hasBoxLook = await hasColumn('crop_boxes', 'turn')
   const boxRows = sortedSegments.flatMap(seg => seg.crop_boxes.map(box => ({
     id: box.id, segment_id: seg.id, slot_index: box.slot_index,
     source_video_id: box.source_video_id ?? null, source_offset_ms: ms(box.source_offset_ms ?? 0),
@@ -178,6 +181,7 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
     volume: Math.max(0, Math.min(1, Number(box.volume ?? 1))),
     muted: !!box.muted,
     ...(hasControls ? { hidden: !!box.hidden } : {}),
+    ...(hasBoxLook ? { mirror: !!box.mirror, turn: turnOf(box.turn) } : {}),
   })))
   const keyframeRows = sortedSegments.flatMap(seg => seg.crop_boxes.flatMap(box =>
     (box.keyframes ?? []).map((kf: BoxKeyframeLocal) => ({ box_id: box.id, t_ms: ms(kf.t_ms), x: kf.x, y: kf.y, w: kf.w, h: kf.h }))))
@@ -236,6 +240,8 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
   const hasPhotoRot = await hasColumn('overlays', 'rotation')
   // How see-through a photo is (a brand kit's logo), once the worker has added the field
   const hasPhotoOpacity = await hasColumn('overlays', 'opacity')
+  // A photo / video on top mirrored, once the worker has added the field
+  const hasPhotoMirror = await hasColumn('overlays', 'mirror')
   /** Degrees, clockwise, -180..180 (nothing when it isn't turned) */
   const turn = (r: unknown) => (typeof r === 'number' && isFinite(r) && Math.round(r * 10) % 3600 !== 0 ? (((r % 360) + 540) % 360) - 180 : null)
   // The clip's start and end, when dragged in the editor (bug #8)
@@ -302,6 +308,7 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
           source_video_id = EXCLUDED.source_video_id, source_offset_ms = EXCLUDED.source_offset_ms,
           image_path = EXCLUDED.image_path, image_motion = EXCLUDED.image_motion,
           volume = EXCLUDED.volume, muted = EXCLUDED.muted, hidden = EXCLUDED.hidden
+          ${hasBoxLook ? tx`, mirror = EXCLUDED.mirror, turn = EXCLUDED.turn` : tx``}
         WHERE crop_boxes.segment_id IN (SELECT id FROM segments WHERE clip_id = ${clipId})
       ` : tx`
         INSERT INTO crop_boxes ${tx(boxRows)}
@@ -309,6 +316,7 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
           source_video_id = EXCLUDED.source_video_id, source_offset_ms = EXCLUDED.source_offset_ms,
           image_path = EXCLUDED.image_path, image_motion = EXCLUDED.image_motion,
           volume = EXCLUDED.volume, muted = EXCLUDED.muted
+          ${hasBoxLook ? tx`, mirror = EXCLUDED.mirror, turn = EXCLUDED.turn` : tx``}
         WHERE crop_boxes.segment_id IN (SELECT id FROM segments WHERE clip_id = ${clipId})
       `)
       // Boxes left over from a layout with more slots (e.g. Split → Vertical)
@@ -414,13 +422,14 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
 
     q.push(tx`DELETE FROM overlays WHERE clip_id = ${clipId}`)
     if (overlays.length > 0) {
-      q.push(tx`INSERT INTO overlays ${tx(overlays.map(({ id, type, storage_path, source_video_id, source_offset_ms, x, y, w, h, start_ms, end_ms, z_index, hidden, muted, locked, rotation, opacity }) => ({
+      q.push(tx`INSERT INTO overlays ${tx(overlays.map(({ id, type, storage_path, source_video_id, source_offset_ms, x, y, w, h, start_ms, end_ms, z_index, hidden, muted, locked, rotation, opacity, mirror }) => ({
         id, clip_id: clipId, type, storage_path: storage_path ?? null,
         source_video_id: source_video_id ?? null, source_offset_ms: ms(source_offset_ms ?? 0),
         x, y, w, h, start_ms: ms(start_ms), end_ms: ms(end_ms), z_index,
         ...(hasPhotoRot ? { rotation: turn(rotation) } : {}),
         ...(hasPhotoOpacity ? { opacity: typeof opacity === 'number' && isFinite(opacity) && opacity < 0.999 ? Math.max(0.05, opacity) : null } : {}),
         ...(hasControls ? { hidden: !!hidden, muted: !!muted, locked: !!locked } : {}),
+        ...(hasPhotoMirror ? { mirror: !!mirror } : {}),
       })))}`)
     }
 
@@ -666,6 +675,8 @@ function cleanFrame(frame: FrameSettings): FrameSettings {
       ...opt('x', -20, 20), ...opt('y', -20, 20), ...opt('w', 0, 20), ...opt('h', 0, 20), ...opt('z_index', 0, 1e6), ...opt('rotation', -360, 360), ...opt('opacity', 0, 1),
     } }
   }
+  // A video's or photo's mirror and turn (90° steps)
+  const lookOf = (it: FrameItem) => ({ ...(it.mirror ? { mirror: true } : {}), ...(turnOf(it.turn) ? { turn: turnOf(it.turn) } : {}) })
   const items: FrameItem[] = (frame.items ?? []).slice(0, 300).flatMap((it): FrameItem[] => {
     if (!it || typeof it.id !== 'string' || !['video', 'photo', 'text'].includes(it.kind)) return []
     // A slot (0–3), the band, or a frame's second text area
@@ -676,15 +687,17 @@ function cleanFrame(frame: FrameSettings): FrameSettings {
     if (it.kind === 'video') {
       if (typeof it.source_video_id !== 'string') return []
       const broll = cleanBroll(it.broll)
-      return [{ ...base, source_video_id: it.source_video_id, source_offset_ms: Math.round(num(it.source_offset_ms, 0, 1e9) ?? 0), volume: num(it.volume, 0, 1) ?? 1, muted: !!it.muted, corners: corner(it.corners), ...rectOf(it.rect), ...(broll ? { broll } : {}), ...(it.freeze ? { freeze: true, ...(it.dim ? { dim: true } : {}) } : {}), ...holdsOf(it, Math.round(end) - Math.round(start)), ...panOf(it.pan), ...fromRowOf(it.from_row) }]
+      return [{ ...base, source_video_id: it.source_video_id, source_offset_ms: Math.round(num(it.source_offset_ms, 0, 1e9) ?? 0), volume: num(it.volume, 0, 1) ?? 1, muted: !!it.muted, corners: corner(it.corners), ...rectOf(it.rect), ...(broll ? { broll } : {}), ...(it.freeze ? { freeze: true, ...(it.dim ? { dim: true } : {}) } : {}), ...holdsOf(it, Math.round(end) - Math.round(start)), ...panOf(it.pan), ...lookOf(it), ...fromRowOf(it.from_row) }]
     }
     if (it.kind === 'photo') {
       if (typeof it.image_path !== 'string') return []
-      return [{ ...base, image_path: it.image_path, motion: it.motion && motions.includes(it.motion) ? it.motion : 'none', corners: corner(it.corners), ...rectOf(it.rect), ...panOf(it.pan), ...fromRowOf(it.from_row) }]
+      return [{ ...base, image_path: it.image_path, motion: it.motion && motions.includes(it.motion) ? it.motion : 'none', corners: corner(it.corners), ...rectOf(it.rect), ...panOf(it.pan), ...lookOf(it), ...fromRowOf(it.from_row) }]
     }
     return [{
       ...base, text: typeof it.text === 'string' ? it.text.slice(0, 500) : '', captions: !!it.captions,
       bg: bgHex(it.bg), color: hex(it.color), size: num(it.size, 16, 200),
+      // Its font (the Text tool, a brand kit's font, Paste style): it wasn't kept before 2026-11-12
+      ...(typeof it.font === 'string' && it.font.trim() && it.font.length <= 120 ? { font: it.font } : {}),
       // (x, y: shares of its area — beyond 0–1 when it's been moved out of it, anywhere in the frame)
       x: num(it.x, -20, 20), y: num(it.y, -20, 20), w: num(it.w, 0.05, 1), h: num(it.h, 0.01, 1),
       ...(typeof it.rotation === 'number' && isFinite(it.rotation) && Math.round(it.rotation * 10) % 3600 !== 0

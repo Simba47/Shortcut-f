@@ -25,6 +25,8 @@ const FIELDS: Record<string, Record<string, How>> = {
     id: 'saved', clip_id: 'saved', type: 'saved', storage_path: 'saved', source_video_id: 'saved', source_offset_ms: 'saved',
     x: 'saved', y: 'saved', w: 'saved', h: 'saved', start_ms: 'saved', end_ms: 'saved', z_index: 'saved', rotation: 'saved',
     opacity: 'saved', hidden: 'saved', muted: 'saved', locked: 'editor',
+    // (shown mirrored: overlays.mirror, drawn by the worker's render.py _mirror_filter — 2026-11-12 Mirror)
+    mirror: 'saved',
     // (a signed link to show it; when it was added; its track: saved as z_index for photos, and layers.lanes)
     preview_url: 'editor', created_at: 'editor', track: 'layers',
   },
@@ -45,6 +47,8 @@ const FIELDS: Record<string, Record<string, How>> = {
     motion: 'frame', corners: 'frame', text: 'frame', bg: 'frame', color: 'frame', size: 'frame', font: 'frame',
     x: 'frame', y: 'frame', w: 'frame', h: 'frame', rotation: 'frame', captions: 'frame',
     pan: 'frame', freeze: 'frame', dim: 'frame', holds: 'frame',
+    // (mirrored / turned 90° steps: render.py _mirror_filter / _turn_filter on frame items — 2026-11-12 Mirror + Rotate)
+    mirror: 'frame', turn: 'frame',
     // (a signed link to show the photo; which stock clip was picked; the lock)
     image_url: 'editor', broll: 'editor', locked: 'editor', from_row: 'editor',
   },

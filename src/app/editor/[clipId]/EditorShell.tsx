@@ -12,7 +12,7 @@ import { CAPTION_CREDITS_PER_MINUTE, CAPTION_GAP_MS, captionCredits, captionSpan
 import { useCredits } from '@/lib/useCredits'
 import { cleanTrims, trimMap, addTrim, wordsOnTimeline, MAX_CLIP_MS, MIN_CLIP_MS } from '@/lib/trims'
 import { toTimelineState, toSourceState, rippleDelete, rippleStretch, lockedInRange, insertAtStart, extendEnd, type TimedState } from '@/modules/editor/trimState'
-import { freezeChanged, insertsOf, insertedMs, rippleInsert, isInsert, goesAfterMain, piecesOf, piecesLength, videoAtPieces, timelineAtPieces, rippleCut, pieceAt, speedOf, pieceVideoMs, mainFrom } from '@/modules/editor/inserts'
+import { freezeChanged, insertsOf, insertedMs, rippleInsert, isInsert, goesAfterMain, piecesOf, piecesLength, videoAtPieces, timelineAtPieces, rippleCut, pieceAt, speedOf, pieceVideoMs, mainFrom, wordPlaces } from '@/modules/editor/inserts'
 import { PostText, type PostTextValue } from '@/components/clips/PostText'
 import { BrollPanel, type StockResult } from '@/components/editor/BrollPanel'
 import { VideoPanel, type PanelVideo } from '@/components/editor/VideoPanel'
@@ -37,7 +37,7 @@ import { MediaPickerModal } from '@/components/editor/MediaPickerModal'
 import { shownSegment, addedVideoBox, isGapPart, isMainShot, STAND_IN_SUFFIX } from '@/modules/editor/visibility'
 import { placeInRow, liftToRow, lowerToRow, liftBlock, fillUncovered } from '@/modules/editor/place'
 import { frameOffMedia, frameOnMedia, mediaForFrame, type RowMedia } from '@/modules/editor/frameOnMedia'
-import { freezePart, restsOnSplit, splitTargets } from '@/modules/editor/split'
+import { freezePart, partButtonsTarget, restsOnSplit, splitTargets } from '@/modules/editor/split'
 import { AccountMenu, openShortcuts } from '@/components/ui/account-menu'
 import { CreditsBadge, TopUpLink } from '@/components/ui/credits-badge'
 import { friendlyError } from '@/lib/friendlyError'
@@ -86,7 +86,10 @@ import { fitsOn, freeTrackIn, settleTracks, savedLanes, type TrackItem, type Tra
 import { viewChanges } from '@/modules/editor/views'
 import { subjectBoxAt, seenShare, followChanges, autoDirectChanges, type SubjectPoint } from '@/modules/editor/subjects'
 import { buildKeyframes } from '@/modules/editor/views'
-import { frameSlotSize, placeNewItem, itemBounds, MIN_ITEM_MS, oldTitleAsTitle } from '@/modules/editor/frames'
+import { frameSlotSize, placeNewItem, itemBounds, MIN_ITEM_MS, oldTitleAsTitle, frameLanesFor, fitHolds } from '@/modules/editor/frames'
+import { copySpots, pasteSpots, frameCopySpot, copyFrameItem, copyShot, duplicateParts, copyPartsOf, placeParts, type CopyItem, type CopySpot } from '@/modules/editor/duplicate'
+import { readClipboard, writeClipboard, rowSpan, type Clipboard, type CopiedRow } from '@/modules/editor/clipboard'
+import { textLook, frameTextLook, lookOnText, lookOnFrameText, writeCopiedLook, readCopiedLook, replayTextAnimation, type CopiedLook } from '@/modules/editor/textStyle'
 import { edgeDragPath } from '@/modules/editor/edgeDrag'
 import { getBoxPositionAtLerp, type BoxPosition } from '@/lib/interpolation'
 import { SubjectsPanel, type SubjectItem, type AnglesView } from '@/components/editor/SubjectsPanel'
@@ -386,10 +389,12 @@ export function EditorShell({
         // Where the word is heard on the timeline; a word in video cut out is gone
         const mid = (w.start_ms + w.end_ms) / 2 - rawClip.start_ms
         if (!pieces.some(p => p.from != null && mid >= p.from && mid < p.from + pieceVideoMs(p))) return []
-        // (both ends: in a part played faster or slower the word is shorter or longer too)
-        const a = timelineAtPieces(pieces, s0), b = Math.max(a + 1, timelineAtPieces(pieces, w.end_ms - rawClip.start_ms))
-        return a === s0 && b === w.end_ms - rawClip.start_ms ? [w] : [{ ...w, start_ms: rawClip.start_ms + a, end_ms: rawClip.start_ms + b }]
-      })
+        // (both ends: in a part played faster or slower the word is shorter or longer too; a part
+        // duplicated says it again — each time after the first its own id, "~r<n>": changeWord)
+        const e0 = w.end_ms - rawClip.start_ms
+        return wordPlaces(pieces, s0, e0).map(([a, b], i) => (!i && a === s0 && b === e0 ? w
+          : { ...w, ...(i ? { id: `${w.id}~r${i}` } : {}), start_ms: rawClip.start_ms + a, end_ms: rawClip.start_ms + b }))
+      }).sort((x, y) => x.start_ms - y.start_ms)
       : brandedWords),
     [brandedWords, trimmed, trim, rawClip.start_ms, rawClip.end_ms, piecesOn, pieces],
   )
@@ -1122,9 +1127,12 @@ export function EditorShell({
   // "Locked" note: a short message when an edit is refused because something is locked
   const [lockNote, setLockNote] = useState<string | null>(null)
   const lockNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  function notifyLocked(msg: string, ms = 2200) {
+  // (`icon`: the padlock, or the copy sign for Copy / Cut)
+  const [lockNoteIcon, setLockNoteIcon] = useState<'lock' | 'copy'>('lock')
+  function notifyLocked(msg: string, ms = 2200, icon: 'lock' | 'copy' = 'lock') {
     if (quietRef.current) return   // (a live drag: told once, on release)
     setLockNote(msg)
+    setLockNoteIcon(icon)
     if (lockNoteTimer.current) clearTimeout(lockNoteTimer.current)
     lockNoteTimer.current = setTimeout(() => setLockNote(null), ms)
   }
@@ -1693,7 +1701,9 @@ export function EditorShell({
    * is there when the clip opens again and the export writes it (before 2026-11-04 it stayed in this
    * editor only: gone on reload, never exported)
    */
-  function changeWord(id: string, text: string) {
+  function changeWord(wordId: string, text: string) {
+    // (a word said again in a duplicated part is the same word: wordPlaces)
+    const id = wordId.replace(/~r\d+$/, '')
     const field = romanize ? 'word_roman' : 'word'
     updateWord(id, text, field)
     // (a corrected word is in the next export, not the last one: the flag is saved with the clip's next save)
@@ -5814,9 +5824,502 @@ export function EditorShell({
     setGroupPick([])
   }
 
-  const shortcutsRef = useRef({ togglePlay, seekToMs, currentTimeMs, clipDurationMs, trimSelectedTo, splitSelected, deleteSelected: () => {}, letGoGroup: (): boolean => false, groupPicked: () => {}, ungroupPicked: () => {} })
+  // ── Duplicate (Ctrl+D, the button beside Split; duplicate.ts) ─────────────────────────────────
+  /**
+   * What Duplicate copies: the things picked together, else the one picked — a video or photo on a
+   * row, text, music, an item in a frame, or a part of the main row (a part of the main video, or a
+   * video put in between). Null when there's nothing it copies: nothing picked, the main video's
+   * detached sound, a frame's captions, the empty space a deleted part left. (Copy and Cut too.)
+   */
+  function dupPick(): { rows: TrackRef[]; parts: string[] } | { frame: { segId: string; id: string } } | null {
+    const rowRef = (id: string): TrackRef | null => {
+      if (shots.some(x => x.id === id)) return { kind: 'shot', id }
+      const o = overlays.find(x => x.id === id)
+      if (o) return o.type === 'image' || o.source_video_id ? { kind: 'photo', id } : null
+      if (textOverlays.some(x => x.id === id)) return { kind: 'text', id }
+      const t = audioTracks.find(x => x.id === id)
+      return t && !isMainAudio(t) ? { kind: 'music', id } : null
+    }
+    const isPart = (id: string) => { const s = segments.find(x => x.id === id); return !!s && dupPart(s) }
+    const of = (ids: string[]) => {
+      const p = { rows: ids.map(rowRef).filter((r): r is TrackRef => !!r), parts: ids.filter(isPart) }
+      return p.rows.length || p.parts.length ? p : null
+    }
+    if (groupLive.length > 1) return of(groupLive)
+    if (!selTarget) return null
+    if (selTarget.kind === 'frameItem') return selTarget.segId ? { frame: { segId: selTarget.segId, id: selTarget.id } } : null
+    return of([selTarget.id])
+  }
+  /** A part of the main row Duplicate plays again (not the empty space a deleted part left, nor the room after the main video) */
+  const dupPart = (s: SegmentLocal) => !isShot(s, mainVideoId) && !isTail(s) && !isGapPart(s, mainVideoId)
+  const dupCtl = (r: TrackRef): CtlTarget => (r.kind === 'shot' ? { kind: 'broll', id: r.id } : { kind: r.kind, id: r.id })
+  /** Whether what Duplicate would copy is locked (itself, or its section) */
+  function dupLocked(p: NonNullable<ReturnType<typeof dupPick>>) {
+    return 'frame' in p ? isLocked({ kind: 'frameItem', id: p.frame.id, segId: p.frame.segId })
+      : p.rows.some(r => isLocked(dupCtl(r))) || p.parts.some(id => isLocked({ kind: 'section', id }))
+  }
+  /** The same, saying why (a short note) */
+  function dupBlocked(p: NonNullable<ReturnType<typeof dupPick>>) {
+    return 'frame' in p ? frameItemBlocked(p.frame.segId, p.frame.id)
+      : p.rows.some(r => blocked(dupCtl(r))) || p.parts.some(id => sectionBlocked(id))
+  }
+  // (a clip with parts removed the older way first becomes pieces: then the duplicate, the copy or
+  // the paste, once redrawn)
+  const pendingDupRef = useRef<'dup' | 'copy' | 'cut' | 'paste' | null>(null)
+  useEffect(() => {
+    const p = pendingDupRef.current
+    if (!p || trimmed) return
+    pendingDupRef.current = null
+    if (p === 'dup') duplicateSelected()
+    else if (p === 'copy') copySelected()
+    else if (p === 'cut') cutSelected()
+    else pasteClipboard()
+  }, [trimmed]) // eslint-disable-line react-hooks/exhaustive-deps
+  /**
+   * Duplicate: a copy of what's picked, picked so it can be dragged straight away. On a row: right
+   * after it (or the same time a row up when that's taken). A part of the main row: played again
+   * right after it, everything after it moving later (duplicateParts). Several picked: copied
+   * together — their parts of the main row as one block after the last of them, the rest in the
+   * same places to each other (a group's copies are a group). One undo step.
+   */
+  function duplicateSelected() {
+    const p = dupPick()
+    if (!p) return
+    if ('frame' in p) { duplicateFrameItem(p.frame.segId, p.frame.id); return }
+    if (dupBlocked(p)) return
+    let lenNow = clipLengthMs
+    const made: string[] = []
+    if (p.parts.length) {
+      if (trimmed) { pendingDupRef.current = 'dup'; trimsToPieces(); return }
+      const out = duplicateMainParts(p.parts)
+      if (!out) return
+      made.push(...out.copies)
+      lenNow += out.len
+    }
+    const rows = rowsOf(p.rows)
+    const spots = copySpots(rowsAsItems(rows), rowItems(), lenNow)
+    const rowCopies = rows.length ? putRows(rows, spots) : new Map<number, string>()
+    pickCopies(made, rows, rowCopies, groups.filter(g => g.every(id => p.rows.some(r => r.id === id))).map(g => g.map(id => p.rows.findIndex(r => r.id === id))))
+  }
+  /** The copies just made picked (to drag them straight away); groups among the rows (indexes) made again */
+  function pickCopies(parts: string[], rows: CopiedRow[], rowCopies: Map<number, string>, rowGroups: number[][]) {
+    const all = [...parts, ...rowCopies.values()]
+    if (!all.length) return
+    const grouped = rowGroups.filter(g => g.every(i => rowCopies.has(i))).map(g => g.map(i => rowCopies.get(i)!))
+    if (grouped.length) useGroupStore.setState(st => ({ groups: grouped.reduce(joinGroup, st.groups) }))
+    if (all.length > 1) {
+      setPickedSegIdState(null); setPickedMusicId(null); setActiveOverlayId(null); setActiveTextOverlayId(null); setActiveFrameItemId(null); setLastPick(null)
+      setGroupPick(all)
+      return
+    }
+    if (parts.length) { setPickedSegId(parts[0]); return }
+    const [i, id] = [...rowCopies.entries()][0]
+    const kind = rows[i].kind
+    if (kind === 'shot') pickShot(id)
+    else if (kind === 'photo') pickPhoto(id)
+    else if (kind === 'text') pickText(id, false)
+    else pickMusic(id)
+  }
+  /** Every part of the main video saying which moment of it it plays (as it plays now), so parts moved, copied or played again keep playing their own */
+  function pinnedSegments(): SegmentLocal[] {
+    const main = (b: { source_video_id?: string | null; image_path?: string | null }) => !b.source_video_id && !b.image_path
+    return useEditorStore.getState().segments.map(x => {
+      if (isShot(x, mainVideoId) || isInsert(x, mainVideoId)) return x
+      const was = mainFrom(x)
+      const d = (piecesOn ? was ?? x.start_ms : x.start_ms) - (was ?? 0)
+      return d ? { ...x, crop_boxes: x.crop_boxes.map(box => (main(box) ? { ...box, source_offset_ms: Math.max(0, (box.source_offset_ms ?? 0) + d) } : box)) } : x
+    })
+  }
+  const timedState = (segs: SegmentLocal[]): TimedState => {
+    const editor = useEditorStore.getState(), media = useMediaStore.getState()
+    return { segments: segs, keyframes: editor.keyframes, overlays: media.overlays, textOverlays: media.textOverlays, audioTracks: media.audioTracks, transitions: media.transitions }
+  }
+  /** A new state of the main row and what moves with it, as one step */
+  function applyTimed(next: TimedState, seekTo: number) {
+    const editor = useEditorStore.getState()
+    pause()
+    skipCanvasTransitionRef.current = true
+    seekAfterInsertRef.current = seekTo
+    editor.applyTrim(next.segments, next.keyframes, editor.trims, rangeAfterPieces(next.segments))
+    useMediaStore.setState({ overlays: next.overlays, textOverlays: next.textOverlays, audioTracks: next.audioTracks, transitions: next.transitions })
+  }
+  /**
+   * Parts of the main row played again right after the last of them (duplicateParts): the clip gets
+   * longer by them (never past 5 minutes).
+   */
+  function duplicateMainParts(ids: string[]): { copies: string[]; len: number } | null {
+    const len = useEditorStore.getState().segments.filter(s => ids.includes(s.id)).reduce((t, s) => t + (s.end_ms - s.start_ms), 0)
+    if (len > MAX_CLIP_MS - clipLengthMs) { notifyLocked('The clip is as long as a clip can be (5 minutes): there is no room for a copy'); return null }
+    const out = duplicateParts(timedState(pinnedSegments()), ids, dupPart)
+    if (!out) return null
+    applyTimed(out.state, out.at)
+    return { copies: out.copies, len: out.len }
+  }
+  /** What's on the rows (videos, photos, text; music on its own rows), fresh from the stores */
+  function rowItems(): CopyItem[] {
+    const ed = useEditorStore.getState(), m = useMediaStore.getState()
+    return [
+      ...ed.segments.filter(s => isShot(s, mainVideoId)).map(s => ({ id: s.id, start_ms: s.start_ms, end_ms: s.end_ms, track: s.track ?? 0, family: 'visual' as const })),
+      ...m.overlays.filter(o => o.type === 'image' || (o.type === 'video' && o.source_video_id))
+        .map(o => ({ id: o.id, start_ms: o.start_ms, end_ms: o.end_ms, track: o.track ?? 0, family: 'visual' as const })),
+      ...m.textOverlays.map(o => ({ id: o.id, start_ms: o.start_ms, end_ms: o.end_ms, track: o.track ?? 0, family: 'visual' as const })),
+      ...m.audioTracks.filter(t => !isMainAudio(t)).map(t => ({ id: t.id, start_ms: t.start_ms, end_ms: songEndMs(t), track: t.track ?? 0, family: 'audio' as const })),
+    ]
+  }
+  /** Things on the rows as copies take them (a song with its end and where it plays from) */
+  function rowsOf(refs: TrackRef[]): CopiedRow[] {
+    const ed = useEditorStore.getState(), m = useMediaStore.getState()
+    return refs.flatMap((r): CopiedRow[] => {
+      if (r.kind === 'shot') {
+        const seg = ed.segments.find(x => x.id === r.id)
+        return seg ? [{ kind: 'shot', seg, keyframes: Object.fromEntries(seg.crop_boxes.map(b => [b.id, ed.keyframes[b.id] ?? []])) }] : []
+      }
+      if (r.kind === 'photo') { const o = m.overlays.find(x => x.id === r.id); return o ? [{ kind: 'photo', item: o }] : [] }
+      if (r.kind === 'text') { const o = m.textOverlays.find(x => x.id === r.id); return o ? [{ kind: 'text', item: o }] : [] }
+      const t = m.audioTracks.find(x => x.id === r.id)
+      return t ? [{ kind: 'music', item: { ...t, end_ms: songEndMs(t) }, url: musicEls.current.get(t.id)?.src, ...(musicDurations[t.id] != null ? { ms: musicDurations[t.id] } : {}) }] : []
+    })
+  }
+  const rowsAsItems = (rows: CopiedRow[]): CopyItem[] => rows.map((r, i) => ({ id: String(i), ...rowSpan(r), family: r.kind === 'music' ? 'audio' as const : 'visual' as const }))
+  /** Copied things put on the rows at their spots (spot ids: their index in `rows`): index → the new one's id. One step. */
+  function putRows(rows: CopiedRow[], spots: CopySpot[]): Map<number, string> {
+    const newIds = new Map<number, string>()
+    // (copies landing in a locked section would be locked there)
+    if (spots.some(s => rangeBlocked(s.start_ms, s.end_ms))) return newIds
+    pause()
+    const ed = useEditorStore.getState(), m = useMediaStore.getState()
+    const now = new Date().toISOString()
+    let segs = ed.segments, kfs = ed.keyframes
+    const photos: Overlay[] = [], texts: TextOverlay[] = [], songs: AudioTrack[] = []
+    for (const spot of spots) {
+      const i = Number(spot.id), r = rows[i]
+      const at = { start_ms: spot.start_ms, end_ms: spot.end_ms, track: spot.track }
+      if (r.kind === 'shot') {
+        const out = copyShot({ ...r.seg, locked: false }, r.keyframes, spot)
+        segs = [...segs, out.segment]; kfs = { ...kfs, ...out.keyframes }
+        newIds.set(i, out.segment.id)
+        continue
+      }
+      const id = crypto.randomUUID()
+      if (r.kind === 'photo') photos.push({ ...r.item, id, ...at, clip_id: clip.id, locked: false, z_index: m.overlays.length + photos.length + 1, created_at: now })
+      else if (r.kind === 'text') texts.push({ ...r.item, id, ...at, clip_id: clip.id, locked: false })
+      else {
+        songs.push({ ...r.item, id, ...at, clip_id: clip.id, locked: false })
+        // (it plays the same song: its own player, its length known already)
+        const src = musicEls.current.get(r.item.id)?.src ?? r.url
+        if (src) { const el = new Audio(); el.preload = 'auto'; el.src = src; musicEls.current.set(id, el) }
+        if (r.ms != null) setMusicDurations(d => ({ ...d, [id]: r.ms! }))
+      }
+      newIds.set(i, id)
+    }
+    if (segs !== ed.segments) {
+      skipCanvasTransitionRef.current = true
+      useEditorStore.setState({ segments: [...segs].sort((a, b) => a.start_ms - b.start_ms), keyframes: kfs })
+    }
+    if (photos.length) setOverlays(prev => [...prev, ...photos])
+    if (texts.length) setTextOverlays(prev => [...prev, ...texts])
+    if (songs.length) setAudioTracks(prev => [...prev, ...songs])
+    return newIds
+  }
+
+  // ── Copy / cut / paste (Ctrl+C / Ctrl+X / Ctrl+V; clipboard.ts) ──────────────────────────────
+  // What's copied is kept in the browser: it pastes into any clip, of this video or another.
+  const clipOwner = (savedClip as unknown as { user_id?: string }).user_id ?? ''
+  /** Ctrl+C: what's picked (as Duplicate takes it) kept to paste. False: nothing it copies is picked. */
+  function copySelected(): boolean {
+    const p = dupPick()
+    if (!p) return false
+    if (dupBlocked(p)) return true
+    const base = { v: 1 as const, owner: clipOwner, clipId: clip.id, videoId: mainVideoId, clipStart: rawClip.start_ms }
+    if ('frame' in p) {
+      const seg = useEditorStore.getState().segments.find(x => x.id === p.frame.segId)
+      const it = seg ? frameOf(seg).items?.find(x => x.id === p.frame.id) : undefined
+      if (!it) return false
+      writeClipboard({ ...base, rows: [], groups: [], parts: [], frame: it })
+    } else {
+      if (p.parts.length && trimmed) { pendingDupRef.current = 'copy'; trimsToPieces(); return true }
+      const rows = rowsOf(p.rows)
+      writeClipboard({
+        ...base, rows, frame: null,
+        groups: groups.filter(g => g.every(id => p.rows.some(r => r.id === id))).map(g => g.map(id => p.rows.findIndex(r => r.id === id))),
+        parts: p.parts.length ? copyPartsOf(timedState(pinnedSegments()), p.parts, dupPart) : [],
+      })
+    }
+    notifyLocked('Copied — move the playhead and press Ctrl+V to paste it there', 2200, 'copy')
+    return true
+  }
+  /** Ctrl+X: copied, then taken out straight away (Ctrl+Z brings it back). A part of the main video leaves an empty space, as Delete does. */
+  function cutSelected() {
+    const p = dupPick()
+    if (!p || dupBlocked(p)) return
+    if ('parts' in p && p.parts.length && trimmed) { pendingDupRef.current = 'cut'; trimsToPieces(); return }
+    if (!copySelected()) return
+    if ('frame' in p) { askRemoveFrameItem(p.frame.segId, p.frame.id); return }
+    for (const r of p.rows) {
+      if (r.kind === 'shot') removeBroll(r.id)
+      else if (r.kind === 'photo') askDeleteOverlay(r.id)
+      else if (r.kind === 'text') askDeleteTextOverlay(r.id)
+      else deleteMusic(r.id)
+    }
+    // (the latest first: each leaves its own empty space)
+    for (const id of [...p.parts].sort((a, b) => (segments.find(x => x.id === b)?.start_ms ?? 0) - (segments.find(x => x.id === a)?.start_ms ?? 0))) askDeleteFormat(id)
+    setGroupPick([])
+    notifyLocked('Cut — move the playhead and press Ctrl+V to paste it there', 2200, 'copy')
+  }
+  /**
+   * Ctrl+V: what was copied put in at the playhead, picked. Things on rows: the earliest at the
+   * playhead, on the rows they came from (the next free ones when taken). Parts of the main row: put
+   * in there (pasteParts). An item in a frame: into the frame under the playhead, in the same lane.
+   */
+  async function pasteClipboard() {
+    const cb = readClipboard(clipOwner)
+    if (!cb) return
+    const at = Math.round(liveTime.get())
+    if (cb.frame) { pasteFrameItem(cb.frame, at); return }
+    if (cb.parts.length && trimmed) { pendingDupRef.current = 'paste'; trimsToPieces(); return }
+    // (videos this clip doesn't know yet: the library again; one gone: nothing is pasted)
+    const vids = [
+      ...cb.rows.flatMap(r => (r.kind === 'shot' ? [r.seg.crop_boxes[0]?.source_video_id] : r.kind === 'photo' ? [r.item.source_video_id] : [])),
+      ...cb.parts.flatMap(p => (p.insert ? [p.seg.crop_boxes[0]?.source_video_id] : [cb.videoId])),
+    ].filter((id): id is string => !!id && id !== mainVideoId)
+    if (vids.some(id => !videoLibraryRef.current[id])) {
+      const lib = await loadVideoLibrary()
+      if (vids.some(id => !lib[id])) { notifyLocked('A video in what you copied isn’t in your videos any more'); return }
+    }
+    let lenNow = clipLengthMs
+    const made: string[] = []
+    if (cb.parts.length) {
+      const out = pasteParts(cb, at)
+      if (!out) return
+      made.push(...out.copies)
+      lenNow += out.len
+    }
+    const spots = pasteSpots(rowsAsItems(cb.rows), rowItems(), at, lenNow)
+    if (cb.rows.length && !spots.length) notifyLocked('No room for it here — move the playhead earlier')
+    const rowCopies = spots.length ? putRows(cb.rows, spots) : new Map<number, string>()
+    pickCopies(made, cb.rows, rowCopies, cb.groups)
+  }
+  /**
+   * Copied parts of the main row put in at `atMs` (close to a join: at the join), everything after
+   * moving later. From this video: each plays its own moment again (a moment before this clip's
+   * start can't be: it goes in as a video put in between, as from another video). From another
+   * video: each a video put in between, playing that stretch of it.
+   */
+  function pasteParts(cb: Clipboard, atMs: number): { copies: string[]; len: number } | null {
+    const len = cb.parts.reduce((t, p) => t + (p.seg.end_ms - p.seg.start_ms), 0)
+    if (len > MAX_CLIP_MS - clipLengthMs) { notifyLocked('The clip is as long as a clip can be (5 minutes): there is no room for it'); return null }
+    const joins = [0, clipLengthMs, ...sections.flatMap(s => [s.start_ms, s.end_ms])]
+    const near = joins.filter(j => Math.abs(j - atMs) <= 60).sort((a, b) => Math.abs(a - atMs) - Math.abs(b - atMs))[0]
+    const at = near ?? Math.max(0, Math.min(clipLengthMs, atMs))
+    if (useEditorStore.getState().segments.some(s => s.locked && !isShot(s, mainVideoId) && s.start_ms < at && s.end_ms > at)) {
+      notifyLocked('The part of the clip here is locked — unlock it first'); return null
+    }
+    const hold = Math.round(videoAtPieces(allPieces, at))
+    // (this video's moments, counted from this clip's start)
+    const shift = cb.clipStart - rawClip.start_ms
+    const mine = cb.videoId === mainVideoId
+    const parts = mine && shift ? cb.parts.map(p => (p.insert ? p : {
+      ...p, seg: { ...p.seg, crop_boxes: p.seg.crop_boxes.map(b => (!b.source_video_id && !b.image_path ? { ...b, source_offset_ms: (b.source_offset_ms ?? 0) + shift } : b)) },
+    })) : cb.parts
+    const same = mine && parts.every(p => p.insert || p.seg.crop_boxes.every(b => !!b.source_video_id || !!b.image_path || (b.source_offset_ms ?? 0) >= 0))
+    const out = same ? placeParts(timedState(pinnedSegments()), parts, at, { same: true, hold })
+      : placeParts(timedState(pinnedSegments()), cb.parts, at, { same: false, video: cb.videoId, clipStart: cb.clipStart, hold })
+    applyTimed(out.state, at)
+    return { copies: out.copies, len: out.len }
+  }
+  /** A copied item of a frame put into the frame under the playhead, in the same lane (as "+" there would), as long as it was */
+  function pasteFrameItem(item: FrameItem, at: number) {
+    const seg = sections.find(s => isFrameLayout(s.layout) && at >= s.start_ms && at < s.end_ms)
+    if (!seg) { notifyLocked('Move the playhead into a frame to paste this'); return }
+    if (sectionBlocked(seg.id)) return
+    if (!frameLanesFor(seg).some(l => l.lane === item.lane)) { notifyLocked('This frame has no place for it — paste it into a frame like the one it came from'); return }
+    const { id: _id, lane, start_ms, end_ms, from_row: _row, holds, locked: _l, ...rest } = item
+    pause()
+    const nid = addFrameItem(seg.id, lane, at, rest, end_ms - start_ms)
+    if (!nid) { notifyLocked('No room in this lane for it here'); return }
+    if (holds?.length) {
+      const it = frameOf(useEditorStore.getState().segments.find(x => x.id === seg.id)!).items?.find(x => x.id === nid)
+      const fit = it ? fitHolds(holds, it.end_ms - it.start_ms) : []
+      if (fit.length) updateFrameItem(seg.id, nid, { holds: fit })
+    }
+    selectFrameItem(nid, seg.id, false)
+  }
+  // ── Copy style (Ctrl+Alt+C / Ctrl+Alt+V, the Text panel's buttons; textStyle.ts) ──────────────────
+  const [copiedLook, setCopiedLook] = useState<CopiedLook | null>(null)
+  useEffect(() => { setCopiedLook(readCopiedLook()) }, [])
+  /** The one text picked whose look Copy style takes: a text on the timeline, or a frame's text (not captions) */
+  function lookSource(): { look: CopiedLook } | null {
+    if (groupLive.length > 1 || !selTarget) return null
+    if (selTarget.kind === 'text') { const o = textOverlays.find(x => x.id === selTarget.id); return o ? { look: textLook(o) } : null }
+    if (selTarget.kind === 'frameItem' && selTarget.segId) {
+      const seg = segments.find(x => x.id === selTarget.segId)
+      const it = seg ? frameOf(seg).items?.find(x => x.id === selTarget.id) : undefined
+      return it?.kind === 'text' && !it.captions ? { look: frameTextLook(it) } : null
+    }
+    return null
+  }
+  /** Every frame's own texts (title bands, name tags; not captions) */
+  const frameTexts = (): { segId: string; id: string }[] => segments.filter(s => isFrameLayout(s.layout))
+    .flatMap(s => (frameOf(s).items ?? []).filter(it => it.kind === 'text' && !it.captions).map(it => ({ segId: s.id, id: it.id })))
+  /** The texts Paste style puts the look on: those picked together, else the one picked */
+  function lookTargets(): { texts: string[]; frame: { segId: string; id: string }[] } {
+    if (groupLive.length > 1) return { texts: groupLive.filter(id => textOverlays.some(t => t.id === id)), frame: [] }
+    if (selTarget?.kind === 'text') return { texts: [selTarget.id], frame: [] }
+    if (selTarget?.kind === 'frameItem' && selTarget.segId && frameTexts().some(f => f.id === selTarget.id)) return { texts: [], frame: [{ segId: selTarget.segId, id: selTarget.id }] }
+    return { texts: [], frame: [] }
+  }
+  /** Copy style: the picked text's look kept to put on others (in any clip) */
+  function copyTextStyle() {
+    const src = lookSource()
+    if (!src) { notifyLocked('Pick one text to copy its style'); return }
+    writeCopiedLook(src.look)
+    setCopiedLook(src.look)
+    notifyLocked('Style copied — pick other texts and press Paste style (Ctrl+Alt+V)', 2400, 'copy')
+  }
+  /**
+   * Paste style: the copied look on the picked texts (`all`: on every text and frame text of the clip).
+   * Locked ones (or in a locked section) are left as they are. One undo step.
+   */
+  function pasteTextStyle(all = false) {
+    const look = copiedLook ?? readCopiedLook()
+    if (!look) { notifyLocked('Copy a text’s style first (Ctrl+Alt+C)'); return }
+    const want = all ? { texts: textOverlays.map(t => t.id), frame: frameTexts() } : lookTargets()
+    const texts = want.texts.filter(id => !isLocked({ kind: 'text', id }))
+    const frame = want.frame.filter(f => !isLocked({ kind: 'frameItem', id: f.id, segId: f.segId }))
+    const skipped = want.texts.length + want.frame.length - texts.length - frame.length
+    if (!texts.length && !frame.length) { notifyLocked(skipped ? 'It’s locked — unlock it to change it' : 'Pick a text to paste the style on'); return }
+    if (texts.length) {
+      const patch = lookOnText(look)
+      setTextOverlays(prev => prev.map(t => (texts.includes(t.id) ? { ...t, ...patch } : t)))
+    }
+    if (frame.length) {
+      const patch = lookOnFrameText(look)
+      useEditorStore.setState(st => ({
+        segments: st.segments.map(seg => {
+          if (!frame.some(f => f.segId === seg.id)) return seg
+          const f = frameOf(seg)
+          return { ...seg, frame: { ...f, items: (f.items ?? []).map(it => (frame.some(x => x.id === it.id) ? { ...it, ...patch } : it)) } }
+        }),
+      }))
+    }
+    const n = texts.length + frame.length
+    if (!all && texts.length === 1 && !frame.length) replayTextAnimation(texts[0])
+    notifyLocked(`Style pasted on ${n} text${n === 1 ? '' : 's'}${skipped ? ` · ${skipped} locked ${skipped === 1 ? 'one' : 'ones'} left as ${skipped === 1 ? 'it was' : 'they were'}` : ''}`, 2600, 'copy')
+  }
+
+  // ── Mirror and Rotate (the buttons after Duplicate; user, 2026-11-12) ─────────────────────────
+  /**
+   * What Mirror and Rotate act on: the picked video or photo — on a row, on top, or in a frame — or parts
+   * of the main row (one, or several picked together: Mirror only; user, 2026-11-12). Not text or music.
+   */
+  function lookTarget(): { kind: 'shot'; id: string } | { kind: 'overlay'; id: string } | { kind: 'frame'; segId: string; id: string } | { kind: 'parts'; ids: string[] } | null {
+    // (parts of the main row picked together: all of them)
+    if (groupLive.length > 1) {
+      const parts = groupLive.filter(id => { const s = segments.find(x => x.id === id); return !!s && dupPart(s) })
+      return parts.length === groupLive.length ? { kind: 'parts', ids: parts } : null
+    }
+    if (!selTarget) return null
+    if ((selTarget.kind === 'broll' || selTarget.kind === 'section') && shots.some(x => x.id === selTarget.id)) return { kind: 'shot', id: selTarget.id }
+    if (selTarget.kind === 'section') {
+      const s = segments.find(x => x.id === selTarget.id)
+      return s && dupPart(s) ? { kind: 'parts', ids: [s.id] } : null
+    }
+    if (selTarget.kind === 'photo') {
+      const o = overlays.find(x => x.id === selTarget.id)
+      return o && (o.type === 'image' || o.source_video_id) ? { kind: 'overlay', id: o.id } : null
+    }
+    if (selTarget.kind === 'frameItem' && selTarget.segId) {
+      const seg = segments.find(x => x.id === selTarget.segId)
+      const it = seg ? frameOf(seg).items?.find(x => x.id === selTarget.id) : undefined
+      return it && (it.kind === 'video' || it.kind === 'photo') ? { kind: 'frame', segId: selTarget.segId, id: it.id } : null
+    }
+    return null
+  }
+  const lookCtls = (t: NonNullable<ReturnType<typeof lookTarget>>): CtlTarget[] =>
+    t.kind === 'parts' ? t.ids.map(id => ({ kind: 'section' as const, id }))
+      : [t.kind === 'shot' ? { kind: 'broll', id: t.id } : t.kind === 'overlay' ? { kind: 'photo', id: t.id } : { kind: 'frameItem', id: t.id, segId: t.segId }]
+  /** A part's own picture: its boxes showing video (the main video, or a video put in between), not a photo slot */
+  const partBoxes = (s: SegmentLocal) => s.crop_boxes.filter(b => !b.image_path)
+  /** Whether the picked video or photo shows mirrored */
+  function lookMirrored(t: NonNullable<ReturnType<typeof lookTarget>>): boolean {
+    // (parts: when every one picked is)
+    if (t.kind === 'parts') return t.ids.every(id => { const s = segments.find(x => x.id === id); return !!s && partBoxes(s).length > 0 && partBoxes(s).every(b => b.mirror) })
+    if (t.kind === 'shot') return !!segments.find(x => x.id === t.id)?.crop_boxes[0]?.mirror
+    if (t.kind === 'overlay') return !!overlays.find(x => x.id === t.id)?.mirror
+    const seg = segments.find(x => x.id === t.segId)
+    return !!(seg && frameOf(seg).items?.find(x => x.id === t.id)?.mirror)
+  }
+  /**
+   * Mirror: the picked video or photo flipped left to right (again: back), for its whole time. Parts of
+   * the main row: each picked part's picture, in every slot it has (all of them back when all were)
+   */
+  function mirrorPicked() {
+    const t = lookTarget()
+    if (!t || lookCtls(t).some(c => blocked(c))) return
+    const on = !lookMirrored(t)
+    if (t.kind === 'parts') {
+      useEditorStore.setState(st => ({
+        segments: st.segments.map(s => (t.ids.includes(s.id)
+          ? { ...s, crop_boxes: s.crop_boxes.map(b => (b.image_path ? b : { ...b, mirror: on || undefined })) } : s)),
+      }))
+      return
+    }
+    if (t.kind === 'shot') patchShotBox(t.id, { mirror: on || undefined })
+    else if (t.kind === 'overlay') updateOverlay(t.id, { mirror: on || undefined })
+    else updateFrameItem(t.segId, t.id, { mirror: on || undefined })
+  }
+  /**
+   * Rotate 90°: a photo or video on top turns round its middle (as its rotate handle does); a video on
+   * a row, or a video or photo in a frame, has its picture turned (a sideways recording put right) —
+   * it fills its place again from the middle (its view / the part of it picked start over)
+   */
+  function rotatePicked() {
+    const t = lookTarget()
+    if (!t || t.kind === 'parts' || lookCtls(t).some(c => blocked(c))) return
+    const next = (v: number | null | undefined) => (Math.round((v ?? 0) / 90) * 90 + 90) % 360
+    if (t.kind === 'overlay') {
+      const o = overlays.find(x => x.id === t.id)
+      if (!o) return
+      // (kept as the save keeps it: -180…180)
+      const r = ((((o.rotation ?? 0) + 90) % 360) + 540) % 360 - 180
+      updateOverlay(t.id, { rotation: r || null })
+      return
+    }
+    if (t.kind === 'shot') {
+      const seg = useEditorStore.getState().segments.find(x => x.id === t.id)
+      const box = seg?.crop_boxes[0]
+      if (!seg || !box) return
+      const view = { x: 0, y: 0, w: 1, h: 1 }
+      patchShotBox(t.id, { turn: next(box.turn) || undefined, keyframes: [{ t_ms: seg.start_ms, ...view }] })
+      setBoxKeyframes(box.id, [{ t_ms: seg.start_ms, ...view }])
+      return
+    }
+    const seg = useEditorStore.getState().segments.find(x => x.id === t.segId)
+    const it = seg ? frameOf(seg).items?.find(x => x.id === t.id) : undefined
+    if (it) updateFrameItem(t.segId, t.id, { turn: next(it.turn) || undefined, pan: null })
+  }
+  /** An item in a frame copied right after it in its lane (in the room there is), and picked */
+  function duplicateFrameItem(segId: string, id: string) {
+    if (frameItemBlocked(segId, id)) return
+    const seg = useEditorStore.getState().segments.find(x => x.id === segId)
+    const frame = seg ? frameOf(seg) : null
+    const it = frame?.items?.find(x => x.id === id)
+    if (!seg || !frame || !it) return
+    const spot = frameCopySpot(frame, it, seg)
+    if (!spot) { notifyLocked('No room in this lane for a copy'); return }
+    pause()
+    const nid = crypto.randomUUID()
+    useEditorStore.setState(st => ({
+      segments: st.segments.map(x => (x.id === segId ? { ...x, frame: { ...frame, items: [...(frame.items ?? []), copyFrameItem(it, spot, nid)] } } : x)),
+    }))
+    selectFrameItem(nid, segId, false)
+  }
+
+  const shortcutsRef = useRef({ togglePlay, seekToMs, currentTimeMs, clipDurationMs, trimSelectedTo, splitSelected, deleteSelected: () => {}, letGoGroup: (): boolean => false, groupPicked: () => {}, ungroupPicked: () => {}, duplicateSelected: () => {}, copySelected: (): boolean => false, cutSelected: () => {}, pasteClipboard: () => {}, canPaste: (): boolean => false, copyTextStyle: () => {}, pasteTextStyle: () => {} })
   shortcutsRef.current = {
-    togglePlay, seekToMs, currentTimeMs, clipDurationMs, trimSelectedTo, splitSelected,
+    togglePlay, seekToMs, currentTimeMs, clipDurationMs, trimSelectedTo, splitSelected, duplicateSelected,
+    copySelected, cutSelected, pasteClipboard: () => { void pasteClipboard() }, canPaste: () => !!readClipboard(clipOwner),
+    copyTextStyle, pasteTextStyle: () => pasteTextStyle(),
     // (Esc lets go of what's picked together; false: nothing was)
     letGoGroup: () => { if (!groupLive.length) return false; setGroupPick([]); return true },
     groupPicked, ungroupPicked,
@@ -5891,6 +6394,34 @@ export function EditorShell({
         if (isTextEntry(target)) return
         e.preventDefault()
         if (e.shiftKey) shortcutsRef.current.ungroupPicked(); else shortcutsRef.current.groupPicked()
+        return
+      }
+      // Ctrl/⌘+D duplicates what's picked (a view change ◆ with the focus copies itself first). Never
+      // the browser's bookmark
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === 'd' || e.key === 'D')) {
+        if (isTextEntry(target) || e.defaultPrevented) return
+        e.preventDefault()
+        shortcutsRef.current.duplicateSelected()
+        return
+      }
+      // Ctrl/⌘+Alt+C copies the picked text's style, Ctrl/⌘+Alt+V pastes it on the picked texts (by the
+      // key's place: Alt can change the letter it types)
+      if ((e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey && (e.code === 'KeyC' || e.code === 'KeyV')) {
+        if (isTextEntry(target)) return
+        e.preventDefault()
+        if (e.code === 'KeyC') shortcutsRef.current.copyTextStyle(); else shortcutsRef.current.pasteTextStyle()
+        return
+      }
+      // Ctrl/⌘+C copies what's picked, Ctrl/⌘+X cuts it, Ctrl/⌘+V pastes at the playhead (clipboard.ts).
+      // Typing, or text picked on the page: the browser's own copy and paste
+      const k = e.key.toLowerCase()
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (k === 'c' || k === 'x' || k === 'v')) {
+        if (isTextEntry(target) || e.defaultPrevented) return
+        if (k !== 'v' && (window.getSelection()?.toString() ?? '').trim()) return
+        const sc = shortcutsRef.current
+        if (k === 'v') { if (sc.canPaste()) { e.preventDefault(); sc.pasteClipboard() } return }
+        if (k === 'x') { e.preventDefault(); sc.cutSelected(); return }
+        if (sc.copySelected()) e.preventDefault()
         return
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -6653,30 +7184,36 @@ export function EditorShell({
   /** The buttons' note while they act on what's picked (their labels say so) */
   const pickNote = (n: number) => (n === 1 ? 'only the picked one' : `only the ${n} picked`)
   /**
-   * The main row, as the other rows (Resolve's track header): its view, sound and lock for all of
-   * it — or for its parts picked. Its sound is the whole clip's (what "Mute clip audio" was); a
-   * frame has no view switch of its own (its slots are the frame).
+   * The main row, as the other rows (Resolve's track header): its lock for all of it, or for its parts
+   * picked. Its view and sound only ever for its parts picked — nothing picked on it: the part under
+   * the playhead (user, 2026-11-12: they hid and silenced every part). The whole clip's sound stays
+   * "Mute clip audio" in the Music panel. A frame has no view switch of its own (its slots are the frame).
    */
+  function mainPick(k: LaneCtlKey): { targets: CtlTarget[]; note?: string } {
+    const all = mainRowTargets(), r = rowPick(all)
+    if (k === 'locked') return { targets: r.targets, ...(r.picked ? { note: pickNote(r.targets.length) } : {}) }
+    const { targets, atPlayhead } = partButtonsTarget(all, r.picked ? r.targets : [], playingSection?.id)
+    return { targets, note: !atPlayhead ? pickNote(targets.length) : targets.length ? `only part ${sections.findIndex(s => s.id === targets[0].id) + 1}, at the playhead` : 'move the playhead onto a part' }
+  }
   function mainCtl(): LaneCtl {
     const all = mainRowTargets()
-    const { targets, picked } = rowPick(all)
+    const lock = mainPick('locked').targets, { targets, note } = mainPick('hidden')
     const viewable = targets.filter(t => canCtl(t).includes('hidden'))
     const soundy = targets.filter(t => canCtl(t).includes('muted'))
     return {
       can: viewable.length ? ['locked', 'hidden', 'muted'] : ['locked', 'muted'],
       state: {
-        locked: targets.length > 0 && targets.every(x => !!ctlState(x)?.locked),
+        locked: lock.length > 0 && lock.every(x => !!ctlState(x)?.locked),
         hidden: viewable.length > 0 && viewable.every(x => !!ctlState(x)?.hidden),
-        muted: picked ? soundy.length > 0 && soundy.every(x => !!ctlState(x)?.muted) : mainAllMuted,
+        muted: soundy.length > 0 && soundy.every(x => !!ctlState(x)?.muted),
       },
       empty: all.length === 0,
-      ...(picked ? { note: pickNote(targets.length) } : {}),
+      ...(note ? { note } : {}),
     }
   }
   function toggleMain(k: LaneCtlKey) {
     const cur = mainCtl()
-    const { targets, picked } = rowPick(mainRowTargets())
-    if (k === 'muted' && !picked) { setMainAllMuted(!cur.state.muted); return }
+    const { targets } = mainPick(k)
     const want = !cur.state[k]
     // Hide only what isn't locked; the lock itself switches for everything
     for (const t of targets) {
@@ -7644,6 +8181,16 @@ export function EditorShell({
                 onUpdate={(id, patch) => { if (!blocked({ kind: 'text', id })) updateTextOverlay(id, patch) }}
                 onRemove={askDeleteTextOverlay}
                 brand={styleKit && brandTextStyles ? { name: styleKit.name, styles: brandTextStyles, lines: styleKit.data.words?.lines ?? [], onFontAll: styleKit.data.title.font ? brandFontOnAll : undefined } : null}
+                // Copy style: off until a text is picked / a style copied
+                styleTools={(() => {
+                  const tg = lookTargets()
+                  return {
+                    copy: lookSource() ? copyTextStyle : null,
+                    paste: copiedLook && (tg.texts.length || tg.frame.length) ? () => pasteTextStyle() : null,
+                    pasteAll: copiedLook && (textOverlays.length || frameTexts().length) ? () => pasteTextStyle(true) : null,
+                    look: copiedLook ? lookOnText(copiedLook) : null,
+                  }
+                })()}
               />
               </>
             )}
@@ -7935,6 +8482,50 @@ export function EditorShell({
                     <circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12" />
                   </svg>
                 </button>
+                {/* Duplicate (Ctrl+D): a copy of what's picked, right after it — only with something it copies picked */}
+                {(() => {
+                  const dup = dupPick()
+                  const locked = !!dup && dupLocked(dup)
+                  return (
+                    <button
+                      onClick={duplicateSelected}
+                      disabled={!dup || locked}
+                      aria-label="Duplicate the picked part"
+                      title={!dup ? 'Pick a part on the timeline to duplicate it' : locked ? "It's locked — unlock it to duplicate it" : 'Duplicate (Ctrl+D)'}
+                      className="ed-tl-btn"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5" />
+                      </svg>
+                    </button>
+                  )
+                })()}
+                {/* Mirror and Rotate 90°: with a video or photo picked (on a row, on top or in a frame) */}
+                {(() => {
+                  const t = lookTarget()
+                  if (!t) return null
+                  const locked = lookCtls(t).some(c => isLocked(c))
+                  const on = lookMirrored(t)
+                  return (
+                    <>
+                      <button onClick={mirrorPicked} disabled={locked} aria-pressed={on} data-active={on || undefined}
+                        aria-label={t.kind === 'parts' ? 'Mirror the picked part of the main video' : 'Mirror the picked video or photo'}
+                        title={locked ? "It's locked — unlock it to change it" : on ? 'Mirrored — click to show it as filmed' : 'Mirror: flip it left to right'}
+                        className="ed-tl-btn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M12 3v18" strokeDasharray="2 2.5" /><path d="M9 7L3 17h6V7z" /><path d="M15 7l6 10h-6V7z" />
+                        </svg>
+                      </button>
+                      {t.kind !== 'parts' && <button onClick={rotatePicked} disabled={locked} aria-label="Rotate the picked video or photo 90 degrees"
+                        title={locked ? "It's locked — unlock it to change it" : 'Rotate 90° (clockwise)'}
+                        className="ed-tl-btn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" />
+                        </svg>
+                      </button>}
+                    </>
+                  )
+                })()}
                 {/* Freeze: on a video picked in a frame (the part of it to hold still is dragged on its bar) */}
                 {freezeBar() && (
                   <button onClick={addFreeze} aria-label="Freeze a part of this video" title="Freeze: add a blue range on this video, then drag it and its ends. It holds still there, then plays on" className="ed-tl-btn">
@@ -8204,7 +8795,11 @@ export function EditorShell({
       {lockNote && (
         <div role="status" className="fixed left-1/2 bottom-6 -translate-x-1/2 flex items-center gap-2 px-3.5 h-9 rounded-full text-xs font-medium pointer-events-none"
           style={{ zIndex: 130, background: 'var(--ed-popover)', color: 'var(--ed-text)', boxShadow: '0 0 0 1px rgba(200,255,0,0.35), 0 12px 32px -8px rgba(0,0,0,0.7)' }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c8ff00" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 018 0v4" /></svg>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c8ff00" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            {lockNoteIcon === 'copy'
+              ? <><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5" /></>
+              : <><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 018 0v4" /></>}
+          </svg>
           {lockNote}
         </div>
       )}

@@ -72,7 +72,7 @@ function takeOffRow(m: RowMedia, layout: FrameLayout, slot: number): FrameItem |
       ...(m.start_ms > x.start_ms + EDGE_MS ? [{ ...x, id: crypto.randomUUID(), end_ms: m.start_ms }] : []),
       ...(m.end_ms < x.end_ms - EDGE_MS ? [{ ...x, id: crypto.randomUUID(), start_ms: m.end_ms }] : []),
     ]))
-    return { ...base, kind: 'photo', start_ms: m.start_ms, end_ms: m.end_ms, image_path: o.storage_path, image_url: o.preview_url ?? null, motion: 'none', muted: true, from_row }
+    return { ...base, kind: 'photo', start_ms: m.start_ms, end_ms: m.end_ms, image_path: o.storage_path, image_url: o.preview_url ?? null, motion: 'none', muted: true, ...(o.mirror ? { mirror: true } : {}), from_row }
   }
   const first = segOf(m.id)
   if (!first) return null
@@ -86,6 +86,8 @@ function takeOffRow(m: RowMedia, layout: FrameLayout, slot: number): FrameItem |
   return {
     ...base, kind: 'video', start_ms: shot.start_ms, end_ms: shot.end_ms, source_video_id: box.source_video_id, source_offset_ms: box.source_offset_ms ?? 0,
     volume: box.volume ?? 1, muted: box.muted !== false,
+    // (mirrored / turned on its row: so in the frame too, and back)
+    ...(box.mirror ? { mirror: true } : {}), ...(box.turn ? { turn: box.turn } : {}),
     from_row: { start_ms: shot.start_ms, track: shot.track, ...(shot.lane === 'broll' ? { lane: 'broll' as const } : {}), views },
   }
 }
@@ -147,6 +149,7 @@ export function frameOffMedia(segId: string, clipId: string, videoAR?: number): 
         source_video_id: null, source_offset_ms: 0, x: from.x ?? 0, y: from.y ?? 0, w: from.w ?? 1, h: from.h ?? 1, start_ms: a, end_ms: b,
         z_index: from.z_index ?? 0, created_at: new Date().toISOString(), track,
         ...(it.hidden ? { hidden: true } : {}), ...(from.rotation != null ? { rotation: from.rotation } : {}), ...(from.opacity != null ? { opacity: from.opacity } : {}),
+        ...(it.mirror ? { mirror: true } : {}),
       }])
       continue
     }
@@ -154,7 +157,7 @@ export function frameOffMedia(segId: string, clipId: string, videoAR?: number): 
     const id = placeBroll(it.source_video_id, a, b, from.lane ?? undefined, track, itemSourceAt(it, a).ms)
     const shot = segOf(id), box = shot?.crop_boxes[0]
     if (!shot || !box) continue
-    updateSegment(id, { crop_boxes: [{ ...box, volume: it.volume ?? 1, muted: it.muted !== false, ...(it.hidden ? { hidden: true } : {}) }] })
+    updateSegment(id, { crop_boxes: [{ ...box, volume: it.volume ?? 1, muted: it.muted !== false, ...(it.hidden ? { hidden: true } : {}), mirror: it.mirror || undefined, turn: it.turn || undefined }] })
     const shift = a - from.start_ms
     if (from.views?.length) {
       useEditorStore.setState(s => ({

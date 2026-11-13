@@ -41,3 +41,13 @@ export function freezePart(picked: SegmentLocal | undefined, here: SegmentLocal 
   const part = otherPicked ? undefined : picked ?? here
   return part && !isGapPart(part, mainVideoId) && !isInsert(part, mainVideoId) && !part.frame?.no_main ? part : null
 }
+
+/**
+ * What the main row's eye and sound act on: the parts picked, else the one under the playhead (none there: nothing)
+ * — never every part at once (user, 2026-11-12)
+ */
+export function partButtonsTarget<T extends { id: string }>(all: T[], picked: T[], hereId: string | null | undefined): { targets: T[]; atPlayhead: boolean } {
+  if (picked.length) return { targets: picked, atPlayhead: false }
+  const here = hereId ? all.find(t => t.id === hereId) : undefined
+  return { targets: here ? [here] : [], atPlayhead: true }
+}

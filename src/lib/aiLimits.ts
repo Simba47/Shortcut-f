@@ -27,8 +27,9 @@ export function extraSearchCredits(durationMs: number | null | undefined): numbe
   return 5 * Math.max(1, Math.ceil((durationMs ?? 0) / (10 * MINUTE)))
 }
 
-/** An AI clip (about ₹1.60, and ₹1.90 if Subjects is used on it, which is free on an AI clip) */
-export const CLIP_CREDITS = 5
+/** An AI clip: about ₹1.65 with its framing, and ₹0.33 more for the second look at its start and end by a stronger
+ * model (gemini-3.6-flash, ₹0.67 from 2027) when it is made (user, 2026-11-12: 6 credits keeps plans at 60%) */
+export const CLIP_CREDITS = 6
 export const clipCredits = (count: number) => count * CLIP_CREDITS
 
 /** An Ask AI search, per started hour of the video (about ₹2 an hour) */

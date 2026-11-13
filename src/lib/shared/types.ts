@@ -125,6 +125,10 @@ export interface FrameItem {
   h?: number
   /** Text: turned this many degrees clockwise round its centre */
   rotation?: number | null
+  /** Video / photo: shown mirrored, left to right (user, 2026-11-12) */
+  mirror?: boolean
+  /** Video / photo: its picture turned this many degrees clockwise (0, 90, 180, 270) before it fills its box */
+  turn?: number
   /** Band only: show the clip's captions here instead of fixed text */
   captions?: boolean
 }
@@ -297,6 +301,10 @@ export interface CropBox {
   muted?: boolean
   /** An added video (B-roll) hidden: the main video shows there instead */
   hidden?: boolean
+  /** A video on a row (B-roll): shown mirrored, left to right (user, 2026-11-12) */
+  mirror?: boolean
+  /** A video on a row: its picture turned this many degrees clockwise (0, 90, 180, 270) before its view — a sideways recording put right */
+  turn?: number
 }
 
 export interface BoxKeyframe {
@@ -493,6 +501,8 @@ export interface Overlay {
   rotation?: number | null
   /** How see-through it is, 0–1 (a brand kit's logo; absent = solid) */
   opacity?: number | null
+  /** Shown mirrored, left to right (user, 2026-11-12) */
+  mirror?: boolean
 }
 
 // ─── Editor state (client-only, not persisted as a single blob) ────────────────
