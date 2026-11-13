@@ -23,7 +23,7 @@ const SCROLL_MS = 180
 const SCRIBBLE_MS = 260
 const SUBTITLE_DIM = 1 - 0x59 / 255     // subtitle: words already spoken
 const GHOST = 1 - 0xb8 / 255            // scroll: the words before / after
-const FIT = 0.9                         // split / subtitle / scribble: a line narrowed to fit this share of the width
+const FIT = 0.9                         // split / subtitle / scribble: a line's widest (wider: on to the next line)
 
 /** Where a look sits when the captions haven't been moved (position_y) */
 export const CREATOR_DEFAULT_Y: Record<CreatorLook, number> = {
@@ -132,6 +132,8 @@ export function drawCreatorCaptions(
   style: Partial<CaptionStyle>,
   tpl: CaptionTemplate,
   person: CanvasImageSource | null,
+  /** A font picked over the style's own (user, 2026-11-12), for Latin lines. ⚠️ Not in the export yet (backend) */
+  picked: { family: string; em: number } | null = null,
 ): Rect | null {
   const look = tpl.look!
   const W = ctx.canvas.width, H = ctx.canvas.height
@@ -142,7 +144,8 @@ export function drawCreatorCaptions(
   const keyN = S * (tpl.keyScale ?? 100) / 100
   // (a line in another script: its Noto font, in the style's weight and slant)
   const script = scriptFont(line.map(w => w.word).join(' '))
-  const base = font(tpl.font, script), key = font(tpl.keyFont ?? tpl.font, script)
+  const own = picked && !script ? { css: (n: number) => `700 ${n * picked.em}px "${picked.family}", sans-serif`, asc: 0.8 } : null
+  const base = own ?? font(tpl.font, script), key = own ?? font(tpl.keyFont ?? tpl.font, script)
   const shadow = (tpl.shadow ?? 0) * k
   const cx = W / 2                                    // (drawCaptions moves it where it was dragged)
   const cy = (style.position_y ?? CREATOR_DEFAULT_Y[look]) * H
@@ -193,6 +196,20 @@ export function drawCreatorCaptions(
   }
   const lineWidth = (idx: number[], f: ReturnType<typeof font>, n: number) =>
     idx.reduce((s, j) => s + width(f, n, texts[j]), 0) + width(f, n, ' ') * Math.max(0, idx.length - 1)
+  /**
+   * A line too wide for `max` broken into rows of whole words (user, 2026-11-12: Size stopped growing the
+   * line once it filled the width — now it goes on to two lines). `widthOf`: a row's width.
+   * ⚠️ The export (backend) still narrows the line instead: to be matched there
+   */
+  const rowsOf = (idx: number[], widthOf: (row: number[]) => number, max: number) => {
+    const rows: number[][] = []
+    for (const j of idx) {
+      const row = rows[rows.length - 1]
+      if (row && widthOf([...row, j]) <= max) row.push(j)
+      else rows.push([j])
+    }
+    return rows
+  }
 
   ctx.save()
   ctx.textBaseline = 'alphabetic'
@@ -291,58 +308,73 @@ export function drawCreatorCaptions(
   } else if (look === 'split') {
     // One line, the key word in its own font and size, on one baseline; the line's height centred on cy
     // (narrowed to fit FIT of the width)
-    const runs = texts.map((text, j) => text + (j + 1 < texts.length ? ' ' : ''))
+    // (too wide for one line: on to more lines, each word whole — a word wider than a line narrows them all)
     const full = texts.map((_, j) => (j === kk ? { f: key, n: keyN } : { f: base, n: S }))
-    const total = runs.reduce((s, r, j) => s + width(full[j].f, full[j].n, r), 0)
-    const fit = total > 0 ? Math.min(1, (FIT * W) / total) : 1
+    const widest = Math.max(...texts.map((tx, j) => width(full[j].f, full[j].n, tx)))
+    const fit = widest > 0 ? Math.min(1, (FIT * W) / widest) : 1
     const parts = full.map(p => ({ f: p.f, n: p.n * fit }))
-    const A = Math.max(...parts.map(p => p.n * p.f.asc)), D = Math.max(...parts.map(p => p.n * (1 - p.f.asc)))
-    const baseY = cy - (A + D) / 2 + A
-    const ws = runs.map((r, j) => width(parts[j].f, parts[j].n, r))
-    let x = cx - ws.reduce((s, w) => s + w, 0) / 2
-    grow(x, baseY - A, ws.reduce((s, w) => s + w, 0), A + D)
-    runs.forEach((r, j) => {
-      run(ctx, r, parts[j].f, parts[j].n, j === kk ? hl : color, x, baseY, reveal(ons[j]))
-      x += ws[j]
+    const rowWidth = (row: number[]) => row.reduce((s, j, i) => s + width(parts[j].f, parts[j].n, texts[j] + (i + 1 < row.length ? ' ' : '')), 0)
+    const rows = rowsOf(texts.map((_, j) => j), rowWidth, FIT * W)
+    const heights = rows.map(row => ({
+      A: Math.max(...row.map(j => parts[j].n * parts[j].f.asc)), D: Math.max(...row.map(j => parts[j].n * (1 - parts[j].f.asc))),
+    }))
+    let top = cy - heights.reduce((s, h) => s + h.A + h.D, 0) / 2
+    rows.forEach((row, r) => {
+      const { A, D } = heights[r]
+      const baseY = top + A
+      const rw = rowWidth(row)
+      let x = cx - rw / 2
+      grow(x, top, rw, A + D)
+      row.forEach((j, i) => {
+        const text = texts[j] + (i + 1 < row.length ? ' ' : '')
+        run(ctx, text, parts[j].f, parts[j].n, j === kk ? hl : color, x, baseY, reveal(ons[j]))
+        x += width(parts[j].f, parts[j].n, text)
+      })
+      top += A + D
     })
   } else if (look === 'subtitle' || look === 'scribble') {
     const all = texts.map((_, j) => j)
-    // (narrowed to fit FIT of the width)
-    const w0 = lineWidth(all, base, S)
-    const n = w0 > 0 ? S * Math.min(1, (FIT * W) / w0) : S
-    const w = lineWidth(all, base, n)
-    const left = cx - w / 2
-    const baseY = centredBase(base, n, cy)
-    if (look === 'scribble') {
-      // The underlines first (under the text), each drawn left to right when its word is spoken
-      const keys = creatorKeys(texts, emph, look, anyEmphasis, lineWord)
-      const space = width(base, n, ' ')
-      const amp = n * 0.06, lam = n * 0.42, th = Math.max(2, n * 0.07)
-      let x = left
-      texts.forEach((text, j) => {
-        const ww = width(base, n, text)
-        if (keys.has(j)) {
-          const p = ons[j] > 0 ? clamp01((t - ons[j]) / SCRIBBLE_MS) : 1
-          if (p > 0) {
-            ctx.save()
-            ctx.beginPath()
-            ctx.rect(x - th, 0, (ww + 2 * th) * p, H)
-            ctx.clip()
-            wavePath(ctx, x, x + ww, baseY + n * 0.14, amp, lam, th)
-            ctx.fillStyle = hl
-            ctx.fill()
-            ctx.restore()
+    // (too wide for one line: on to more lines, each word whole — a word wider than a line narrows them all)
+    const widest = Math.max(...texts.map(tx => width(base, S, tx)))
+    const n = widest > 0 ? S * Math.min(1, (FIT * W) / widest) : S
+    const rows = rowsOf(all, row => lineWidth(row, base, n), FIT * W)
+    const pitch = n * 1.08
+    const keys = look === 'scribble' ? creatorKeys(texts, emph, look, anyEmphasis, lineWord) : null
+    rows.forEach((row, r) => {
+      const w = lineWidth(row, base, n)
+      const left = cx - w / 2
+      const yc = cy + (r - (rows.length - 1) / 2) * pitch
+      const baseY = centredBase(base, n, yc)
+      if (keys) {
+        // The underlines first (under the text), each drawn left to right when its word is spoken
+        const space = width(base, n, ' ')
+        const amp = n * 0.06, lam = n * 0.42, th = Math.max(2, n * 0.07)
+        let x = left
+        for (const j of row) {
+          const ww = width(base, n, texts[j])
+          if (keys.has(j)) {
+            const p = ons[j] > 0 ? clamp01((t - ons[j]) / SCRIBBLE_MS) : 1
+            if (p > 0) {
+              ctx.save()
+              ctx.beginPath()
+              ctx.rect(x - th, 0, (ww + 2 * th) * p, H)
+              ctx.clip()
+              wavePath(ctx, x, x + ww, baseY + n * 0.14, amp, lam, th)
+              ctx.fillStyle = hl
+              ctx.fill()
+              ctx.restore()
+            }
           }
+          x += ww + space
         }
-        x += ww + space
+      }
+      words(ctx, row, base, n, () => color, left, baseY, j => {
+        const rv = reveal(ons[j])
+        // subtitle: the words already said dimmed
+        return look === 'subtitle' && t >= offs[j] && offs[j] < lineEnd - a ? rv * SUBTITLE_DIM : rv
       })
-    }
-    words(ctx, all, base, n, () => color, left, baseY, j => {
-      const r = reveal(ons[j])
-      // subtitle: the words already said dimmed
-      return look === 'subtitle' && t >= offs[j] && offs[j] < lineEnd - a ? r * SUBTITLE_DIM : r
+      grow(left, yc - n / 2, w, n)
     })
-    grow(left, cy - n / 2, w, n)
   }
 
   ctx.restore()

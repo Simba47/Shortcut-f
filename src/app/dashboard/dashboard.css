@@ -790,10 +790,12 @@
 @media (prefers-reduced-motion: reduce) { .vcard-hover { transition: none; } }
 
 /* "Open clips" with both kinds of clip (user, 2026-11-11): a small menu over the card's picture, from its button —
-   AI clips · n, Your clips · n, a line, + Make new clips. The card with it open stays over its neighbours */
+   AI edits · n, Manual edits · n, a line, + Make new clips. The card with it open stays over its neighbours */
 .vcard.has-menu { z-index: 5; }
 .vcard-open-wrap { position: relative; flex-shrink: 0; }
-.vcard-menu { top: auto; bottom: calc(100% + 8px); right: 0; min-width: 200px; transform-origin: bottom right;
+/* (.dash-popover.vcard-menu: stronger than globals.css' .dash-popover, which loads after this file and set top: 100% + 8px
+   as well — both top and bottom then squeezed the menu to a thin strip, its items spilling out under the card) */
+.dash-popover.vcard-menu { top: auto; bottom: calc(100% + 8px); right: 0; min-width: 200px; transform-origin: bottom right;
   animation: vcard-menu-in .2s cubic-bezier(.2, .9, .3, 1.2) both; }
 @keyframes vcard-menu-in { from { opacity: 0; transform: translateY(6px) scale(.94); } to { opacity: 1; transform: none; } }
 .vcard-menu .dash-menu-item { font-weight: 600; }

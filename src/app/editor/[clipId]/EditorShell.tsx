@@ -41,7 +41,6 @@ import { freezePart, partButtonsTarget, restsOnSplit, splitTargets } from '@/mod
 import { AccountMenu, openShortcuts } from '@/components/ui/account-menu'
 import { CreditsBadge, TopUpLink } from '@/components/ui/credits-badge'
 import { friendlyError } from '@/lib/friendlyError'
-import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { BrandLogo } from '@/components/ui/brand-logo'
 import { BrandLoader } from '@/components/ui/brand-loader'
 import { SpinningBorderButton } from '@/components/ui/spinning-border-button'
@@ -54,7 +53,7 @@ import { putBrandOn, takeBrandOff, brandNewFrames, updateBrand, brandChanged, fi
 import { EditorBrandMenu } from '@/components/brand/EditorBrandMenu'
 import { CleanupPanel, type CleanupRow } from '@/components/editor/CleanupPanel'
 import { cleanupCards, isDeleted } from '@/modules/editor/cleanup'
-import { BRAND_ENDS_ON, brandPalette, brandLockOf, brandTextStyle, brandCaptionLooks, brandCaptionStyleOn, captionBand, sameEndVideo, type FrameRect, type BrandKit, type BrandTextKind } from '@/lib/shared/brandKit'
+import { BRAND_ENDS_ON, brandPalette, brandLockOf, brandTextStyle, brandCaptionLooks, brandCaptionStyleOn, captionCaseOf, captionBand, sameEndVideo, type FrameRect, type BrandKit, type BrandTextKind } from '@/lib/shared/brandKit'
 import { brandTextLook } from '@/modules/editor/textStyle'
 import { brandCaptionWords, BRAND_WORDS_ON, type BrandWords } from '@/lib/brandWords'
 import { lockClipLook, lockHolds, lockSetOf, type LockSet } from '@/lib/shared/brandTeam'
@@ -209,7 +208,7 @@ const TOOLS: { id: Tool; label: string; title: string; hint: string; icon: React
     icon: <><rect x="2.5" y="5" width="19" height="14" rx="3" stroke="currentColor" strokeWidth="1.8" fill="none" /><path d="M10 10.2a2.2 2.2 0 100 3.6M17 10.2a2.2 2.2 0 100 3.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" /></>,
   },
   {
-    id: 'transitions', label: 'Transition', title: 'Transitions',
+    id: 'transitions', label: 'Transitions', title: 'Transitions',
     hint: 'How one part of the clip gives way to the next: a dissolve, a slide, a wipe… Pick one for each join; it plays in the preview and the export.',
     icon: <><rect x="2.5" y="5" width="8" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" fill="none" /><rect x="13.5" y="5" width="8" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" fill="none" strokeDasharray="2.4 2" /><path d="M8.5 12h7M13.5 9.5L16 12l-2.5 2.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" /></>,
   },
@@ -1158,8 +1157,10 @@ export function EditorShell({
   const [exportPress, setExportPress] = useState(false)
   function pressExport() {
     if (exportPress) return
+    // (user, 2026-11-12) the export starts at once; the press animation plays alongside, never before it
     setExportPress(true)
-    setTimeout(() => { setExportPress(false); requestExport() }, 750)
+    requestExport()
+    setTimeout(() => setExportPress(false), 750)
   }
   // Click counters that replay each toolbar button's own animation (keys remount the icon)
   const [formatPlay, setFormatPlay] = useState<{ id: LayoutType; n: number } | null>(null)
@@ -1723,14 +1724,14 @@ export function EditorShell({
     await handleSave()
     handleRetranscribe('unknown')
   }
-  /** Captions on or off. Nothing is read until Get CC is pressed: it costs credits, so the price comes first */
+  /** Captions on or off. Nothing is read until Get captions is pressed: it costs credits, so the price comes first */
   function turnCaptions(on: boolean) {
     setShowCaptions(on)
   }
   const { credits, refresh: refreshCredits } = useCredits()
   // An export taken, finished, cancelled or failed (which gives its credits back): the balance follows
   useEffect(() => { refreshCredits() }, [clipStatus, refreshCredits])
-  /** The part of the clip Get CC reads, and its price: the server works it out the same way (captionSpan) */
+  /** The part of the clip Get captions reads, and its price: the server works it out the same way (captionSpan) */
   function captionQuote() {
     const kept = trim.kept
     const start = kept[0]?.[0] ?? clip.start_ms, end = kept[kept.length - 1]?.[1] ?? clip.end_ms
@@ -1745,7 +1746,7 @@ export function EditorShell({
     confirm({
       title: `Get captions for ${q.credits} credits?`,
       body: `This needs the clip's captions first, from its main video. You have ${credits.balance} credits.`,
-      confirmLabel: 'Get CC', cancelLabel: 'Not now', onCancel: notNow, tone: 'warning',
+      confirmLabel: 'Get captions', cancelLabel: 'Not now', onCancel: notNow, tone: 'warning',
     }, go)
   }
   /** Regenerate reads all of the clip again, words or no words */
@@ -6540,7 +6541,8 @@ export function EditorShell({
           aria-label={exporting ? 'Starting the export' : `Exporting, ${formatElapsed(renderElapsed)} so far`}>
           <span className="sbb-beam" aria-hidden="true" />
           <span className="sbb-surface gap-1.5 h-8 px-3.5 text-xs font-bold tabular-nums">
-            <ExportIcon /> {exporting ? 'Starting…' : `Exporting · ${formatElapsed(renderElapsed)}`}
+            {/* (user, 2026-11-13) Stop answers at once: "Stopping…" until the server confirms (it used to keep counting) */}
+            {cancelling ? <><span aria-hidden="true" className="w-3 h-3 rounded-full border-[1.5px] animate-spin shrink-0" style={{ borderColor: 'rgb(var(--ed-fg) / 0.55)', borderTopColor: 'transparent' }} /> Stopping…</> :<><ExportIcon /> {exporting ? 'Starting…' : `Exporting · ${formatElapsed(renderElapsed)}`}</>}
           </span>
         </span>
         {/* (once the export is on its way: while it starts there is nothing to stop yet) */}
@@ -7428,7 +7430,6 @@ export function EditorShell({
             </svg>
           </button>
           <CreditsBadge credits={credits} onClick={e => { e.preventDefault(); leave(() => { window.location.href = '/billing#credits' }) }} />
-          <ThemeSwitch />
           {/* Shared profile button; saves pending edits before leaving the editor */}
           <AccountMenu
             onNavigate={href => leave(() => { window.location.href = href })}
@@ -7513,8 +7514,8 @@ export function EditorShell({
           onDrop={e => { if (!e.dataTransfer.files.length) return; e.preventDefault(); setSidebarDrop(false); dropFiles([...e.dataTransfer.files], currentTimeMs, null) }}>
           {sidebarDrop && (
             <div className="absolute inset-2 z-50 flex flex-col items-center justify-center gap-1 rounded-xl pointer-events-none text-center px-4"
-              style={{ border: '2px dashed #c8ff00', background: 'rgba(12,12,12,0.86)' }}>
-              <span className="text-sm font-bold" style={{ color: '#c8ff00' }}>Drop to add at {msToLabel(currentTimeMs)}</span>
+              style={{ border: '2px dashed rgba(255,255,255,0.55)', background: 'rgba(12,12,12,0.86)' }}>
+              <span className="text-sm font-bold" style={{ color: '#fff' }}>Drop to add at {msToLabel(currentTimeMs)}</span>
               <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>
                 {tool === 'media' && mediaSection === 'library' ? 'A video goes in as B-roll' : 'Videos, photos or music'}
               </span>
@@ -7558,7 +7559,7 @@ export function EditorShell({
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold text-[var(--ed-text)]">Sections</span>
                   <span className="h-5 min-w-5 px-1.5 flex items-center justify-center rounded-full text-[11px] font-bold tabular-nums"
-                    style={{ background: 'rgba(200,255,0,0.12)', color: 'var(--ed-accent-text)' }}>
+                    style={{ background: 'rgb(var(--ed-fg) / 0.1)', color: 'rgb(var(--ed-fg) / 0.75)' }}>
                     {cropPositions.length}
                   </span>
                   <div className="flex-1" />
@@ -7620,22 +7621,22 @@ export function EditorShell({
                         aria-label={`Section ${i + 1}: ${name}, ${msToLabel(seg.start_ms)} to ${msToLabel(seg.end_ms)}`}
                         className="group relative flex flex-col rounded-xl cursor-pointer overflow-hidden transition-[background,box-shadow,opacity] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(200,255,0,0.6)]"
                         style={{
-                          background: isActiveSeg ? 'linear-gradient(180deg, rgba(200,255,0,0.06), rgba(200,255,0,0.015))' : 'rgb(var(--ed-fg) / 0.03)',
-                          boxShadow: isActiveSeg ? 'inset 0 0 0 1px rgba(200,255,0,0.45), 0 8px 22px -16px rgba(200,255,0,0.5)' : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.07)',
+                          background: isActiveSeg ? 'rgb(var(--ed-fg) / 0.07)' : 'rgb(var(--ed-fg) / 0.03)',
+                          boxShadow: isActiveSeg ? 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.32)' : 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.07)',
                           opacity: faded ? 0.45 : 1,
                         }}
                         onClick={() => { setActiveSegmentId(seg.id); setPickedSegId(seg.id); seekToMs(seg.start_ms) }}
                         onKeyDown={e => { if (e.key === 'Enter') { setActiveSegmentId(seg.id); setPickedSegId(seg.id); seekToMs(seg.start_ms) } }}>
                         <div className="flex items-start gap-2.5 pl-2.5 pr-1.5 pt-2 pb-1.5">
                           <span className="shrink-0 w-8 h-8 mt-px flex items-center justify-center rounded-lg"
-                            style={{ background: isActiveSeg ? 'rgba(200,255,0,0.1)' : 'rgb(var(--ed-fg) / 0.06)' }}>
-                            <LayoutGlyph layout={shown} color={isActiveSeg ? '#c8ff00' : '#9ca3af'} active={isActiveSeg} />
+                            style={{ background: isActiveSeg ? 'rgb(var(--ed-fg) / 0.1)' : 'rgb(var(--ed-fg) / 0.06)', color: 'var(--ed-text)' }}>
+                            <LayoutGlyph layout={shown} color={isActiveSeg ? 'currentColor' : '#9ca3af'} active={isActiveSeg} />
                           </span>
                           <div className="flex-1 min-w-0 flex flex-col">
                             {/* Line 1: name · time range · open */}
                             <div className="flex items-center gap-2 min-w-0 h-6">
                               <span className="text-[13px] font-semibold truncate text-[var(--ed-text)]">{name}</span>
-                              {isActiveSeg && <span className="shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: '#c8ff00' }} title="Under the playhead" />}
+                              {isActiveSeg && <span className="shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: 'rgb(var(--ed-fg) / 0.7)' }} title="Under the playhead" />}
                               <span className="ml-auto shrink-0 whitespace-nowrap text-[11px] tabular-nums" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
                                 {msToLabel(seg.start_ms)} – {msToLabel(seg.end_ms)}
                               </span>
@@ -7668,7 +7669,7 @@ export function EditorShell({
                                 <button onClick={() => { pause(); seekToMs(seg.start_ms); setActiveSegmentId(seg.id); setPickedSegId(seg.id) }}
                                   title={`Main video · ${msToLabel(seg.start_ms)}–${msToLabel(seg.end_ms)}`}
                                   className="flex-1 min-w-0 h-8 flex items-center gap-2 pl-2 pr-1 text-left transition-colors hover:bg-[rgb(var(--ed-fg)/0.05)]">
-                                  <span className="w-[18px] h-[18px] shrink-0 flex items-center justify-center rounded-[5px]" style={{ background: 'rgba(200,255,0,0.14)', color: 'var(--ed-accent-text)' }}>
+                                  <span className="w-[18px] h-[18px] shrink-0 flex items-center justify-center rounded-[5px]" style={{ background: 'rgb(var(--ed-fg) / 0.1)', color: 'rgb(var(--ed-fg) / 0.75)' }}>
                                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                                       <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4" />
                                     </svg>
@@ -7797,8 +7798,9 @@ export function EditorShell({
                     <path d="M8 11V8a4 4 0 118 0v3" stroke="rgb(var(--ed-fg) / 0.6)" strokeWidth="1.8" strokeLinecap="round" />
                   </svg>
                   <div>
-                    <p className="text-sm font-semibold text-[var(--ed-text)]">Auto-captions are a paid feature</p>
-                    <p className="text-xs mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>Available on Starter and above.</p>
+                    {/* (user, 2026-11-12) one upgrade message for captions, the same as in the Captions card */}
+                    <p className="text-sm font-semibold text-[var(--ed-text)]">Captions are on Starter and above</p>
+                    <p className="text-xs mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>Upgrade to add captions to your clips.</p>
                   </div>
                   <a href="/pricing" className="px-4 py-2 rounded-lg text-xs font-bold" style={{ background: ACCENT, color: '#000' }}>See plans</a>
                 </div>
@@ -7954,7 +7956,7 @@ export function EditorShell({
                   {captionTab === 'style' && styleKit && (
                     <BrandCaptionLooks kitName={styleKit.name} current={panelCaptionStyle}
                       looks={brandCaptionLooks(styleKit.data).filter(l => l.id === 'main' && styleKit.data.captions.on)}
-                      onPick={l => { changeCaptionStyle(brandCaptionStyleOn(l.captions, panelCaptionStyle)); setCaptionTextCase(l.captions.uppercase ? 'upper' : 'title') }} />
+                      onPick={l => { changeCaptionStyle(brandCaptionStyleOn(l.captions, panelCaptionStyle)); setCaptionTextCase(captionCaseOf(l.captions)) }} />
                   )}
                   {captionTab !== 'captions' && (
                     <div role="tabpanel" aria-label={CAPTION_TABS.find(t => t.id === captionTab)?.label}>
@@ -8001,7 +8003,7 @@ export function EditorShell({
               <div className="mx-4 mt-4 p-3 flex flex-col gap-2.5 rounded-xl"
                 style={{ background: 'rgb(var(--ed-fg) / 0.04)', border: '1px solid rgb(var(--ed-fg) / 0.1)' }}>
                 <div className="flex items-center gap-2.5">
-                  <span className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg" style={{ background: 'rgba(200,255,0,0.12)', color: 'var(--ed-accent-text)' }}>
+                  <span className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg" style={{ background: 'rgb(var(--ed-fg) / 0.1)', color: 'rgb(var(--ed-fg) / 0.75)' }}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <rect x="2" y="5" width="15" height="14" rx="2" /><path d="M17 10l5-3v10l-5-3z" />
                     </svg>
@@ -8223,10 +8225,10 @@ export function EditorShell({
             <button
               onClick={() => setMotionMode(m => !m)}
               aria-pressed={motionMode}
-              title={motionMode
-                ? 'Motion is on: drag the view while the video plays and it follows your hand smoothly'
-                : 'Motion is off: moving the view changes it from the playhead on (a cut). Turn on to record a smooth follow while the video plays'}
-              className="ed-motion select-none" data-on={motionMode || undefined}
+              // (user, 2026-11-12: explained by a tip on the video while it's on, not a long hover text)
+              aria-label={motionMode ? 'Motion is on: drag the box while the video plays, and the view follows' : 'Motion: record a smooth camera move'}
+              data-tip={motionMode ? 'Turn Motion off' : 'Record a smooth camera move'} data-tip-below
+              className="ed-motion ed-tip select-none" data-on={motionMode || undefined}
             >
               <span className="ed-motion-dot" aria-hidden="true" />
               {motionMode ? 'Recording motion' : 'Motion'}
@@ -8250,6 +8252,12 @@ export function EditorShell({
                 // (a quiet see-through tag; its dot says which: lime = a video put in between, as on the film strip; orange = B-roll)
                 ? <div className="ed-pv-tag absolute top-3 left-3 pointer-events-none"><i style={{ background: '#c8ff00' }} />Inserted video</div>
                 : <div className="ed-pv-tag absolute top-3 left-3 pointer-events-none"><i style={{ background: '#f97316' }} />B-roll</div>
+              )}
+              {/* Motion on (user, 2026-11-12): what to do, said on the video itself */}
+              {motionMode && (
+                <div className="ed-pv-tag ed-motion-tip absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none" role="status">
+                  <i style={{ background: '#ef4444' }} />Drag the box while it plays, and the view follows
+                </div>
               )}
               {/* Holding ← / →: how fast it's skipping */}
               {skipRate !== null && (
@@ -9062,7 +9070,7 @@ function SectionGroupHead({ label, layout, count, lengthMs, open, playing, onTog
       {layout && <LayoutGlyph layout={layout} color="#9ca3af" active={false} />}
       <span className="text-[12px] font-semibold truncate text-[var(--ed-text)]">{label}</span>
       <span className="shrink-0 px-1.5 rounded-full text-[10.5px] font-semibold tabular-nums" style={{ background: 'rgb(var(--ed-fg) / 0.08)', color: 'rgb(var(--ed-fg) / 0.7)' }}>{count}</span>
-      {!open && playing && <span className="shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: '#c8ff00' }} title="Under the playhead" />}
+      {!open && playing && <span className="shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: 'rgb(var(--ed-fg) / 0.7)' }} title="Under the playhead" />}
       <span className="ml-auto shrink-0 text-[11px] tabular-nums" style={{ color: 'rgb(var(--ed-fg) / 0.42)' }}>{lengthLabel(lengthMs)}</span>
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
         className="shrink-0" style={{ color: 'rgb(var(--ed-fg) / 0.55)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}><path d="M6 9l6 6 6-6" /></svg>
@@ -9193,27 +9201,30 @@ function UndoRedo() {
 }
 
 function SaveIndicator({ state, leaving, onRetry }: { state: SaveState; leaving?: boolean; onRetry: () => void }) {
-  const chip = 'flex items-center gap-1.5 shrink-0 h-6 px-2 rounded-full text-[11px] font-medium'
+  // (user, 2026-11-12) plain words, and the link says what it does ("Save now", not "Now"); grey while all is
+  // well, a soft amber or red only for a real problem (styles: .ed-save)
+  const chip = 'ed-save flex items-center gap-1.5 shrink-0 h-6 px-2.5 rounded-full text-[11px] font-medium'
+  const dot = <span className="ed-save-dot" aria-hidden="true" />
   if (state === 'error') {
     return (
-      <span role="alert" className={chip} style={{ color: '#fca5a5', background: 'rgba(239,68,68,0.12)' }}>
-        Couldn&apos;t save · <button onClick={onRetry} className="underline hover:opacity-80">Retry</button>
+      <span role="alert" className={chip} data-tone="bad">
+        {dot}Not saved · <button onClick={onRetry} className="ed-save-act">Retry</button>
       </span>
     )
   }
   if (state === 'retrying') {
+    // (no answer at all: the connection — the edits are kept here and save by themselves once it's back)
     return (
-      <span className={chip} style={{ color: '#fcd34d', background: 'rgba(245,158,11,0.12)' }} aria-live="polite"
-        title="The connection dropped — your changes are kept here and will save as soon as it's back">
-        Connection lost · retrying… <button onClick={onRetry} className="underline hover:opacity-80">Now</button>
+      <span className={chip} data-tone="warn" aria-live="polite">
+        {dot}Offline · will save when you&apos;re back · <button onClick={onRetry} className="ed-save-act">Save now</button>
       </span>
     )
   }
   if (state === 'refused') {
+    // (the server turned it down: kept here, tried again by itself)
     return (
-      <span className={chip} style={{ color: '#fcd34d', background: 'rgba(245,158,11,0.12)' }} aria-live="polite"
-        title="The server couldn't save your changes — they're kept here and it keeps trying. If this stays, let us know">
-        Couldn&apos;t save · trying again… <button onClick={onRetry} className="underline hover:opacity-80">Now</button>
+      <span className={chip} data-tone="warn" aria-live="polite">
+        {dot}Not saved yet · trying again · <button onClick={onRetry} className="ed-save-act">Save now</button>
       </span>
     )
   }
@@ -9242,9 +9253,10 @@ function SwitchRow({ label, description, checked, onChange }: { label: string; d
       </div>
       <button role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)}
         className="relative shrink-0 rounded-full transition-colors"
-        style={{ width: 40, height: 22, background: checked ? ACCENT : 'rgb(var(--ed-fg) / 0.15)' }}>
-        <span className="absolute rounded-full bg-white transition-all"
-          style={{ top: 3, left: checked ? 21 : 3, width: 16, height: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+        style={{ width: 40, height: 22, background: checked ? 'var(--ed-text)' : 'rgb(var(--ed-fg) / 0.15)' }}>
+        {/* (user, 2026-11-12: on is the text colour, not lime) the knob the page's colour on it, white off it */}
+        <span className="absolute rounded-full transition-all"
+          style={{ top: 3, left: checked ? 21 : 3, width: 16, height: 16, background: checked ? 'var(--ed-app)' : '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
       </button>
     </div>
   )
@@ -9306,8 +9318,9 @@ function GetCaptions({ lengthMs, price, newPart, balance, freePlan, hasAddedVide
   if (freePlan) {
     return (
       <div className="mt-3 flex flex-col gap-2 text-[11.5px] leading-snug" style={muted}>
-        <span>Captions aren&rsquo;t part of the Free plan.</span>
-        <a href="/pricing" className="cap-link justify-center font-semibold">Upgrade to get captions</a>
+        {/* (user, 2026-11-12) the same upgrade message as the Captions tool's */}
+        <span>Captions are on Starter and above.</span>
+        <a href="/pricing" className="cap-link justify-center font-semibold">See plans</a>
       </div>
     )
   }
@@ -9335,7 +9348,7 @@ function GetCaptions({ lengthMs, price, newPart, balance, freePlan, hasAddedVide
       ) : (
         <button type="button" onClick={onGet} className="h-9 rounded-lg text-[12.5px] font-bold transition-opacity hover:opacity-90"
           style={{ background: ACCENT, color: '#0a0a0a' }}>
-          Get CC
+          Get captions
         </button>
       )}
     </div>
@@ -9367,7 +9380,7 @@ function ZoomSlider({ zoom, onZoom }: { zoom: number; onZoom: (z: number) => voi
       <button onClick={() => onZoom(1)} disabled={i === 0} aria-live="polite" aria-label={`Zoom ${zoomLabel(zoom)}x${i ? ', back to 1x' : ''}`}
         title={i ? 'Back to the whole clip (1x)' : 'Whole clip'}
         className="h-7 min-w-[46px] px-2 rounded-md text-xs font-semibold tabular-nums transition-colors disabled:cursor-default"
-        style={i ? { background: 'rgba(200,255,0,0.14)', color: 'var(--ed-accent-text)', boxShadow: 'inset 0 0 0 1px rgba(200,255,0,0.35)' }
+        style={i ? { background: 'rgb(var(--ed-fg) / 0.12)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.22)' }
           : { color: 'rgb(var(--ed-fg) / 0.7)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.12)' }}>
         {zoomLabel(zoom)}x
       </button>

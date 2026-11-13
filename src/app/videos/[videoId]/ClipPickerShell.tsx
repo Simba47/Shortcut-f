@@ -13,14 +13,13 @@ import { usePolling } from '@/lib/usePolling'
 import { useCredits } from '@/lib/useCredits'
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
-import { CaptionScan } from '@/components/editor/CaptionScan'
+import { AiScan } from '@/components/clips/AiScan'
 import { useRouter } from 'next/navigation'
 import { FilterChip } from '@/components/ui/filter-chip'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { AccountMenu } from '@/components/ui/account-menu'
 import { CreditsBadge, TopUpLink } from '@/components/ui/credits-badge'
 import { useConfirm } from '@/components/editor/ConfirmDialog'
-import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { openBrandKits } from '@/components/brand/brandKitsEvents'
 import { BrandLoader, BrandLoaderScreen } from '@/components/ui/brand-loader'
 import { ClipPlayer } from '@/components/clips/ClipPlayer'
@@ -216,9 +215,14 @@ const PANEL_LINE = '1px solid rgb(var(--cb-fg) / 0.07)'
 // Wide screens get three columns (AI tools · video · clips); narrower ones stack the AI tools under the video
 const WIDE_QUERY = '(min-width: 1280px)'
 // The side columns' usual widths and how far their bars drag them; the video column keeps CENTRE_MIN
-// AI edit (user, 2026-11-09): all three columns start equal, a third of the row each, at any window
-// size: each side column a third (the row less the 16 px between columns), the video the rest
-const ONE_THIRD = 'calc((100% - 32px) / 3)'
+// AI edit (user, 2026-11-12: the sizes they set by dragging, from their recording): the AI tools 24.6% and
+// the clipboard 28.7% of the row less the 16 px between columns, the video the rest (46.7%) — 344 / 654 /
+// 401 px on a 1463 px window. Shares, not pixels, so other window sizes keep the same look.
+// (before: all three equal, a third each)
+const AI_SHARE = 'calc((100% - 32px) * 0.2459)'
+const CLIPS_SHARE = 'calc((100% - 32px) * 0.2866)'
+// Make my clips' usual height in the AI column (user, 2026-11-12); Ask AI takes the rest
+const MMC_H = 390
 const CLIPS_W = 340, CLIPS_W_MANUAL = 420
 const AI_MIN = 300
 const CLIPS_RANGE: [number, number] = [280, 720]
@@ -333,6 +337,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // Earlier Ask AI answers by search (newest last), and which search the shown saved answer is for
   const [askSaved, setAskSaved] = useState<Record<string, Suggestion[]>>({})
   const [askFrom, setAskFrom] = useState<string | null>(null)
+  // The search running now, shown in the middle of the video's scan (user, 2026-11-12: AiScan's "find" look)
+  const [askingFor, setAskingFor] = useState('')
   const askKey = `clipboard.ask.${video.id}`
   // const bestKey = `clipboard.best.${video.id}`   (Best moments: removed 2026-11-09 (user), kept commented)
   useEffect(() => {
@@ -1104,6 +1110,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     const ctl = new AbortController()
     askAbort.current = ctl
     setLoadingAi(true)
+    setAskingFor(q)
     setAiError(null)
     try {
       const res = await fetch(`/api/videos/${video.id}/ai-detect`, {
@@ -1171,7 +1178,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const [resizing, setResizing] = useState<'ai' | 'clips' | 'split' | null>(null)
   const columnsRef = useRef<HTMLDivElement>(null)
   // The AI column doesn't scroll (user, 2026-11-09): a bar between Make my clips and Ask AI shares its
-  // height. mmcH: Make my clips' height (null = as tall as it is, Ask AI takes the rest)
+  // height. mmcH: Make my clips' height (null = the usual MMC_H, Ask AI takes the rest)
   const [mmcH, setMmcH] = useState<number | null>(null)
   const mmcRef = useRef<HTMLElement>(null)
   const aiColRef = useRef<HTMLElement>(null)
@@ -1196,8 +1203,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     window.addEventListener('pointerup', up)
   }
   const aiShown = wide && isReady && !manualOnly
-  const aiBasis = aiW !== null ? `${aiW}px` : ONE_THIRD
-  const clipsBasis = clipsW !== null ? `${clipsW}px` : aiShown ? ONE_THIRD : `${manualOnly ? CLIPS_W_MANUAL : CLIPS_W}px`
+  const aiBasis = aiW !== null ? `${aiW}px` : AI_SHARE
+  const clipsBasis = clipsW !== null ? `${clipsW}px` : aiShown ? CLIPS_SHARE : `${manualOnly ? CLIPS_W_MANUAL : CLIPS_W}px`
   /** Drag a bar: the AI tools grow to the right, the clipboard to the left; the video keeps CENTRE_MIN */
   function startColumnResize(e: React.PointerEvent, which: 'ai' | 'clips') {
     if (e.button !== 0) return
@@ -1518,7 +1525,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       {/* (styles: .mmc-* in globals.css) */}
       {/* (wide: its height is shared with Ask AI at the bar under it; what doesn't fit scrolls, no scrollbar) */}
       <section ref={mmcRef} className={`mmc p-3.5 flex flex-col gap-3 rounded-2xl ${wide ? 'cb-split-top cb-noscroll' : 'shrink-0'}`} data-start-target="ai"
-        style={wide ? { flex: mmcH == null ? '0 1 auto' : `0 1 ${mmcH}px` } : undefined}>
+        style={wide ? { flex: `0 1 ${mmcH ?? MMC_H}px` } : undefined}>
         {/* Header: a spark badge (glass, the spark lime), the title and its ⓘ; on the right, the way to the clips already made */}
         <div className="flex items-center gap-2.5">
           <span aria-hidden="true" className="shrink-0 w-8 h-8 rounded-[10px] grid place-items-center"
@@ -2055,12 +2062,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     </div>
   )
   const aiTools = aiLocked ? aiToolsLocked : aiToolsOpen
-  // A scan over the video (the editor's CaptionScan) while AI works on it (user, 2026-11-09): its
+  // A scan over the video (components/clips/AiScan.tsx; the editor keeps CaptionScan) while AI works on it (user, 2026-11-09): its
   // captions being read, Make my clips running, or an Ask AI search — the line under it says which
   const scanLabel = autoRunning
     ? (autoJob?.status === 'queued' ? 'Waiting to start…' : autoJob?.stage?.text ? `${autoJob.stage.text}…` : 'Making your clips…')
-    : reading?.status === 'running' ? 'Getting captions…'
+    : reading?.status === 'running' ? 'Reading your video…'
     : loadingAi ? 'Finding your moments…' : null
+  // Which look: Ask AI's own (the words searched for, pins on a timeline) or the reading one
+  const scanMode = !autoRunning && reading?.status !== 'running' && loadingAi ? 'find' as const : 'read' as const
 
   return (
     <div className="cb-page h-screen flex flex-col overflow-hidden">
@@ -2087,7 +2096,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           <span>Brand kits</span>
         </button>
         <CreditsBadge credits={credits} />
-        <ThemeSwitch />
         <AccountMenu />
       </nav>
 
@@ -2118,14 +2126,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               <div className="cb-player rounded-2xl overflow-hidden flex items-center justify-center bg-black"
                 style={{ width: `min(100cqw, calc(100cqh * ${frameRatio}))`, aspectRatio: `${frameRatio}` }}>
                 {/* The video stays mounted (hidden) while a clip previews, so it keeps its place */}
-                <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<CaptionScan label={scanLabel} /></div>
+                <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<AiScan label={scanLabel} mode={scanMode} query={askingFor} durationMs={initialVideo.duration_ms} /></div>
                 {viewMode === 'preview' && previewPane}
               </div>
             </div>
           ) : (
             <div className="cb-player w-full rounded-2xl overflow-hidden flex items-center justify-center bg-black shrink-0"
               style={{ aspectRatio: `${frameRatio}`, maxHeight: '70vh', margin: '0 auto', width: `min(100%, calc(70vh * ${frameRatio}))` }}>
-              <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<CaptionScan label={scanLabel} /></div>
+              <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<AiScan label={scanLabel} mode={scanMode} query={askingFor} durationMs={initialVideo.duration_ms} /></div>
               {viewMode === 'preview' && previewPane}
             </div>
           )}

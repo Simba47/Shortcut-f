@@ -27,15 +27,15 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      {/* Dark everywhere, except that the dashboard, the clip board, AI edits and the editor have a dark /
-          light switch (components/ui/cinematic-theme-switcher.tsx). Its choice (`shortcut-theme`) is
-          put on those pages before they paint, so a light page never flashes dark. The old
-          site-wide switch's `theme` is cleared so nobody stays stuck in light mode. */}
+      {/* Dark everywhere (user, 2026-11-13: the dark / light switch taken off every page). Anyone who had
+          picked light keeps that choice in their browser (`shortcut-theme`, and the older site-wide `theme`):
+          both are cleared, so nobody is stuck in light mode with no switch to leave it. (The light styles in
+          globals.css stay, unused, in case light mode comes back.) */}
       <body className={displayFont.variable}>
         {/* next/script runs it before the page is interactive (a raw <script> in a component
             makes React warn on every render) */}
         <Script id="clear-old-theme" strategy="beforeInteractive">
-          {`try { localStorage.removeItem('theme'); if (/^\\/(dashboard|videos\\/|editor\\/)/.test(location.pathname) && localStorage.getItem('shortcut-theme') === 'light') document.documentElement.setAttribute('data-theme', 'light') } catch (e) {}`}
+          {`try { localStorage.removeItem('theme'); localStorage.removeItem('shortcut-theme') } catch (e) {}`}
         </Script>
         <Providers>{children}</Providers>
       </body>

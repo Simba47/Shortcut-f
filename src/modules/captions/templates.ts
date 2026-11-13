@@ -94,6 +94,8 @@ export const baseAnimation = (t: CaptionTemplate): AnimationType => (t.base === 
 export function applyTemplate(t: CaptionTemplate): Partial<CaptionStyle> {
   return {
     template: t.id, animation: baseAnimation(t), color: t.color, highlight_color: t.hl, uppercase: !!t.upper, words_per_line: null,
+    // (its own font: a font picked before goes — user, 2026-11-12: a style's font is the default, another can be picked after)
+    font: null,
     // A Creator style starts where its look sits (over the head, the middle, the bottom…)
     ...(t.look ? { position_y: null } : {}),
   }

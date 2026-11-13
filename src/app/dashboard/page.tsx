@@ -14,7 +14,6 @@ import type { Video } from '@chai-cut/shared'
 import { ACCEPTED_VIDEO_EXTENSIONS } from '@chai-cut/shared'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { AccountMenu } from '@/components/ui/account-menu'
-import ThemeSwitch from '@/components/ui/cinematic-theme-switcher'
 import { DashSkeleton } from './DashSkeleton'
 import { FillButtonContent } from '@/components/ui/fill-button'
 import { useVideoUpload, formatBytes, uploadPace } from '@/modules/upload/useVideoUpload'
@@ -270,7 +269,6 @@ export default function DashboardPage() {
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2" /><circle cx="17.5" cy="10.5" r="2" /><circle cx="8.5" cy="7.5" r="2" /><circle cx="6.5" cy="12.5" r="2" /><path d="M12 22a10 10 0 110-20 9 9 0 019 9c0 3-2 4-4 4h-2a2 2 0 00-1 3.7A2 2 0 0112 22z" /></svg>
             <span>Brand kits</span>
           </button>
-          <ThemeSwitch />
           <AccountMenu planInfo={planInfo} />
         </div>
       </nav>
@@ -622,7 +620,7 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
   const ended = useRef(false)
   const canOpen = video.status === 'ready' && !selecting && !renaming
   // "Open clips" (user, 2026-11-11: a video with clips opens them — no "AI or Manual?" question): only the AI's,
-  // or only ones cut by hand: straight to that board; both: a small menu (AI clips · n, Your clips · n, + Make new
+  // or only ones cut by hand: straight to that board; both: a small menu (AI edits · n, Manual edits · n, + Make new
   // clips). No clips yet — or how many of each isn't known — Make clips asks AI or Manual, as before
   const total = video.clip_count ?? 0
   const manualN = video.manual_clip_count ?? null
@@ -855,11 +853,11 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
                 }}>
                 <button type="button" role="menuitem" className="dash-menu-item" autoFocus onClick={() => { setMenu(false); onGo('ai') }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z" /></svg>
-                  <span className="vcard-menu-label">AI clips</span><span className="vcard-menu-n">{aiN}</span>
+                  <span className="vcard-menu-label">AI edits</span><span className="vcard-menu-n">{aiN}</span>
                 </button>
                 <button type="button" role="menuitem" className="dash-menu-item" onClick={() => { setMenu(false); onGo('manual') }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12" /></svg>
-                  <span className="vcard-menu-label">Your clips</span><span className="vcard-menu-n">{manualN}</span>
+                  <span className="vcard-menu-label">Manual edits</span><span className="vcard-menu-n">{manualN}</span>
                 </button>
                 <span className="vcard-menu-line" aria-hidden="true" />
                 <button type="button" role="menuitem" className="dash-menu-item" onClick={() => { setMenu(false); onOpen() }}>

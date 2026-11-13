@@ -39,6 +39,8 @@ export interface BrandCaptions {
   color: string
   highlight_color: string
   uppercase: boolean
+  /** All small letters (the Capitals "aa" — user, 2026-11-12: it did nothing in the brand kit); never with uppercase */
+  lowercase?: boolean
   words_per_line: number | null
 }
 
@@ -178,8 +180,9 @@ export const MAX_EXTRA_COLORS = 3
 /** Space between the logo and the frame's edge, as a share of the frame's width */
 export const LOGO_MARGIN = 0.04
 
+// (size 58: the caption size a new kit starts at — user, 2026-11-12)
 export const DEFAULT_BRAND_CAPTIONS: BrandCaptions = {
-  on: false, template: null, animation: 'karaoke', font: null, size: 52, color: '#ffffff', highlight_color: '#ffe700',
+  on: false, template: null, animation: 'karaoke', font: null, size: 58, color: '#ffffff', highlight_color: '#ffe700',
   uppercase: false, words_per_line: null,
 }
 
@@ -260,6 +263,7 @@ export function cleanBrandKitData(raw: unknown, userId?: string): BrandKitData {
       color: color(cap.color, dc.color),
       highlight_color: color(cap.highlight_color, dc.highlight_color),
       uppercase: cap.uppercase === true,
+      lowercase: cap.lowercase === true && cap.uppercase !== true,
       words_per_line: typeof cap.words_per_line === 'number' ? Math.round(num(cap.words_per_line, 1, 10, 3)) : null,
     },
     fonts: (Array.isArray(d.fonts) ? d.fonts : [])
@@ -333,6 +337,7 @@ function cleanCaptions(raw: unknown): BrandCaptions {
     color: color(cap.color, dc.color),
     highlight_color: color(cap.highlight_color, dc.highlight_color),
     uppercase: cap.uppercase === true,
+    lowercase: cap.lowercase === true && cap.uppercase !== true,
     words_per_line: typeof cap.words_per_line === 'number' ? Math.round(num(cap.words_per_line, 1, 10, 3)) : null,
   }
 }
@@ -384,6 +389,9 @@ export function brandPalette(d: BrandKitData): string[] {
 }
 
 /** The caption style fields a kit puts on a clip (its captions switched on in the kit), as the editor saves them */
+/** A kit's captions' capitals: First letter capital, ALL CAPITALS or all small letters */
+export const captionCaseOf = (c: BrandCaptions): 'title' | 'upper' | 'lower' => (c.uppercase ? 'upper' : c.lowercase ? 'lower' : 'title')
+
 export function brandCaptionStyle(c: BrandCaptions): Partial<CaptionStyle> {
   return {
     template: c.template, animation: c.animation, font: c.font, size: c.size, color: c.color,

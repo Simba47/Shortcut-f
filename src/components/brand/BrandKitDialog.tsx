@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useBrandKits, BrandKitStudio } from '@/components/editor/BrandKit'
 import type { BrandKit } from '@/lib/shared/brandKit'
 import { ROLE_NAMES, type KitInviteIn } from '@/lib/shared/brandTeam'
+import { useConfirm } from '@/components/editor/ConfirmDialog'
 import { BRAND_KITS_OPEN, BRAND_KITS_CLOSED, type BrandKitsStart } from './brandKitsEvents'
 
 export { openBrandKits, BRAND_KITS_CLOSED } from './brandKitsEvents'
@@ -44,7 +45,9 @@ function BrandKitDialog({ start, onClose }: { start: Start; onClose: () => void 
   const brand = useBrandKits()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [confirm, setConfirm] = useState<string | null>(null)
+  // (user, 2026-11-12: "the delete confirmation should be in the middle, not in that bar") the centred
+  // "Are you sure?" card over the popup, as the editor's deletes; it takes Esc itself
+  const { confirm, dialog: confirmDialog } = useConfirm()
   const [answering, setAnswering] = useState<string | null>(null)
   const [linked, setLinked] = useState<string | null>(start.invite ?? null)
 
@@ -58,14 +61,13 @@ function BrandKitDialog({ start, onClose }: { start: Start; onClose: () => void 
       if (e.key !== 'Escape') return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
-      if (confirm) { setConfirm(null); return }
       onClose()
     }
     window.addEventListener('keydown', esc)
     const overflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => { window.removeEventListener('keydown', esc); document.body.style.overflow = overflow }
-  }, [onClose, confirm])
+  }, [onClose])
 
   const own = brand.kits.filter(k => !k.shared_by)
   const shared = brand.kits.filter(k => k.shared_by)
@@ -77,7 +79,7 @@ function BrandKitDialog({ start, onClose }: { start: Start; onClose: () => void 
     try {
       const kit = await brand.create()
       // (the first brand is the one new clips get)
-      if (!own.some(k => k.data.is_default)) brand.update(kit.id, { data: { ...kit.data, is_default: true } })
+      if (!own.some(k => k.data.is_default)) brand.update(kit.id, { data: { ...kit.data, is_default: true } }, false)
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
   }
   /** One kit the default: the others aren't any more (the server keeps just one too) */
@@ -86,7 +88,7 @@ function BrandKitDialog({ start, onClose }: { start: Start; onClose: () => void 
     brand.update(kit.id, { data: { ...kit.data, is_default: true } })
   }
   async function remove(kit: BrandKit) {
-    setConfirm(null); setError(null)
+    setError(null)
     try { await (kit.shared_by ? brand.leave(kit.id) : brand.remove(kit.id)) } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
   }
   async function answer(inv: KitInviteIn, accept: boolean) {
@@ -114,20 +116,17 @@ function BrandKitDialog({ start, onClose }: { start: Start; onClose: () => void 
           </span>
           <span className="bkd-dots" aria-hidden="true"><i style={{ background: d.colors.main }} /><i style={{ background: d.colors.accent }} /></span>
         </button>
-        {confirm === k.id ? (
-          <div className="bkd-kit-foot" role="alert">
-            <span className="flex-1">{k.shared_by ? 'Stop using it?' : 'Delete this kit?'}</span>
-            <button type="button" className="bkd-link" onClick={() => setConfirm(null)}>No</button>
-            <button type="button" className="bkd-link bkd-danger" onClick={() => remove(k)}>{k.shared_by ? 'Stop' : 'Delete'}</button>
-          </div>
-        ) : (isOn || isDefault) && (
+        {(isOn || isDefault) && (
           <div className="bkd-kit-foot">
             {isDefault
               ? <span className="bkd-tag" title="New clips — and Make my clips — get this brand by themselves">Default</span>
               : !k.shared_by && <button type="button" className="bkd-link" onClick={() => makeDefault(k)} title="New clips — and Make my clips — get this brand by themselves">Make default</button>}
             <span className="flex-1" />
             {isOn && (
-              <button type="button" className="bkd-icon" onClick={() => setConfirm(k.id)} title={k.shared_by ? 'Stop using this kit' : 'Delete this kit'} aria-label={k.shared_by ? `Leave ${k.name}` : `Delete ${k.name}`}>
+              <button type="button" className="bkd-icon" onClick={() => confirm(k.shared_by
+                ? { title: `Stop using \u201c${k.name}\u201d?`, body: 'It leaves your brand kits. Its owner can invite you back.', confirmLabel: 'Stop using', tone: 'warning' }
+                : { title: `Delete \u201c${k.name}\u201d?`, body: 'Are you sure you want to delete this brand kit? This can’t be undone.' },
+                () => remove(k))} title={k.shared_by ? 'Stop using this kit' : 'Delete this kit'} aria-label={k.shared_by ? `Leave ${k.name}` : `Delete ${k.name}`}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   {k.shared_by ? <path d="M15 4h4v16h-4M10 17l-5-5 5-5M5 12h11" /> : <path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 002 2h8a2 2 0 002-2l1-12M9 7V4h6v3" />}
                 </svg>
@@ -141,6 +140,7 @@ function BrandKitDialog({ start, onClose }: { start: Start; onClose: () => void 
 
   const loading = brand.loading && !brand.kits.length
   return (
+    <>
     <div className="bkd-overlay" role="dialog" aria-modal="true" aria-labelledby="bkd-title" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="bk editor-theme bkd-box">
         {/* Its own title bar, so it reads as a window over the page (user, 2026-10-31): Brand kits · ✕ */}
@@ -219,5 +219,7 @@ function BrandKitDialog({ start, onClose }: { start: Start; onClose: () => void 
         )}
       </div>
     </div>
+    {confirmDialog}
+    </>
   )
 }
