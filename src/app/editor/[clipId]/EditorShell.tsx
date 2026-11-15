@@ -26,7 +26,7 @@ import { SOUND_DEFAULTS, type SoundItem, type SoundKind } from '@/modules/editor
 import { Timeline } from '@/components/editor/timeline/Timeline'
 import { memoStable } from '@/components/editor/memoStable'
 import { useFreeWatermark } from '@/components/editor/watermark'
-import { LAYOUT_COLORS, MAX_ZOOM, zoomStep, zoomLabel, STOCK_DRAG_TYPE, type LaneCtl, type LaneCtlKey } from '@/components/editor/SegmentTimeline'
+import { LAYOUT_COLORS, MAX_ZOOM, MIN_ZOOM, zoomStep, zoomLabel, STOCK_DRAG_TYPE, type LaneCtl, type LaneCtlKey } from '@/components/editor/SegmentTimeline'
 import { useVideoUpload } from '@/modules/upload/useVideoUpload'
 import { TranscriptPanel } from '@/components/editor/TranscriptPanel'
 import { CaptionStyler } from '@/components/editor/CaptionStyler'
@@ -9343,7 +9343,6 @@ function msToClock(ms: number) {
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}.${String(cs % 100).padStart(2, '0')}`
 }
 
-/** Timeline zoom as − 1x +: each press one step (1x → 1.25x → 1.5x → 2x → 3x → 4x); click the value for 1x */
 /** How far the clip has played, as an arc round the play button (globals.css .ed-play-ring: the desktop editor shows it) */
 function PlayRing({ lengthMs }: { lengthMs: number }) {
   const now = useLiveTimeMs()
@@ -9417,12 +9416,14 @@ function ClipClock({ lengthMs }: { lengthMs: number }) {
   )
 }
 
+/** Timeline zoom as − 1x +: each press one step, out to 0.25x (the whole clip in a quarter of the
+    width) or in to 8x; click the value to go back to 1x */
 function ZoomSlider({ zoom, onZoom }: { zoom: number; onZoom: (z: number) => void }) {
-  const i = zoom > 1 ? 1 : 0   // zoomed in or not
+  const i = Math.abs(zoom - 1) > 0.001 ? 1 : 0   // zoomed in or out (not at 1x)
   return (
     <div className="flex items-center gap-1" role="group" aria-label="Timeline zoom"
       title="Pinch on the trackpad, or hold ⌘ / Ctrl and scroll, to zoom">
-      <button onClick={() => onZoom(zoomStep(zoom, -1))} disabled={i === 0} aria-label="Zoom out" title="Zoom out" className="ed-tl-btn">
+      <button onClick={() => onZoom(zoomStep(zoom, -1))} disabled={zoom <= MIN_ZOOM} aria-label="Zoom out" title="Zoom out" className="ed-tl-btn">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M8 11h6M20 20l-4-4" /></svg>
       </button>
       <button onClick={() => onZoom(1)} disabled={i === 0} aria-live="polite" aria-label={`Zoom ${zoomLabel(zoom)}x${i ? ', back to 1x' : ''}`}

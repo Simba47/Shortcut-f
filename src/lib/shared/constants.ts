@@ -31,7 +31,7 @@ export const CAPTION_FONTS = [
 
 export const DEFAULT_CAPTION_STYLE = {
   font: 'noto-sans-telugu',
-  size: 52,
+  size: 80,   // (user, 2026-11-15: 52 read small on a phone — ~5% of the width now)
   color: '#FFFFFF',
   position: 'bottom-center',
   animation: 'karaoke',

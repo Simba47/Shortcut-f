@@ -19,69 +19,58 @@ import { FaqSection, type FaqItem } from '@/components/ui/faq-section'
 import { HeroSplit } from '@/components/landing/hero-split'
 import { FeatureTunnel } from '@/components/landing/feature-tunnel'
 import { FlyIn } from '@/components/landing/fly-in'
+import { FooterWordmark } from '@/components/landing/footer-wordmark'
 import type Lenis from 'lenis'
 import { InsightsSection, ProblemSection, ProofSection } from '@/components/landing/sections'
 import { neutralStyle, useLiteMotion } from '@/components/ui/use-lite-motion'
 import { PLANS } from '@/lib/plans'
 import { readingLabel } from '@/lib/planFeatures'
+import { FREE_SIGNUP_CREDITS } from '@/lib/credits'
 import { COMPANY } from '@/lib/company'
 import { GMAIL_COMPOSE, openMailAppOnPhones } from '@/components/ui/email-link'
 
 const free = PLANS.free
-const pro = PLANS.starter // shown as "Pro" on the landing page
-const business = PLANS.agency // shown as "Business"
 
-// Annual pricing is display-only for now: billing only supports monthly.
-// Every card lists the same rows (✓/✗) so plans are easy to compare.
-// Notes: hours of video are a month on paid plans, once only on Free; AI clip
-// suggestions need a transcript, which only plans with auto-captions get.
+// (user, 2026-11-14) The landing page shows the real plans, read from lib/plans.ts — the same source as the
+// Pricing page and the app — so its names, prices and limits can't drift apart again. (It used to have its own
+// copy: Starter shown as "Pro", Agency as "Business", Creator left out, and an Annual price billing doesn't offer.)
+// The key facts only; the Pricing page lists every limit.
+const LANDING_PLANS = ['free', 'starter', 'creator', 'agency'] as const
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 function planFeatures(plan: (typeof PLANS)[keyof typeof PLANS]) {
+  // (Free's allowances are once only; a paid plan's renew every month)
+  const per = plan.allowancesOnce ? 'in total' : 'a month'
   return [
-    { text: 'AI finds the best moments', included: plan.autoCaption },
+    { text: `${readingLabel(plan.readingMinutes)} of video read ${per}`, included: true },
+    { text: `${count(plan.uploadsPerMonth, 'upload', 'uploads')} ${per}`, included: true },
+    { text: plan.maxClips ? `${count(plan.maxClips, 'clip', 'clips')} in total` : `${plan.ai.clipsPerMonth} AI clips a month`, included: true },
+    { text: 'Unlimited clips you cut yourself', included: !plan.maxClips },
     { text: `Up to ${plan.maxFileSizeGb} GB per video`, included: true },
-    { text: `${plan.retentionDays}-day history`, included: true },
-    { text: 'Captions on AI clips in Telugu, Hindi & Hinglish', included: plan.autoCaption },
-    { text: 'Your logo on your clips', included: true },
+    { text: 'Captions on AI clips', included: plan.autoCaption },
     { text: 'No watermark', included: !plan.watermark },
+    { text: 'Priority exports', included: plan.priorityExports },
   ]
 }
 
-
-const PRICING_PLANS: PricingPlan[] = [
-  {
-    name: 'Free',
-    price: free.price,
-    yearlyPrice: free.price,
-    headline: `Process ${readingLabel(free.readingMinutes)} of video`,
-    subline: `Cut up to ${free.maxClips} clips`,
-    features: planFeatures(free),
-    buttonText: 'Start for free',
-    href: '/signup',
-  },
-  {
-    name: 'Pro',
-    price: pro.price,
-    yearlyPrice: Math.round(pro.price * 0.8),
-    headline: `Process ${readingLabel(pro.readingMinutes)} of video a month`,
-    subline: 'Cut as many clips as you want',
-    features: planFeatures(pro),
-    buttonText: 'Go Pro',
-    href: '/signup',
-    badge: 'Most popular',
-    isPopular: true,
-  },
-  {
-    name: 'Business',
-    price: business.price,
-    yearlyPrice: Math.round(business.price * 0.8),
-    headline: `Process ${readingLabel(business.readingMinutes)} of video a month`,
-    subline: 'Cut as many clips as you want',
-    features: planFeatures(business),
-    buttonText: 'Go Business',
-    href: '/signup',
-    badge: 'For agencies',
-  },
-]
+const PRICING_PLANS: PricingPlan[] = LANDING_PLANS.map(key => {
+  const plan = PLANS[key]
+  const paid = plan.price > 0
+  return {
+    name: plan.name,
+    price: plan.price,
+    // (user, 2026-11-14) Annual shown for now while the plans are discussed: 20% off the monthly price.
+    // Billing is monthly only — the buttons still lead to the monthly plans.
+    yearlyPrice: Math.round(plan.price * 0.8),
+    headline: paid ? `${plan.monthlyCredits.toLocaleString('en-IN')} credits every month` : `${FREE_SIGNUP_CREDITS} credits to start`,
+    subline: paid ? 'Unused credits roll over one month' : 'No credit card needed',
+    features: planFeatures(plan),
+    buttonText: paid ? `Choose ${plan.name}` : 'Start for free',
+    // A paid plan: sign up first (landing visitors are signed out), then straight to the Pricing page to pay
+    // (lib/nextPath.ts keeps ?callbackUrl through the email code and Google)
+    href: paid ? '/signup?callbackUrl=%2Fpricing' : '/signup',
+    ...(key === 'creator' ? { badge: 'Most popular', isPopular: true } : {}),
+  }
+})
 
 // FAQ between Pricing and the closing section. Plan-by-plan differences live in Pricing, not here.
 const FAQS: FaqItem[] = [
@@ -96,7 +85,7 @@ const FAQS: FaqItem[] = [
   },
   {
     question: 'Which platforms can I post to?',
-    answer: 'YouTube Shorts, Instagram Reels and TikTok. Connect your channels once and post in one tap.',
+    answer: 'Instagram Reels and YouTube Shorts. Connect your channels once and post in one tap.',
   },
   {
     question: 'How do trending topics work?',
@@ -156,7 +145,7 @@ const FEATURES: CarouselItem[] = [
   { id: 'brand', tag: 'Brand', icon: featureIcon('◈', 'fi-purple'), title: 'Every clip looks like yours', description: 'Your fonts, colors and logo applied to every clip automatically.' },
   { id: 'layouts', tag: 'Layouts', icon: featureIcon('▤', 'fi-blue'), title: 'Ready-made layouts', description: 'Video with text on top, split screen, video with photo, and more.' },
   { id: 'export', tag: 'Speed', icon: featureIcon('⬆', 'fi-green'), title: 'No waiting to export', description: 'Clips render while you edit, so they’re ready the moment you finish.' },
-  { id: 'post', tag: 'Publish', icon: featureIcon('➚', 'fi-cyan'), title: 'Post everywhere at once', description: 'Send clips straight to YouTube Shorts, Reels and TikTok from one place.' },
+  { id: 'post', tag: 'Publish', icon: featureIcon('➚', 'fi-cyan'), title: 'Post everywhere at once', description: 'Send clips straight to Instagram Reels and YouTube Shorts from one place.' },
 ]
 
 const CONTACT = COMPANY
@@ -329,6 +318,10 @@ export function LandingPage() {
   // it stays pinned behind the Problem section for a while, and nobody can see it
   const [heroCovered, setHeroCovered] = useState(false)
   useEffect(() => raw.on('change', v => setHeroCovered(v >= 0.999)), [raw])
+  // As soon as the Problem section starts sliding up, the hero's looping animation pauses, so the
+  // two never draw at the same time (that overlap made the hand-off stutter)
+  const [heroPaused, setHeroPaused] = useState(false)
+  useEffect(() => raw.on('change', v => setHeroPaused(v > 0.02)), [raw])
   const reduceMotion = useReducedMotion()
   // Phones/touch screens scroll plainly: per-frame blur/scale effects stutter there
   const lite = useLiteMotion()
@@ -393,12 +386,20 @@ export function LandingPage() {
   // Once the features sheet reaches the nav (i.e. we've left the hero), the black
   // link tab turns see-through
   const [pastHero, setPastHero] = useState(false)
+  // Once the footer is fully open (scrolled to the bottom, or it fills the screen up to the bar),
+  // the bar's logo steps aside: the footer has its own, and the two would sit on top of each other
+  const [footerOpen, setFooterOpen] = useState(false)
   useEffect(() => {
     let raf = 0
     const check = () => {
       raf = 0
       const sheet = sheetRef.current
       if (sheet) setPastHero(sheet.getBoundingClientRect().top <= NAV_H)
+      const foot = document.querySelector('.lp-footer')
+      if (foot) {
+        const r = foot.getBoundingClientRect()
+        setFooterOpen(r.top <= NAV_H + 40 || r.bottom <= window.innerHeight + 2)
+      }
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(check) }
     check()
@@ -435,19 +436,20 @@ export function LandingPage() {
       }),
       { threshold: 0.1, rootMargin: '0px 0px -40px 0px' },
     )
-    document.querySelectorAll('.lp-root .reveal').forEach((el, i) => {
+    document.querySelectorAll('.lp-root .reveal:not(.visible)').forEach((el, i) => {
       ;(el as HTMLElement).style.transitionDelay = (i % 3) * 0.07 + 's'
       observer.observe(el)
     })
     return () => observer.disconnect()
-  }, [])
+    // again once desktop mode kicks in: the sections re-mount (PlainSection) with fresh elements
+  }, [tunnel])
 
   return (
     <div className="lp-root">
 
       {/* ── NAV ── */}
       <nav className={`lp-nav${pastHero ? ' nav-past-hero' : ''}`}>
-        <a href="#" className="logo" aria-label="Shortcut home"><BrandLogo shine /></a>
+        <a href="#" className="logo" aria-label="Shortcut home" data-away={footerOpen || undefined} tabIndex={footerOpen ? -1 : undefined}><BrandLogo shine /></a>
         <ul className="nav-links">
           <li>
             <a href="#" onClick={goHome}>Home</a>
@@ -484,7 +486,7 @@ export function LandingPage() {
 
       {/* ── HERO + FEATURES: hero pins while features slides over it ── */}
       <div className="hero-stack">
-      <section className="hero" ref={heroRef} data-covered={heroCovered || undefined}>
+      <section className="hero" ref={heroRef} data-covered={heroCovered || undefined} data-paused={heroPaused || undefined}>
         {/* Soft light shade, same as the closing CTA section */}
         <div className="hero-shade" aria-hidden />
         {/* Interactive dot field: lights up around the cursor, ripples on click */}
@@ -550,7 +552,7 @@ export function LandingPage() {
         className="section-wrap sheet"
         style={fx({ scale: sheetScale, borderTopLeftRadius: sheetRadius, borderTopRightRadius: sheetRadius })}
       >
-        <ProblemSection flip={tunnel} />
+        <ProblemSection />
       </motion.div>
       </div>
 
@@ -625,12 +627,14 @@ export function LandingPage() {
 
       {/* ── INSIDE SHORTCUT: trends, earnings and output on one board (keeps the #trends anchor for the nav) ── */}
       <Sec id="trends" variant="tilt" className="section-wrap">
-        <FlyIn on={tunnel} pieces=".bx-hint, .bx-inner"><InsightsSection /></FlyIn>
+        {/* plain reveal: heading, hint, then the board cards one by one (no pin, no fly-in) */}
+        <InsightsSection />
       </Sec>
 
       {/* ── SOCIAL PROOF ── */}
       <Sec id="proof" variant="tilt" className="section-wrap">
-        <FlyIn on={tunnel} pieces=".lx-quote, .lx-trend-rows"><ProofSection /></FlyIn>
+        {/* plain reveal: heading, the quote cards one by one, then the word rows (no pin, no fly-in) */}
+        <ProofSection />
       </Sec>
 
       {/* ── PRICING ── */}
@@ -639,7 +643,7 @@ export function LandingPage() {
           plans={PRICING_PLANS}
           eyebrow="Pricing"
           title="Simple pricing. Serious reels."
-          description={'Start free. Go Pro when your content takes off.'}
+          description={'Start free. Upgrade when your content takes off. Cancel anytime.'}
         />
       </SectionTransition>
 
@@ -654,7 +658,7 @@ export function LandingPage() {
       </div>
 
       {/* ── CTA ── */}
-      <section className="cta-section">
+      <section className={`cta-section${lite ? '' : ' cta-full'}`}>
         {/* One language per line, gliding across in alternating directions (decorative) */}
         <div className="lang-marquees" aria-hidden>
           {LANGUAGES.map((l, i) => (
@@ -726,6 +730,9 @@ export function LandingPage() {
             </ul>
           </FooterReveal>
         </div>
+
+        {/* the big SHORTCUT, each letter acting out a feature (desktop) */}
+        <FooterWordmark />
 
         <FooterReveal delay={0.4} className="footer-bottom">
           <span className="footer-copy">© 2026 {COMPANY.legalName}. All rights reserved.</span>

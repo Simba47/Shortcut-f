@@ -14,7 +14,7 @@ import { TransitionGlyph, TRANSITION_DRAG_TYPE, TRANSITION_DEFAULT_MS, playedTra
 import {
   VideoThumbnails, LAYOUT_COLORS, FRAME_ITEM_COLORS, frameItemColor, visibleLanes, thumbsFor, nearestThumb,
   ACCENT, SELECTED_RING, msToLabel, LANE_META, type LaneMeta, InsertTag, MEDIA_COLORS,
-  StateBadges, MediaIcon, MAX_ZOOM, STOCK_DRAG_TYPE, MEDIA_DRAG_TYPE, draggedIn, markTimelineOpened,
+  StateBadges, MediaIcon, MAX_ZOOM, MIN_ZOOM, STOCK_DRAG_TYPE, MEDIA_DRAG_TYPE, draggedIn, markTimelineOpened,
   type LaneCtl, type LaneCtlKey,
 } from '../SegmentTimeline'
 
@@ -405,7 +405,8 @@ export function Timeline({
     return () => clearTimeout(t)
   }, [laneHighlight]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Scale: at 1× the whole clip fills the width; zoomed in, the view scrolls along it ──
+  // ── Scale: at 1× the whole clip fills the width; zoomed in, the view scrolls along it; zoomed out
+  //    (below 1×), the clip takes part of the width with room after it ──
   const duration = (clipEndMs - clipStartMs) || safeDurationMs || 0
   const base = Math.max(120, viewW - PAD * 2)
   // (media dragged in past the end: the timeline grows to show all of it, as for a bar carried there)
@@ -1013,7 +1014,7 @@ export function Timeline({
         e.preventDefault()
         const k = e.ctrlKey && Math.abs(e.deltaY) < 40 ? 0.012 : 0.0026
         const z0 = zoomRef.current
-        const z = Math.round(Math.max(1, Math.min(MAX_ZOOM, z0 * Math.exp(-e.deltaY * k))) * 100) / 100
+        const z = Math.round(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z0 * Math.exp(-e.deltaY * k))) * 100) / 100
         if (z === z0) return
         const x = e.clientX - el.getBoundingClientRect().left - PAD
         zoomAnchor.current = { t: (scrollRef.current + x) / geoRef.current.pxPerMs, x }

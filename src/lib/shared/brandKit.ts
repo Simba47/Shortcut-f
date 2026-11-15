@@ -182,7 +182,7 @@ export const LOGO_MARGIN = 0.04
 
 // (size 58: the caption size a new kit starts at — user, 2026-11-12)
 export const DEFAULT_BRAND_CAPTIONS: BrandCaptions = {
-  on: false, template: null, animation: 'karaoke', font: null, size: 58, color: '#ffffff', highlight_color: '#ffe700',
+  on: false, template: null, animation: 'karaoke', font: null, size: 80, color: '#ffffff', highlight_color: '#ffe700',
   uppercase: false, words_per_line: null,
 }
 

@@ -8,7 +8,7 @@ export const AUTH = {
   brand: {
     home: 'Shortcut home',
     title: ['Long videos in.', 'Scroll-stopping shorts out.'],
-    lead: 'Turn any talk, podcast or stream into clips ready for Reels, Shorts and TikTok.',
+    lead: 'Turn any talk, podcast or stream into clips ready for Instagram Reels and YouTube Shorts.',
     fine: 'Free to start · No credit card',
     /**
      * The brand side's scenes (BrandScene): what the creator in each photo is saying, word by word;
