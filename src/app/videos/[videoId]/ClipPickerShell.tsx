@@ -1181,6 +1181,12 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // height. mmcH: Make my clips' height (null = the usual MMC_H, Ask AI takes the rest)
   const [mmcH, setMmcH] = useState<number | null>(null)
   const mmcRef = useRef<HTMLElement>(null)
+  // The lock over the AI tools while the transcript isn't read (only there while locked), and a short
+  // glow on it when the empty board's Make my clips points at it
+  const lockRef = useRef<HTMLDivElement>(null)
+  const [lockFlash, setLockFlash] = useState(false)
+  const lockFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (lockFlashTimer.current) clearTimeout(lockFlashTimer.current) }, [])
   const aiColRef = useRef<HTMLElement>(null)
   const clipsColRef = useRef<HTMLElement>(null)
   // What Ask AI keeps: its box and one-tap searches while it has nothing to show, more once results come
@@ -1425,6 +1431,18 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     })
   }
   const goToMakeClips = () => {
+    // Locked (the transcript isn't read yet): the card under the lock can't be pressed, so point at the
+    // lock instead — it says why and holds the next step (Unlock, Get credits, Try again). Before
+    // this the button did nothing at all (F2 bug 11).
+    const lock = lockRef.current
+    if (lock) {
+      lock.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      lock.querySelector<HTMLElement>('a[href], button:not(:disabled)')?.focus({ preventScroll: true })
+      setLockFlash(true)
+      if (lockFlashTimer.current) clearTimeout(lockFlashTimer.current)
+      lockFlashTimer.current = setTimeout(() => setLockFlash(false), 1400)
+      return
+    }
     const card = mmcRef.current
     if (!card) return
     card.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
@@ -2004,8 +2022,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       </div>
       {/* The lock */}
       <div className="absolute inset-0 flex items-start justify-center px-3 pt-16">
-        <div role="status" aria-live="polite" className="w-full max-w-[320px] flex flex-col gap-3 rounded-2xl p-4"
-          style={{ background: 'rgba(14,14,14,0.94)', boxShadow: '0 0 0 1px rgb(var(--cb-fg) / 0.1), 0 18px 40px -12px rgba(0,0,0,0.8)', backdropFilter: 'blur(6px)' }}>
+        <div ref={lockRef} role="status" aria-live="polite" data-flash={lockFlash || undefined} className="w-full max-w-[320px] flex flex-col gap-3 rounded-2xl p-4"
+          style={{ background: 'rgba(14,14,14,0.94)', boxShadow: lockFlash ? `0 0 0 2px ${ACCENT}, 0 0 28px -4px rgba(200,255,0,0.45), 0 18px 40px -12px rgba(0,0,0,0.8)` : '0 0 0 1px rgb(var(--cb-fg) / 0.1), 0 18px 40px -12px rgba(0,0,0,0.8)', backdropFilter: 'blur(6px)', transition: 'box-shadow 0.3s' }}>
           <div className="flex items-center gap-2.5">
             <span aria-hidden="true" className="shrink-0 w-9 h-9 rounded-xl grid place-items-center"
               style={{ background: 'rgba(200,255,0,0.1)', color: ACCENT, boxShadow: 'inset 0 0 0 1px rgba(200,255,0,0.25)' }}>
@@ -2253,7 +2271,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 action={{ label: 'New clip', onClick: goToNewClip }} />
             ) : (
               <EmptyState icon="auto" title="No clips yet"
-                text="Let AI make clips from the best moments, or describe what you want in Ask AI."
+                text={aiLocked
+                  ? 'Make my clips and Ask AI unlock once your video\u2019s transcript is in. You can make clips by hand meanwhile.'
+                  : 'Let AI make clips from the best moments, or describe what you want in Ask AI.'}
                 action={aiShown ? { label: 'Make my clips', onClick: goToMakeClips } : undefined} />
             ))}
             {boardClips.length > 0 && tabClips.length === 0 && (

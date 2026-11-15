@@ -29,6 +29,7 @@ import { insertsOf, insertedMs, piecesOf } from '@/modules/editor/inserts'
 import { isShot } from '@/modules/editor/shots'
 import { pictureOrWhole } from '@/modules/editor/pictureBox'
 import { setFramePicture } from '@/modules/editor/framePicture'
+import { transcriptWindowQuery } from '@/modules/editor/transcriptWindow'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -80,6 +81,8 @@ export function EditorShellMobile({
 }: Props) {
   // The picture inside the video's black bars (none: the whole frame): the views the editor makes keep inside it
   setFramePicture(pictureOrWhole((clip as { picture_box?: Parameters<typeof pictureOrWhole>[0] }).picture_box))
+  // Words fetched again ask for the clip's stretch of the transcript only, as the page loaded it (F2 bug 8)
+  const wordsWindowQuery = useMemo(() => transcriptWindowQuery(clip as unknown as Parameters<typeof transcriptWindowQuery>[0]), [clip])
   // Music: stored when picked (any audio, or a video's sound; up to 20 MB) so it's in the export
   const [musicUploads, setMusicUploads] = useState<Record<string, 'uploading' | 'failed'>>({})
   const [musicNotice, setMusicNotice] = useState<string | null>(null)
@@ -277,7 +280,7 @@ export function EditorShellMobile({
     const videoId = (clip as unknown as { video_id: string }).video_id
     const interval = setInterval(async () => {
       // (only this clip's own caption job keeps it waiting)
-      const res = await fetch(`/api/transcribe/words?video_id=${videoId}&clip_id=${clip.id}`)
+      const res = await fetch(`/api/transcribe/words?video_id=${videoId}&clip_id=${clip.id}${wordsWindowQuery}`)
       if (!res.ok) return
       const { words: newWords, video_status: vs, pending } = await res.json()
       if (newWords && clipHasWords(newWords)) {
@@ -308,7 +311,7 @@ export function EditorShellMobile({
       if (data.status === 'done' && refreshWordsOnDoneRef.current) {
         refreshWordsOnDoneRef.current = false
         const videoId = (clip as unknown as { video_id: string }).video_id
-        fetch(`/api/transcribe/words?video_id=${videoId}`).then(r => r.ok ? r.json() : null)
+        fetch(`/api/transcribe/words?video_id=${videoId}${wordsWindowQuery}`).then(r => r.ok ? r.json() : null)
           .then(d => { if (d?.words?.length) setWords(d.words) }).catch(() => {})
       }
       if (data.status === 'failed') setExportError('Render failed — try again')
@@ -526,7 +529,7 @@ export function EditorShellMobile({
         while (Date.now() < deadline) {
           await new Promise(r => setTimeout(r, 3000))
           if (retranscribeRunRef.current !== run) return
-          const r = await fetch(`/api/transcribe/words?video_id=${videoId}&since=${encodeURIComponent(queuedAt)}${jobId ? `&job=${jobId}` : ''}`)
+          const r = await fetch(`/api/transcribe/words?video_id=${videoId}&since=${encodeURIComponent(queuedAt)}${jobId ? `&job=${jobId}` : ''}${wordsWindowQuery}`)
           if (r.ok) {
             const { words: newWords, place } = await r.json()
             // Waiting its turn (many people making captions at once): say where it is in line

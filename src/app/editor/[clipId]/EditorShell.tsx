@@ -102,6 +102,7 @@ import { setFramePicture, framePicture, inFramePicture } from '@/modules/editor/
 import type { SegmentLocal, CropBoxLocal, FrameHold, FrameLayout, FrameLane, FrameItem, TransitionType } from '@chai-cut/shared'
 import { SPEED_MIN, SPEED_MAX } from '@chai-cut/shared'
 import { TransitionsPanel, TRANSITION_DEFAULT_MS, TRANSITION_KINDS, playedTransitionMs, type TransitionJoin } from '@/components/editor/TransitionsPanel'
+import { transcriptWindowQuery } from '@/modules/editor/transcriptWindow'
 
 type Tool = 'format' | 'subjects' | 'frames' | 'captions' | 'transitions' | 'text' | 'media' | 'music' | 'cleanup' | 'post' | 'brand'
 /** Media: the user's imported media, or Library (stock footage) */
@@ -280,6 +281,9 @@ export function EditorShell({
   // The main video waits where one goes in and carries on after it: the clip gets that much longer.
   // (Not together with removed parts yet: a clip has one or the other.)
   const storeSegments = useEditorStore(s => s.segments)
+  // The stretch of the transcript this clip can reach (as the page loaded it): words fetched again ask
+  // for the same stretch, never the whole video's (F2 bug 8)
+  const wordsWindowQuery = useMemo(() => transcriptWindowQuery(savedClip as unknown as Parameters<typeof transcriptWindowQuery>[0]), [savedClip])
   const ownVideoIdForInserts = (savedClip as unknown as { video_id: string }).video_id
   const inserts = useMemo(() => (trimmed ? [] : insertsOf(storeSegments, ownVideoIdForInserts)), [trimmed, storeSegments, ownVideoIdForInserts])
   const hasInserts = inserts.length > 0
@@ -922,10 +926,14 @@ export function EditorShell({
   const [originalVolume, setOriginalVolume] = useState(initialOriginalSound?.volume ?? 1)
   const [originalMuted, setOriginalMuted] = useState(initialOriginalSound?.muted ?? false)
   const originalSoundRef = useRef({ volume: originalVolume, muted: originalMuted })
-  const originalLoadedRef = useRef(true)
+  // The sound as last seen: only a real change saves. (A "skip the first run" flag here saved the clip
+  // each time the editor opened, because React runs effects twice when it checks them — F2 bug 7.)
+  const originalSeenRef = useRef({ volume: originalVolume, muted: originalMuted })
   useEffect(() => {
     originalSoundRef.current = { volume: originalVolume, muted: originalMuted }
-    if (originalLoadedRef.current) { originalLoadedRef.current = false; return }
+    const seen = originalSeenRef.current
+    if (seen.volume === originalVolume && seen.muted === originalMuted) return
+    originalSeenRef.current = { volume: originalVolume, muted: originalMuted }
     // A change is saved like any other edit (2.5 s later)
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
     noteEdited()
@@ -1359,7 +1367,7 @@ export function EditorShell({
     const videoId = (clip as unknown as { video_id: string }).video_id
     const interval = setInterval(async () => {
       // (only this clip's own caption job keeps it waiting)
-      const res = await fetch(`/api/transcribe/words?video_id=${videoId}&clip_id=${clip.id}`)
+      const res = await fetch(`/api/transcribe/words?video_id=${videoId}&clip_id=${clip.id}${wordsWindowQuery}`)
       if (!res.ok) return
       const { words: newWords, video_status: vs, pending } = await res.json()
       if (newWords && clipHasWords(newWords)) {
@@ -1393,7 +1401,7 @@ export function EditorShell({
       if (data.status === 'done' && refreshWordsOnDoneRef.current) {
         refreshWordsOnDoneRef.current = false
         const videoId = (clip as unknown as { video_id: string }).video_id
-        fetch(`/api/transcribe/words?video_id=${videoId}`).then(r => r.ok ? r.json() : null)
+        fetch(`/api/transcribe/words?video_id=${videoId}${wordsWindowQuery}`).then(r => r.ok ? r.json() : null)
           .then(d => { if (d?.words?.length) setWords(d.words) }).catch(() => {})
       }
       if (data.status === 'failed') { setExportError('The export didn’t finish'); restoreStaleAfterExport() }
@@ -1831,7 +1839,7 @@ export function EditorShell({
         while (Date.now() < deadline) {
           await new Promise(r => setTimeout(r, 3000))
           if (retranscribeRunRef.current !== run) return
-          const res = await fetch(`/api/transcribe/words?video_id=${videoId}&since=${encodeURIComponent(queuedAt)}${jobId ? `&job=${jobId}` : ''}`)
+          const res = await fetch(`/api/transcribe/words?video_id=${videoId}&since=${encodeURIComponent(queuedAt)}${jobId ? `&job=${jobId}` : ''}${wordsWindowQuery}`)
           if (res.ok) {
             const { words: newWords, failed, place } = await res.json()
             // Waiting its turn (many people making captions at once): say where it is in line

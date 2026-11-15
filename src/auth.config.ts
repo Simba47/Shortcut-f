@@ -1,5 +1,5 @@
 import type { NextAuthConfig } from 'next-auth'
-import { PUBLIC_PATHS } from './lib/publicPaths'
+import { isAuthPage, needsSignIn } from './lib/publicPaths'
 
 export const authConfig = {
   // AUTH_TRUST_HOST isn't reliably picked up on Railway (vs. Vercel, which sets it for you) —
@@ -14,16 +14,11 @@ export const authConfig = {
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = !!auth?.user
       const { pathname } = nextUrl
-      const isAuthPage =
-        pathname.startsWith('/login') ||
-        pathname.startsWith('/signup') ||
-        pathname.startsWith('/verify-otp') ||
-        pathname.startsWith('/forgot-password') ||
-        pathname.startsWith('/reset-password')
-      const isPublic = PUBLIC_PATHS.includes(pathname)
-      const isApi = pathname.startsWith('/api')
-      if (!isLoggedIn && !isAuthPage && !isPublic && !isApi) return false
-      if (isLoggedIn && isAuthPage) return Response.redirect(new URL('/dashboard', nextUrl))
+      // Signed out: sent to sign in only from the signed-in parts of the site. Public pages, the
+      // sign-in pages and the API pass (the API checks for itself), and so does an address that isn't
+      // a page, which shows Page not found (F2 bug 9: it used to show the sign-in page)
+      if (!isLoggedIn && needsSignIn(pathname)) return false
+      if (isLoggedIn && isAuthPage(pathname)) return Response.redirect(new URL('/dashboard', nextUrl))
       return true
     },
   },

@@ -8,6 +8,7 @@ import { EditorShellMobile } from './EditorShellMobile'
 import sql from '@/lib/db'
 import { cleanBrandOn } from '@/lib/shared/brandOn'
 import { brandCaptionWords } from '@/lib/brandWords'
+import { transcriptWindow } from '@/modules/editor/transcriptWindow'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import { GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
@@ -43,6 +44,8 @@ export default async function EditorPage({
     WHERE c.id = ${clipId}
   `
   if (!clip || clip.user_id !== user.id) notFound()
+  // Only the stretch of the transcript this clip can reach, not the whole video's (F2 bug 8)
+  const wordsWindow = transcriptWindow(clip as unknown as Parameters<typeof transcriptWindow>[0])
 
   // Fire all independent queries in parallel — one round-trip after the clip fetch
   const [
@@ -69,6 +72,7 @@ export default async function EditorPage({
           AND EXISTS (SELECT 1 FROM transcript_words WHERE transcript_id = t.id)
         ORDER BY t.created_at DESC LIMIT 1
       )
+        AND tw.start_ms < ${wordsWindow.to} AND tw.end_ms > ${wordsWindow.from}
       ORDER BY tw.start_ms
     `,
     sql`
