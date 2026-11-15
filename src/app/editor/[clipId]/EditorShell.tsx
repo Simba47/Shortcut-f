@@ -81,6 +81,7 @@ import { CAPTION_TEMPLATES, usesKeyWords } from '@/modules/captions/templates'
 import { useMediaStore } from '@/modules/media/store'
 import { rowsToLocal, normalizeCoverage, uncoveredRanges, defaultCropForSlot, msToLabel } from '@/modules/editor/utils'
 import { isShot, flattenShots, toSaved, asMainPart } from '@/modules/editor/shots'
+import { endCut } from '@/modules/editor/endCut'
 import { stateFromRows, type SegmentRow } from '@/modules/editor/loadRows'
 import { applyGroupShots, applyFormatSpans } from '@/modules/editor/groupShots'
 import { LAYOUT_SLOT_COUNT } from '@chai-cut/shared'
@@ -3592,7 +3593,17 @@ export function EditorShell({
 
   function trimSelectedTo(edge: 'start' | 'end') {
     if (!activeSegment) return
-    setSegmentEdge(activeSegment.id, edge, currentTimeMs, clipLengthMs)
+    const s = activeSegment, t = currentTimeMs
+    // [ / ] trim the picked part to the playhead as dragging that edge there does: the stretch passed
+    // over is cut out and the clip gets shorter (user, 2026-11-15: ] on the last part used to move
+    // only its layout's edge, the rest of the clip playing on in the default framing — still 2 min).
+    // A video on a row, or a database that can't save cuts yet: its edge moves, as before
+    if (isShot(s, mainVideoId) || !cutOk) { setSegmentEdge(s.id, edge, t, clipLengthMs); return }
+    if (t <= s.start_ms + 50 || t >= s.end_ms - 50) {
+      notifyLocked(edge === 'start' ? 'Put the playhead inside the part, after its start' : 'Put the playhead inside the part, before its end')
+      return
+    }
+    trimByEdge(s.id, edge, edge === 'start' ? s.start_ms : s.end_ms, t)
   }
 
   function handleResetPositions() {
@@ -4875,6 +4886,9 @@ export function EditorShell({
     if (stored && !isGapPart(stored, mainVideoId) && !isFrameLayout(stored.layout)) {
       if (stored.locked) { notifyLocked('This part is locked — unlock it first'); return }
       pause()
+      // The main video's last part: the clip ends there instead (endCut.ts — user, 2026-11-15: a deleted
+      // end exported as black). Read from the stores, not this render: several parts are deleted in a row
+      if (cutOk && cutAtEnd(segId)) { setActiveSegmentId(null); return }
       updateSegment(segId, { hidden: true, muted: true, crop_boxes: stored.crop_boxes.map((b, i) => (i === 0 ? { ...b, hidden: true } : b)) })
       setActiveSegmentId(null)
       return
@@ -4884,6 +4898,30 @@ export function EditorShell({
     const length = seg.end_ms - seg.start_ms
     if (!cutOk || clipLengthMs - length < MIN_CLIP_LEFT_MS) handleDeleteFormat(segId)
     else removePart(seg.start_ms, seg.end_ms)
+  }
+
+  /**
+   * Deleting part `segId` of the main row where nothing with video comes after it: that stretch (and
+   * empty spaces just before it) is cut out, so the clip ends there — as an edge dragged in would
+   * (removePart: one undo step, saved as a removed part, the export leaves it out). False — left to
+   * Delete's empty space — when something plays there, something there is locked, or the clip would
+   * be under a second.
+   */
+  function cutAtEnd(segId: string): boolean {
+    const editor = useEditorStore.getState(), media = useMediaStore.getState()
+    const r = endCut({
+      segments: editor.segments, mainVideoId, partId: segId,
+      onTop: [...media.overlays, ...media.textOverlays],
+      isShot: s => isShot(s, mainVideoId), isTail,
+    })
+    if (!r || r.start < MIN_CLIP_LEFT_MS) return false
+    const state: TimedState = {
+      segments: editor.segments, keyframes: editor.keyframes,
+      overlays: media.overlays, textOverlays: media.textOverlays, audioTracks: media.audioTracks, transitions: media.transitions,
+    }
+    if (lockedInRange(state, r.start, r.end).length) return false
+    removePart(r.start, r.end)
+    return true
   }
 
   function askRemoveFrame(segId: string) {
