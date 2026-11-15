@@ -725,6 +725,134 @@ html[data-theme="light"] .ai-bar-pct { color: #4d7c0f; }
   .mmc-opt .mmc-opt-box, .mmc-opt .mmc-opt-icon svg * { animation: none !important; }
 }
 
+/* Make my clips (user, 2026-11-15): the Captions tile's name opens its styles (its tick turns them on / off);
+   Layout, where Split screen was, opens the shape and layouts; both show what's picked under their name */
+.mmc-opt-open { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; height: 100%; padding: 0; text-align: left;
+  background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
+button.mmc-opt.mmc-opt-open { width: 100%; padding: 0 8px 0 9px; font-size: 12px; font-weight: 600; letter-spacing: -.01em; }
+.mmc-opt-open:disabled { cursor: not-allowed; }
+.mmc-opt-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 1.15; }
+.mmc-opt-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 500; color: rgb(var(--cb-fg) / 0.5); }
+button.mmc-opt-box { padding: 0; border: 0; cursor: pointer; }
+button.mmc-opt-box::after { content: ''; position: absolute; inset: -9px; }
+button.mmc-opt-box:disabled { cursor: not-allowed; }
+button.mmc-opt-box:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
+.mmc-opt[data-open] { box-shadow: inset 0 0 0 1px rgba(200,255,0,0.45); }
+.mmc-opt[data-open] .mmc-pick-chev { transform: rotate(180deg); }
+.mmc-opt .mmc-pick-chev { margin-left: 0; }
+
+/* (user, 2026-11-15: "clumsy") Make my clips as one clean list: rows in a rounded group, a hairline between them;
+   each row its picture, name, what's picked in grey (cut short with … when long), and an arrow or a switch */
+.mmc-list { display: flex; flex-direction: column; border-radius: 14px; overflow: hidden;
+  background: linear-gradient(180deg, rgb(var(--cb-fg) / 0.035), rgb(var(--cb-fg) / 0.015)); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.07); }
+.mmc-li { position: relative; display: flex; align-items: center; gap: 8px; min-height: 44px; padding-right: 12px; transition: background-color .15s; }
+.mmc-li + .mmc-li::before { content: ''; position: absolute; top: 0; left: 38px; right: 0; height: 1px; background: rgb(var(--cb-fg) / 0.06); }
+.mmc-li:hover, .mmc-li[data-open] { background: rgb(var(--cb-fg) / 0.04); }
+.mmc-li[data-open] { box-shadow: inset 2px 0 0 #c8ff00; }
+.mmc-li-main { flex: 1 1 auto; min-width: 0; align-self: stretch; display: flex; align-items: center; gap: 10px; padding: 0 0 0 12px;
+  background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.mmc-li-main:disabled { cursor: not-allowed; }
+.mmc-li-main:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.55); border-radius: 10px; }
+.mmc-li-static { cursor: default; flex: 0 0 auto; }
+.mmc-li-icon { flex-shrink: 0; width: 16px; display: grid; place-items: center; color: rgb(var(--cb-fg) / 0.7); }
+.mmc-li-name { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--cb-text); white-space: nowrap; }
+.mmc-li-value { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right;
+  font-size: 11.5px; font-weight: 500; color: rgb(var(--cb-fg) / 0.5); }
+.mmc-li-chev { flex-shrink: 0; color: rgb(var(--cb-fg) / 0.35); transition: transform .15s, color .15s; }
+.mmc-li:hover .mmc-li-chev { color: rgb(var(--cb-fg) / 0.7); transform: translateX(1px); }
+.mmc-li[data-dim] .mmc-li-icon, .mmc-li[data-dim] .mmc-li-name { color: rgb(var(--cb-fg) / 0.45); }
+.mmc-li .mmc-switch:disabled { cursor: not-allowed; opacity: .5; }
+[data-off] > div > .mmc-list { opacity: .55; }
+/* Brand's choice at the row's end: no box, the name in grey and an arrow */
+.mmc-pick-btn[data-bare] { flex: 1 1 auto; height: 44px; justify-content: flex-end; padding: 0; border: 0; background: none; box-shadow: none; border-radius: 0;
+  font-size: 11.5px; font-weight: 500; color: rgb(var(--cb-fg) / 0.5); }
+.mmc-pick-btn[data-bare] .mmc-pick-name { flex: 0 1 auto; }
+.mmc-pick-btn[data-bare] .mmc-pick-chev { margin-left: 2px; color: rgb(var(--cb-fg) / 0.35); }
+.mmc-pick-btn[data-bare]:not(:disabled):hover, .mmc-pick-btn[data-bare][aria-expanded="true"] { background: none; box-shadow: none; color: rgb(var(--cb-fg) / 0.8); }
+.mmc-pick-btn[data-bare]:focus-visible { box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.55); border-radius: 8px; }
+[data-theme="light"] .mmc-pick-btn[data-bare] { background: none; }
+
+/* the box they open: floating over the page, as wide as the card, scrolling inside when tall */
+.mmc-pop { position: fixed; z-index: 90; overflow-y: auto; overscroll-behavior: contain; padding: 14px; border-radius: 16px;
+  background: var(--cb-pop); color: var(--cb-text); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.1), 0 24px 48px -16px rgb(0 0 0 / 0.75);
+  animation: mmc-pop-in .16s ease-out; }
+@keyframes mmc-pop-in { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .mmc-pop { animation: none; } }
+.mmc-pop-wait { height: 120px; }
+.mmc-pop-heading { font-size: 12px; font-weight: 600; color: rgb(var(--cb-fg) / 0.75); }
+.mmc-pop-tick { position: absolute; top: 4px; right: 4px; width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center;
+  background: #c8ff00; color: #000; }
+/* Shape: four outlines at their own proportions */
+.mmc-shapes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.mmc-shape { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; padding: 6px 2px 5px; border-radius: 10px; cursor: pointer;
+  background: rgb(var(--cb-fg) / 0.03); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.07); transition: background-color .15s, box-shadow .15s; }
+.mmc-shape:hover { background: rgb(var(--cb-fg) / 0.06); }
+.mmc-shape-box { height: 50px; display: grid; place-items: center; }
+.mmc-shape-box > span { position: relative; border-radius: 5px; background: rgb(var(--cb-fg) / 0.12); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.18); }
+.mmc-shape-box .mmc-pop-tick { top: -5px; right: -5px; }
+.mmc-shape[data-on] { box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.6); }
+.mmc-shape[data-on] .mmc-shape-box > span { background: rgb(var(--cb-fg) / 0.22); }
+.mmc-shape-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; color: rgb(var(--cb-fg) / 0.6); }
+.mmc-shape[data-on] .mmc-shape-name { color: var(--cb-text); }
+/* Layouts AI can use: little screens, ticked */
+.mmc-lays { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.mmc-lay { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; padding: 0; background: none; border: 0; cursor: pointer; }
+.mmc-lay-screen { position: relative; width: 100%; max-width: 64px; aspect-ratio: 9 / 16; border-radius: 9px; overflow: hidden; background: #0d0d0f;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1); opacity: .5; transition: opacity .15s, box-shadow .15s; }
+.mmc-lay:hover .mmc-lay-screen { opacity: .8; }
+.mmc-lay[data-on] .mmc-lay-screen { opacity: 1; box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.6); }
+.mmc-lay[aria-disabled] { cursor: default; }
+.mmc-lay-pic { display: block; width: 100%; height: 100%; }
+.mmc-lay-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; color: rgb(var(--cb-fg) / 0.55); }
+.mmc-lay[data-on] .mmc-lay-name { color: var(--cb-text); }
+/* Frame: the editor's frame pictures */
+.mmc-frames { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mmc-frame { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; padding: 7px 4px 6px; border-radius: 11px; cursor: pointer;
+  background: rgb(var(--cb-fg) / 0.03); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.07); transition: background-color .15s, box-shadow .15s; }
+.mmc-frame:hover { background: rgb(var(--cb-fg) / 0.06); }
+.mmc-frame[data-on] { box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.6); }
+.mmc-frame-pic { position: relative; width: 42px; height: 75px; display: grid; place-items: center; }
+.mmc-frame-pic .mmc-pop-tick { top: -4px; right: -6px; }
+.mmc-frame-none { border-radius: 7px; color: rgb(var(--cb-fg) / 0.5); border: 1px dashed rgb(var(--cb-fg) / 0.25); }
+.mmc-frame-name { max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere;
+  text-align: center; line-height: 1.2; font-size: 10.5px; font-weight: 600; color: rgb(var(--cb-fg) / 0.6); }
+.mmc-frame[data-on] .mmc-frame-name { color: var(--cb-text); }
+/* Captions on / off, and the styles (dimmed while off) */
+.mmc-switch { flex-shrink: 0; position: relative; width: 32px; height: 18px; border-radius: 99px; border: 0; padding: 0; cursor: pointer;
+  background: rgb(var(--cb-fg) / 0.18); transition: background-color .15s; }
+.mmc-switch > span { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.mmc-switch[data-on] { background: #c8ff00; }
+.mmc-switch[data-on] > span { transform: translateX(14px); background: #000; }
+.mmc-switch:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
+/* Over the video preview (user, 2026-11-15): the box fills the centre column, its name and ✕ on top, its body scrolling */
+.mmc-pop[data-over] { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.mmc-pop-head { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px 16px; border-bottom: 1px solid rgb(var(--cb-fg) / 0.08); }
+.mmc-pop-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 700; }
+.mmc-pop-close { flex-shrink: 0; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; border: 0; cursor: pointer;
+  background: rgb(var(--cb-fg) / 0.06); color: rgb(var(--cb-fg) / 0.75); transition: background-color .15s; }
+.mmc-pop-close:hover { background: rgb(var(--cb-fg) / 0.12); }
+.mmc-pop[data-over] .mmc-pop-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px 18px; }
+/* wider there: more to a row */
+.mmc-pop[data-over] .mmc-lays, .mmc-pop[data-over] .mmc-shapes { max-width: 460px; }
+.mmc-pop[data-over] .mmc-frames { max-width: 460px; }
+/* Layouts on a frame of the video: its parts, a hairline between them */
+.mmc-lay-photo { position: absolute; inset: 0; background: #000; }
+.mmc-lay-part { position: absolute; background-repeat: no-repeat; box-shadow: 0 0 0 0.5px #000; }
+.mmc-lay-blur { filter: blur(6px) brightness(.55); transform: scale(1.15); }
+/* Title styles: a dark little screen with "Your title" in each look */
+.mmc-titles { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 6px; }
+.mmc-title { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 4px 4px 6px; border-radius: 11px; cursor: pointer; border: 0;
+  background: rgb(var(--cb-fg) / 0.03); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.07); transition: background-color .15s, box-shadow .15s; }
+.mmc-title:hover { background: rgb(var(--cb-fg) / 0.06); }
+.mmc-title[data-on] { box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.6); }
+.mmc-title-screen { position: relative; height: 54px; border-radius: 8px; overflow: hidden; display: grid; place-items: center; padding: 0 6px;
+  background: linear-gradient(160deg, #3a3a40, #17171a); }
+.mmc-title-text { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mmc-title-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; color: rgb(var(--cb-fg) / 0.6); text-align: center; }
+.mmc-title[data-on] .mmc-title-name { color: var(--cb-text); }
+.mmc-pop-styles { transition: opacity .15s; }
+.mmc-pop-styles[data-off] { opacity: .4; }
+
 /* Captions in / Title in: dark dropdowns (the list that opens is dark too) */
 .mmc-row { transition: opacity .15s; }
 .mmc-row[data-off] { opacity: .38; }
@@ -3347,6 +3475,11 @@ div:has(> .vscan[data-on][data-mode="find"]) > .sp .sp-controls { opacity: 0; vi
 /* Unseen: never opened — an open ring, not a dot */
 .cb-state[data-state="unseen"] { background: transparent; border-style: dashed; }
 .cb-state[data-state="unseen"] > i { background: transparent; box-shadow: inset 0 0 0 1px var(--c); }
+/* Make my clips cards: what was ticked before the run (Captions, Title…), quiet grey tags */
+.cb-made { display: inline-flex; align-items: center; gap: 4px; max-width: 120px; padding: 1px 6px; border-radius: 6px;
+  font-size: 10px; font-weight: 600; color: rgb(var(--cb-fg) / 0.6); border: 1px solid rgb(var(--cb-fg) / 0.12); }
+.cb-made > svg { flex-shrink: 0; }
+.cb-made > span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cbb-tag[data-add]:hover { color: rgb(var(--cb-fg) / 0.9); border-color: rgba(200,255,0,0.5); }
 .cb-tab { border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.02); transition: background-color .15s, border-color .15s, color .15s; }
 .cb-tab:hover { background: rgba(255, 255, 255, 0.06); }
