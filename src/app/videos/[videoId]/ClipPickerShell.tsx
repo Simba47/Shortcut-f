@@ -160,7 +160,7 @@ type AutoOption = 'captions' | 'title' | 'motion' | 'layouts'
 const AUTO_OPTIONS: Array<{ id: AutoOption; label: string; tip: string }> = [
   { id: 'captions', label: 'Captions', tip: 'Word-by-word captions at the bottom' },
   { id: 'title', label: 'Title', tip: 'A short hook as a title over the first 3 seconds' },
-  { id: 'motion', label: 'Follow people', tip: 'The frame follows people as they move. Off: it holds still in each shot' },
+  // (user, 2026-11-15: the Follow people tile is gone; the frame always follows people — motion stays on)
   { id: 'layouts', label: 'Split screen', tip: 'Split and trio when 2 or more people are in the shot. Off: always vertical, on one person' },
 ]
 // Each option's little picture (a 16 × 16 drawing): what it does, in one glance. The marked parts
@@ -383,7 +383,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(AUTO_OPTIONS_KEY) ?? 'null') as Partial<Record<AutoOption, boolean>> | null
-      if (saved) setAutoOpts(o => ({ ...o, ...saved }))
+      if (saved) setAutoOpts(o => ({ ...o, ...saved, motion: true }))   // (no tile for it any more: always on)
       const lang = JSON.parse(localStorage.getItem(AUTO_LANGUAGE_KEY) ?? 'null') as { caption?: string; title?: string } | null
       if (CAPTION_LANGUAGES.some(l => l.id === lang?.caption)) setCaptionLang(lang!.caption as CaptionLanguage)
       if (TITLE_LANGUAGES.some(l => l.id === lang?.title)) setTitleLang(lang!.title as TitleLanguage)
@@ -1613,9 +1613,10 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             how many → what each clip gets → Make clips */}
         <div className="flex flex-col gap-2">
         <p id={`mmc-gets-${video.id}`} className="mmc-heading">Each clip gets</p>
-        {/* What AI adds: four tiles, each a checkbox — its little picture turns white and a lime tick
-            shows on the right when it's on (styles: .mmc-opt in globals.css) */}
-        <div className="grid grid-cols-2 gap-1.5" role="group" aria-labelledby={`mmc-gets-${video.id}`}>
+        {/* What AI adds: three tiles, each a checkbox — its little picture turns white and a lime tick
+            shows on the right when it's on (styles: .mmc-opt in globals.css). Two on top, the third
+            across the full width below, so none sits alone half-width */}
+        <div className="grid grid-cols-2 gap-1.5 [&>*:last-child:nth-child(odd)]:col-span-2" role="group" aria-labelledby={`mmc-gets-${video.id}`}>
           {AUTO_OPTIONS.map(o => (
             <label key={o.id} className="mmc-opt" data-on={autoOpts[o.id] || undefined} data-off={autoRunning || undefined}>
               <input type="checkbox" className="sr-only" checked={autoOpts[o.id]} disabled={autoRunning}

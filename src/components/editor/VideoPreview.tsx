@@ -10,6 +10,7 @@ import { emojiFamily, captionEmojiFamily } from '@/modules/editor/emojiFont'
 import { LAYOUT_COLORS } from './SegmentTimeline'
 import type { RefObject } from 'react'
 import type { FrameLayout, SegmentLocal, Overlay, TextOverlay as TextOverlayType, CaptionStyle, TranscriptWord, FrameItem, FrameLane, CornerStyle } from '@chai-cut/shared'
+import { DEFAULT_CAPTION_STYLE } from '@chai-cut/shared'
 import { BG_PAD, shownText, textCss, textReplayElapsed, withAlpha, wrapTextLines, TEXT_LINE_EM, MIN_TEXT_W, MIN_TEXT_H } from '@/modules/editor/textStyle'
 import type { BoxPosition } from '@/lib/interpolation'
 import type { TextCase } from './CaptionStyler'
@@ -1540,7 +1541,7 @@ function drawPresetCaptions(
   const baseFont: DrawFont = (ownFont ? templateFont(tpl.font) : null) ?? { family: plain.family, em: plain.em, weight: 700, italic: false }
   const liveFont = ownFont && tpl.liveFont ? templateFont(tpl.liveFont) : null
   // The caption size as libass takes it: every font is sized so its full height is this
-  const lineH = (style.size ?? 52) * (tpl && latin ? tpl.size / 100 : 1) * k
+  const lineH = (style.size ?? DEFAULT_CAPTION_STYLE.size) * (tpl && latin ? tpl.size / 100 : 1) * k
   const fontOf = (f: DrawFont, scale: number) =>
     `${f.italic ? 'italic ' : ''}${f.weight} ${lineH * f.em * scale}px ${captionEmojiFamily(f.em)}, "${f.family}", sans-serif`
   const lineStart = chunk[0].start_ms
@@ -1719,7 +1720,7 @@ function drawCaptionsCentred(
   // size — user, 2026-11-04; the export's Noto fonts follow any font for letters it doesn't have)
   const font       = captionFont(style.language === 'roman' ? 'roboto' : (style.font ?? 'noto-sans-telugu'))
   const scriptFonts = style.language === 'roman' ? '' : SCRIPT_FALLBACKS.map(id => `"${exportFont(id).family}", `).join('')
-  const fontSize   = Math.round((style.size ?? 52) * k * font.em)
+  const fontSize   = Math.round((style.size ?? DEFAULT_CAPTION_STYLE.size) * k * font.em)
   const lineHeight = Math.round(fontSize * 1.4)
   const PAD_X      = Math.round(W * 0.05)
   const maxLineW   = W - PAD_X * 2
@@ -2807,7 +2808,7 @@ export function OutputCanvas({
           position_x={captionStyle?.position_x ?? 0.5}
           inBand={!!captionBandAt(activeSegment, currentTimeMs, false)}
           inStrip={captionStyleNow?.position_y == null && !!captionBandAt(activeSegment, currentTimeMs)}
-          size={captionStyleNow?.size ?? 52}
+          size={captionStyleNow?.size ?? DEFAULT_CAPTION_STYLE.size}
           onMove={onCaptionPositionChange}
           onSize={onCaptionSizeChange}
           onTap={onCaptionTap}

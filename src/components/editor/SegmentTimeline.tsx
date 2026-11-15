@@ -389,11 +389,13 @@ export function msToLabel(ms: number): string {
   return `${m}:${String(s % 60).padStart(2, '0')}`
 }
 
-export const ZOOM_STEPS = [1, 1.25, 1.5, 2, 3, 4, 6, 8]
+// (below 1x the whole clip takes only part of the width, with room after it: zoomed out)
+export const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8]
+export const MIN_ZOOM = ZOOM_STEPS[0]
 export const MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1]
 /** The next zoom step out (-1) or in (1) from any zoom — a pinch can leave it between steps */
 export function zoomStep(zoom: number, dir: 1 | -1): number {
-  return dir > 0 ? (ZOOM_STEPS.find(z => z > zoom + 0.001) ?? MAX_ZOOM) : ([...ZOOM_STEPS].reverse().find(z => z < zoom - 0.001) ?? 1)
+  return dir > 0 ? (ZOOM_STEPS.find(z => z > zoom + 0.001) ?? MAX_ZOOM) : ([...ZOOM_STEPS].reverse().find(z => z < zoom - 0.001) ?? MIN_ZOOM)
 }
 /** A zoom as shown on its button: 1.25×, 1.7×, 3× */
 export const zoomLabel = (zoom: number) => `${Math.round(zoom * 100) / 100}`
@@ -785,7 +787,7 @@ export function SegmentTimeline({
         // A pinch sends small steps, a mouse wheel ~100 per notch: each notch about ×1.3
         const k = e.ctrlKey && Math.abs(e.deltaY) < 40 ? 0.012 : 0.0026
         const z0 = zoomRef.current
-        const z = Math.round(Math.max(1, Math.min(MAX_ZOOM, z0 * Math.exp(-e.deltaY * k))) * 100) / 100
+        const z = Math.round(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z0 * Math.exp(-e.deltaY * k))) * 100) / 100
         if (z === z0) return
         const rect = el.getBoundingClientRect()
         const x = e.clientX - rect.left

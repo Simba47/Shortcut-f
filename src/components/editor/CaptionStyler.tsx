@@ -679,12 +679,12 @@ export function CaptionStyler({
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between">
           <span className="cap-label">Size</span>
-          <span className="cap-value">{style.size ?? 52}</span>
+          <span className="cap-value">{style.size ?? DEFAULT_CAPTION_STYLE.size}</span>
         </div>
-        <input type="range" min={20} max={100} step={2} value={style.size ?? 52}
+        <input type="range" min={20} max={100} step={2} value={style.size ?? DEFAULT_CAPTION_STYLE.size}
           onChange={e => onChange({ size: Number(e.target.value) })}
           aria-label="Caption size"
-          className="ed-zoom-range w-full" style={{ '--p': `${(((style.size ?? 52) - 20) / 80) * 100}%` } as React.CSSProperties} />
+          className="ed-zoom-range w-full" style={{ '--p': `${(((style.size ?? DEFAULT_CAPTION_STYLE.size) - 20) / 80) * 100}%` } as React.CSSProperties} />
         {/* Styles that narrow their words to fit the width (modules/captions/creator.ts): a long word stops
             growing early, so Size seemed to do nothing (user, 2026-11-12) */}
         {tpl?.look && FITS_WIDTH.has(tpl.look) && (

@@ -65,7 +65,11 @@ function Art({ id }: { id: string }) {
     case 'brand':        // your logo, colours and font
       return (
         <div className="ft-a ft-a-brand">
-          <span className="ft-a-logo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 4H9.5a4.5 4.5 0 0 0 0 9h5a2.5 2.5 0 0 1 0 5H6" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" /></svg></span>
+          {/* an empty logo slot: the visitor's own logo goes here */}
+          <span className="ft-a-logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5" /><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" /></svg>
+            <em>Logo</em>
+          </span>
           <span className="ft-a-font">Aa</span>
           <div className="ft-a-swatches"><i style={{ background: '#c8ff00' }} /><i style={{ background: '#ffffff' }} /><i style={{ background: '#38bdf8' }} /><i style={{ background: '#18181b' }} /></div>
         </div>
@@ -92,11 +96,21 @@ function Art({ id }: { id: string }) {
       return (
         <div className="ft-a ft-a-post">
           <span className="ft-a-clip" style={VIDEO(2, '47% 40%')} />
-          <svg className="ft-a-lines" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true"><path d="M30 30 C 50 30, 50 10, 70 10 M30 30 L70 30 M30 30 C 50 30, 50 50, 70 50" /></svg>
+          <svg className="ft-a-lines" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true"><path d="M0 30 C 45 30, 45 10, 100 10 M0 30 L100 30 M0 30 C 45 30, 45 50, 100 50" /></svg>
           <div className="ft-a-plats">
-            <span className="yt">▶<em>{TICK}</em></span>
-            <span className="ig"><i /><em>{TICK}</em></span>
-            <span className="tt">♪<em>{TICK}</em></span>
+            {/* YouTube Shorts · Instagram Reels · download the MP4 (to post anywhere else) */}
+            <span className="yt" title="YouTube Shorts">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5.5" width="19" height="13" rx="4" fill="#fff" /><path d="M10 9.2v5.6l4.8-2.8z" fill="#ff0033" /></svg>
+              <em>{TICK}</em>
+            </span>
+            <span className="ig" title="Instagram Reels">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4.5" /><circle cx="12" cy="12" r="3.6" /><circle cx="16.6" cy="7.4" r=".9" fill="#fff" stroke="none" /></svg>
+              <em>{TICK}</em>
+            </span>
+            <span className="dl" title="Download">
+              <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5" /><path d="M5 19h14" /></svg>
+              <em>{TICK}</em>
+            </span>
           </div>
         </div>
       )
@@ -189,7 +203,6 @@ export function FeatureTunnel({ eyebrow, title, items }: { eyebrow: string; titl
   return (
     <div ref={ref} className="ft" style={{ height: `${Math.max(380, items.length * 55)}vh` }}>
       <div className="ft-stage">
-        <div className="ft-grid" aria-hidden="true" />
         <div className="ft-glow" aria-hidden="true" />
         <div className="ft-ring" aria-hidden="true" />
         <div className="ft-ring ft-ring-2" aria-hidden="true" />

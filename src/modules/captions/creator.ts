@@ -1,4 +1,5 @@
 import type { CaptionStyle } from '@chai-cut/shared'
+import { DEFAULT_CAPTION_STYLE } from '@chai-cut/shared'
 import { TEMPLATE_FONTS, templateFontFamily, type CaptionTemplate, type CreatorLook } from './templates'
 
 /**
@@ -140,7 +141,7 @@ export function drawCreatorCaptions(
   const k = W / 1080
   const color = style.color ?? tpl.color
   const hl = style.highlight_color ?? tpl.hl
-  const S = (style.size ?? 52) * (tpl.size / 100) * k
+  const S = (style.size ?? DEFAULT_CAPTION_STYLE.size) * (tpl.size / 100) * k
   const keyN = S * (tpl.keyScale ?? 100) / 100
   // (a line in another script: its Noto font, in the style's weight and slant)
   const script = scriptFont(line.map(w => w.word).join(' '))

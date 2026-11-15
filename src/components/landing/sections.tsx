@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { VelocityMarquee } from '@/components/ui/velocity-marquee'
 import { LayoutGroup, motion } from 'framer-motion'
-import { useProblemFlip } from '@/components/landing/problem-flip'
 
 /**
  * Landing-page sections for the "Turn every video into income" story (styles: .lx-* in
@@ -14,10 +13,10 @@ import { useProblemFlip } from '@/components/landing/problem-flip'
 
 // ── Problem ─────────────────────────────────────────────────────────────────────
 type PainArt = 'hours' | 'crop' | 'blind'
-const PAINS: { art: PainArt; title: string; desc: string; fix: string; href: string }[] = [
-  { art: 'hours', title: 'Hours per video', desc: 'Finding moments, cropping, captioning, exporting. One long video can eat your whole afternoon.', fix: 'One upload, a week of clips', href: '#process' },
-  { art: 'crop', title: 'AI that gets it wrong', desc: 'The crop drifts off the speaker, the cut lands mid-sentence, and fixing it means opening a timeline.', fix: 'Steer it right while it plays', href: '#process' },
-  { art: 'blind', title: 'Posting blind', desc: 'You don’t know which topics are hot or which clips earned, so you can’t double down on what works.', fix: 'See what’s trending and earning', href: '#trends' },
+const PAINS: { art: PainArt; title: string; desc: string; miss: string; fix: string; href: string }[] = [
+  { art: 'hours', title: 'Hours per video', desc: 'Finding, cropping, captioning, exporting. One video eats your afternoon.', miss: 'A whole afternoon', fix: 'One upload, a week of clips', href: '#process' },
+  { art: 'crop', title: 'AI that gets it wrong', desc: 'The crop drifts off the speaker. Fixing it means opening a timeline.', miss: 'Fix it on a timeline', fix: 'Steer it right while it plays', href: '#process' },
+  { art: 'blind', title: 'Posting blind', desc: 'No idea which topics are hot or which clips earned.', miss: 'Guessing', fix: 'See what’s trending and earning', href: '#trends' },
 ]
 const CHORES = ['Find', 'Crop', 'Caption', 'Export']
 
@@ -29,17 +28,20 @@ function HoursArt() {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setSecs(3 * 3600 + 47 * 60 + 12); return }
     // Ticks only while it can be seen (on screen, the tab showing): off screen it used to redraw 12×
     // a second for as long as the page was open
+    // It starts only once the cards have risen in (about 1s after it first shows), so it doesn't
+    // redraw while they're moving
     let id: ReturnType<typeof setInterval> | null = null
-    let seen = false
+    let seen = false, ready = false, wait: ReturnType<typeof setTimeout> | null = null
     const run = () => {
-      const want = seen && !document.hidden
+      if (seen && !ready && !wait) wait = setTimeout(() => { ready = true; run() }, 1000)
+      const want = seen && ready && !document.hidden
       if (want && !id) id = setInterval(() => setSecs(s => (s + 97) % (4 * 3600)), 80)
       else if (!want && id) { clearInterval(id); id = null }
     }
     const io = new IntersectionObserver(([e]) => { seen = e.isIntersecting; run() })
     if (ref.current) io.observe(ref.current)
     document.addEventListener('visibilitychange', run)
-    return () => { io.disconnect(); document.removeEventListener('visibilitychange', run); if (id) clearInterval(id) }
+    return () => { io.disconnect(); document.removeEventListener('visibilitychange', run); if (id) clearInterval(id); if (wait) clearTimeout(wait) }
   }, [])
   const hh = Math.floor(secs / 3600), mm = Math.floor(secs / 60) % 60, ss = secs % 60
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -52,15 +54,42 @@ function HoursArt() {
   )
 }
 
-/** A 9:16 crop drifting off the speaker, flagged, then snapping back */
+/**
+ * The mistake, then the fix, in a 9:16 phone (styles: .lx-steer-* in app/landing.css; one 6 s loop):
+ * the frame drifts and the speaker slides half out of shot, a red "Off the speaker" tag pops up and the
+ * caption cuts off; a cursor drags the frame back, the speaker snaps to centre, the tag turns into
+ * "Steered" and the caption finishes.
+ */
 function CropArt() {
   return (
-    <div className="lx-pa lx-pa-crop" aria-hidden="true">
-      <div className="lx-pa-frame">
-        <span className="lx-pa-bokeh" /><span className="lx-pa-person"><i /><b /></span>
-        <span className="lx-pa-person lx-pa-person-2"><i /><b /></span>
-        <span className="lx-pa-box"><em>Off the speaker</em></span>
+    <div className="lx-pa lx-pa-steer" aria-hidden="true">
+      <div className="lx-steer-phone">
+        <div className="lx-steer-scene">
+          <span className="lx-steer-light" />
+          {/* the speaker: hair, face, shoulders, a mic in front */}
+          <svg className="lx-steer-person" viewBox="0 0 90 110" aria-hidden="true">
+            <defs>
+              <linearGradient id="lx-st-skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#ecc6a6" /><stop offset="1" stopColor="#b07a5d" /></linearGradient>
+              <linearGradient id="lx-st-top" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#4a4f57" /><stop offset="1" stopColor="#24272c" /></linearGradient>
+            </defs>
+            <path d="M8 110 C10 84 26 74 45 74 C64 74 80 84 82 110 Z" fill="url(#lx-st-top)" />
+            <path d="M38 66 h14 v12 c0 4 -14 4 -14 0 z" fill="#a8735a" />
+            <ellipse cx="45" cy="50" rx="17" ry="20" fill="url(#lx-st-skin)" />
+            <path d="M27 48 C25 30 34 24 46 24 C58 24 66 31 63 47 C61 40 56 36 49 36 C40 36 33 40 27 48 Z" fill="#1d1a19" />
+            <circle cx="39" cy="52" r="1.6" fill="#2b1d16" /><circle cx="51" cy="52" r="1.6" fill="#2b1d16" />
+            <path d="M40 60 Q45 64 50 60" stroke="#7a4434" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+            <rect x="58" y="70" width="7" height="16" rx="3.5" fill="#2f3237" stroke="#5b6068" strokeWidth="1" />
+            <rect x="60.5" y="86" width="2" height="24" fill="#3a3d43" />
+          </svg>
+        </div>
+        <div className="lx-steer-cap">
+          <span className="lx-steer-cap-bad">this changed every—</span>
+          <span className="lx-steer-cap-good">this changed <u>everything</u></span>
+        </div>
       </div>
+      <span className="lx-steer-tag lx-steer-tag-bad">✕ Off the speaker</span>
+      <span className="lx-steer-tag lx-steer-tag-good">✓ Steered</span>
+      <svg className="lx-steer-cursor" viewBox="0 0 24 24"><path d="M5 3l14 7.5-6.2 1.6L10 18.5z" /></svg>
     </div>
   )
 }
@@ -83,55 +112,38 @@ function PainCard({ p, i }: { p: (typeof PAINS)[number]; i: number }) {
   return (
     <article className={`lx-pain lx-pain-${p.art}`} style={{ '--i': i } as React.CSSProperties}>
       {p.art === 'hours' ? <HoursArt /> : p.art === 'crop' ? <CropArt /> : <BlindArt />}
-      <span className="lx-pain-num">0{i + 1}</span>
+      {/* the number, big and faint behind the picture */}
+      <span className="lx-pain-num" aria-hidden="true">0{i + 1}</span>
       <h3>{p.title}</h3>
       <p>{p.desc}</p>
-      {/* How Shortcut answers it: jumps to the section that shows the fix */}
-      <a className="lx-pain-fix" href={p.href}>
-        <span>{p.fix}</span>
-        {FIX_ARROW}
-      </a>
+      {/* the problem, then how Shortcut fixes it (hover: the ✕ turns into the ✓) */}
+      <div className="lx-pain-row">
+        <span className="lx-pain-miss"><i aria-hidden="true">✕</i>{p.miss}</span>
+        <a className="lx-pain-fix" href={p.href}>
+          <i aria-hidden="true">✓</i><span>{p.fix}</span>
+          {FIX_ARROW}
+        </a>
+      </div>
     </article>
   )
 }
 
 /**
- * The Problem. With `flip` (desktop), the cards play a scroll story (problem-flip.ts): they rise out
- * of the hero as a deck, deal out, then each turns over to its fix, and lines lead on to How it works.
+ * The Problem. Scrolls normally: the heading fades up, then the three cards rise in one after
+ * another (.reveal → .visible, styles in app/landing.css). No pinning, no 3D.
  */
-export function ProblemSection({ flip = false }: { flip?: boolean }) {
-  const outer = useRef<HTMLDivElement>(null), stage = useRef<HTMLDivElement>(null), fit = useRef<HTMLDivElement>(null)
-  useProblemFlip(flip, outer, stage, fit)
-  const body = (
+export function ProblemSection() {
+  return (
     <section className="section-inner">
       <div className="section-head reveal">
         <p className="section-eyebrow">The problem</p>
         <h2 className="section-title">More clips means more money.<br /> Editing slows you down.</h2>
-        <p className="section-sub">Every hour spent scrubbing timelines and fixing crops is an hour you’re not posting. Manual editing is too slow to keep up. AI clippers are fast, but you still end up fixing their framing clip by clip.</p>
+        <p className="section-sub">Hours of scrubbing and cropping for every video, and AI clippers still get the framing wrong.</p>
       </div>
       <div className="lx-pains reveal">
-        {PAINS.map((p, i) => flip ? (
-          <div key={p.title} className="pf-card">
-            <div className="pf-flip">
-              <PainCard p={p} i={i} />
-              {/* the back: Shortcut's answer to it */}
-              <a className="pf-back" href={p.href}>
-                <span className="pf-back-num">0{i + 1}</span>
-                <span className="pf-back-fix">{p.fix}</span>
-                <span className="pf-back-go">{FIX_ARROW}</span>
-              </a>
-            </div>
-            <span className="pf-bridge" aria-hidden="true" />
-          </div>
-        ) : <PainCard key={p.title} p={p} i={i} />)}
+        {PAINS.map((p, i) => <PainCard key={p.title} p={p} i={i} />)}
       </div>
     </section>
-  )
-  if (!flip) return body
-  return (
-    <div ref={outer} className="pf">
-      <div ref={stage} className="pf-stage"><div ref={fit} className="pf-fit">{body}</div></div>
-    </div>
   )
 }
 

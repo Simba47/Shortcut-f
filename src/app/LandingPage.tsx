@@ -19,6 +19,7 @@ import { FaqSection, type FaqItem } from '@/components/ui/faq-section'
 import { HeroSplit } from '@/components/landing/hero-split'
 import { FeatureTunnel } from '@/components/landing/feature-tunnel'
 import { FlyIn } from '@/components/landing/fly-in'
+import { FooterWordmark } from '@/components/landing/footer-wordmark'
 import type Lenis from 'lenis'
 import { InsightsSection, ProblemSection, ProofSection } from '@/components/landing/sections'
 import { neutralStyle, useLiteMotion } from '@/components/ui/use-lite-motion'
@@ -317,6 +318,10 @@ export function LandingPage() {
   // it stays pinned behind the Problem section for a while, and nobody can see it
   const [heroCovered, setHeroCovered] = useState(false)
   useEffect(() => raw.on('change', v => setHeroCovered(v >= 0.999)), [raw])
+  // As soon as the Problem section starts sliding up, the hero's looping animation pauses, so the
+  // two never draw at the same time (that overlap made the hand-off stutter)
+  const [heroPaused, setHeroPaused] = useState(false)
+  useEffect(() => raw.on('change', v => setHeroPaused(v > 0.02)), [raw])
   const reduceMotion = useReducedMotion()
   // Phones/touch screens scroll plainly: per-frame blur/scale effects stutter there
   const lite = useLiteMotion()
@@ -381,12 +386,20 @@ export function LandingPage() {
   // Once the features sheet reaches the nav (i.e. we've left the hero), the black
   // link tab turns see-through
   const [pastHero, setPastHero] = useState(false)
+  // Once the footer is fully open (scrolled to the bottom, or it fills the screen up to the bar),
+  // the bar's logo steps aside: the footer has its own, and the two would sit on top of each other
+  const [footerOpen, setFooterOpen] = useState(false)
   useEffect(() => {
     let raf = 0
     const check = () => {
       raf = 0
       const sheet = sheetRef.current
       if (sheet) setPastHero(sheet.getBoundingClientRect().top <= NAV_H)
+      const foot = document.querySelector('.lp-footer')
+      if (foot) {
+        const r = foot.getBoundingClientRect()
+        setFooterOpen(r.top <= NAV_H + 40 || r.bottom <= window.innerHeight + 2)
+      }
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(check) }
     check()
@@ -423,19 +436,20 @@ export function LandingPage() {
       }),
       { threshold: 0.1, rootMargin: '0px 0px -40px 0px' },
     )
-    document.querySelectorAll('.lp-root .reveal').forEach((el, i) => {
+    document.querySelectorAll('.lp-root .reveal:not(.visible)').forEach((el, i) => {
       ;(el as HTMLElement).style.transitionDelay = (i % 3) * 0.07 + 's'
       observer.observe(el)
     })
     return () => observer.disconnect()
-  }, [])
+    // again once desktop mode kicks in: the sections re-mount (PlainSection) with fresh elements
+  }, [tunnel])
 
   return (
     <div className="lp-root">
 
       {/* ── NAV ── */}
       <nav className={`lp-nav${pastHero ? ' nav-past-hero' : ''}`}>
-        <a href="#" className="logo" aria-label="Shortcut home"><BrandLogo shine /></a>
+        <a href="#" className="logo" aria-label="Shortcut home" data-away={footerOpen || undefined} tabIndex={footerOpen ? -1 : undefined}><BrandLogo shine /></a>
         <ul className="nav-links">
           <li>
             <a href="#" onClick={goHome}>Home</a>
@@ -472,7 +486,7 @@ export function LandingPage() {
 
       {/* ── HERO + FEATURES: hero pins while features slides over it ── */}
       <div className="hero-stack">
-      <section className="hero" ref={heroRef} data-covered={heroCovered || undefined}>
+      <section className="hero" ref={heroRef} data-covered={heroCovered || undefined} data-paused={heroPaused || undefined}>
         {/* Soft light shade, same as the closing CTA section */}
         <div className="hero-shade" aria-hidden />
         {/* Interactive dot field: lights up around the cursor, ripples on click */}
@@ -538,7 +552,7 @@ export function LandingPage() {
         className="section-wrap sheet"
         style={fx({ scale: sheetScale, borderTopLeftRadius: sheetRadius, borderTopRightRadius: sheetRadius })}
       >
-        <ProblemSection flip={tunnel} />
+        <ProblemSection />
       </motion.div>
       </div>
 
@@ -613,12 +627,14 @@ export function LandingPage() {
 
       {/* ── INSIDE SHORTCUT: trends, earnings and output on one board (keeps the #trends anchor for the nav) ── */}
       <Sec id="trends" variant="tilt" className="section-wrap">
-        <FlyIn on={tunnel} pieces=".bx-hint, .bx-inner"><InsightsSection /></FlyIn>
+        {/* plain reveal: heading, hint, then the board cards one by one (no pin, no fly-in) */}
+        <InsightsSection />
       </Sec>
 
       {/* ── SOCIAL PROOF ── */}
       <Sec id="proof" variant="tilt" className="section-wrap">
-        <FlyIn on={tunnel} pieces=".lx-quote, .lx-trend-rows"><ProofSection /></FlyIn>
+        {/* plain reveal: heading, the quote cards one by one, then the word rows (no pin, no fly-in) */}
+        <ProofSection />
       </Sec>
 
       {/* ── PRICING ── */}
@@ -642,7 +658,7 @@ export function LandingPage() {
       </div>
 
       {/* ── CTA ── */}
-      <section className="cta-section">
+      <section className={`cta-section${lite ? '' : ' cta-full'}`}>
         {/* One language per line, gliding across in alternating directions (decorative) */}
         <div className="lang-marquees" aria-hidden>
           {LANGUAGES.map((l, i) => (
@@ -714,6 +730,9 @@ export function LandingPage() {
             </ul>
           </FooterReveal>
         </div>
+
+        {/* the big SHORTCUT, each letter acting out a feature (desktop) */}
+        <FooterWordmark />
 
         <FooterReveal delay={0.4} className="footer-bottom">
           <span className="footer-copy">© 2026 {COMPANY.legalName}. All rights reserved.</span>

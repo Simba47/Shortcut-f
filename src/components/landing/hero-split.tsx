@@ -81,7 +81,7 @@ export function HeroSplit() {
       raf = requestAnimationFrame(tick)
       const dt = Math.min(now - last, 50)
       last = now
-      if (!visible || root.closest('[data-covered]')) return   // off screen, or covered by the next section
+      if (!visible || root.closest('[data-covered], [data-paused]')) return   // off screen, or the next section is coming up over it
       clock = (clock + dt) % CYCLE
       setT(clock)
     }
@@ -127,8 +127,9 @@ export function HeroSplit() {
           </div>
           {MOMENTS.map((m, i) => {
             const reached = head >= m.at
+            const now = reached && head < m.at + m.len        // the playhead is picking this one right now
             return (
-              <div key={i} className="hs-mark" data-on={reached || undefined} style={{ left: `${m.at * 100}%`, width: `${m.len * 100}%` }}>
+              <div key={i} className="hs-mark" data-on={reached || undefined} data-now={now || undefined} style={{ left: `${m.at * 100}%`, width: `${m.len * 100}%` }}>
                 {/* its viral score (0–99, as the app shows it: a bolt and the number), counting up as the playhead crosses it */}
                 {reached && (
                   <span className="hs-score">
