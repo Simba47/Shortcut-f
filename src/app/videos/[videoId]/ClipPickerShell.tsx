@@ -14,6 +14,7 @@ import { useCredits } from '@/lib/useCredits'
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { AiScan } from '@/components/clips/AiScan'
+import { MmcPop, LayoutChoices, FrameChoices, CaptionChoices, TitleChoices, cleanMakeLook, captionStyleName, titleStyleName, frameName, DEFAULT_MAKE_LOOK, CLIP_LAYOUTS, type MakeLook } from '@/components/clips/MakeClipsChoices'
 import { useRouter } from 'next/navigation'
 import { FilterChip } from '@/components/ui/filter-chip'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -54,6 +55,17 @@ interface SavedClip {
   favorite?: boolean
   /** Why AI picked it (Make my clips), shown on its card */
   reason?: string | null
+  /** Changed in the editor since its last export (or never exported): its stage says Edited / Edited after export */
+  changed?: boolean
+  /** Opened in the editor at least once: Draft, not Unseen */
+  opened?: boolean
+  /** Make my clips: what was ticked before its run (null: not saved, or not made by it) */
+  made?: MadeWith | null
+}
+/** What a Make my clips run was made with (page.tsx reads it from its job) */
+type MadeWith = Record<AutoOption, boolean> & {
+  aspect?: string | null; layoutList?: string[] | null; captionStyle?: { template?: string | null; animation?: string } | null; frame?: string | null
+  titleStyle?: string | null
 }
 
 /** Where a clip came from, so the clip list can be split into sections */
@@ -161,8 +173,16 @@ const AUTO_OPTIONS: Array<{ id: AutoOption; label: string; tip: string }> = [
   { id: 'captions', label: 'Captions', tip: 'Word-by-word captions at the bottom' },
   { id: 'title', label: 'Title', tip: 'A short hook as a title over the first 3 seconds' },
   { id: 'motion', label: 'Follow people', tip: 'The frame follows people as they move. Off: it holds still in each shot' },
+  // (a run from before 2026-11-15 says Split screen on its cards; its tile is now Layout — the layouts AI can use)
   { id: 'layouts', label: 'Split screen', tip: 'Split and trio when 2 or more people are in the shot. Off: always vertical, on one person' },
 ]
+/** The tiles that are checkboxes: Captions (whose name opens its styles), Title, Follow people — the fourth is Layout */
+// (Follow people taken off the card, user 2026-11-15: clips always follow people, as they did by default)
+const AUTO_TILES = AUTO_OPTIONS.filter(o => o.id !== 'layouts' && o.id !== 'motion')
+const LAYOUT_TIP = 'The shape of the clips, and the layouts AI can use: Fill, Fit, Split, Three'
+const FRAME_TIP = 'A frame around each clip, as in the editor: a title on top, a blurred fill, and more'
+// (the shape, layouts, caption style and frame: remembered per browser too)
+const AUTO_LOOK_KEY = 'clipboard.makeLook'
 // Each option's little picture (a 16 × 16 drawing): what it does, in one glance. The marked parts
 // (mmc-i-*) move when the tile is hovered or just ticked (styles: .mmc-opt in globals.css).
 const AUTO_ICONS: Record<AutoOption, React.ReactNode> = {
@@ -176,6 +196,29 @@ const AUTO_ICONS: Record<AutoOption, React.ReactNode> = {
   layouts: <><rect x="3.5" y="2" width="9" height="12" rx="2" /><path className="mmc-i-cut" d="M3.5 8h9" /></>,
 }
 const AUTO_OPTIONS_KEY = 'clipboard.makeOptions'
+
+/** Make my clips cards: what was ticked before the run, the ones that were on (user, 2026-11-14) */
+function MadeTags({ made }: { made: MadeWith }) {
+  // (a run that saved its layouts says them under Layout instead of Split screen)
+  const on = AUTO_OPTIONS.filter(o => made[o.id] && o.id !== 'motion' && !(o.id === 'layouts' && made.layoutList))
+  const tag = (key: string, icon: React.ReactNode, label: string, title: string) => (
+    <span key={key} className="cb-made" title={title}>
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{icon}</svg>
+      <span>{label}</span>
+    </span>
+  )
+  const layouts = made.layoutList?.map(id => CLIP_LAYOUTS.find(l => l.id === id)?.label).filter(Boolean).join(', ')
+  return <>
+    {on.map(o => tag(o.id, AUTO_ICONS[o.id], o.id === 'captions' && made.captionStyle ? `Captions · ${captionStyleName(made.captionStyle as never)}`
+      : o.id === 'title' && made.titleStyle ? `Title · ${titleStyleName(made.titleStyle)}` : o.label, `Made with ${o.label}: ${o.tip}`))}
+    {(made.aspect || layouts) && tag('layout', AUTO_ICONS.layouts, [made.aspect, layouts].filter(Boolean).join(' · '), `Made with: ${LAYOUT_TIP}`)}
+    {made.frame && tag('frame', FRAME_ICON, frameName(made.frame as never), `Made with the ${frameName(made.frame as never)} frame`)}
+  </>
+}
+/** A brand kit: a little tag */
+const BRAND_ICON = <><path d="M2.5 8.6V3.5a1 1 0 0 1 1-1h5.1l5 5a1 1 0 0 1 0 1.4l-4.7 4.7a1 1 0 0 1-1.4 0z" /><circle cx="5.6" cy="5.6" r="1" fill="currentColor" stroke="none" /></>
+/** A frame: a picture inside a border with a title bar */
+const FRAME_ICON = <><rect x="2.5" y="2" width="11" height="12" rx="2" /><path d="M5 4.8h6" /><rect x="5" y="7" width="6" height="4.5" rx="1" /></>
 // What the captions and the title are written in (speech in an Indian language; English speech stays English)
 type CaptionLanguage = 'native' | 'roman'
 type TitleLanguage = 'roman' | 'english' | 'native'
@@ -373,6 +416,21 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         if (!brandPicked.current && !d.kits.some(k => k.data?.is_default) && own.length) setBrandPickState(own[own.length - 1].id)
       }).catch(() => { /* no kits shown */ })
   }, [])
+  // The shape, the layouts AI can use, the caption style and the frame (user, 2026-11-15)
+  const [look, setLookState] = useState<MakeLook>(DEFAULT_MAKE_LOOK)
+  const setLook = (next: MakeLook) => {
+    setLookState(next)
+    try { localStorage.setItem(AUTO_LOOK_KEY, JSON.stringify(next)) } catch { /* storage blocked */ }
+  }
+  // Which box is open: the captions' styles, the layouts, the frame
+  const [pop, setPop] = useState<'captions' | 'title' | 'layout' | 'frame' | null>(null)
+  const [popAt, setPopAt] = useState<HTMLElement | null>(null)
+  // (the boxes open over the video preview — user, 2026-11-15 — the centre column)
+  const [stageEl, setStageEl] = useState<HTMLElement | null>(null)
+  const openPop = (which: 'captions' | 'title' | 'layout' | 'frame') => (e: React.MouseEvent<HTMLElement>) => {
+    if (pop === which) { setPop(null); return }
+    setPopAt(e.currentTarget); setPop(which)
+  }
   const [captionLang, setCaptionLang] = useState<CaptionLanguage>('native')
   const [titleLang, setTitleLang] = useState<TitleLanguage>('roman')
   function pickLanguage(next: { caption?: CaptionLanguage; title?: TitleLanguage }) {
@@ -384,6 +442,10 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     try {
       const saved = JSON.parse(localStorage.getItem(AUTO_OPTIONS_KEY) ?? 'null') as Partial<Record<AutoOption, boolean>> | null
       if (saved) setAutoOpts(o => ({ ...o, ...saved }))
+      const savedLook = JSON.parse(localStorage.getItem(AUTO_LOOK_KEY) ?? 'null')
+      // (none yet: Split screen turned off before means Fill and Fit only)
+      if (savedLook) setLookState(cleanMakeLook(savedLook))
+      else if (saved?.layouts === false) setLookState({ ...DEFAULT_MAKE_LOOK, layouts: ['fill', 'fit'] })
       const lang = JSON.parse(localStorage.getItem(AUTO_LANGUAGE_KEY) ?? 'null') as { caption?: string; title?: string } | null
       if (CAPTION_LANGUAGES.some(l => l.id === lang?.caption)) setCaptionLang(lang!.caption as CaptionLanguage)
       if (TITLE_LANGUAGES.some(l => l.id === lang?.title)) setTitleLang(lang!.title as TitleLanguage)
@@ -483,7 +545,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         return
       }
     }
-    setClips(cs => cs.map(x => x.id === id ? { ...x, status: 'rendering', output_url: null } : x))
+    // (an export takes the edits in: the server clears the clip's edited-since-export mark, so does its card)
+    setClips(cs => cs.map(x => x.id === id ? { ...x, status: 'rendering', output_url: null, changed: false } : x))
   }
   /** Stop on a card while it exports (user, 2026-11-10): the export stops, nothing is saved, the clip as it was before */
   async function stopDownload(id: string) {
@@ -939,6 +1002,24 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     else if (wasRunningRef.current && autoJob?.status === 'done') router.push(`/videos/${video.id}/clips`)
   }, [autoRunning, autoJob?.status, router, video.id])
   const autoRendering = autoClips.some(c => c.status === 'rendering')
+  // The AI column's panel that's working gets the room, the other is a slim bar (user, 2026-11-13): the one
+  // started last; when it's done the other one (still working) takes over, and with neither the usual split
+  // is back. A click on a bar opens that one instead
+  const [aiFocus, setAiFocus] = useState<'mmc' | 'ask' | null>(null)
+  const mmcBusy = autoRunning || autoStarting
+  const busyBefore = useRef({ mmc: false, ask: false })
+  // (the bar between them can be dragged any time — both then show at the dragged split — and the next task
+  // that starts or ends pops its panel up again as usual: user, 2026-11-13)
+  useEffect(() => {
+    const was = busyBefore.current
+    busyBefore.current = { mmc: mmcBusy, ask: loadingAi }
+    if (!mmcBusy && !loadingAi) { setAiFocus(null); return }
+    if (mmcBusy && !was.mmc) setAiFocus('mmc')
+    else if (loadingAi && !was.ask) setAiFocus('ask')
+    else if (!mmcBusy && !loadingAi) setAiFocus(null)
+    else if (!mmcBusy && was.mmc) setAiFocus('ask')
+    else if (!loadingAi && was.ask) setAiFocus('mmc')
+  }, [mmcBusy, loadingAi])
   // Show an earlier run on load, then poll (usePolling's rhythm) while the job runs or its clips export
   useEffect(() => { if (video.status === 'ready') loadAutoClips().catch(() => {}) }, [video.id, video.status]) // eslint-disable-line react-hooks/exhaustive-deps
   usePolling(() => loadAutoClips().catch(() => {}), autoRunning || autoRendering)
@@ -959,7 +1040,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       const res = await fetch(`/api/videos/${video.id}/auto-clips`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clip_count: count, add_broll: autoBroll, ...autoOpts, caption_language: captionLang, title_language: titleLang, brand_kit: brandPick, search, pay }),
+        body: JSON.stringify({
+          clip_count: count, add_broll: autoBroll, ...autoOpts, motion: true,
+          // (today's worker reads layouts as Split screen on / off: on when Split or Three may be used)
+          layouts: look.layouts.includes('split') || look.layouts.includes('three'),
+          aspect: look.aspect, layout_list: look.layouts, caption_style: look.captionStyle, frame: look.frame,
+          title_style: look.titleStyle, title_font: look.titleFont,
+          caption_language: captionLang, title_language: titleLang, brand_kit: brandPick, search, pay,
+        }),
       })
       if (res.status === 402) {
         const d = await res.json().catch(() => ({}))
@@ -1189,7 +1277,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     if (e.button !== 0) return
     e.preventDefault(); e.stopPropagation()
     const y0 = e.clientY
-    const h0 = mmcRef.current?.getBoundingClientRect().height ?? 300
+    // (from the slim bar, or from all of the column: dragging shows both, at the split dragged to)
+    const h0 = mmcRef.current?.getBoundingClientRect().height ?? 44
+    setAiFocus(null)
     // (the column less its padding, the gap, and what Ask AI keeps)
     const colH = aiColRef.current?.clientHeight ?? 800
     const max = Math.max(MMC_MIN, colH - 24 - 12 - askMin)
@@ -1236,6 +1326,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // Clip previews are 9:16; the video keeps its own shape
   // The frame takes the video's own proportions once it loads, so it fits exactly (no empty bars)
   const [ratio, setRatio] = useState(16 / 9)
+  // The Layout box's pictures: a frame of this video, a third of the way in (fetched once the box opens)
+  const layoutFrame = useFrameAt(pop === 'layout' && isReady ? videoUrl : null, Math.round((initialVideo.duration_ms ?? 0) / 3), 480)
   // The metadata can arrive before the page is interactive (the <video> is server-rendered),
   // so also read the size once on mount
   useEffect(() => {
@@ -1268,7 +1360,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         // (a fresh link after the old one stopped working: back to where the video was)
         if (resumeAt.current !== null) { v.currentTime = resumeAt.current; resumeAt.current = null }
       }}
-      onError={relink} />
+      onError={relink}
+      // (user, 2026-11-13: no Play while Make my clips works; as usual otherwise)
+      noPlay={autoRunning} />
   ) : (
     <div className="flex flex-col items-center gap-4 px-10 text-center">
       {video.status === 'failed' ? (
@@ -1519,15 +1613,60 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     </div>
   )
 
+  /** A click on a panel's title row pops that panel up (user, 2026-11-13: "when he clicks Make my clips / Ask AI,
+   *  do the popup") — not a click on a button or link in the row (ⓘ, Watch as reels) */
+  const popUp = (which: 'mmc' | 'ask') => (e: React.MouseEvent) => {
+    if (!wide || (e.target as HTMLElement).closest('button, a, [role="button"], input, label')) return
+    setAiFocus(which)
+  }
+
+  // The slim bars a panel becomes while the other one has the room: its name, and while it works how far it
+  // is (Make my clips: % and Stop) or what it's looking for (Ask AI); a click opens it (styles: .ai-bar)
+  const mmcBar = (
+    <div role="button" tabIndex={0} className="ai-bar" aria-label="Open Make my clips"
+      onClick={() => setAiFocus('mmc')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAiFocus('mmc') } }}>
+      <span className="ai-bar-icon" aria-hidden="true" style={{ color: ACCENT }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z" /></svg>
+      </span>
+      <span className="ai-bar-name">Make my clips</span>
+      {autoRunning && autoJob ? (
+        <>
+          <span className="ai-bar-track" aria-hidden="true"><i style={{ width: `${Math.max(3, autoShown)}%` }} /></span>
+          <span className="ai-bar-pct">{Math.floor(autoShown)}%</span>
+          <button type="button" className="ai-bar-stop" disabled={autoStopping}
+            onClick={e => { e.stopPropagation(); stopMakingClips() }} onKeyDown={e => e.stopPropagation()}>
+            {autoStopping ? 'Stopping…' : 'Stop'}
+          </button>
+        </>
+      ) : mmcBusy ? <span className="ai-bar-note">Starting…</span> : <span className="ai-bar-chev" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4.5l3 3 3-3" /></svg></span>}
+    </div>
+  )
+  const askBar = (
+    <div role="button" tabIndex={0} className="ai-bar" aria-label="Open Ask AI"
+      onClick={() => setAiFocus('ask')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAiFocus('ask') } }}>
+      <span className="ai-bar-icon" aria-hidden="true">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.8A8 8 0 1 1 21 12z" /></svg>
+      </span>
+      <span className="ai-bar-name">Ask AI</span>
+      {loadingAi
+        ? <><Spinner /><span className="ai-bar-note">Searching{askingFor ? ` “${askingFor}”` : ''}…</span></>
+        : aiSuggestions?.length
+          ? <span className="ai-bar-note">{aiSuggestions.length} moment{aiSuggestions.length === 1 ? '' : 's'} found</span>
+          : <span className="ai-bar-chev" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4.5l3 3 3-3" /></svg></span>}
+    </div>
+  )
+
   // ── AI tools: Ask AI + Best moments (left column on wide screens, under the video otherwise) ──
   const aiToolsOpen = (
     <>
       {/* (styles: .mmc-* in globals.css) */}
       {/* (wide: its height is shared with Ask AI at the bar under it; what doesn't fit scrolls, no scrollbar) */}
+      {wide && aiFocus === 'ask' ? mmcBar : (
       <section ref={mmcRef} className={`mmc p-3.5 flex flex-col gap-3 rounded-2xl ${wide ? 'cb-split-top cb-noscroll' : 'shrink-0'}`} data-start-target="ai"
-        style={wide ? { flex: `0 1 ${mmcH ?? MMC_H}px` } : undefined}>
-        {/* Header: a spark badge (glass, the spark lime), the title and its ⓘ; on the right, the way to the clips already made */}
-        <div className="flex items-center gap-2.5">
+        style={wide ? { flex: aiFocus === 'mmc' ? '1 1 0' : `0 1 ${mmcH ?? MMC_H}px` } : undefined}>
+        {/* Header: a spark badge (glass, the spark lime), the title and its ⓘ; on the right, the way to the clips already made.
+            A click on it pops Make my clips up */}
+        <div className="flex items-center gap-2.5" data-popup={wide || undefined} onClick={popUp('mmc')}>
           <span aria-hidden="true" className="shrink-0 w-8 h-8 rounded-[10px] grid place-items-center"
             style={{ background: 'rgb(var(--cb-fg) / 0.06)', color: ACCENT, boxShadow: 'inset 0 0 0 1px rgb(var(--cb-fg) / 0.1)' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -1541,7 +1680,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               AI picks the best moments of the video and frames each one vertically. Choose how many clips (up to {AUTO_MAX} at a time) and what each one gets. You can change everything in the editor afterwards.
               {/* (user, 2026-11-12: no hover tooltips) what each option does, here instead of on the tiles */}
               <span className="mmc-tip-list">
-                {AUTO_OPTIONS.map(o => <span key={o.id}><b>{o.label}:</b> {o.tip}</span>)}
+                {AUTO_TILES.map(o => <span key={o.id}><b>{o.label}:</b> {o.tip}{o.id === 'captions' ? '. Click it to pick their style' : ''}</span>)}
+                <span><b>Layout:</b> {LAYOUT_TIP}</span>
+                <span><b>Frame:</b> {FRAME_TIP}</span>
               </span>
             </InfoTip>
           </h2>
@@ -1609,62 +1750,75 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           </div>
         </div>
 
-        {/* (user, 2026-11-12) the tiles and the language / brand rows under one heading, closer together:
-            how many → what each clip gets → Make clips */}
-        <div className="flex flex-col gap-2">
-        <p id={`mmc-gets-${video.id}`} className="mmc-heading">Each clip gets</p>
-        {/* What AI adds: four tiles, each a checkbox — its little picture turns white and a lime tick
-            shows on the right when it's on (styles: .mmc-opt in globals.css) */}
-        <div className="grid grid-cols-2 gap-1.5" role="group" aria-labelledby={`mmc-gets-${video.id}`}>
-          {AUTO_OPTIONS.map(o => (
-            <label key={o.id} className="mmc-opt" data-on={autoOpts[o.id] || undefined} data-off={autoRunning || undefined}>
-              <input type="checkbox" className="sr-only" checked={autoOpts[o.id]} disabled={autoRunning}
-                onChange={() => toggleAutoOpt(o.id)} />
-              <span className="mmc-opt-icon" aria-hidden="true">
-                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">{AUTO_ICONS[o.id]}</svg>
-              </span>
-              <span className="flex-1 min-w-0 truncate">{o.label}</span>
-              <span className="mmc-opt-box" aria-hidden="true">
-                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
-              </span>
-            </label>
-          ))}
-        </div>
-
-        {/* What the captions and the title are written in. Both rows always show (one whose box is
-            unticked is dimmed), so the button below never moves. */}
-        <div className="flex flex-col gap-1.5">
-          {([
-            { name: 'Captions', what: 'captions are', on: autoOpts.captions, list: CAPTION_LANGUAGES, value: captionLang, pick: (id: string) => pickLanguage({ caption: id as CaptionLanguage }) },
-            { name: 'Title', what: 'title is', on: autoOpts.title, list: TITLE_LANGUAGES, value: titleLang, pick: (id: string) => pickLanguage({ title: id as TitleLanguage }) },
-          ]).map(row => {
-            const off = autoRunning || !row.on
-            return (
-              <div key={row.name} className="mmc-row flex items-center gap-2 text-[11px]" data-off={off || undefined} style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}>
-                <span className="shrink-0 w-[52px]">{row.name}</span>
-                <MmcPick value={row.value} options={row.list} onChange={row.pick} disabled={off} label={`What the ${row.what} written in`} />
-              </div>
-            )
-          })}
-          {/* The brand kit the clips get (shown once the account has a kit) */}
-          {brandKits.length > 0 && (() => {
-            const def = brandKits.find(k => k.isDefault)
-            // A kit goes on, but with Captions or Title off its caption / title look has nothing to
-            // go on — only the logo would show (user, 2026-10-31): say so, with a way to turn them on
-            const kitOn = brandPick !== 'none' && (brandPick !== 'default' || !!def)
-            const missing = [!autoOpts.captions && 'Captions', !autoOpts.title && 'Title'].filter(Boolean) as string[]
-            return (
-              <>
-                <div className="mmc-row flex items-center gap-2 text-[11px]" data-off={autoRunning || undefined} style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}>
-                  <span className="shrink-0 w-[52px]">Brand</span>
-                  <MmcPick value={brandPick} disabled={autoRunning} onChange={setBrandPick} label="The brand kit the clips get"
-                    options={[
-                      { id: 'default', label: def ? `Default · ${def.name}` : 'Default (none set)' },
-                      ...brandKits.filter(k => !k.isDefault).map(k => ({ id: k.id, label: k.name })),
-                      // (user, 2026-11-09: "No brand kit" taken out of the list — the worker still reads 'none')
-                    ]} />
+        {/* (user, 2026-11-15: "the options are clumsy") one clean list in two parts: what each clip gets (a switch
+            each; Captions and Title open their style, font and language) and how the clips look (Layout, Frame,
+            Brand). Each row: its picture, its name, what's picked in grey, and an arrow where it opens. */}
+        {(() => {
+          const def = brandKits.find(k => k.isDefault)
+          // A kit goes on, but with Captions or Title off its caption / title look has nothing to
+          // go on — only the logo would show (user, 2026-10-31): say so, with a way to turn them on
+          const kitOn = brandPick !== 'none' && (brandPick !== 'default' || !!def)
+          const missing = [!autoOpts.captions && 'Captions', !autoOpts.title && 'Title'].filter(Boolean) as string[]
+          const langOf = (list: Array<{ id: string; label: string }>, id: string) => list.find(l => l.id === id)?.label ?? ''
+          const icon = (d: React.ReactNode) => (
+            <span className="mmc-li-icon" aria-hidden="true">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">{d}</svg>
+            </span>
+          )
+          const chev = <svg className="mmc-li-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          const sw = (on: boolean, label: string, flip: () => void) => (
+            <button type="button" role="switch" aria-checked={on} aria-label={label} className="mmc-switch" data-on={on || undefined}
+              disabled={autoRunning} onClick={flip}><span /></button>
+          )
+          /** A row that opens a box (and, with `toggle`, has a switch at its end) */
+          const opener = (which: 'captions' | 'title' | 'layout' | 'frame', d: React.ReactNode, name: string, value: string, toggle?: { on: boolean; flip: () => void }) => (
+            <div className="mmc-li" data-open={pop === which || undefined} data-dim={(toggle && !toggle.on) || undefined}>
+              <button type="button" className="mmc-li-main" disabled={autoRunning} aria-haspopup="dialog" aria-expanded={pop === which}
+                aria-label={`${name}: ${toggle && !toggle.on ? 'off' : value}`} onClick={openPop(which)}>
+                {icon(d)}
+                <span className="mmc-li-name">{name}</span>
+                <span className="mmc-li-value">{toggle && !toggle.on ? 'Off' : value}</span>
+                {chev}
+              </button>
+              {toggle && sw(toggle.on, `${name} on the clips`, toggle.flip)}
+            </div>
+          )
+          return (
+            <div className="flex flex-col gap-2.5" data-off={autoRunning || undefined}>
+              <div className="flex flex-col gap-1.5">
+                <p id={`mmc-gets-${video.id}`} className="mmc-heading">Each clip gets</p>
+                <div className="mmc-list" role="group" aria-labelledby={`mmc-gets-${video.id}`}>
+                  {opener('captions', AUTO_ICONS.captions, 'Captions',
+                    `${captionStyleName(look.captionStyle)} · ${langOf(CAPTION_LANGUAGES, captionLang)}`,
+                    { on: autoOpts.captions, flip: () => toggleAutoOpt('captions') })}
+                  {opener('title', AUTO_ICONS.title, 'Title',
+                    `${titleStyleName(look.titleStyle)}${look.titleFont ? ` · ${look.titleFont}` : ''} · ${langOf(TITLE_LANGUAGES, titleLang)}`,
+                    { on: autoOpts.title, flip: () => toggleAutoOpt('title') })}
                 </div>
-                {kitOn && missing.length > 0 && !autoRunning && (
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <p id={`mmc-look-${video.id}`} className="mmc-heading">Look</p>
+                <div className="mmc-list" role="group" aria-labelledby={`mmc-look-${video.id}`}>
+                  {opener('layout', AUTO_ICONS.layouts, 'Layout', `${look.aspect} · ${look.layouts.length} layout${look.layouts.length === 1 ? '' : 's'}`)}
+                  {opener('frame', FRAME_ICON, 'Frame', frameName(look.frame))}
+                  {/* The brand kit the clips get (shown once the account has a kit) */}
+                  {brandKits.length > 0 && (
+                    <div className="mmc-li">
+                      <span className="mmc-li-main mmc-li-static">
+                        {icon(BRAND_ICON)}
+                        <span className="mmc-li-name">Brand</span>
+                      </span>
+                      <MmcPick value={brandPick} disabled={autoRunning} onChange={setBrandPick} label="The brand kit the clips get" bare
+                        options={[
+                          // (user, 2026-11-09: "No brand kit" taken out; 2026-11-13: back as "Off", at the top — the worker reads 'none')
+                          { id: 'none', label: 'Off' },
+                          { id: 'default', label: def ? `Default · ${def.name}` : 'Default (none set)' },
+                          ...brandKits.filter(k => !k.isDefault).map(k => ({ id: k.id, label: k.name })),
+                        ]} />
+                    </div>
+                  )}
+                </div>
+                {kitOn && missing.length > 0 && !autoRunning && brandKits.length > 0 && (
                   <p className="mmc-brand-note" role="status">
                     {missing.length > 1
                       ? 'Captions and Title are off, so only the kit’s logo goes on.'
@@ -1672,11 +1826,29 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                     <button type="button" onClick={captionsAndTitleOn}>Turn {missing.length > 1 ? 'them' : 'it'} on</button>
                   </p>
                 )}
-              </>
-            )
-          })()}
-        </div>
-        </div>
+              </div>
+
+              {/* The boxes the rows open (over the video preview on a wide screen). What the captions and the
+                  title are written in now sits in their box. */}
+              <MmcPop anchor={popAt} over={wide ? stageEl : null} open={pop === 'captions'} onClose={() => setPop(null)} label="Captions">
+                <CaptionChoices on={autoOpts.captions} onToggle={() => toggleAutoOpt('captions')}
+                  style={look.captionStyle} onStyle={captionStyle => setLook({ ...look, captionStyle })}
+                  language={<MmcPick value={captionLang} options={CAPTION_LANGUAGES} onChange={id => pickLanguage({ caption: id as CaptionLanguage })} label="What the captions are written in" />} />
+              </MmcPop>
+              <MmcPop anchor={popAt} over={wide ? stageEl : null} open={pop === 'title'} onClose={() => setPop(null)} label="Title">
+                <TitleChoices on={autoOpts.title} onToggle={() => toggleAutoOpt('title')} styleId={look.titleStyle} font={look.titleFont}
+                  onStyle={titleStyle => setLook({ ...look, titleStyle })} onFont={titleFont => setLook({ ...look, titleFont })}
+                  language={<MmcPick value={titleLang} options={TITLE_LANGUAGES} onChange={id => pickLanguage({ title: id as TitleLanguage })} label="What the title is written in" />} />
+              </MmcPop>
+              <MmcPop anchor={popAt} over={wide ? stageEl : null} open={pop === 'layout'} onClose={() => setPop(null)} label="Layout">
+                <LayoutChoices look={look} onChange={setLook} frameSrc={layoutFrame} ratio={ratio} />
+              </MmcPop>
+              <MmcPop anchor={popAt} over={wide ? stageEl : null} open={pop === 'frame'} onClose={() => setPop(null)} label="Frame">
+                <FrameChoices frame={look.frame} onPick={frame => { setLook({ ...look, frame }); setPop(null) }} />
+              </MmcPop>
+            </div>
+          )
+        })()}
 
         {autoError && <p className="text-xs" style={{ color: '#f87171' }}>{autoError}<TopUpLink message={autoError} /></p>}
         {autoNote && !autoError && <p className="text-xs" style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}>{autoNote}</p>}
@@ -1797,8 +1969,10 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           })()}
         </div>
       </section>
+      )}
 
-      {/* The bar between the two (wide): drag to share the height, double-click for the usual split */}
+      {/* The bar between the two (wide): drag to share the height, double-click for the usual split; also while one
+          of them has the room — dragging it then shows both (user, 2026-11-13) */}
       {wide && (
         <div role="separator" aria-orientation="horizontal" aria-label="Resize Make my clips and Ask AI"
           className="cb-row-handle" data-on={resizing === 'split' || undefined}
@@ -1806,8 +1980,10 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       )}
 
       {/* Ask AI (Best moments: removed 2026-11-09 (user), kept commented: it shared this card through a switch at the top, commented below) */}
+      {wide && aiFocus === 'mmc' ? askBar : (
       <section className="flex-1 p-3.5 flex flex-col gap-2.5 rounded-2xl" style={{ ...CARD, minHeight: askMin }}>
-        <div className="shrink-0 flex items-center gap-2">
+        {/* (a click on the title row pops Ask AI up) */}
+        <div className="shrink-0 flex items-center gap-2" data-popup={wide || undefined} onClick={popUp('ask')}>
           <h3 className="flex-1 flex items-center gap-2 text-[13px] font-semibold" style={{ color: 'var(--cb-text)' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.8A8 8 0 1 1 21 12z" />
@@ -1984,6 +2160,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         </>)}
         */}
       </section>
+      )}
     </>
   )
 
@@ -2118,7 +2295,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         {/* ── Centre: the video, as large as fits, with the new-clip bar right under it ──
             (data-keep-clip-open: a click here — playing the clip preview, its arrows, Edit this
             clip — doesn't count as "outside" the open clip, so the preview stays) */}
-        <main data-keep-clip-open className="cb-panel flex-1 flex flex-col gap-4 p-4 overflow-y-auto" style={{ minWidth: `min(${CENTRE_MIN}px, 45%)` }}>
+        <main ref={setStageEl} data-keep-clip-open className="cb-panel flex-1 flex flex-col gap-4 p-4 overflow-y-auto" style={{ minWidth: `min(${CENTRE_MIN}px, 45%)` }}>
           {viewBar}
           {wide ? (
             // Container-query box: the player takes the biggest size (in the video's own shape) that fits both ways
@@ -2126,14 +2303,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               <div className="cb-player rounded-2xl overflow-hidden flex items-center justify-center bg-black"
                 style={{ width: `min(100cqw, calc(100cqh * ${frameRatio}))`, aspectRatio: `${frameRatio}` }}>
                 {/* The video stays mounted (hidden) while a clip previews, so it keeps its place */}
-                <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<AiScan label={scanLabel} mode={scanMode} query={askingFor} durationMs={initialVideo.duration_ms} /></div>
+                <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<AiScan label={scanLabel} mode={scanMode} query={askingFor} durationMs={initialVideo.duration_ms} full={autoRunning} /></div>
                 {viewMode === 'preview' && previewPane}
               </div>
             </div>
           ) : (
             <div className="cb-player w-full rounded-2xl overflow-hidden flex items-center justify-center bg-black shrink-0"
               style={{ aspectRatio: `${frameRatio}`, maxHeight: '70vh', margin: '0 auto', width: `min(100%, calc(70vh * ${frameRatio}))` }}>
-              <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<AiScan label={scanLabel} mode={scanMode} query={askingFor} durationMs={initialVideo.duration_ms} /></div>
+              <div className="relative w-full h-full flex items-center justify-center" style={{ display: viewMode === 'video' ? 'flex' : 'none' }}>{player}<AiScan label={scanLabel} mode={scanMode} query={askingFor} durationMs={initialVideo.duration_ms} full={autoRunning} /></div>
               {viewMode === 'preview' && previewPane}
             </div>
           )}
@@ -2286,7 +2463,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 outputUrl={clip.output_url}
                 playing={nowMs >= clip.start_ms && nowMs < clip.end_ms}
                 onSeek={() => seek(clip.start_ms)}
-                onEdit={() => { setBusy('open'); router.push(editorHref(clip.id)) }}
+                onEdit={() => { setBusy('open'); setClips(cs => cs.map(x => (x.id === clip.id ? { ...x, opened: true } : x))); router.push(editorHref(clip.id)) }}
                 onPreview={() => openClip(clip)}
                 previewing={viewMode === 'preview' && previewId === clip.id}
                 open={previewId === clip.id}
@@ -2295,6 +2472,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 onStopDownload={() => stopDownload(clip.id)}
                 manual={manualOnly}
                 edited={manualOnly && isEdited(clip)}
+                changed={!!clip.changed}
+                opened={!!clip.opened || (manualOnly && isEdited(clip))}
                 downloadError={typeof dlState[clip.id] === 'object' ? (dlState[clip.id] as { error: string }).error : null}
                 download={dlState[clip.id] === 'stopping' ? 'stopping'
                   : dlState[clip.id] === 'exporting' || clip.status === 'rendering' ? 'preparing'
@@ -2304,6 +2483,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 selected={selected.has(clip.id)}
                 onToggle={() => toggleSelected(clip.id)}
                 brandTag={<BrandTag b={brands} clipId={clip.id} />}
+                madeTags={clip.made ? <MadeTags made={clip.made} /> : null}
               />
             ))}
             {/* (the "Tip: tap a clip to open it" box under the list: out, user 2026-11-09) */}
@@ -2418,11 +2598,13 @@ function BoardPicker({ manual, disabled, switching, onPick }: {
  * Make my clips' Captions / Title / Brand choice (user, 2026-11-09: a designed menu, not the browser's
  * list; each language with an example, "e.g. Namaste"). The menu floats over the page (a portal), as
  * the card it sits in scrolls; it opens under the box, or over it when there's no room below.
- * ↑ / ↓, Enter, Esc; a click outside, a scroll or a resize closes it.
+ * ↑ / ↓, Enter, Esc; a click outside or a scroll closes it; it follows its panel when a column is resized.
  */
-function MmcPick({ value, options, onChange, disabled, label }: {
+function MmcPick({ value, options, onChange, disabled, label, bare = false }: {
   value: string; options: Array<{ id: string; label: string; example?: string }>; onChange: (id: string) => void
   disabled?: boolean
+  /** No box: the choice in grey and an arrow, at the end of a list row (Brand) */
+  bare?: boolean
   /** What it picks, for screen readers */
   label: string
 }) {
@@ -2432,15 +2614,26 @@ function MmcPick({ value, options, onChange, disabled, label }: {
   const btn = useRef<HTMLButtonElement>(null)
   const list = useRef<HTMLUListElement>(null)
   const cur = options.find(o => o.id === value) ?? options[0]
-  const show = () => {
+  /** Where the list goes: under (or over) the box, kept inside the panel it opens from — the nearest box that
+   *  scrolls or clips, else the window (user, 2026-11-13: the Brand list ran over the panel's edge) */
+  const placeList = () => {
     const r = btn.current?.getBoundingClientRect()
-    if (!r) return
-    const width = Math.max(r.width, 230)
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8))
+    if (!r) return null
+    let panel: Element | null = btn.current!.parentElement
+    while (panel && panel !== document.body && getComputedStyle(panel).overflowX === 'visible') panel = panel.parentElement
+    const p = panel && panel !== document.body ? panel.getBoundingClientRect() : { left: 0, right: window.innerWidth }
+    const lo = Math.max(8, p.left + 4), hi = Math.min(window.innerWidth - 8, p.right - 4)
+    const width = Math.max(0, Math.min(Math.max(r.width, 230), hi - lo))
+    const left = Math.max(lo, Math.min(r.left, hi - width))
     const below = window.innerHeight - r.bottom - 8
-    setAt(below >= options.length * 36 + 14 || below >= r.top
+    return below >= options.length * 36 + 14 || below >= r.top
       ? { left, width, top: r.bottom + 6 }
-      : { left, width, bottom: window.innerHeight - r.top + 6 })
+      : { left, width, bottom: window.innerHeight - r.top + 6 }
+  }
+  const show = () => {
+    const at = placeList()
+    if (!at) return
+    setAt(at)
     setActive(Math.max(0, options.findIndex(o => o.id === value)))
     setOpen(true)
   }
@@ -2452,17 +2645,25 @@ function MmcPick({ value, options, onChange, disabled, label }: {
       const t = e.target as Node
       if (!btn.current?.contains(t) && !list.current?.contains(t)) setOpen(false)
     }
-    // (it's placed where the box was: anything moving the box closes it)
+    // (it follows the box while open: a column's edge dragged — user, 2026-11-13 — moves it with the panel)
+    let raf = 0, last = ''
+    const follow = () => {
+      const at = placeList()
+      const key = JSON.stringify(at)
+      if (at && key !== last) { last = key; setAt(at) }
+      raf = requestAnimationFrame(follow)
+    }
+    raf = requestAnimationFrame(follow)
+    // (scrolling the page away from it closes it)
     const moved = () => setOpen(false)
     window.addEventListener('pointerdown', away)
     window.addEventListener('scroll', moved, true)
-    window.addEventListener('resize', moved)
     return () => {
       window.removeEventListener('pointerdown', away)
       window.removeEventListener('scroll', moved, true)
-      window.removeEventListener('resize', moved)
+      cancelAnimationFrame(raf)
     }
-  }, [open])
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
   const onKey = (e: React.KeyboardEvent) => {
     if (!open) { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); show() } return }
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => (i + 1) % options.length) }
@@ -2473,7 +2674,7 @@ function MmcPick({ value, options, onChange, disabled, label }: {
   }
   return (
     <>
-      <button ref={btn} type="button" className="mmc-pick-btn" disabled={disabled} aria-haspopup="listbox" aria-expanded={open}
+      <button ref={btn} type="button" className="mmc-pick-btn" data-bare={bare || undefined} disabled={disabled} aria-haspopup="listbox" aria-expanded={open}
         aria-label={`${label}: ${cur?.label ?? ''}${cur?.example ? `, for example ${cur.example}` : ''}`}
         onClick={() => (open ? close() : show())} onKeyDown={onKey}>
         <span className="mmc-pick-name">{cur?.label}</span>
@@ -3080,8 +3281,28 @@ function SubEditOverlay({ startedAt, estimate, ahead, onStop }: { startedAt: num
   )
 }
 
-function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, onStopDownload, download, downloadError, onSubEdited, manual, edited, brandTag, onRename, defaultTitle }: {
+/**
+ * Where a clip stands, on its card (user, 2026-11-13: "he wants to know at what stage he is on that video"):
+ * Unseen (never opened) → Draft (opened, not changed) → Edited (changed in the editor) → Exporting → Exported;
+ * changed again after that: Edited after export (the download is the old one); Export failed. `changed`: the
+ * editor's editedSinceExport mark; `edited`: your own clip laid out in the editor (manual board); `opened`:
+ * opened in the editor (clips.layers.opened)
+ */
+function clipState(status: string, outputUrl: string | null, edited: boolean, changed = false, opened = false) {
+  if (status === 'rendering') return { key: 'exporting', label: 'Exporting', color: ACCENT }
+  if (status === 'failed') return { key: 'failed', label: 'Export failed', color: '#f87171' }
+  if (status === 'done' && outputUrl) return changed
+    ? { key: 'stale', label: 'Edited after export', color: '#fbbf24' }
+    : { key: 'exported', label: 'Exported', color: '#4ade80' }
+  if (edited || changed) return { key: 'edited', label: 'Edited', color: ACCENT }
+  if (opened) return { key: 'draft', label: 'Draft', color: 'rgb(var(--cb-fg) / 0.6)' }
+  return { key: 'unseen', label: 'Unseen', color: 'rgb(var(--cb-fg) / 0.45)' }
+}
+
+function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, onStopDownload, download, downloadError, onSubEdited, manual, edited, changed, opened, brandTag, madeTags, onRename, defaultTitle }: {
   id: string
+  /** Make my clips: what was ticked before its run, in the row of labels */
+  madeTags?: React.ReactNode
   /** Renamed from its card (✎ or a double-click on the name): the new name, or null for `defaultTitle` again */
   onRename?: (title: string | null) => void
   /** Its name when it has none of its own ("Clip 5") */
@@ -3092,6 +3313,10 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
   manual?: boolean
   /** Manual edit board: opened in the editor already (a small green label) */
   edited?: boolean
+  /** Changed in the editor since its last export */
+  changed?: boolean
+  /** Opened in the editor at least once */
+  opened?: boolean
   /** Sub-edit finished: the clip's framing changed (the board reloads it) */
   onSubEdited?: () => void
   /** Download: saves the file, exporting it first if it isn't exported yet (e.g. AI's clips) */
@@ -3179,11 +3404,12 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
     document.addEventListener('pointerdown', away)
     return () => document.removeEventListener('pointerdown', away)
   }, [open, selecting, id, onClose])
-  const chip =
-    status === 'rendering' ? { label: 'Rendering', color: ACCENT } :
-    status === 'done' ? { label: 'Exported', color: '#4ade80' } :
-    status === 'failed' ? { label: 'Render failed', color: '#f87171' } :
-    { label: 'Draft', color: 'rgb(var(--cb-fg) / 0.45)' }
+  const chip = clipState(status, outputUrl, !!edited, !!changed, !!opened)
+  const stateTag = (
+    <span className="cb-state" data-state={chip.key} style={{ '--c': chip.color } as React.CSSProperties} title={chip.key === 'stale' ? 'Changed after its last export: export again for a download with the changes' : `This clip: ${chip.label}`}>
+      {chip.key === 'exporting' ? <Spinner /> : <i aria-hidden="true" />}{chip.label}
+    </span>
+  )
   const heart = (
     <button type="button" onClick={e => { e.stopPropagation(); onFavorite() }} aria-pressed={favorite}
       aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'}
@@ -3229,12 +3455,11 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
             </span>
             <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] tabular-nums" style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>
               <ClockIcon />{manual ? <><span className="cb-range" style={{ color: ACCENT }}>{msToDisplay(startMs)} – {msToDisplay(endMs)}</span> · {durLabel(startMs, endMs)}</> : durLabel(startMs, endMs)}
-              {edited && (
-                <span className="cb-edited px-1.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide" style={{ color: ACCENT, background: 'rgba(200,255,0,0.12)' }}>Edited</span>
-              )}
-              {status === 'rendering' && <span className="flex items-center gap-1" style={{ color: ACCENT }}>· <Spinner /> Exporting</span>}
+              {/* Where it stands: Draft, Edited, Exporting, Exported, Export failed (user, 2026-11-13) */}
+              {stateTag}
               {/* Which brand kit is on it, at a glance (user, 2026-11-10: the slim cards didn't say) */}
               {brandTag}
+              {madeTags}
               {sub.busy && <SubEditInline startedAt={sub.startedAt} estimate={sub.estimate} ahead={sub.ahead} onStop={sub.stop} />}
             </span>
             {/* Why the download didn't work (user, 2026-11-12: it only turned into Retry) — out of credits, with
@@ -3352,11 +3577,9 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
                 {ORIGIN_BADGE[origin].label}
               </span>
             )}
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide" style={{ color: chip.color }}>
-              {status === 'rendering' ? <Spinner /> : <span className="w-1.5 h-1.5 rounded-full" style={{ background: chip.color }} />}
-              {chip.label}
-            </span>
+            {stateTag}
             {!selecting && brandTag}
+            {!selecting && madeTags}
           </div>
         </div>
       </div>

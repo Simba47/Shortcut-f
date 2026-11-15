@@ -23,6 +23,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ vid
       captionLanguage: body?.caption_language, titleLanguage: body?.title_language,
       // 'default' (the account's default kit), 'none', or a kit's id
       brandKit: typeof body?.brand_kit === 'string' ? body.brand_kit : undefined,
+      // The shape, the layouts AI can use, the caption style and the frame (user, 2026-11-15; made safe in createAutoClips)
+      aspect: body?.aspect, layoutList: body?.layout_list, captionStyle: body?.caption_style, frame: body?.frame,
+      titleStyle: body?.title_style, titleFont: body?.title_font,
       // 'new': look for new moments instead of making more from the saved ones; pay: agreed to its credits
       search: body?.search === 'new' ? 'new' : 'more', pay: body?.pay === true,
     }))
