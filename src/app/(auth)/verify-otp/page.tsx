@@ -32,7 +32,13 @@ function VerifyOtpForm() {
   const [cooldown, setCooldown] = useCooldown()
   const codeRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { codeRef.current?.focus() }, [])
+  // Opened without an email (typed in, a bookmark, a link that lost it): nothing to send a code to,
+  // so back to where the code is asked for — sign in, or Forgot password for a reset code
+  const noEmail = !email.includes('@')
+  useEffect(() => {
+    if (noEmail) router.replace(purpose === 'password_reset' ? '/forgot-password' : '/login')
+    else codeRef.current?.focus()
+  }, [noEmail, purpose, router])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -75,6 +81,8 @@ function VerifyOtpForm() {
     setNotice(r?.ok ? AUTH.notes.newCodeSent(email) : null)
     if (!r?.ok) { const d = r ? await r.json().catch(() => ({})) : {}; setError(r?.status === 429 && d.error ? d.error : AUTH.errors.resendFailed) }
   }
+
+  if (noEmail) return <BrandLoader size={36} />
 
   if (success) {
     return (
