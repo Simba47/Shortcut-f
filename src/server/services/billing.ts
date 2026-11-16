@@ -3,6 +3,7 @@ import { ensureBillingSchema } from '@/server/services/billingSchema'
 import { recordPayment, recordCheckoutPayment } from '@/server/services/invoices'
 import { PLANS } from '@/lib/plans'
 import { grantPlanCredits } from '@/server/services/credits'
+import { givenPlan, higherPlan } from '@/server/services/givenPlan'
 import {
   PAID_PLAN_KEYS, type PaidPlanKey, type SubscriptionChange, razorpayMode,
   createRazorpayPlan, createRazorpaySubscription, cancelRazorpaySubscription, fetchRazorpaySubscription, rupeesToPaise,
@@ -102,8 +103,17 @@ export async function endSubscription(c: Extract<SubscriptionChange, { kind: 'en
   })
 }
 
-/** The plan the user is on right now: a paid plan needs a paid-up Razorpay subscription (users from before payments have none and are left alone) */
+/**
+ * The plan the user is on right now: the higher of the plan they pay for and a plan Shortcut's admin
+ * gave them that is on now (givenPlan.ts; the admin never changes the paid plan)
+ */
 export async function effectivePlan(userId: string, storedPlan: string): Promise<string> {
+  const [paid, given] = await Promise.all([paidUpPlan(userId, storedPlan), givenPlan(userId)])
+  return higherPlan(paid, given)
+}
+
+/** The plan paid for: a paid plan needs a paid-up Razorpay subscription (users from before payments have none and are left alone) */
+async function paidUpPlan(userId: string, storedPlan: string): Promise<string> {
   if (storedPlan === 'free') return 'free'
   await ensureBillingSchema()
   const [row] = await sql<{ managed: boolean; valid: boolean }[]>`
