@@ -1,5 +1,6 @@
 'use client'
 
+import { Spinner } from '@/components/ui/spinner'
 import { useEffect, useState } from 'react'
 import { TopUpLink } from '@/components/ui/credits-badge'
 import { useFaceAt, useFrameAt } from '@/modules/clips/thumbs'
@@ -132,7 +133,7 @@ export function SubjectsPanel(p: Props) {
     try { ok = (await p.onMarkShot()) !== false } finally { setGroupBusy(false) }
     if (ok) setMarked(true)
   }
-  const groupSpinner = <span className="w-3 h-3 shrink-0 rounded-full animate-spin motion-reduce:animate-none" aria-hidden="true" style={{ border: '2px solid rgb(var(--ed-fg) / 0.18)', borderTopColor: 'rgb(var(--ed-fg) / 0.85)' }} />
+  const groupSpinner = <Spinner />
   useEffect(() => { if (!marked) return; const id = setTimeout(() => setMarked(false), 1400); return () => clearTimeout(id) }, [marked])
   const busy = p.subjects.some(s => s.status === 'queued' || s.status === 'running')
   /** Marked but not looked for yet (or the last try failed): Follow takes them */
@@ -179,10 +180,7 @@ export function SubjectsPanel(p: Props) {
     const id = setTimeout(() => setSlowPress(true), Math.max(0, pendingSince + 3000 - Date.now()))
     return () => clearTimeout(id)
   }, [pending, pendingSince])
-  const spinner = (dark: boolean) => (
-    <span className="w-3.5 h-3.5 shrink-0 rounded-full animate-spin motion-reduce:animate-none" aria-hidden="true"
-      style={dark ? { border: '2px solid rgba(0,0,0,0.25)', borderTopColor: '#000' } : { border: '2px solid rgb(var(--ed-fg) / 0.2)', borderTopColor: 'currentColor' }} />
-  )
+  const spinner = (dark: boolean) => <Spinner size={14} style={dark ? { color: '#000' } : undefined} />
   // Following them (user, 2026-10-24: "add a processing bar so we understand it is going on"): how far
   // the ones being followed are, and — while none has started — how long they have waited for the worker
   const following = p.subjects.filter(s => s.status === 'queued' || s.status === 'running')
@@ -249,7 +247,7 @@ export function SubjectsPanel(p: Props) {
             : <>
                 <span className="ed-run-label relative flex items-center gap-2 min-w-0">
                   {accent
-                    ? <span className="w-3.5 h-3.5 shrink-0 rounded-full animate-spin motion-reduce:animate-none" aria-hidden="true" style={{ border: '2px solid rgba(200,255,0,0.22)', borderTopColor: accent }} />
+                    ? <Spinner size={14} style={{ color: accent }} />
                     : spinner(dark)}
                   <span className="truncate">{label}</span>
                   {pct !== null && <span className="tabular-nums" style={accent ? { color: accent } : { opacity: 0.7 }}>{pct}%</span>}

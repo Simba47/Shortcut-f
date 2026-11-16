@@ -1,6 +1,7 @@
 'use client'
 
 // The brand on the clip board: a tag per clip, "Put on all" (brand kit Phase 2: components/brand/ClipBoardBrand.tsx)
+import { Spinner } from '@/components/ui/spinner'
 import { BrandTagIcon, BRAND_TAG } from '@/components/brand/BrandTagIcon'
 import { useClipBrands, BrandAllBar, BrandTag } from '@/components/brand/ClipBoardBrand'
 import { preloadMascot } from '@/components/ui/mascot'
@@ -12,10 +13,10 @@ import { ScrubPlayer } from '@/components/clips/ScrubPlayer'
 import { useLocalVideo } from '@/modules/clips/localVideo'
 import { usePolling } from '@/lib/usePolling'
 import { useCredits } from '@/lib/useCredits'
-import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { AiScan } from '@/components/clips/AiScan'
-import { MmcPop, LayoutChoices, FrameChoices, CaptionChoices, TitleChoices, cleanMakeLook, captionStyleName, titleStyleName, frameName, DEFAULT_MAKE_LOOK, CLIP_LAYOUTS, type MakeLook } from '@/components/clips/MakeClipsChoices'
+import { MmcPop, CaptionChoices, TitleChoices, cleanMakeLook, captionStyleName, titleStyleName, frameName, DEFAULT_MAKE_LOOK, CLIP_LAYOUTS, type MakeLook } from '@/components/clips/MakeClipsChoices'
 import { useRouter } from 'next/navigation'
 import { FilterChip } from '@/components/ui/filter-chip'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -423,12 +424,12 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     setLookState(next)
     try { localStorage.setItem(AUTO_LOOK_KEY, JSON.stringify(next)) } catch { /* storage blocked */ }
   }
-  // Which box is open: the captions' styles, the layouts, the frame
-  const [pop, setPop] = useState<'captions' | 'title' | 'layout' | 'frame' | null>(null)
+  // Which box is open: the captions' style or the title's
+  const [pop, setPop] = useState<'captions' | 'title' | null>(null)
   const [popAt, setPopAt] = useState<HTMLElement | null>(null)
   // (the boxes open over the video preview — user, 2026-11-15 — the centre column)
   const [stageEl, setStageEl] = useState<HTMLElement | null>(null)
-  const openPop = (which: 'captions' | 'title' | 'layout' | 'frame') => (e: React.MouseEvent<HTMLElement>) => {
+  const openPop = (which: 'captions' | 'title') => (e: React.MouseEvent<HTMLElement>) => {
     if (pop === which) { setPop(null); return }
     setPopAt(e.currentTarget); setPop(which)
   }
@@ -444,9 +445,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       const saved = JSON.parse(localStorage.getItem(AUTO_OPTIONS_KEY) ?? 'null') as Partial<Record<AutoOption, boolean>> | null
       if (saved) setAutoOpts(o => ({ ...o, ...saved }))
       const savedLook = JSON.parse(localStorage.getItem(AUTO_LOOK_KEY) ?? 'null')
-      // (none yet: Split screen turned off before means Fill and Fit only)
-      if (savedLook) setLookState(cleanMakeLook(savedLook))
-      else if (saved?.layouts === false) setLookState({ ...DEFAULT_MAKE_LOOK, layouts: ['fill', 'fit'] })
+      // (user, 2026-11-16: Layout and Frame taken out of Make my clips — a shape, layouts or frame picked
+      // before is not kept: the clips get the usual ones, never a choice that can't be seen any more)
+      if (savedLook) setLookState({ ...cleanMakeLook(savedLook), aspect: DEFAULT_MAKE_LOOK.aspect, layouts: [...DEFAULT_MAKE_LOOK.layouts], frame: null })
       const lang = JSON.parse(localStorage.getItem(AUTO_LANGUAGE_KEY) ?? 'null') as { caption?: string; title?: string } | null
       if (CAPTION_LANGUAGES.some(l => l.id === lang?.caption)) setCaptionLang(lang!.caption as CaptionLanguage)
       if (TITLE_LANGUAGES.some(l => l.id === lang?.title)) setTitleLang(lang!.title as TitleLanguage)
@@ -1044,8 +1045,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         body: JSON.stringify({
           clip_count: count, add_broll: autoBroll, ...autoOpts, motion: true,
           // (today's worker reads layouts as Split screen on / off: on when Split or Three may be used)
-          layouts: look.layouts.includes('split') || look.layouts.includes('three'),
-          aspect: look.aspect, layout_list: look.layouts, caption_style: look.captionStyle, frame: look.frame,
+          // (no Layout or Frame options any more — user, 2026-11-16: the usual shape and layouts, no frame)
+          layouts: DEFAULT_MAKE_LOOK.layouts.includes('split') || DEFAULT_MAKE_LOOK.layouts.includes('three'),
+          aspect: DEFAULT_MAKE_LOOK.aspect, layout_list: DEFAULT_MAKE_LOOK.layouts, caption_style: look.captionStyle, frame: null,
           title_style: look.titleStyle, title_font: look.titleFont,
           caption_language: captionLang, title_language: titleLang, brand_kit: brandPick, search, pay,
         }),
@@ -1278,8 +1280,29 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   useEffect(() => () => { if (lockFlashTimer.current) clearTimeout(lockFlashTimer.current) }, [])
   const aiColRef = useRef<HTMLElement>(null)
   const clipsColRef = useRef<HTMLElement>(null)
-  // What Ask AI keeps: its box and one-tap searches while it has nothing to show, more once results come
-  const askMin = aiSuggestions?.length || loadingAi || aiError ? ASK_MIN : ASK_MIN_EMPTY
+  // What Ask AI keeps: its box and one-tap searches while it has nothing to show, more once results come.
+  // Never less than what its fixed parts need (title, box, the one-tap searches on however many rows they
+  // wrap to, "searches left"): user, 2026-11-16 — that line came out below the card
+  const askRef = useRef<HTMLElement>(null)
+  const [askNeed, setAskNeed] = useState(0)
+  useLayoutEffect(() => {
+    const el = askRef.current
+    if (!el) return
+    const measure = () => {
+      const kids = [...el.children].filter(c => (c as HTMLElement).classList.contains('shrink-0')) as HTMLElement[]
+      const cs = getComputedStyle(el)
+      const gap = parseFloat(cs.rowGap) || 0
+      const need = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
+        + kids.reduce((n, k) => n + k.offsetHeight, 0) + gap * kids.length   // (and the gap before the results)
+      setAskNeed(Math.ceil(need))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    for (const k of el.children) ro.observe(k)
+    return () => ro.disconnect()
+  })
+  const askMin = Math.max(aiSuggestions?.length || loadingAi || aiError ? ASK_MIN : ASK_MIN_EMPTY, askNeed)
   function startSplitResize(e: React.PointerEvent) {
     if (e.button !== 0) return
     e.preventDefault(); e.stopPropagation()
@@ -1333,8 +1356,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // Clip previews are 9:16; the video keeps its own shape
   // The frame takes the video's own proportions once it loads, so it fits exactly (no empty bars)
   const [ratio, setRatio] = useState(16 / 9)
-  // The Layout box's pictures: a frame of this video, a third of the way in (fetched once the box opens)
-  const layoutFrame = useFrameAt(pop === 'layout' && isReady ? videoUrl : null, Math.round((initialVideo.duration_ms ?? 0) / 3), 480)
   // The metadata can arrive before the page is interactive (the <video> is server-rendered),
   // so also read the size once on mount
   useEffect(() => {
@@ -1790,7 +1811,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               disabled={autoRunning} onClick={flip}><span /></button>
           )
           /** A row that opens a box (and, with `toggle`, has a switch at its end) */
-          const opener = (which: 'captions' | 'title' | 'layout' | 'frame', d: React.ReactNode, name: string, value: string, toggle?: { on: boolean; flip: () => void }) => (
+          const opener = (which: 'captions' | 'title', d: React.ReactNode, name: string, value: string, toggle?: { on: boolean; flip: () => void }) => (
             <div className="mmc-li" data-open={pop === which || undefined} data-dim={(toggle && !toggle.on) || undefined}>
               <button type="button" className="mmc-li-main" disabled={autoRunning} aria-haspopup="dialog" aria-expanded={pop === which}
                 aria-label={`${name}: ${toggle && !toggle.on ? 'off' : value}`} onClick={openPop(which)}>
@@ -1815,13 +1836,12 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                     { on: autoOpts.title, flip: () => toggleAutoOpt('title') })}
                 </div>
               </div>
+              {/* Look: the brand kit the clips get (user, 2026-11-16: Layout and Frame taken out — only Brand here,
+                  so the part shows only once the account has a kit) */}
+              {brandKits.length > 0 && (
               <div className="flex flex-col gap-1.5">
                 <p id={`mmc-look-${video.id}`} className="mmc-heading">Look</p>
                 <div className="mmc-list" role="group" aria-labelledby={`mmc-look-${video.id}`}>
-                  {opener('layout', AUTO_ICONS.layouts, 'Layout', `${look.aspect} · ${look.layouts.length} layout${look.layouts.length === 1 ? '' : 's'}`)}
-                  {opener('frame', FRAME_ICON, 'Frame', frameName(look.frame))}
-                  {/* The brand kit the clips get (shown once the account has a kit) */}
-                  {brandKits.length > 0 && (
                     <div className="mmc-li">
                       <span className="mmc-li-main mmc-li-static">
                         {icon(BRAND_ICON)}
@@ -1835,9 +1855,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                           ...brandKits.filter(k => !k.isDefault).map(k => ({ id: k.id, label: k.name })),
                         ]} />
                     </div>
-                  )}
                 </div>
-                {kitOn && missing.length > 0 && !autoRunning && brandKits.length > 0 && (
+                {kitOn && missing.length > 0 && !autoRunning && (
                   <p className="mmc-brand-note" role="status">
                     {missing.length > 1
                       ? 'Captions and Title are off, so only the kit’s logo goes on.'
@@ -1846,6 +1865,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                   </p>
                 )}
               </div>
+              )}
 
               {/* The boxes the rows open (over the video preview on a wide screen). What the captions and the
                   title are written in now sits in their box. */}
@@ -1858,12 +1878,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 <TitleChoices on={autoOpts.title} onToggle={() => toggleAutoOpt('title')} styleId={look.titleStyle} font={look.titleFont}
                   onStyle={titleStyle => setLook({ ...look, titleStyle })} onFont={titleFont => setLook({ ...look, titleFont })}
                   language={<MmcPick value={titleLang} options={TITLE_LANGUAGES} onChange={id => pickLanguage({ title: id as TitleLanguage })} label="What the title is written in" />} />
-              </MmcPop>
-              <MmcPop anchor={popAt} over={wide ? stageEl : null} open={pop === 'layout'} onClose={() => setPop(null)} label="Layout">
-                <LayoutChoices look={look} onChange={setLook} frameSrc={layoutFrame} ratio={ratio} />
-              </MmcPop>
-              <MmcPop anchor={popAt} over={wide ? stageEl : null} open={pop === 'frame'} onClose={() => setPop(null)} label="Frame">
-                <FrameChoices frame={look.frame} onPick={frame => { setLook({ ...look, frame }); setPop(null) }} />
               </MmcPop>
             </div>
           )
@@ -2000,7 +2014,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
 
       {/* Ask AI (Best moments: removed 2026-11-09 (user), kept commented: it shared this card through a switch at the top, commented below) */}
       {wide && aiFocus === 'mmc' ? askBar : (
-      <section className="flex-1 p-3.5 flex flex-col gap-2.5 rounded-2xl" style={{ ...CARD, minHeight: askMin }}>
+      <section ref={askRef} className="flex-1 p-3.5 flex flex-col gap-2.5 rounded-2xl" style={{ ...CARD, minHeight: askMin }}>
         {/* (a click on the title row pops Ask AI up) */}
         <div className="shrink-0 flex items-center gap-2" data-popup={wide || undefined} onClick={popUp('ask')}>
           <h3 className="flex-1 flex items-center gap-2 text-[13px] font-semibold" style={{ color: 'var(--cb-text)' }}>
@@ -3012,9 +3026,6 @@ function ReadingProgress({ reading, expectMs, small = false }: { reading: Readin
       </span>
     </div>
   )
-}
-function Spinner() {
-  return <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
 }
 
 type EmptyKind = 'clips' | 'edit' | 'heart' | 'filter' | 'wait' | 'ask' | 'auto'

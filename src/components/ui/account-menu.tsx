@@ -21,7 +21,35 @@ import { BrandTeamDialog } from '@/components/brand/BrandTeamDialog'
  * waiting for the backend. TODO(backend): wire them up.
  */
 
-type PlanSummary = { planName: string; maxVideos: number; usage: { videos: number } }
+type PlanSummary = { plan?: string; planName: string; maxVideos: number; usage: { videos: number } }
+
+type Tier = 'none' | 'trial' | 'starter' | 'creator' | 'agency'
+/**
+ * A plan's tier from its key (lib/plans.ts: free = "No plan" since 2026-11-16, trial, starter, creator, agency),
+ * else its name; an unknown paid one counts as the top
+ */
+function tierOf(key: string | undefined, name: string): Tier {
+  const n = (key ?? name).toLowerCase()
+  if (n === 'free' || n === 'no plan') return 'none'
+  return n === 'trial' || n === 'starter' || n === 'creator' ? n : 'agency'
+}
+/**
+ * Each plan's own symbol beside its name (user, 2026-11-16: "a special symbol for every plan"):
+ * No plan an empty dashed ring, Trial a sprout (trying it out), Starter a bolt (getting going), Creator
+ * sparkles (making things), Agency a crown (the top). Grey with no plan, lime on the paid ones (.am-plan-sym)
+ */
+function PlanSymbol({ tier }: { tier: Tier }) {
+  const d = {
+    none: <circle cx="12" cy="12" r="7.5" strokeDasharray="3.2 3" />,
+    trial: <><path d="M12 21v-8" /><path d="M12 13c0-4 2.6-6.5 7-6.5 0 4.2-2.7 6.5-7 6.5z" fill="currentColor" fillOpacity=".25" /><path d="M12 15.5c0-3.2-2-5.2-5.6-5.2 0 3.3 2.1 5.2 5.6 5.2z" fill="currentColor" fillOpacity=".25" /></>,
+    starter: <path d="M13.2 2.5 5 13.6h6.1l-1.1 7.9 8.2-11.1h-6.1z" fill="currentColor" stroke="none" />,
+    creator: <><path d="M10 3.5c.7 3.9 2.6 5.8 6.5 6.5-3.9.7-5.8 2.6-6.5 6.5-.7-3.9-2.6-5.8-6.5-6.5 3.9-.7 5.8-2.6 6.5-6.5z" fill="currentColor" stroke="none" /><path d="M18 14.5c.35 1.9 1.25 2.8 3.1 3.1-1.85.35-2.75 1.25-3.1 3.1-.35-1.85-1.25-2.75-3.1-3.1 1.85-.3 2.75-1.2 3.1-3.1z" fill="currentColor" stroke="none" /></>,
+    agency: <><path d="M3.5 8.5 8 12l4-6.5 4 6.5 4.5-3.5-1.8 9.5H5.3z" fill="currentColor" stroke="none" /><path d="M5.6 20.5h12.8" /></>,
+  }[tier]
+  return (
+    <svg className="am-plan-sym" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>
+  )
+}
 
 const SUPPORT_WHATSAPP = 'https://wa.me/917702404917'
 
@@ -180,7 +208,13 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
           {plan && (
             <div className="am-usage">
               <div className="flex items-center justify-between">
-                <span className="am-usage-plan">Plan</span>
+                {/* Which plan (user, 2026-11-16: "the user should know which plan they're on"): its name as a
+                    badge with the plan's own symbol (PlanSymbol), richer the higher the plan */}
+                <span className="am-usage-plan">
+                  <span className="am-plan-chip" data-tier={tierOf(plan.plan, plan.planName)}><PlanSymbol tier={tierOf(plan.plan, plan.planName)} />{plan.planName}</span>
+                  {/* ("No plan" is already the whole name) */}
+                  {tierOf(plan.plan, plan.planName) !== 'none' && <span className="am-plan-word">plan</span>}
+                </span>
                 <span className="am-usage-count"><b>{plan.usage.videos}</b> / {plan.maxVideos} videos</span>
               </div>
               <div className="am-bar" aria-hidden="true"><span style={{ width: `${Math.max(3, used * 100)}%` }} data-high={used >= 0.85 || undefined} /></div>

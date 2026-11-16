@@ -1,5 +1,6 @@
 'use client'
 
+import { Spinner } from '@/components/ui/spinner'
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { useStoryboard } from '@/modules/clips/storyboard'
 import { useLocalVideoProgress } from '@/modules/clips/localVideo'
@@ -276,7 +277,7 @@ export function ScrubPlayer({ src, videoRef, durationMs: durHint, loadKey, onTim
       )}
       {slow && !preview && (
         <div className="absolute inset-0 grid place-items-center pointer-events-none" aria-hidden="true">
-          <span className="w-9 h-9 rounded-full border-[3px] border-white/25 border-t-white animate-spin" style={{ filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.6))' }} />
+          <Spinner size={36} style={{ color: '#fff', filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.6))' }} />
         </div>
       )}
 

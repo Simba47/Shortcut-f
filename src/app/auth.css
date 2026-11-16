@@ -355,12 +355,6 @@
 .auth-submit:hover:not(:disabled) .auth-submit-arrow { translate: 3px 0; }
 [dir="rtl"] .auth-submit-arrow { scale: -1 1; }
 [dir="rtl"] .auth-submit:hover:not(:disabled) .auth-submit-arrow { translate: -3px 0; }
-.auth-spinner {
-  width: 16px; height: 16px; flex-shrink: 0; border-radius: 50%;
-  border: 2px solid rgb(10 10 10 / 0.22); border-top-color: var(--auth-ink);
-  animation: auth-spin .7s linear infinite;
-}
-@keyframes auth-spin { to { rotate: 360deg; } }
 /* "By creating an account, you agree to our Terms and Privacy Policy" under Create account */
 .auth-legal {
   margin: 0; text-align: center; font-size: 12px; line-height: 1.5; color: var(--auth-dim);

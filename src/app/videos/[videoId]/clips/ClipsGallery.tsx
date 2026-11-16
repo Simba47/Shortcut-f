@@ -1,5 +1,6 @@
 'use client'
 
+import { Spinner } from '@/components/ui/spinner'
 import { preloadMascot } from '@/components/ui/mascot'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -202,7 +203,7 @@ export function ClipsGallery({ video, videoUrl, needsProxy, stockUrls, job, clip
         {/* ── Status ── */}
         {running && (
           <div className="ag-banner ag-banner-lime" role="status">
-            <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin shrink-0" />
+            <Spinner size={16} />
             <div>
               <p className="font-semibold">AI is making your clips</p>
               <p className="ag-banner-sub">New clips appear here by themselves as soon as they’re ready.</p>
@@ -323,7 +324,7 @@ export function ClipsGallery({ video, videoUrl, needsProxy, stockUrls, job, clip
                       <button onClick={() => exportClip(c.id)} disabled={c.status === 'rendering'} className="ag-btn ag-btn-dark"
                         title={c.status === 'rendering' ? 'It downloads by itself when ready' : 'Export this clip as AI edited it, then download it'}>
                         {c.status === 'rendering'
-                          ? <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          ? <Spinner />
                           : <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                         {c.status === 'rendering' ? (wantDl.includes(c.id) ? 'Preparing…' : 'Exporting…') : 'Download'}
                       </button>
