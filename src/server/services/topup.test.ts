@@ -114,6 +114,49 @@ test('an unknown pack is refused, and the free plan is sent to upgrade', opts, a
   await assert.rejects(topup.startTopup(free, 'small'), (e: { status?: number; message?: string }) => e.status === 403 && /paid plan/i.test(e.message ?? ''))
 })
 
+test('the Trial pack (user, 2026-11-16): ₹50 once for 99 credits and the Trial plan for 14 days; once per account; unused credits carry into a plan', opts, async () => {
+  const u = await newUser('free')
+  const quota = await import('./quota')
+  const order = await topup.startTopup(u, 'trial')
+  assert.equal(order.amountPaise, 5000); assert.equal(order.credits, 99)
+  await mock.mockPay({ orderId: order.orderId, outcome: 'success' }, collect)
+  await deliverAll()
+  await deliverAll()   // delivered again: nothing more
+  assert.equal((await credits.balance(u)).balance, 99)
+  assert.equal(await quota.getUserPlan(u), 'trial')
+  const [g] = await sql<{ kind: string; expires_at: Date }[]>`SELECT kind, expires_at FROM credit_grants WHERE user_id = ${u}`
+  assert.equal(g.kind, 'trial')
+  const days = (g.expires_at.getTime() - Date.now()) / 86_400_000
+  assert.ok(days > 13.9 && days <= 14, `trial credits last 14 days (${days})`)
+  // on the Trial: no second trial, no top-ups
+  await assert.rejects(topup.startTopup(u, 'trial'), (e: { status?: number; message?: string }) => e.status === 403 && /Trial already/.test(e.message ?? ''))
+  await assert.rejects(topup.startTopup(u, 'small'), (e: { status?: number; message?: string }) => e.status === 403 && /paid plans/.test(e.message ?? ''))
+  // a plan: its credits on top, and what is left of the trial's lasts as long as the plan's
+  const sub = await billing.startSubscription(u, 'creator')
+  const paid = await mock.mockPay({ subscriptionId: sub.subscriptionId, outcome: 'success' }, collect)
+  await billing.activateAfterCheckout(u, sub.subscriptionId, paid.razorpay_payment_id)
+  await deliverAll()
+  assert.equal(await quota.getUserPlan(u), 'creator')
+  assert.equal((await credits.balance(u)).balance, 99 + 999)
+  const rows = await sql<{ kind: string; expires_at: Date }[]>`SELECT kind, expires_at FROM credit_grants WHERE user_id = ${u} ORDER BY kind`
+  assert.equal(rows[0].kind, 'plan'); assert.equal(rows[1].kind, 'trial')
+  assert.equal(rows[1].expires_at.getTime(), rows[0].expires_at.getTime(), 'trial credits now end with the plan credits')
+  await assert.rejects(topup.startTopup(u, 'trial'), (e: { status?: number; message?: string }) => e.status === 403 && /new accounts/.test(e.message ?? ''))
+})
+
+test('a Trial that has ended: no plan again, and it cannot be bought twice', opts, async () => {
+  const u = await newUser('free')
+  const order = await topup.startTopup(u, 'trial')
+  await mock.mockPay({ orderId: order.orderId, outcome: 'success' }, collect)
+  await deliverAll()
+  await sql`UPDATE topup_orders SET paid_at = now() - interval '15 days' WHERE user_id = ${u}`
+  await sql`UPDATE credit_grants SET expires_at = now() - interval '1 day' WHERE user_id = ${u}`
+  const quota = await import('./quota')
+  assert.equal(await quota.getUserPlan(u), 'free')
+  assert.equal((await credits.balance(u)).balance, 0)
+  await assert.rejects(topup.startTopup(u, 'trial'), (e: { status?: number; message?: string }) => e.status === 403 && /once per account/.test(e.message ?? ''))
+})
+
 test('the ₹1 test pack (user, 2026-11-12): only for an email in TEST_PACK_EMAILS, paid and credited like any pack', opts, async () => {
   const u = await newUser('free')
   process.env.TEST_PACK_EMAILS = 'owner@example.test, Tester@Example.test'

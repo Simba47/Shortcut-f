@@ -3,7 +3,7 @@ import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand } from '@aw
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { aiProvider, askGemini, GEMINI_MODEL, type GeminiUsage } from '@/lib/gemini'
 import { creditsMode } from '@/lib/credits'
-import { clipsAllowed, clipCredits, type LimitedBy } from '@/lib/aiLimits'
+import { clipsAllowed, clipCredits, moreLater, type LimitedBy } from '@/lib/aiLimits'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import sql from '@/lib/db'
 import { findClips, type FoundClip, type Subscores } from './clipFinder'
@@ -639,9 +639,13 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
   let count = requested
   let limitedBy: LimitedBy | 'saved' = null
   if (mode === 'on') {
+    // No plan (a Trial that has ended keeps its videos): no AI clips until a plan
+    const { getUserPlan, NO_PLAN_AI_MESSAGE } = await import('./quota')
+    const planKey = await getUserPlan(userId)
+    if (planKey === 'free') throw Object.assign(new Error(NO_PLAN_AI_MESSAGE), { status: 403, expose: true })
     const r = clipsAllowed({ requested, perRun: allowance.perRun, dayLeft: allowance.dayLeft, videoLeft: allowance.videoLeft, monthLeft: allowance.monthLeft })
     if (r.count === 0) {
-      if (r.limitedBy === 'month') throw Object.assign(new Error(`You've used your ${allowance.clipsPerMonth} AI clips. More next month, or upgrade.`), { status: 403, expose: true })
+      if (r.limitedBy === 'month') throw Object.assign(new Error(`You've used your ${allowance.clipsPerMonth} AI clips. ${moreLater(planKey)}`), { status: 403, expose: true })
       throw Object.assign(new Error(r.limitedBy === 'day'
         ? `You've made ${allowance.clipsToday} of today's ${allowance.clipsPerDay} AI clips. More tomorrow.`
         : `This video already has ${allowance.videoClips} AI clips, the most for its length (1 per minute of video).`), { status: 429, expose: true })

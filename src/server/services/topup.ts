@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import sql from '@/lib/db'
-import { TOPUP_CREDIT_DAYS, findTopupPack, testPackAllowed } from '@/lib/credits'
+import { TOPUP_CREDIT_DAYS, TRIAL_DAYS, findTopupPack, testPackAllowed } from '@/lib/credits'
 import {
   checkoutScriptUrl, createRazorpayOrder, fetchRazorpayPayment, paidPayment, rupeesToPaise, verifyOrderSignature,
   type TopupChange,
@@ -8,6 +8,7 @@ import {
 import { ensureCreditsSchema } from './creditsSchema'
 import { balance, grant } from './credits'
 import { getUserPlan } from './quota'
+import { trialSummary } from './billing'
 import { recordPayment } from './invoices'
 
 const fail = (message: string, status: number) => Object.assign(new Error(message), { status, expose: true })
@@ -20,14 +21,22 @@ const fail = (message: string, status: number) => Object.assign(new Error(messag
 export async function startTopup(userId: string, packKey: unknown, email?: string | null) {
   const pack = findTopupPack(packKey, { test: testPackAllowed(email) })
   if (!pack) throw fail('Unknown credit pack', 400)
-  if (pack.key !== 'test' && await getUserPlan(userId) === 'free') throw fail('Top-ups are for paid plans. Upgrade to a paid plan to get more credits.', 403)
+  const plan = await getUserPlan(userId)
+  if (pack.key === 'trial') {
+    // Once per account, and only with no plan: it is the way in, not a cheap pack for paying users
+    if (plan === 'trial') throw fail('You are on the Trial already. Choose a plan to keep going after it.', 403)
+    if (plan !== 'free') throw fail('The Trial pack is for new accounts. Your plan already includes more, and top-ups are below.', 403)
+    if ((await trialSummary(userId)).used) throw fail('The Trial pack is once per account. Choose a plan to keep going.', 403)
+  } else if (pack.key !== 'test' && (plan === 'free' || plan === 'trial')) {
+    throw fail('Top-ups are for paid plans. Choose a plan to get more credits.', 403)
+  }
   await ensureCreditsSchema()
   const amountPaise = rupeesToPaise(pack.price)
   const order = await createRazorpayOrder(amountPaise, `topup_${randomUUID().replace(/-/g, '').slice(0, 24)}`, {
     kind: 'topup', user_id: userId, pack: pack.key, credits: String(pack.credits),
   })
   await sql`INSERT INTO topup_orders (order_id, user_id, pack, credits, amount_paise) VALUES (${order.id}, ${userId}, ${pack.key}, ${pack.credits}, ${amountPaise})`
-  return { orderId: order.id, amountPaise, credits: pack.credits, packName: `${pack.credits} credits`, keyId: process.env.RAZORPAY_KEY_ID, checkoutScript: checkoutScriptUrl() }
+  return { orderId: order.id, amountPaise, credits: pack.credits, packName: pack.key === 'trial' ? `Trial pack, ${pack.credits} credits` : `${pack.credits} credits`, keyId: process.env.RAZORPAY_KEY_ID, checkoutScript: checkoutScriptUrl() }
 }
 
 /**
@@ -38,8 +47,13 @@ export async function applyTopup(c: TopupChange): Promise<{ granted: boolean }> 
   await ensureCreditsSchema()
   const [own] = await sql<{ order_id: string }[]>`SELECT order_id FROM topup_orders WHERE order_id = ${c.orderId} AND user_id = ${c.userId} AND pack = ${c.pack}`
   if (!own) return { granted: false }
-  const r = await grant(c.userId, { kind: 'topup', amount: c.credits, expiresAt: new Date(Date.now() + TOPUP_CREDIT_DAYS * 86_400_000), sourceRef: `rzp:${c.payment.id}` })
+  const trial = c.pack === 'trial'
+  // The Trial pack's credits last as long as the trial (TRIAL_DAYS); a top-up's a year
+  const days = trial ? TRIAL_DAYS : TOPUP_CREDIT_DAYS
+  const r = await grant(c.userId, { kind: trial ? 'trial' : 'topup', amount: c.credits, expiresAt: new Date(Date.now() + days * 86_400_000), sourceRef: `rzp:${c.payment.id}` })
   await sql`UPDATE topup_orders SET status = 'paid', payment_id = ${c.payment.id}, paid_at = COALESCE(paid_at, now()) WHERE order_id = ${c.orderId}`
+  // The Trial plan's limits, while it lasts (billing.ts effectivePlan); never over a plan bought meanwhile
+  if (trial && await getUserPlan(c.userId) === 'free') await sql`UPDATE users SET plan = 'trial' WHERE id = ${c.userId}`
   // The invoice, once per payment whatever the number of tries; a failure answers an error so it is retried
   await recordPayment(c.userId, null, `topup:${c.pack}`, c.payment)
   return r

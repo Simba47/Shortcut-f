@@ -5,6 +5,8 @@
 // 1 credit = ₹1 (about ₹0.83 reaches us after GST and fees). Each price keeps 60%+ even on the
 // biggest top-up pack, from the 5 Nov costs (Shortcut-Unit-Economics-Nov-2026.pdf).
 
+import { PLANS } from './plans'
+
 /**
  * off:    nothing is recorded or checked (how the site ran before credits)
  * shadow: every spend is written to the ledger but never refused — to watch real numbers first
@@ -24,9 +26,11 @@ export function creditsMode(env: Record<string, string | undefined> = process.en
   return mode
 }
 
-/** (what Free's limits use: 45 for 30 minutes read, 15 for 3 AI clips, 21 for 3 Ask AI, 4 for 20 rewrites; and 10 to export) */
-/** Given once, when an account is first seen with credits switched on (CREDITS_FREE_SIGNUP changes it; 0 gives none) */
-export const FREE_SIGNUP_CREDITS = 95
+/**
+ * Given once, when an account is first seen with credits switched on (CREDITS_FREE_SIGNUP changes it).
+ * 0 since 2026-11-16 (user): no free plan, an account starts with the Trial pack (TRIAL_PACK) instead.
+ */
+export const FREE_SIGNUP_CREDITS = 0
 export function freeSignupCredits(env: Record<string, string | undefined> = process.env): number {
   const n = Number(env.CREDITS_FREE_SIGNUP)
   return env.CREDITS_FREE_SIGNUP !== undefined && env.CREDITS_FREE_SIGNUP.trim() !== '' && Number.isInteger(n) && n >= 0 ? n : FREE_SIGNUP_CREDITS
@@ -111,7 +115,15 @@ export const TOPUP_PACKS = [
  * setting removed it is gone.
  */
 export const TEST_PACK = { key: 'test', credits: 1, price: 1 } as const
-export type TopupPack = typeof TOPUP_PACKS[number] | typeof TEST_PACK
+/**
+ * The Trial pack (plans.ts `trial`, user 2026-11-16): bought once per account by someone with no plan,
+ * paid once like a credit pack: ₹50 for 99 credits (more than ₹1 a credit, the user's choice). Its credits
+ * and the Trial plan last TRIAL_DAYS from the payment. (what its limits use: 45 for 30 minutes read, 18 for
+ * 3 AI clips, 14 for 2 Ask AI, 4 for 20 rewrites; the other 18 export about 18 one-minute clips)
+ */
+export const TRIAL_PACK = { key: 'trial', credits: 99, price: PLANS.trial.price } as const
+export const TRIAL_DAYS = 14
+export type TopupPack = typeof TOPUP_PACKS[number] | typeof TEST_PACK | typeof TRIAL_PACK
 export type TopupPackKey = TopupPack['key']
 
 export function testPackAllowed(email: string | null | undefined, env: Record<string, string | undefined> = process.env): boolean {
@@ -123,6 +135,7 @@ export function testPackAllowed(email: string | null | undefined, env: Record<st
 /** A pack by its key; the test pack only when `test` (the buyer is allowed it, or the order was already made) */
 export function findTopupPack(key: unknown, { test }: { test: boolean }): TopupPack | undefined {
   if (test && key === TEST_PACK.key) return TEST_PACK
+  if (key === TRIAL_PACK.key) return TRIAL_PACK
   return TOPUP_PACKS.find(p => p.key === key)
 }
 
@@ -131,7 +144,7 @@ const SPENT_ON: Record<string, string> = {
   search: 'New moment search', ai_clips: 'AI clips', reading: 'Reading past your plan',
 }
 const GRANTED: Record<string, string> = {
-  plan: 'Monthly plan credits', topup: 'Top-up', free: 'Free credits', bonus: 'Bonus credits', refund: 'Credits refunded',
+  plan: 'Monthly plan credits', topup: 'Top-up', trial: 'Trial pack', free: 'Free credits', bonus: 'Bonus credits', refund: 'Credits refunded',
 }
 /** One row of the credit history in plain words (billing page) */
 export function ledgerLabel(reason: string, refType: string | null): string {
@@ -142,7 +155,7 @@ export function ledgerLabel(reason: string, refType: string | null): string {
   return 'Credits changed'
 }
 
-export type GrantKind = 'free' | 'plan' | 'topup' | 'bonus' | 'refund'
+export type GrantKind = 'free' | 'trial' | 'plan' | 'topup' | 'bonus' | 'refund'
 export interface SpendableGrant { id: string; remaining: number; expiresAt: Date | null; kind: GrantKind; createdAt: Date }
 
 /**

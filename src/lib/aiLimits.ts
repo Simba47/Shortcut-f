@@ -47,7 +47,9 @@ export const AI_REQUESTS_PER_MINUTE = 10
 export type LimitedBy = null | 'run' | 'day' | 'video' | 'month'
 /** How many clips a run makes: the lowest of what was asked, the plan's per-run limit, and what is left today, for this video and this month */
 export function clipsAllowed(a: { requested: number; perRun: number; dayLeft: number; videoLeft: number; monthLeft: number }): { count: number; limitedBy: LimitedBy } {
-  const options: Array<[number, LimitedBy]> = [[a.requested, null], [a.perRun, 'run'], [Math.max(0, a.dayLeft), 'day'], [Math.max(0, a.videoLeft), 'video'], [Math.max(0, a.monthLeft), 'month']]
+  // The month before the day: when both are used up the refusal names the one that lasts (the Trial's day
+  // and total are both 3, and "more tomorrow" would be wrong)
+  const options: Array<[number, LimitedBy]> = [[a.requested, null], [a.perRun, 'run'], [Math.max(0, a.monthLeft), 'month'], [Math.max(0, a.dayLeft), 'day'], [Math.max(0, a.videoLeft), 'video']]
   let best = options[0]
   for (const o of options) if (o[0] < best[0]) best = o
   return { count: best[0], limitedBy: best[1] }
@@ -77,7 +79,12 @@ export function istMonthStart(now: Date = new Date()): Date {
   return new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), 1) - IST_MS)
 }
 
-/** Allowances count from here: the start of the India month, or for ever on Free (its allowances are once only) */
+/** What a refusal past a limit says next: a paid plan's limits come back next month, the Trial's are once only */
+export function moreLater(plan: string | null | undefined): string {
+  return (PLANS[plan as PlanKey] ?? PLANS.free).allowancesOnce ? 'Upgrade to a plan for more.' : 'More next month, or upgrade.'
+}
+
+/** Allowances count from here: the start of the India month, or for ever on the Trial (its allowances are once only) */
 export function allowanceSince(plan: string | null | undefined, now: Date = new Date()): Date {
   return (PLANS[plan as PlanKey] ?? PLANS.free).allowancesOnce ? new Date(0) : istMonthStart(now)
 }

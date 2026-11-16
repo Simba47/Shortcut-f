@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  creditsMode, ledgerLabel, subjectsCredits, subjectsNewMs, captionCredits, exportCredits, readingCredits, captionSpan, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS, testPackAllowed, findTopupPack,
+  creditsMode, ledgerLabel, subjectsCredits, subjectsNewMs, captionCredits, exportCredits, readingCredits, captionSpan, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS, testPackAllowed, findTopupPack, TRIAL_PACK, TRIAL_DAYS,
   type SpendableGrant,
 } from './credits'
 import { PLANS } from './plans'
@@ -32,12 +32,13 @@ test('an export costs 1 credit per started clip minute, and is blocked past 5 mi
   assert.throws(() => exportCredits(5 * MIN + 1), (e: { status?: number; message?: string }) => e.status === 400 && /5 minutes/.test(e.message ?? ''))
 })
 
-test('plans carry their monthly credits; the free plan gets a one-time grant instead', () => {
+test('plans carry their monthly credits; no plan gets none, and the Trial pack gives its credits once', () => {
   assert.equal(PLANS.free.monthlyCredits, 0)
+  assert.equal(PLANS.trial.monthlyCredits, 0)
   assert.equal(PLANS.starter.monthlyCredits, 599)
   assert.equal(PLANS.creator.monthlyCredits, 999)
   assert.equal(PLANS.agency.monthlyCredits, 2599)
-  assert.equal(FREE_SIGNUP_CREDITS, 95)
+  assert.equal(FREE_SIGNUP_CREDITS, 0)
 })
 
 test('a credit is about ₹1: a pack never gives more than 3,000 credits for ₹2,799', () => {
@@ -134,8 +135,22 @@ test('credit history says in plain words what each row was', () => {
 })
 
 test('a plan gives credits worth what it costs: 1 credit = ₹1', () => {
-  for (const p of Object.values(PLANS)) if (p.price) assert.equal(p.monthlyCredits, p.price, p.key)
-  assert.equal(FREE_SIGNUP_CREDITS, 95)   // what Free's limits use (30 min, 3 clips, 3 Ask AI, 20 rewrites: 88) and 7 to export
+  for (const p of Object.values(PLANS)) if (p.price && !p.oneTime) assert.equal(p.monthlyCredits, p.price, p.key)
+  assert.equal(TRIAL_PACK.price, PLANS.trial.price)
+})
+
+test('the Trial pack: ₹50 for 99 credits that cover its limits with 18 left to export, and it is sold by its key to anyone', () => {
+  const t = PLANS.trial
+  assert.equal(TRIAL_PACK.price, 50); assert.equal(TRIAL_PACK.credits, 99)
+  // 30 min read 45, 3 AI clips 18, 2 Ask AI 14, 20 rewrites 4 = 81
+  const limits = (t.readingMinutes / 10) * 15 + t.ai.clipsPerMonth * 6 + t.ai.askAiPerMonth * 7 + t.ai.rewritesPerMonth / 5
+  assert.equal(limits, 81)
+  assert.equal(TRIAL_PACK.credits - limits, 18)
+  assert.equal(t.uploadsPerMonth, 2)
+  assert.equal(TRIAL_DAYS, 14)
+  assert.ok(t.oneTime && t.allowancesOnce && !t.watermark && t.autoCaption)
+  assert.equal(findTopupPack('trial', { test: false }), TRIAL_PACK)
+  assert.equal(ledgerLabel('grant:trial', null), 'Trial pack')
 })
 
 test('a video costs 15 credits per started 10 minutes', () => {

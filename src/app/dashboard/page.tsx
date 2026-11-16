@@ -136,6 +136,8 @@ export default function DashboardPage() {
   }, [])
 
   const atLimit = !!planInfo && planInfo.usage.videos >= planInfo.maxVideos
+  // No plan (no free plan since 2026-11-16): uploading starts with the Trial pack or a plan
+  const noPlan = planInfo?.plan === 'free'
 
   // Numbering follows upload order (newest = highest), independent of the current sort
   const indexById = useMemo(() => new Map(videos.map((v, i) => [v.id, videos.length - i])), [videos])
@@ -160,6 +162,7 @@ export default function DashboardPage() {
 
   function startUpload(f: File) {
     if (uploading) return
+    if (noPlan) { setUploadError('Uploading needs a plan. Start with the ₹50 Trial pack (Start trial, top right) or choose a plan.'); return }
     if (atLimit) { setUploadError(`You've used all ${planInfo?.maxVideos} videos on your plan. Delete a video or upgrade to add more.`); return }
     const error = validateFile(f)
     if (error) { setUploadError(error); return }
@@ -231,7 +234,7 @@ export default function DashboardPage() {
   if (loading) return <DashSkeleton />
 
   searchBlocked.current = chooserOpen || !!choosing || !!pendingDelete
-  const usagePct = planInfo ? Math.min(100, (planInfo.usage.videos / planInfo.maxVideos) * 100) : 0
+  const usagePct = planInfo && planInfo.maxVideos > 0 ? Math.min(100, (planInfo.usage.videos / planInfo.maxVideos) * 100) : 0
   const isEmpty = videos.length === 0
   // Running low (user, 2026-11-11: told before an upload is refused, not after): with a sixth of the plan's videos
   // left (5 of 30: from 25; at least 2 — 8 of 10) until it's full (then the strip says so). ✕ hides it — until another video is added (kept for
@@ -251,7 +254,7 @@ export default function DashboardPage() {
       <nav className="dash-nav app-nav">
         <Breadcrumbs shine items={[{ label: 'Dashboard' }]} />
         <div className="dash-nav-right">
-          {planInfo && (
+          {planInfo && !noPlan && (
             <div
               className={`dash-usage${usagePct >= 100 ? ' is-full' : usagePct >= 90 ? ' is-warn' : ''}`}
               role="img" aria-label={`${planInfo.usage.videos} of ${planInfo.maxVideos} videos used`}
@@ -261,8 +264,9 @@ export default function DashboardPage() {
             </div>
           )}
           <CreditsBadge credits={credits} className="dash-credits" />
-          {planInfo?.plan === 'free' && (
-            <a href="/pricing" className="dash-btn-fill fill-btn fill-btn-sm"><FillButtonContent>Upgrade</FillButtonContent></a>
+          {/* No plan: the ₹50 Trial pack is the way in (no free plan since 2026-11-16); on the Trial, upgrade */}
+          {(planInfo?.plan === 'free' || planInfo?.plan === 'trial') && (
+            <a href="/pricing" className="dash-btn-fill fill-btn fill-btn-sm"><FillButtonContent>{planInfo.plan === 'free' ? 'Start trial' : 'Upgrade'}</FillButtonContent></a>
           )}
           {/* (the account's brand kits: set once, on every clip) */}
           <button type="button" onClick={() => openBrandKits()} className="dash-brand-link" aria-label="Brand kits: your logo, colours and caption look, on every clip">
