@@ -39,7 +39,7 @@ const FIELDS: Record<string, Record<string, How>> = {
     id: 'saved', clip_id: 'saved', font: 'saved', size: 'saved', color: 'saved', position: 'saved', position_y: 'saved',
     position_x: 'saved', animation: 'saved', language: 'saved', translated_from_language: 'saved', timing_offset_ms: 'saved',
     enabled: 'saved', highlight_color: 'saved', words_per_line: 'saved', uppercase: 'saved', text_case: 'saved',
-    stroke_width: 'saved', emphasis: 'saved', line_keys: 'saved', template: 'saved',
+    stroke_width: 'saved', emphasis: 'saved', line_keys: 'saved', template: 'saved', gradient: 'saved',
   },
   FrameItem: {
     id: 'frame', lane: 'frame', kind: 'frame', start_ms: 'frame', end_ms: 'frame', source_video_id: 'frame',

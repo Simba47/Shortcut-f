@@ -223,6 +223,7 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
   const hasEmphasisField = await hasColumn('caption_styles', 'emphasis')
   // The line words (what a Creator line makes big with no key word), once the worker has added the field
   const hasLineKeysField = await hasColumn('caption_styles', 'line_keys')
+  const hasGradientField = await hasColumn('caption_styles', 'gradient')
   // Captions moved left or right, once the worker has added the field
   const hasCaptionX = await hasColumn('caption_styles', 'position_x')
   // The captions' case (Title, UPPER, lower), once the worker has added the field
@@ -354,6 +355,11 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
       const lineKeys = (captionStyle as Partial<CaptionStyle>).line_keys
       if (hasLineKeysField && lineKeys && typeof lineKeys === 'object') {
         fields.line_keys = sql.json(lineKeys as never)
+      }
+      // The text colour as a gradient (null: solid again)
+      const gradient = (captionStyle as Partial<CaptionStyle>).gradient
+      if (hasGradientField && gradient !== undefined) {
+        fields.gradient = gradient && typeof gradient === 'object' ? sql.json(gradient as never) : null
       }
       // A database the backend hasn't updated yet only accepts the original animations
       if (!hasPresetFields && typeof fields.animation === 'string' && !['karaoke', 'fade', 'none'].includes(fields.animation)) {
