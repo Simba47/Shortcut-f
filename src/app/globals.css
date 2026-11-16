@@ -3476,6 +3476,8 @@ div:has(> .vscan[data-on][data-mode="find"]) > .sp .sp-controls { opacity: 0; vi
 .cbb-btn:disabled { opacity: .5; }
 .cbb-btn:focus-visible, .cbb-tag:focus-visible, .cbb-tag button:focus-visible { outline: 2px solid rgba(200,255,0,0.7); outline-offset: 2px; }
 .cbb-dots { display: inline-flex; gap: 2px; flex-shrink: 0; }
+/* the brand kit tag (components/brand/BrandTagIcon) */
+.brand-tag { flex-shrink: 0; display: block; }
 .cbb-dots i { width: 9px; height: 9px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.25); }
 .cbb-tag { display: inline-flex; align-items: center; gap: 4px; max-width: 140px; padding: 1px 4px 1px 6px; border-radius: 6px; font-size: 10px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgb(var(--cb-fg) / 0.8); background: rgba(200,255,0,0.08); border: 1px solid rgba(200,255,0,0.3); }
 .cbb-tag button { padding: 0 3px; border-radius: 4px; font-size: 12px; line-height: 1; color: rgb(var(--cb-fg) / 0.55); }
@@ -4846,7 +4848,7 @@ html[data-theme="light"] .editor-theme .ed-autobtn {
 .ebm-row[data-on] > .ebm-item:hover { background: transparent; }
 .ebm-row .ebm-item { background: transparent; }
 .ebm-check { color: var(--ed-accent-text); font-weight: 700; animation: ebm-pop .32s cubic-bezier(.34, 1.56, .64, 1); }
-.ebm-row[data-picked] .ebm-dots i { animation: ebm-dot .45s cubic-bezier(.34, 1.56, .64, 1); }
+.ebm-row[data-picked] .brand-tag { animation: ebm-dot .45s cubic-bezier(.34, 1.56, .64, 1); }
 .ebm-edit {
   flex-shrink: 0; height: 24px; margin-right: 4px; padding: 0 8px; display: inline-flex; align-items: center; gap: 5px;
   border-radius: 7px; font-size: 11px; font-weight: 600; color: rgb(var(--ed-fg) / 0.85);
@@ -4864,7 +4866,7 @@ html[data-theme="light"] .editor-theme .ed-autobtn {
 @keyframes ebm-dot { 0%, 100% { transform: scale(1); } 45% { transform: scale(1.35); } }
 @keyframes ebm-swap { from { opacity: 0; transform: translateY(5px); } }
 @media (prefers-reduced-motion: reduce) {
-  .ebm-menu, .ebm-check, .ebm-edit, .ebm-swap, .ebm-row[data-picked] .ebm-dots i { animation: none; }
+  .ebm-menu, .ebm-check, .ebm-edit, .ebm-swap, .ebm-row[data-picked] .brand-tag { animation: none; }
 }
 
 /* ── Brand kits as a popup (user, 2026-10-31; BrandKitDialog): clearly a window over the page — the page shows

@@ -1,5 +1,6 @@
 'use client'
 
+import { BRAND_TAG } from '@/components/brand/BrandTagIcon'
 import { useFrameAt } from '@/modules/clips/thumbs'
 import { InfoTip } from '@/components/ui/info-tip'
 import { musicGainAt, speechRangesInVideo, speechRanges, heardSpeech, type Range as SpeechRange } from '@/modules/editor/musicGain'
@@ -244,7 +245,7 @@ const TOOLS: { id: Tool; label: string; title: string; hint: string; icon: React
     // (user, 2026-10-17) Its workshop takes the video's place in the middle, for more room
     id: 'brand', label: 'Brand kit', title: 'Brand kit',
     hint: 'Your colours, logo and title style, saved for every clip. Set a kit up, then Apply it to this clip.',
-    icon: <><path d="M12 21a9 9 0 110-18 8.5 8.5 0 018.5 8.2c0 2.6-1.8 3.8-3.8 3.8h-1.9a1.9 1.9 0 00-1 3.5A1.9 1.9 0 0112 21z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" fill="none" /><circle cx="7.6" cy="11" r="1.3" fill="currentColor" /><circle cx="10.4" cy="7" r="1.3" fill="currentColor" /><circle cx="15.2" cy="7.6" r="1.3" fill="currentColor" /></>,
+    icon: <g transform="scale(1.5)" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">{BRAND_TAG}</g>,
   },
 ]
 

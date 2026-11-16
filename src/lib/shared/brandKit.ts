@@ -180,9 +180,9 @@ export const MAX_EXTRA_COLORS = 3
 /** Space between the logo and the frame's edge, as a share of the frame's width */
 export const LOGO_MARGIN = 0.04
 
-// (size 58: the caption size a new kit starts at — user, 2026-11-12)
+// (size: the caption size a new kit starts at, as the editor's DEFAULT_CAPTION_STYLE — user, 2026-11-16)
 export const DEFAULT_BRAND_CAPTIONS: BrandCaptions = {
-  on: false, template: null, animation: 'karaoke', font: null, size: 80, color: '#ffffff', highlight_color: '#ffe700',
+  on: false, template: null, animation: 'karaoke', font: null, size: 100, color: '#ffffff', highlight_color: '#ffe700',
   uppercase: false, words_per_line: null,
 }
 
@@ -259,7 +259,7 @@ export function cleanBrandKitData(raw: unknown, userId?: string): BrandKitData {
       template: typeof cap.template === 'string' && cap.template.length <= 60 ? cap.template : null,
       animation: ANIMATIONS.includes(cap.animation as AnimationType) ? cap.animation as AnimationType : dc.animation,
       font: typeof cap.font === 'string' && cap.font.length <= 60 ? cap.font : null,
-      size: Math.round(num(cap.size, 20, 100, dc.size)),
+      size: Math.round(num(cap.size, 20, 140, dc.size)),
       color: color(cap.color, dc.color),
       highlight_color: color(cap.highlight_color, dc.highlight_color),
       uppercase: cap.uppercase === true,
@@ -333,7 +333,7 @@ function cleanCaptions(raw: unknown): BrandCaptions {
     template: typeof cap.template === 'string' && cap.template.length <= 60 ? cap.template : null,
     animation: ANIMATIONS.includes(cap.animation as AnimationType) ? cap.animation as AnimationType : dc.animation,
     font: typeof cap.font === 'string' && cap.font.length <= 60 ? cap.font : null,
-    size: Math.round(num(cap.size, 20, 100, dc.size)),
+    size: Math.round(num(cap.size, 20, 140, dc.size)),
     color: color(cap.color, dc.color),
     highlight_color: color(cap.highlight_color, dc.highlight_color),
     uppercase: cap.uppercase === true,

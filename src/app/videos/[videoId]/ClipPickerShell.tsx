@@ -1,6 +1,7 @@
 'use client'
 
 // The brand on the clip board: a tag per clip, "Put on all" (brand kit Phase 2: components/brand/ClipBoardBrand.tsx)
+import { BrandTagIcon, BRAND_TAG } from '@/components/brand/BrandTagIcon'
 import { useClipBrands, BrandAllBar, BrandTag } from '@/components/brand/ClipBoardBrand'
 import { preloadMascot } from '@/components/ui/mascot'
 import { InfoTip } from '@/components/ui/info-tip'
@@ -216,7 +217,7 @@ function MadeTags({ made }: { made: MadeWith }) {
   </>
 }
 /** A brand kit: a little tag */
-const BRAND_ICON = <><path d="M2.5 8.6V3.5a1 1 0 0 1 1-1h5.1l5 5a1 1 0 0 1 0 1.4l-4.7 4.7a1 1 0 0 1-1.4 0z" /><circle cx="5.6" cy="5.6" r="1" fill="currentColor" stroke="none" /></>
+const BRAND_ICON = BRAND_TAG
 /** A frame: a picture inside a border with a title bar */
 const FRAME_ICON = <><rect x="2.5" y="2" width="11" height="12" rx="2" /><path d="M5 4.8h6" /><rect x="5" y="7" width="6" height="4.5" rx="1" /></>
 // What the captions and the title are written in (speech in an Indian language; English speech stays English)
@@ -2287,7 +2288,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         <div className="flex-1" />
         {/* The account's brand kits, in the popup (as on the dashboard — user, 2026-10-31) */}
         <button type="button" onClick={() => openBrandKits()} className="cb-brand-link" aria-label="Brand kits: your logo, colours and caption look, on every clip">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2" /><circle cx="17.5" cy="10.5" r="2" /><circle cx="8.5" cy="7.5" r="2" /><circle cx="6.5" cy="12.5" r="2" /><path d="M12 22a10 10 0 110-20 9 9 0 019 9c0 3-2 4-4 4h-2a2 2 0 00-1 3.7A2 2 0 0112 22z" /></svg>
+          <BrandTagIcon />
           <span>Brand kits</span>
         </button>
         <CreditsBadge credits={credits} />
