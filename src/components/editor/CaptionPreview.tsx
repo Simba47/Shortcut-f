@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import type { CaptionStyle, TranscriptWord } from '@chai-cut/shared'
+import { DEFAULT_CAPTION_STYLE } from '@chai-cut/shared'
 import { buildCaptionChunks, captionWordsPerLine, drawCaptions } from './VideoPreview'
 import type { TextCase } from './CaptionStyler'
 
@@ -32,7 +33,7 @@ const DRAW_ASPECT = 1.2
 const MEASURE_W = 360
 const MEASURE_MOMENTS = 27
 /** The caption size every style is fitted at (the Size slider's starting point): sizes above and below it show as bigger and smaller */
-const FIT_AT_SIZE = 52
+const FIT_AT_SIZE = DEFAULT_CAPTION_STYLE.size
 /** At that size a line fills this much of the box's width, or of its height, whichever comes first (so all styles look alike in size) */
 const FIT_W = 0.62
 const FIT_H = 0.7

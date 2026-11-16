@@ -242,21 +242,24 @@ export function drawCreatorCaptions(
     ctx.setTransform(m)
     grow(cx - w / 2, cy - n / 2, w, n)
   } else if (look === 'difference') {
-    // The key word big in difference blend; the words before it small above, those after small below
+    // The key word big in difference blend; the words before it small above, those after small below.
+    // (the key word narrowed to fit 88% of the width, as "behind": a big Size ran it off the sides — 2026-11-16)
+    const kw0 = width(key, keyN, texts[kk])
+    const kn = kw0 > 0 ? keyN * Math.min(1, (0.88 * W) / kw0) : keyN
     const rows: Array<[number[], number]> = ([
       [Array.from({ length: kk }, (_, j) => j), S * 0.95],
-      [[kk], keyN * 0.9],
+      [[kk], kn * 0.9],
       [Array.from({ length: texts.length - kk - 1 }, (_, j) => kk + 1 + j), S * 0.95],
     ] as Array<[number[], number]>).filter(([idx]) => idx.length > 0)
     let y = cy - rows.reduce((s, [, h]) => s + h, 0) / 2
     for (const [idx, h] of rows) {
       const yc = y + h / 2
       if (idx[0] === kk && idx.length === 1) {
-        const w = width(key, keyN, texts[kk])
+        const w = width(key, kn, texts[kk])
         ctx.globalCompositeOperation = 'difference'
-        run(ctx, texts[kk], key, keyN, color, cx - w / 2, centredBase(key, keyN, yc), reveal(ons[kk]), 0)
+        run(ctx, texts[kk], key, kn, color, cx - w / 2, centredBase(key, kn, yc), reveal(ons[kk]), 0)
         ctx.globalCompositeOperation = 'source-over'
-        grow(cx - w / 2, yc - keyN / 2, w, keyN)
+        grow(cx - w / 2, yc - kn / 2, w, kn)
       } else {
         const w = lineWidth(idx, base, S)
         words(ctx, idx, base, S, () => color, cx - w / 2, centredBase(base, S, yc), j => reveal(ons[j]))

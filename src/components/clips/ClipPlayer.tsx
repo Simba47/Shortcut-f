@@ -1,5 +1,6 @@
 'use client'
 
+import { Spinner } from '@/components/ui/spinner'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CaptionStyle, Overlay, SegmentLocal, TextOverlay, TranscriptWord } from '@chai-cut/shared'
 import { OutputCanvas } from '@/components/editor/VideoPreview'
@@ -353,7 +354,7 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
           <span className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
             {ready
               ? <svg width="18" height="18" viewBox="0 0 24 24" fill="white" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
-              : <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+              : <Spinner size={16} style={{ color: '#fff' }} />}
           </span>
         )}
       </button>

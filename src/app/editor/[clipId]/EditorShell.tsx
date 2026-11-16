@@ -1,5 +1,7 @@
 'use client'
 
+import { Spinner } from '@/components/ui/spinner'
+import { BRAND_TAG } from '@/components/brand/BrandTagIcon'
 import { useFrameAt } from '@/modules/clips/thumbs'
 import { InfoTip } from '@/components/ui/info-tip'
 import { musicGainAt, speechRangesInVideo, speechRanges, heardSpeech, type Range as SpeechRange } from '@/modules/editor/musicGain'
@@ -43,6 +45,7 @@ import { AccountMenu, openShortcuts } from '@/components/ui/account-menu'
 import { CreditsBadge, TopUpLink } from '@/components/ui/credits-badge'
 import { friendlyError } from '@/lib/friendlyError'
 import { BrandLogo } from '@/components/ui/brand-logo'
+import { PandaLoader } from '@/components/ui/panda-loader'
 import { BrandLoader } from '@/components/ui/brand-loader'
 import { SpinningBorderButton } from '@/components/ui/spinning-border-button'
 import { FramesPanel } from '@/components/editor/FramesPanel'
@@ -244,7 +247,7 @@ const TOOLS: { id: Tool; label: string; title: string; hint: string; icon: React
     // (user, 2026-10-17) Its workshop takes the video's place in the middle, for more room
     id: 'brand', label: 'Brand kit', title: 'Brand kit',
     hint: 'Your colours, logo and title style, saved for every clip. Set a kit up, then Apply it to this clip.',
-    icon: <><path d="M12 21a9 9 0 110-18 8.5 8.5 0 018.5 8.2c0 2.6-1.8 3.8-3.8 3.8h-1.9a1.9 1.9 0 00-1 3.5A1.9 1.9 0 0112 21z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" fill="none" /><circle cx="7.6" cy="11" r="1.3" fill="currentColor" /><circle cx="10.4" cy="7" r="1.3" fill="currentColor" /><circle cx="15.2" cy="7.6" r="1.3" fill="currentColor" /></>,
+    icon: <g transform="scale(1.5)" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">{BRAND_TAG}</g>,
   },
 ]
 
@@ -6596,7 +6599,7 @@ export function EditorShell({
           <span className="sbb-beam" aria-hidden="true" />
           <span className="sbb-surface gap-1.5 h-8 px-3.5 text-xs font-bold tabular-nums">
             {/* (user, 2026-11-13) Stop answers at once: "Stopping…" until the server confirms (it used to keep counting) */}
-            {cancelling ? <><span aria-hidden="true" className="w-3 h-3 rounded-full border-[1.5px] animate-spin shrink-0" style={{ borderColor: 'rgb(var(--ed-fg) / 0.55)', borderTopColor: 'transparent' }} /> Stopping…</> :<><ExportIcon /> {exporting ? 'Starting…' : `Exporting · ${formatElapsed(renderElapsed)}`}</>}
+            {cancelling ? <><Spinner /> Stopping…</> :<><ExportIcon /> {exporting ? 'Starting…' : `Exporting · ${formatElapsed(renderElapsed)}`}</>}
           </span>
         </span>
         {/* (once the export is on its way: while it starts there is nothing to stop yet) */}
@@ -7907,7 +7910,7 @@ export function EditorShell({
                             <p className="text-[13px] font-semibold text-[var(--ed-text)]">Show captions</p>
                             {(transcribing || retranscribing) ? (
                               <p className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--ed-accent-text)' }}>
-                                <span className="w-2.5 h-2.5 rounded-full border-[1.5px] border-t-transparent animate-spin shrink-0" style={{ borderColor: ACCENT, borderTopColor: 'transparent' }} />
+                                <Spinner />
                                 {retranscribePlace ? `Waiting its turn: ${inLineText(retranscribePlace)}`
                                   : retranscribing ? `Regenerating… ${formatElapsed(retranscribeElapsed)}` : 'Generating… this can take a minute'}
                               </p>
@@ -8403,11 +8406,13 @@ export function EditorShell({
               <div className={fullView ? undefined : 'ed-pv-card-in'}>
               <div className="relative">
               {rendering ? (
-                <div className="flex flex-col items-center justify-center gap-4 rounded-xl" style={{ aspectRatio: '9/16', background: 'var(--ed-app)', border: '1px solid rgb(var(--ed-fg) / 0.08)' }}>
-                  <BrandLoader size={48} />
+                // Exporting: the Shortcut panda at its laptop (user, 2026-11-16 — the longest wait, watched the whole
+                // time), on black as its video is filmed on black; until its own export scene is made (mascot.ts)
+                <div className="ed-export-wait flex flex-col items-center justify-center gap-4 rounded-xl" style={{ aspectRatio: '9/16', background: '#000', border: '1px solid rgb(var(--ed-fg) / 0.08)' }}>
+                  <PandaLoader scene="editor" fallback={<BrandLoader size={48} />} />
                   <div className="text-center flex flex-col gap-1 px-6">
-                    <p className="text-sm font-semibold text-[var(--ed-text)]">Rendering your reel…</p>
-                    <p className="text-xs" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>Usually takes a minute or two. You can keep editing.</p>
+                    <p className="text-sm font-semibold" style={{ color: '#F4F4F5' }}>Rendering your reel…</p>
+                    <p className="text-xs" style={{ color: 'rgb(244 244 245 / 0.5)' }}>Usually takes a minute or two. You can keep editing.</p>
                   </div>
                   {/* (user, 2026-11-12: two Cancels and two clocks) the time and Cancel are the top bar's
                       "Exporting · 0:09 ✕" only — always there, whatever panels are open */}
@@ -9287,7 +9292,7 @@ function SaveIndicator({ state, leaving, onRetry }: { state: SaveState; leaving?
   if (state === 'saving') {
     return (
       <span className={chip} style={{ color: 'rgb(var(--ed-fg) / 0.55)', background: 'rgb(var(--ed-fg) / 0.05)' }} aria-live="polite">
-        <span className="w-2.5 h-2.5 rounded-full border-[1.5px] border-t-transparent animate-spin" style={{ borderColor: 'rgb(var(--ed-fg) / 0.55)', borderTopColor: 'transparent' }} />
+        <Spinner />
         {leaving ? 'Saving and leaving…' : 'Saving…'}
       </span>
     )

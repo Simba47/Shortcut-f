@@ -1,5 +1,6 @@
 'use client'
 
+import { BrandTagIcon } from '@/components/brand/BrandTagIcon'
 import { useEffect, useRef, useState } from 'react'
 import type { BrandKit } from '@/lib/shared/brandKit'
 
@@ -52,8 +53,8 @@ export function EditorBrandMenu({ kits, loading, onKitId, onTurnOn, onTurnOff, o
         onClick={() => setOpen(o => !o)} title={on ? `${on.name} is on this clip` : 'No brand kit on this clip'}>
         {/* (keyed on the kit: switching slides the new name and colours in) */}
         <span key={on?.id ?? 'off'} className="ebm-swap">
-          {on ? <span className="ebm-dots" aria-hidden="true"><i style={{ background: on.data.colors.main }} /><i style={{ background: on.data.colors.accent }} /></span>
-            : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 3a9 9 0 000 18" fill="currentColor" stroke="none" opacity=".35" /></svg>}
+          {/* the tag in the kit's colours when one is on; slashed when none */}
+          {on ? <BrandTagIcon size={14} kit={on.data.colors} /> : <BrandTagIcon size={14} off />}
           <span className="ebm-name">Brand: {on ? on.name : 'Off'}</span>
         </span>
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
@@ -67,7 +68,7 @@ export function EditorBrandMenu({ kits, loading, onKitId, onTurnOn, onTurnOff, o
             return (
               <div key={k.id} className="ebm-row" data-on={isOn || undefined} data-picked={picked === k.id || undefined}>
                 <button type="button" role="menuitemradio" aria-checked={isOn} className="ebm-item flex-1 min-w-0" onClick={() => pick(k)}>
-                  <span className="ebm-dots" aria-hidden="true"><i style={{ background: k.data.colors.main }} /><i style={{ background: k.data.colors.accent }} /></span>
+                  <BrandTagIcon size={14} kit={k.data.colors} />
                   <span className="flex-1 min-w-0 truncate">{k.name}</span>
                   {k.data.is_default && <span className="ebm-tag">Default</span>}
                   {isOn && <span className="ebm-check" aria-hidden="true">✓</span>}
@@ -83,7 +84,7 @@ export function EditorBrandMenu({ kits, loading, onKitId, onTurnOn, onTurnOff, o
           })}
           <div className="ebm-row" data-on={!onKitId || undefined} data-picked={picked === 'off' || undefined}>
             <button type="button" role="menuitemradio" aria-checked={!onKitId} className="ebm-item flex-1" onClick={() => pick(null)}>
-              <span className="ebm-dots" aria-hidden="true"><i style={{ background: 'transparent' }} /></span>
+              <BrandTagIcon size={14} off />
               <span className="flex-1">Off</span>
               {!onKitId && <span className="ebm-check" aria-hidden="true">✓</span>}
             </button>

@@ -1,5 +1,6 @@
 'use client'
 
+import { BrandTagIcon } from '@/components/brand/BrandTagIcon'
 import { openBrandKits, BRAND_KITS_CLOSED } from '@/components/brand/brandKitsEvents'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
@@ -123,10 +124,8 @@ export function useClipBrands(videoId: string, clipIds: string[], onChanged?: (c
   return { kits, kitOf, pick, setPick, branded, busy, note, applyAll, applyTo, setClip }
 }
 
-/** Two dots in a kit's colours */
-const Dots = ({ k }: { k: Pick<KitLite, 'main' | 'accent'> }) => (
-  <span className="cbb-dots" aria-hidden="true"><i style={{ background: k.main }} /><i style={{ background: k.accent }} /></span>
-)
+/** The brand tag in a kit's colours (BrandTagIcon) */
+const Dots = ({ k }: { k: Pick<KitLite, 'main' | 'accent'> }) => <BrandTagIcon size={13} kit={k} />
 
 /**
  * Which kit (user, 2026-10-28: a designed menu, not the browser's own list): the picked kit's colours and
@@ -161,7 +160,7 @@ function KitPick({ kits, value, onChange, disabled }: { kits: KitLite[]; value: 
       }}>
       <button ref={btn} type="button" className="cbb-pick-btn" disabled={disabled} aria-haspopup="listbox" aria-expanded={open}
         aria-label={`The brand kit to put on the clips: ${cur?.name ?? 'off'}`} onClick={() => (open ? setOpen(false) : show())}>
-        {cur && <Dots k={cur} />}
+        {cur ? <Dots k={cur} /> : <BrandTagIcon size={13} off />}
         <span className="cbb-pick-name">{cur?.name ?? 'Off'}</span>
         {cur?.isDefault && <span className="cbb-pick-def">Default</span>}
         <svg className="cbb-pick-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -170,8 +169,7 @@ function KitPick({ kits, value, onChange, disabled }: { kits: KitLite[]; value: 
         <ul className="cbb-pick-list" role="listbox" aria-label="Brand kits">
           <li role="option" aria-selected={value === NO_KIT} className="cbb-pick-item" data-active={active === 0 || undefined}
             onMouseEnter={() => setActive(0)} onClick={() => pick(NO_KIT)}>
-            {/* (empty dots: the name lines up with the kits' names) */}
-            <span style={{ visibility: 'hidden' }}><Dots k={{ main: '', accent: '' }} /></span>
+            <BrandTagIcon size={13} off />
             <span className="cbb-pick-name">Off</span>
             {value === NO_KIT && tick}
           </li>

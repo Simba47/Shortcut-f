@@ -1,5 +1,6 @@
 'use client'
 
+import { BrandTagIcon } from '@/components/brand/BrandTagIcon'
 import { useEffect, useState } from 'react'
 import { useBrandKits, BrandKitStudio } from '@/components/editor/BrandKit'
 import type { BrandKit } from '@/lib/shared/brandKit'
@@ -146,7 +147,7 @@ function BrandKitDialog({ start, onClose }: { start: Start; onClose: () => void 
         {/* Its own title bar, so it reads as a window over the page (user, 2026-10-31): Brand kits · ✕ */}
         <header className="bkd-head">
           <span className="bkd-head-ico" aria-hidden="true">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="13.5" cy="6.5" r="2" /><circle cx="17.5" cy="10.5" r="2" /><circle cx="8.5" cy="7.5" r="2" /><circle cx="6.5" cy="12.5" r="2" /><path d="M12 22a10 10 0 110-20 9 9 0 019 9c0 3-2 4-4 4h-2a2 2 0 00-1 3.7A2 2 0 0112 22z" /></svg>
+            <BrandTagIcon />
           </span>
           <h2 id="bkd-title" className="bkd-head-title">Brand kits</h2>
           <span className="bkd-head-sub">Your logo, colours and caption look — on every clip</span>
