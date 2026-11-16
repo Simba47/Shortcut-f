@@ -80,6 +80,7 @@ import { CAPTION_TEMPLATES, usesKeyWords } from '@/modules/captions/templates'
 import { useMediaStore } from '@/modules/media/store'
 import { rowsToLocal, normalizeCoverage, uncoveredRanges, defaultCropForSlot, msToLabel } from '@/modules/editor/utils'
 import { isShot, flattenShots, toSaved, asMainPart } from '@/modules/editor/shots'
+import { endCut } from '@/modules/editor/endCut'
 import { stateFromRows, type SegmentRow } from '@/modules/editor/loadRows'
 import { applyGroupShots, applyFormatSpans } from '@/modules/editor/groupShots'
 import { LAYOUT_SLOT_COUNT } from '@chai-cut/shared'
@@ -102,6 +103,7 @@ import { setFramePicture, framePicture, inFramePicture } from '@/modules/editor/
 import type { SegmentLocal, CropBoxLocal, FrameHold, FrameLayout, FrameLane, FrameItem, TransitionType } from '@chai-cut/shared'
 import { SPEED_MIN, SPEED_MAX } from '@chai-cut/shared'
 import { TransitionsPanel, TRANSITION_DEFAULT_MS, TRANSITION_KINDS, playedTransitionMs, type TransitionJoin } from '@/components/editor/TransitionsPanel'
+import { transcriptWindowQuery } from '@/modules/editor/transcriptWindow'
 
 type Tool = 'format' | 'subjects' | 'frames' | 'captions' | 'transitions' | 'text' | 'media' | 'music' | 'cleanup' | 'post' | 'brand'
 /** Media: the user's imported media, or Library (stock footage) */
@@ -280,6 +282,9 @@ export function EditorShell({
   // The main video waits where one goes in and carries on after it: the clip gets that much longer.
   // (Not together with removed parts yet: a clip has one or the other.)
   const storeSegments = useEditorStore(s => s.segments)
+  // The stretch of the transcript this clip can reach (as the page loaded it): words fetched again ask
+  // for the same stretch, never the whole video's (F2 bug 8)
+  const wordsWindowQuery = useMemo(() => transcriptWindowQuery(savedClip as unknown as Parameters<typeof transcriptWindowQuery>[0]), [savedClip])
   const ownVideoIdForInserts = (savedClip as unknown as { video_id: string }).video_id
   const inserts = useMemo(() => (trimmed ? [] : insertsOf(storeSegments, ownVideoIdForInserts)), [trimmed, storeSegments, ownVideoIdForInserts])
   const hasInserts = inserts.length > 0
@@ -411,6 +416,13 @@ export function EditorShell({
   // start auto-saving once the state differs from it (opening a clip must not write anything)
   const loadedStateRef = useRef<EditableSnapshot | null>(null)
   const editedSinceLoadRef = useRef(false)
+
+  // Opened: the Clipboard's "Unseen" becomes "Draft" (user, 2026-11-13). Only a mark beside the clip's note
+  // (api/clips/[clipId]/opened), once, not waited for: the clip's edits and its export state aren't touched
+  useEffect(() => {
+    if ((savedClip as unknown as { layers?: { opened?: unknown } | null }).layers?.opened === true) return
+    fetch(`/api/clips/${savedClip.id}/opened`, { method: 'POST' }).catch(() => {})
+  }, [savedClip.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Hydrate stores from server props (once on mount) ─────────────────────────
   useEffect(() => {
@@ -922,10 +934,14 @@ export function EditorShell({
   const [originalVolume, setOriginalVolume] = useState(initialOriginalSound?.volume ?? 1)
   const [originalMuted, setOriginalMuted] = useState(initialOriginalSound?.muted ?? false)
   const originalSoundRef = useRef({ volume: originalVolume, muted: originalMuted })
-  const originalLoadedRef = useRef(true)
+  // The sound as last seen: only a real change saves. (A "skip the first run" flag here saved the clip
+  // each time the editor opened, because React runs effects twice when it checks them — F2 bug 7.)
+  const originalSeenRef = useRef({ volume: originalVolume, muted: originalMuted })
   useEffect(() => {
     originalSoundRef.current = { volume: originalVolume, muted: originalMuted }
-    if (originalLoadedRef.current) { originalLoadedRef.current = false; return }
+    const seen = originalSeenRef.current
+    if (seen.volume === originalVolume && seen.muted === originalMuted) return
+    originalSeenRef.current = { volume: originalVolume, muted: originalMuted }
     // A change is saved like any other edit (2.5 s later)
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
     noteEdited()
@@ -1359,7 +1375,7 @@ export function EditorShell({
     const videoId = (clip as unknown as { video_id: string }).video_id
     const interval = setInterval(async () => {
       // (only this clip's own caption job keeps it waiting)
-      const res = await fetch(`/api/transcribe/words?video_id=${videoId}&clip_id=${clip.id}`)
+      const res = await fetch(`/api/transcribe/words?video_id=${videoId}&clip_id=${clip.id}${wordsWindowQuery}`)
       if (!res.ok) return
       const { words: newWords, video_status: vs, pending } = await res.json()
       if (newWords && clipHasWords(newWords)) {
@@ -1393,7 +1409,7 @@ export function EditorShell({
       if (data.status === 'done' && refreshWordsOnDoneRef.current) {
         refreshWordsOnDoneRef.current = false
         const videoId = (clip as unknown as { video_id: string }).video_id
-        fetch(`/api/transcribe/words?video_id=${videoId}`).then(r => r.ok ? r.json() : null)
+        fetch(`/api/transcribe/words?video_id=${videoId}${wordsWindowQuery}`).then(r => r.ok ? r.json() : null)
           .then(d => { if (d?.words?.length) setWords(d.words) }).catch(() => {})
       }
       if (data.status === 'failed') { setExportError('The export didn’t finish'); restoreStaleAfterExport() }
@@ -1831,7 +1847,7 @@ export function EditorShell({
         while (Date.now() < deadline) {
           await new Promise(r => setTimeout(r, 3000))
           if (retranscribeRunRef.current !== run) return
-          const res = await fetch(`/api/transcribe/words?video_id=${videoId}&since=${encodeURIComponent(queuedAt)}${jobId ? `&job=${jobId}` : ''}`)
+          const res = await fetch(`/api/transcribe/words?video_id=${videoId}&since=${encodeURIComponent(queuedAt)}${jobId ? `&job=${jobId}` : ''}${wordsWindowQuery}`)
           if (res.ok) {
             const { words: newWords, failed, place } = await res.json()
             // Waiting its turn (many people making captions at once): say where it is in line
@@ -3593,7 +3609,17 @@ export function EditorShell({
 
   function trimSelectedTo(edge: 'start' | 'end') {
     if (!activeSegment) return
-    setSegmentEdge(activeSegment.id, edge, currentTimeMs, clipLengthMs)
+    const s = activeSegment, t = currentTimeMs
+    // [ / ] trim the picked part to the playhead as dragging that edge there does: the stretch passed
+    // over is cut out and the clip gets shorter (user, 2026-11-15: ] on the last part used to move
+    // only its layout's edge, the rest of the clip playing on in the default framing — still 2 min).
+    // A video on a row, or a database that can't save cuts yet: its edge moves, as before
+    if (isShot(s, mainVideoId) || !cutOk) { setSegmentEdge(s.id, edge, t, clipLengthMs); return }
+    if (t <= s.start_ms + 50 || t >= s.end_ms - 50) {
+      notifyLocked(edge === 'start' ? 'Put the playhead inside the part, after its start' : 'Put the playhead inside the part, before its end')
+      return
+    }
+    trimByEdge(s.id, edge, edge === 'start' ? s.start_ms : s.end_ms, t)
   }
 
   function handleResetPositions() {
@@ -4876,6 +4902,9 @@ export function EditorShell({
     if (stored && !isGapPart(stored, mainVideoId) && !isFrameLayout(stored.layout)) {
       if (stored.locked) { notifyLocked('This part is locked — unlock it first'); return }
       pause()
+      // The main video's last part: the clip ends there instead (endCut.ts — user, 2026-11-15: a deleted
+      // end exported as black). Read from the stores, not this render: several parts are deleted in a row
+      if (cutOk && cutAtEnd(segId)) { setActiveSegmentId(null); return }
       updateSegment(segId, { hidden: true, muted: true, crop_boxes: stored.crop_boxes.map((b, i) => (i === 0 ? { ...b, hidden: true } : b)) })
       setActiveSegmentId(null)
       return
@@ -4885,6 +4914,30 @@ export function EditorShell({
     const length = seg.end_ms - seg.start_ms
     if (!cutOk || clipLengthMs - length < MIN_CLIP_LEFT_MS) handleDeleteFormat(segId)
     else removePart(seg.start_ms, seg.end_ms)
+  }
+
+  /**
+   * Deleting part `segId` of the main row where nothing with video comes after it: that stretch (and
+   * empty spaces just before it) is cut out, so the clip ends there — as an edge dragged in would
+   * (removePart: one undo step, saved as a removed part, the export leaves it out). False — left to
+   * Delete's empty space — when something plays there, something there is locked, or the clip would
+   * be under a second.
+   */
+  function cutAtEnd(segId: string): boolean {
+    const editor = useEditorStore.getState(), media = useMediaStore.getState()
+    const r = endCut({
+      segments: editor.segments, mainVideoId, partId: segId,
+      onTop: [...media.overlays, ...media.textOverlays],
+      isShot: s => isShot(s, mainVideoId), isTail,
+    })
+    if (!r || r.start < MIN_CLIP_LEFT_MS) return false
+    const state: TimedState = {
+      segments: editor.segments, keyframes: editor.keyframes,
+      overlays: media.overlays, textOverlays: media.textOverlays, audioTracks: media.audioTracks, transitions: media.transitions,
+    }
+    if (lockedInRange(state, r.start, r.end).length) return false
+    removePart(r.start, r.end)
+    return true
   }
 
   function askRemoveFrame(segId: string) {

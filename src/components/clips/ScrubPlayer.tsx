@@ -22,7 +22,7 @@ import { useLocalVideoProgress } from '@/modules/clips/localVideo'
  *
  * Space plays / pauses, ← / → jump 5 s, F is full screen, M mutes.
  */
-export function ScrubPlayer({ src, videoRef, durationMs: durHint, loadKey, onTime, onMeta, onError }: {
+export function ScrubPlayer({ src, videoRef, durationMs: durHint, loadKey, onTime, onMeta, onError, noPlay = false }: {
   src: string
   /** The key the page downloads the whole video under (useLocalVideo): its progress shows on the bar */
   loadKey?: string | null
@@ -33,6 +33,9 @@ export function ScrubPlayer({ src, videoRef, durationMs: durHint, loadKey, onTim
   onTime: (ms: number) => void
   onMeta?: (v: HTMLVideoElement) => void
   onError?: (v: HTMLVideoElement) => void
+  /** No playing for now (user, 2026-11-13: while Make my clips works): paused, and no controls at all — no
+   *  Play, bar, time, sound or full screen; a click or Space doesn't start it */
+  noPlay?: boolean
 }) {
   const boxRef = useRef<HTMLDivElement>(null)
   const barRef = useRef<HTMLDivElement>(null)
@@ -135,9 +138,10 @@ export function ScrubPlayer({ src, videoRef, durationMs: durHint, loadKey, onTim
   }
 
   // ── buttons and keys ──
+  useEffect(() => { if (noPlay) videoRef.current?.pause() }, [noPlay, videoRef])
   function togglePlay() {
     const v = videoRef.current
-    if (!v) return
+    if (!v || noPlay) return
     if (v.paused) void v.play().catch(() => {})
     else v.pause()
   }
@@ -277,7 +281,7 @@ export function ScrubPlayer({ src, videoRef, durationMs: durHint, loadKey, onTim
       )}
 
       {/* ── controls ── */}
-      <div className="sp-controls" data-show={showControls || undefined}>
+      {!noPlay && <div className="sp-controls" data-show={showControls || undefined}>
         <div ref={barRef} className="sp-bar" data-drag={dragging || undefined}
           role="slider" tabIndex={-1} aria-label="Video position" aria-valuemin={0} aria-valuemax={Math.round(durMs / 1000)}
           aria-valuenow={Math.round(curMs / 1000)} aria-valuetext={fmt(curMs)}
@@ -317,7 +321,7 @@ export function ScrubPlayer({ src, videoRef, durationMs: durHint, loadKey, onTim
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" /></svg>
           </button>
         </div>
-      </div>
+      </div>}
     </div>
   )
 }

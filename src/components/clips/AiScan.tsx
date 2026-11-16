@@ -23,7 +23,7 @@ const clock = (ms: number) => {
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`
 }
 
-export function AiScan({ label, mode = 'read', query, durationMs }: {
+export function AiScan({ label, mode = 'read', query, durationMs, full = false }: {
   /** What AI is doing, shown in the pill; null: no scan */
   label: string | null
   /** read / make: the reading look · find: the Ask AI look */
@@ -32,6 +32,8 @@ export function AiScan({ label, mode = 'read', query, durationMs }: {
   query?: string
   /** find: the video's length, for "Searching all 11:12 of your video" */
   durationMs?: number | null
+  /** The player's controls are hidden (Make my clips working): the scan goes down to the video's bottom */
+  full?: boolean
 }) {
   // (while it fades out, label is already null: it keeps the look and words it had, not the defaults)
   const [kept, setKept] = useState({ mode, query })
@@ -39,7 +41,7 @@ export function AiScan({ label, mode = 'read', query, durationMs }: {
   const find = kept.mode === 'find'
   const words = (kept.query ?? '').trim().split(/\s+/).filter(Boolean).slice(0, 12)
   return (
-    <div className="vscan" data-on={label !== null || undefined} data-mode={find ? 'find' : 'read'} aria-hidden="true">
+    <div className="vscan" data-on={label !== null || undefined} data-mode={find ? 'find' : 'read'} data-full={full || undefined} aria-hidden="true">
       <div className="vscan-veil" />
       {find ? (
         <>

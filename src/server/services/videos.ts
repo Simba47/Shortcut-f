@@ -556,6 +556,41 @@ export interface AutoClipOptions {
   captionLanguage?: 'native' | 'roman'
   /** 'roman' = English letters in the speaker's language; 'english'; 'native' = the speaker's own script */
   titleLanguage?: 'roman' | 'english' | 'native'
+  /** The clips' shape: '9:16' (the usual), '16:9', '1:1', '4:5' */
+  aspect?: unknown
+  /** The layouts AI can use: 'fill', 'fit', 'split', 'three' */
+  layoutList?: unknown
+  /** The caption style picked (template, animation, colours, capitals); none: the usual */
+  captionStyle?: unknown
+  /** The frame the clips come in (a frame layout, e.g. 'frame_blur_fill'); none: no frame */
+  frame?: unknown
+  /** The title's look (a Text-tool style id, e.g. 'bold-pop') and font family; none: the usual */
+  titleStyle?: unknown
+  titleFont?: unknown
+}
+
+/**
+ * Make my clips' look choices made safe for the job (user, 2026-11-15). Today's worker reads none of them yet
+ * (only `layouts` on / off): they wait in the payload for it.
+ */
+function makeLookOf(o: AutoClipOptions) {
+  const aspect = ['9:16', '16:9', '1:1', '4:5'].includes(o.aspect as string) ? o.aspect as string : '9:16'
+  const ids = ['fill', 'fit', 'split', 'three']
+  const list = Array.isArray(o.layoutList) ? ids.filter(id => (o.layoutList as unknown[]).includes(id)) : []
+  const cs = o.captionStyle && typeof o.captionStyle === 'object' ? o.captionStyle as Record<string, unknown> : null
+  const word = (v: unknown, max: number) => (typeof v === 'string' && /^[\w-]+$/.test(v) && v.length <= max ? v : undefined)
+  const hex = (v: unknown) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : undefined)
+  const caption_style = cs ? Object.fromEntries(Object.entries({
+    template: word(cs.template, 60), animation: word(cs.animation, 30), color: hex(cs.color), highlight_color: hex(cs.highlight_color),
+    uppercase: typeof cs.uppercase === 'boolean' ? cs.uppercase : undefined,
+  }).filter(([, v]) => v !== undefined)) : null
+  return {
+    aspect, layout_list: list.length ? list : ids,
+    caption_style: caption_style && Object.keys(caption_style).length ? caption_style : null,
+    frame: typeof o.frame === 'string' && /^frame_[a-z_]{2,40}$/.test(o.frame) ? o.frame : null,
+    title_style: word(o.titleStyle, 30) ?? null,
+    title_font: typeof o.titleFont === 'string' && /^[\w .'-]{1,60}$/.test(o.titleFont) ? o.titleFont : null,
+  }
 }
 
 /**
@@ -657,6 +692,7 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
       caption_language: options.captionLanguage === 'roman' ? 'roman' : 'native',
       title_language: options.titleLanguage === 'english' || options.titleLanguage === 'native' ? options.titleLanguage : 'roman',
       brand_kit: await brandKitChoice(userId, options.brandKit),
+      ...makeLookOf(options),
       // 'saved': pick from video_moments (the worker makes no new search); 'new': search and save
       search: fromSaved ? 'saved' : 'new',
       user_id: userId,

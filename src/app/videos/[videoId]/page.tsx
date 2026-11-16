@@ -54,6 +54,12 @@ export default async function VideoPickerPage({
     status: string; output_storage_path: string | null; created_at: string
     layout: string | null; auto: boolean
     favorite?: boolean | null; reason?: string | null
+    /** Changed in the editor since its last export (the editor's clips.layers.editedSinceExport) */
+    changed?: boolean | null
+    /** Opened in the editor at least once (clips.layers.opened): Draft, not Unseen */
+    opened?: boolean | null
+    /** Its Make my clips run (clips.ai_edit_job_id) */
+    job_id?: string | null
   }
 
   const clipsRaw = await sql<RawClip[]>`
@@ -62,7 +68,11 @@ export default async function VideoPickerPage({
       -- Made by "Make my clips" (read through to_jsonb so this works before the worker adds the column)
       (to_jsonb(c)->>'ai_edit_job_id') IS NOT NULL AS auto,
       COALESCE((to_jsonb(c)->>'favorite')::boolean, false) AS favorite,
-      to_jsonb(c)->>'ai_reason' AS reason
+      to_jsonb(c)->>'ai_reason' AS reason,
+      -- (its stage on the card, user 2026-11-13: Edited / Edited after export)
+      COALESCE(to_jsonb(c)->'layers'->>'editedSinceExport' = 'true', false) AS changed,
+      COALESCE(to_jsonb(c)->'layers'->>'opened' = 'true', false) AS opened,
+      to_jsonb(c)->>'ai_edit_job_id' AS job_id
     FROM clips c
     WHERE c.video_id = ${videoId}
     ORDER BY c.created_at ASC
@@ -81,6 +91,33 @@ export default async function VideoPickerPage({
       : usedFrom.get(c.id) === 'clip_search' ? 'ask'
       : 'yours'
 
+  // What was ticked before each Make my clips run (user, 2026-11-14: the cards didn't say): saved with
+  // the run's job (videos.ts createAutoClips). No record (an old run) just shows nothing.
+  type Made = {
+    captions: boolean; title: boolean; motion: boolean; layouts: boolean
+    // (runs from 2026-11-15: the shape, the layouts AI could use, the caption style and the frame)
+    aspect: string | null; layoutList: string[] | null; captionStyle: { template?: string | null; animation?: string } | null; frame: string | null
+    titleStyle: string | null
+  }
+  const str = (v: unknown) => (typeof v === 'string' && v.length <= 60 ? v : null)
+  const jobIds = [...new Set(clipsRaw.map(c => c.job_id).filter((x): x is string => !!x))]
+  const madeBy = new Map<string, Made>(jobIds.length ? (await sql<{ job_id: string; payload: Record<string, unknown> }[]>`
+    SELECT DISTINCT ON (payload->>'ai_edit_job_id') payload->>'ai_edit_job_id' AS job_id, payload FROM jobs
+    WHERE type = 'ai_edit' AND payload->>'ai_edit_job_id' = ANY(${jobIds})
+    ORDER BY payload->>'ai_edit_job_id', created_at DESC
+  `.catch(() => [])).map(r => [r.job_id, {
+    // (as the worker reads them: anything but false is on)
+    captions: r.payload.captions !== false, title: r.payload.title !== false,
+    motion: r.payload.motion !== false, layouts: r.payload.layouts !== false,
+    aspect: str(r.payload.aspect),
+    layoutList: Array.isArray(r.payload.layout_list) ? (r.payload.layout_list as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 8) : null,
+    captionStyle: r.payload.caption_style && typeof r.payload.caption_style === 'object'
+      ? { template: str((r.payload.caption_style as Record<string, unknown>).template), animation: str((r.payload.caption_style as Record<string, unknown>).animation) ?? undefined }
+      : null,
+    frame: str(r.payload.frame),
+    titleStyle: str(r.payload.title_style),
+  }]) : [])
+
   // Download links: fresh ones on every load (the link stored with a clip expires after 7 days)
   const savedClips = await Promise.all(clipsRaw.map(async (c, idx) => ({
     id: c.id, title: c.title ?? null, start_ms: c.start_ms, end_ms: c.end_ms,
@@ -90,7 +127,8 @@ export default async function VideoPickerPage({
       : null,
     created_at: c.created_at,
     layout: c.layout ?? null, index: idx + 1, origin: originOf(c),
-    favorite: !!c.favorite, reason: c.reason ?? null,
+    favorite: !!c.favorite, reason: c.reason ?? null, changed: !!c.changed, opened: !!c.opened,
+    made: (c.job_id && madeBy.get(c.job_id)) || null,
   })))
 
   return (
