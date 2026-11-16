@@ -6,8 +6,10 @@ import {
 
 const MIN = 60_000
 
-test('each plan has its AI limits; clips per run and daily clips grow with the plan, and every plan has 1 free search per video', () => {
-  assert.deepEqual(aiLimitsFor('free'), { clipsPerRun: 3, clipsPerDay: 3, clipsPerMonth: 3, searchesPerVideo: 1, askAiPerMonth: 3, askAiPerDay: 3, rewritesPerMonth: 20 })
+test('each plan has its AI limits; clips per run and daily clips grow with the plan, and every plan (the Trial too) has 1 free search per video', () => {
+  // No plan (no free plan since 2026-11-16): no AI at all until the Trial pack or a plan
+  assert.deepEqual(aiLimitsFor('free'), { clipsPerRun: 0, clipsPerDay: 0, clipsPerMonth: 0, searchesPerVideo: 0, askAiPerMonth: 0, askAiPerDay: 0, rewritesPerMonth: 0 })
+  assert.deepEqual(aiLimitsFor('trial'), { clipsPerRun: 3, clipsPerDay: 3, clipsPerMonth: 3, searchesPerVideo: 1, askAiPerMonth: 2, askAiPerDay: 2, rewritesPerMonth: 20 })
   assert.deepEqual(aiLimitsFor('starter'), { clipsPerRun: 10, clipsPerDay: 30, clipsPerMonth: 20, searchesPerVideo: 1, askAiPerMonth: 10, askAiPerDay: 10, rewritesPerMonth: 30 })
   assert.deepEqual(aiLimitsFor('creator'), { clipsPerRun: 15, clipsPerDay: 60, clipsPerMonth: 40, searchesPerVideo: 1, askAiPerMonth: 20, askAiPerDay: 20, rewritesPerMonth: 60 })
   assert.deepEqual(aiLimitsFor('agency'), { clipsPerRun: 20, clipsPerDay: 150, clipsPerMonth: 90, searchesPerVideo: 1, askAiPerMonth: 40, askAiPerDay: 40, rewritesPerMonth: 130 })
@@ -38,6 +40,8 @@ test('a run makes the lowest of: asked, the plan per run, what is left today, wh
   assert.deepEqual(clipsAllowed({ requested: 5, perRun: 10, dayLeft: 9, videoLeft: 0, monthLeft: 99 }), { count: 0, limitedBy: 'video' })
   assert.deepEqual(clipsAllowed({ requested: 5, perRun: 10, dayLeft: 9, videoLeft: 9, monthLeft: 2 }), { count: 2, limitedBy: 'month' })
   assert.deepEqual(clipsAllowed({ requested: 5, perRun: 10, dayLeft: 9, videoLeft: 9, monthLeft: 0 }), { count: 0, limitedBy: 'month' })
+  // both the day and the month used up: the month is named (it does not come back tomorrow)
+  assert.deepEqual(clipsAllowed({ requested: 3, perRun: 3, dayLeft: 0, videoLeft: 9, monthLeft: 0 }), { count: 0, limitedBy: 'month' })
 })
 
 test('days and months start at midnight India time (UTC+5:30)', () => {

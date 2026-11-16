@@ -10,7 +10,7 @@ export function ensureCreditsSchema(): Promise<void> {
       CREATE TABLE IF NOT EXISTS credit_grants (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        kind TEXT NOT NULL CHECK (kind IN ('free', 'plan', 'topup', 'bonus', 'refund')),
+        kind TEXT NOT NULL CHECK (kind IN ('free', 'trial', 'plan', 'topup', 'bonus', 'refund')),
         amount INTEGER NOT NULL CHECK (amount > 0),
         remaining INTEGER NOT NULL CHECK (remaining >= 0),
         expires_at TIMESTAMPTZ,
@@ -18,6 +18,15 @@ export function ensureCreditsSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`
     await sql`CREATE INDEX IF NOT EXISTS credit_grants_user_idx ON credit_grants (user_id, expires_at)`
+    // 'trial' (the Trial pack, 2026-11-16) on a table made before it: the kind check is made again once
+    await sql`
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'credit_grants_kind_check'
+                   AND pg_get_constraintdef(oid) NOT LIKE '%trial%') THEN
+          ALTER TABLE credit_grants DROP CONSTRAINT credit_grants_kind_check;
+          ALTER TABLE credit_grants ADD CONSTRAINT credit_grants_kind_check CHECK (kind IN ('free', 'trial', 'plan', 'topup', 'bonus', 'refund'));
+        END IF;
+      END $$`
     // Credits set aside while a job runs: held, then settled (kept) or released (given back)
     await sql`
       CREATE TABLE IF NOT EXISTS credit_holds (

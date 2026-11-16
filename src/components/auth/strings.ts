@@ -9,7 +9,7 @@ export const AUTH = {
     home: 'Shortcut home',
     title: ['Long videos in.', 'Scroll-stopping shorts out.'],
     lead: 'Turn any talk, podcast or stream into clips ready for Instagram Reels and YouTube Shorts.',
-    fine: 'Free to start · No credit card',
+    fine: 'Try everything for ₹50 · No subscription',
     /**
      * The brand side's scenes (BrandScene): what the creator in each photo is saying, word by word;
      * the words from `pick[0]` up to (not including) `pick[1]` are the moment the AI picks; the

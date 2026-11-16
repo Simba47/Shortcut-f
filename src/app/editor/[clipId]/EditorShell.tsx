@@ -6660,7 +6660,7 @@ export function EditorShell({
   const captionsWaitRef = useRef<{ resolve: () => void; reject: (e: Error) => void; started: boolean } | null>(null)
   function ensureCaptions(): Promise<void> {
     if (!needsCaptions()) return Promise.resolve()
-    if (isFreePlan) return Promise.reject(new Error('Captions aren\u2019t part of the Free plan, so there are no words to work from.'))
+    if (isFreePlan) return Promise.reject(new Error('Captions need the Trial pack or a plan, so there are no words to work from.'))
     return new Promise((resolve, reject) => {
       if (transcribing || retranscribing) { captionsWaitRef.current = { resolve, reject, started: true }; return }
       withCaptionPrice(() => {

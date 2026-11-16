@@ -14,7 +14,7 @@ const users: string[] = []
 // "Earlier this month": the first instant of the month (on the 1st that is also today, so a test
 // that needs the month used up but not the day lifts the daily cap with withAskAiDayCap)
 const monthStart = async () => (await import('@/lib/aiLimits')).istMonthStart()
-async function withAskAiDayCap<T>(plan: 'free' | 'starter', n: number, fn: () => Promise<T>): Promise<T> {
+async function withAskAiDayCap<T>(plan: 'trial' | 'starter', n: number, fn: () => Promise<T>): Promise<T> {
   const { PLANS } = await import('@/lib/plans')
   const ai = PLANS[plan].ai as { askAiPerDay: number }
   const was = ai.askAiPerDay
@@ -25,6 +25,8 @@ async function withAskAiDayCap<T>(plan: 'free' | 'starter', n: number, fn: () =>
 async function setup(plan = 'starter', videoMs = 20 * MIN, grantCredits = 0) {
   const [u] = await sql<{ id: string }[]>`INSERT INTO users (email, plan) VALUES (${`ai-test-${Math.random().toString(36).slice(2)}@example.test`}, ${plan}) RETURNING id`
   users.push(u.id)
+  // The Trial counts while its paid order is under 14 days old (billing.ts trialSummary)
+  if (plan === 'trial') await sql`INSERT INTO topup_orders (order_id, user_id, pack, credits, amount_paise, status, paid_at) VALUES (${`order_t_${u.id}`}, ${u.id}, 'trial', 99, 5000, 'paid', now())`
   if (grantCredits) await credits.grant(u.id, { kind: 'plan', amount: grantCredits, expiresAt: new Date(Date.now() + 30 * 86_400_000), sourceRef: `ai-test:${u.id}` })
   const [v] = await sql<{ id: string }[]>`INSERT INTO videos (user_id, source_type, storage_path, duration_ms, status) VALUES (${u.id}, 'upload', 'raw/x.mp4', ${videoMs}, 'ready') RETURNING id`
   return { userId: u.id, videoId: v.id }
@@ -94,12 +96,15 @@ const pick = (a: { searchesUsed: number; searchesIncluded: number; nextSearchCre
   ({ searchesUsed: a.searchesUsed, searchesIncluded: a.searchesIncluded, nextSearchCredits: a.nextSearchCredits })
 
 test('Ask AI: 7 credits a search up to the month\'s limit, then refused even with credits; 402 when credits run out', opts, async () => {
-  const { userId, videoId } = await setup('free', 20 * MIN, 14)   // free plan: 3 in total
+  const { userId, videoId } = await setup('trial', 20 * MIN, 7)   // the Trial: 2 in total
   const a1 = await ai.beginAiAction(userId, 'ask_ai', videoId)
   assert.equal(a1.credits, 7); await a1.done()
-  assert.equal((await credits.balance(userId)).balance, 7)
-  await (await ai.beginAiAction(userId, 'ask_ai', videoId)).done()
+  assert.equal((await credits.balance(userId)).balance, 0)
   await assert.rejects(ai.beginAiAction(userId, 'ask_ai', videoId), (e: { status?: number }) => e.status === 402)
+  // with credits, the Trial's second is its last: then refused, and told to upgrade (not "next month")
+  await credits.grant(userId, { kind: 'plan', amount: 50, expiresAt: new Date(Date.now() + 30 * 86_400_000), sourceRef: `ai-test-more:${userId}` })
+  await (await ai.beginAiAction(userId, 'ask_ai', videoId)).done()
+  await assert.rejects(ai.beginAiAction(userId, 'ask_ai', videoId), (e: { status?: number; message?: string }) => e.status === 403 && /Upgrade to a plan/.test(e.message ?? '') && !/next month/.test(e.message ?? ''))
   const { userId: u2, videoId: v2 } = await setup('starter', 20 * MIN, 500)
   await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${u2}, 'ask_ai', now() - interval '2 hours' FROM generate_series(1, 10)`
   await withAskAiDayCap('starter', 1000, () => assert.rejects(ai.beginAiAction(u2, 'ask_ai', v2), (e: { status?: number; message?: string }) => e.status === 403 && /upgrade/i.test(e.message ?? '')))
@@ -121,7 +126,7 @@ test('Ask AI: the daily cap holds, and a failed search gives its credits and cou
 })
 
 test('rewrites: 1 credit for every 5, up to the month\'s limit, then refused even with credits', opts, async () => {
-  const { userId } = await setup('free', 20 * MIN, 10)   // free: 20 rewrites
+  const { userId } = await setup('trial', 20 * MIN, 10)   // the Trial: 20 rewrites
   const charged: number[] = []
   for (let i = 0; i < 6; i++) { const h = await ai.beginAiAction(userId, 'rewrite'); charged.push(h.credits); await h.done() }
   assert.deepEqual(charged, [1, 0, 0, 0, 0, 1])
@@ -157,8 +162,8 @@ test('AI cost is recorded per call with its tokens and an estimated price', opts
   assert.equal(rows[1].cost_micro_usd, null)                          // no price known: tokens only
 })
 
-test('Free\'s limits are once only: last month\'s use still counts; a paid plan starts again', opts, async () => {
-  const { userId: free } = await setup('free', 20 * MIN)
+test('the Trial\'s limits are once only: last month\'s use still counts; a paid plan starts again', opts, async () => {
+  const { userId: free } = await setup('trial', 20 * MIN)
   const { userId: paid } = await setup('starter', 20 * MIN)
   for (const u of [free, paid]) await sql`INSERT INTO ai_actions (user_id, kind, created_at) VALUES (${u}, 'ask_ai', now() - interval '60 days')`
   assert.equal((await ai.aiActionCounts(free)).askAiThisMonth, 1)

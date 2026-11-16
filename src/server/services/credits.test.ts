@@ -53,15 +53,32 @@ test('an expired grant does not count', opts, async () => {
   assert.equal((await svc.balance(u)).balance, 10)
 })
 
-test('the free grant is given once per account', opts, async () => {
+test('no sign-up credits by default (the Trial pack instead); a grant set by CREDITS_FREE_SIGNUP is given once per account', opts, async () => {
   const u = await newUser()
   const before = process.env.CREDITS_FREE_SIGNUP
   delete process.env.CREDITS_FREE_SIGNUP
   try {
     await svc.ensureFreeGrant(u)
+    assert.equal((await svc.balance(u)).balance, 0)
+    process.env.CREDITS_FREE_SIGNUP = '30'
     await svc.ensureFreeGrant(u)
-    assert.equal((await svc.balance(u)).balance, 95)
-  } finally { if (before !== undefined) process.env.CREDITS_FREE_SIGNUP = before }
+    await svc.ensureFreeGrant(u)
+    assert.equal((await svc.balance(u)).balance, 30)
+  } finally { if (before !== undefined) process.env.CREDITS_FREE_SIGNUP = before; else delete process.env.CREDITS_FREE_SIGNUP }
+})
+
+test('a plan after the Trial: the trial\'s unused credits last as long as the plan\'s, spent ones stay spent', opts, async () => {
+  const u = await newUser()
+  await svc.grant(u, { kind: 'trial', amount: 99, expiresAt: future(14), sourceRef: `t:${u}:trial` })
+  await svc.grant(u, { kind: 'trial', amount: 5, expiresAt: new Date(Date.now() - 1000), sourceRef: `t:${u}:trial-old` })
+  const until = future(62)
+  await svc.carryTrialCredits(u, until)
+  const rows = await sql<{ amount: number; expires_at: Date }[]>`SELECT amount, expires_at FROM credit_grants WHERE user_id = ${u} ORDER BY amount`
+  assert.ok(rows[0].expires_at.getTime() < Date.now(), 'an expired trial grant is not brought back')
+  assert.equal(rows[1].expires_at.getTime(), until.getTime())
+  await svc.carryTrialCredits(u, future(20))
+  const [again] = await sql<{ expires_at: Date }[]>`SELECT expires_at FROM credit_grants WHERE user_id = ${u} AND amount = 99`
+  assert.equal(again.expires_at.getTime(), until.getTime(), 'never shortened')
 })
 
 test('CREDITS_FREE_SIGNUP=0 gives no free credits', opts, async () => {

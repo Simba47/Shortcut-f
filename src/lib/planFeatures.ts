@@ -16,14 +16,13 @@ export function readingLabel(minutes: number): string {
 
 export function planFeatureRows(plan: Plan): FeatureRow[] {
   const ai = plan.ai
-  // Free's allowances are once only, a paid plan's renew every month
+  // The Trial's allowances are once only, a paid plan's renew every month
   const per = plan.allowancesOnce ? 'in total' : 'a month'
-  // Free counts every clip it ever makes (videos.ts); paid plans have AI clips a month
   const clips: FeatureRow[] = plan.maxClips
     ? [{ label: `${plan.maxClips} clips in total`, included: true }]
     : [
         { label: 'Unlimited clips you cut yourself', included: true },
-        { label: `${ai.clipsPerMonth} AI clips a month`, included: true },
+        { label: `${ai.clipsPerMonth} AI clips ${per}`, included: true },
       ]
   return [
     { label: `${readingLabel(plan.readingMinutes)} of video read ${per}`, included: true },
@@ -34,9 +33,9 @@ export function planFeatureRows(plan: Plan): FeatureRow[] {
     ...clips,
     { label: `Up to ${ai.clipsPerRun} clips per Make my clips`, included: true },
     { label: `${plural(ai.searchesPerVideo, 'free AI moment search', 'free AI moment searches')} per video`, included: true },
-    { label: `${ai.askAiPerMonth} Ask AI searches ${per}`, included: true },
+    { label: `${plural(ai.askAiPerMonth, 'Ask AI search', 'Ask AI searches')} ${per}`, included: true },
     { label: `${ai.rewritesPerMonth} hook and title rewrites ${per}`, included: true },
-    { label: `${plan.retentionDays} days history`, included: true },
+    { label: plan.oneTime ? `Lasts ${plan.retentionDays} days` : `${plan.retentionDays} days history`, included: true },
     { label: 'Captions on AI clips included', included: plan.autoCaption },
     { label: 'No watermark', included: !plan.watermark },
     { label: 'Priority exports', included: plan.priorityExports },

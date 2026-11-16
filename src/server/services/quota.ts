@@ -14,14 +14,24 @@ export async function getUserPlanConfig(userId: string) {
   return PLANS[key]
 }
 
+/** No plan (no free plan since 2026-11-16): nothing that costs us runs until the Trial pack or a plan is bought */
+export const NO_PLAN_MESSAGE = `Uploading needs a plan. Start with the ₹${PLANS.trial.price} Trial pack (try everything, paid once) or choose a plan.`
+/** The same for the AI tools, for an account whose Trial has ended (its videos are still there) */
+export const NO_PLAN_AI_MESSAGE = `The AI tools need a plan. Choose a plan, or start with the ₹${PLANS.trial.price} Trial pack if you haven't yet.`
+function refuseNoPlan(key: PlanKey): void {
+  if (key === 'free') throw Object.assign(new Error(NO_PLAN_MESSAGE), { status: 403, expose: true })
+}
+
 export async function checkVideoQuota(userId: string): Promise<void> {
-  const plan = await getUserPlanConfig(userId)
+  const key = await getUserPlan(userId)
+  refuseNoPlan(key)
+  const plan = PLANS[key]
   // Stock clips saved for auto B-roll don't count
   const [row] = await sql<{ count: string }[]>`SELECT COUNT(*) as count FROM videos WHERE user_id = ${userId} AND role <> 'asset'`
   const count = parseInt(row?.count ?? '0', 10)
   if (count >= plan.maxVideos) {
     throw Object.assign(
-      new Error(`Your ${plan.name} plan allows ${plan.maxVideos} video${plan.maxVideos === 1 ? '' : 's'}. Upgrade to add more.`),
+      new Error(`Your ${plan.name} plan allows ${plan.maxVideos} video${(plan.maxVideos as number) === 1 ? '' : 's'}. Upgrade to add more.`),
       { status: 403 }
     )
   }
@@ -60,7 +70,9 @@ export async function checkBrollSize(userId: string, fileSizeBytes: number): Pro
 }
 
 export async function checkFileSizeQuota(userId: string, fileSizeBytes: number): Promise<void> {
-  const plan = await getUserPlanConfig(userId)
+  const key = await getUserPlan(userId)
+  refuseNoPlan(key)
+  const plan = PLANS[key]
   if (fileSizeBytes > plan.maxFileSizeBytes) {
     throw Object.assign(
       new Error(`Your ${plan.name} plan allows videos up to ${plan.maxFileSizeGb} GB. Upgrade for larger files.`),

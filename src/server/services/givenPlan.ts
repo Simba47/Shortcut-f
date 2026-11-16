@@ -8,7 +8,7 @@ import sql from '@/lib/db'
 // KEEP IN STEP with Shortcut-Admin-f/src/server/admin/plans.ts (the same table and "on now" rule).
 
 /** Plans from lowest to highest (the higher one wins) */
-const ORDER = ['free', 'starter', 'creator', 'agency']
+const ORDER = ['free', 'trial', 'starter', 'creator', 'agency']
 export function higherPlan(a: string | null | undefined, b: string | null | undefined): string {
   const ra = ORDER.indexOf(a ?? 'free'), rb = ORDER.indexOf(b ?? 'free')
   return (rb > ra ? b : a) ?? 'free'
