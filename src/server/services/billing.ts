@@ -2,7 +2,9 @@ import sql from '@/lib/db'
 import { ensureBillingSchema } from '@/server/services/billingSchema'
 import { recordPayment, recordCheckoutPayment } from '@/server/services/invoices'
 import { PLANS } from '@/lib/plans'
-import { grantPlanCredits } from '@/server/services/credits'
+import { carryTrialCredits, ensureCreditsSchema, grantPlanCredits } from '@/server/services/credits'
+import { TRIAL_DAYS } from '@/lib/credits'
+import { givenPlan, higherPlan } from '@/server/services/givenPlan'
 import {
   PAID_PLAN_KEYS, type PaidPlanKey, type SubscriptionChange, razorpayMode,
   createRazorpayPlan, createRazorpaySubscription, cancelRazorpaySubscription, fetchRazorpaySubscription, rupeesToPaise,
@@ -72,7 +74,11 @@ export async function activate(c: Extract<SubscriptionChange, { kind: 'active' }
   const creditRef = c.payment?.id ?? paymentId
   if (creditRef) {
     const [mine] = await sql<{ id: string }[]>`SELECT id FROM subscriptions WHERE razorpay_subscription_id = ${c.subscriptionId} AND user_id = ${c.userId}`
-    if (mine) await grantPlanCredits(c.userId, c.plan, `${c.subscriptionId}:${creditRef}`, expiresAt)
+    if (mine) {
+      const r = await grantPlanCredits(c.userId, c.plan, `${c.subscriptionId}:${creditRef}`, expiresAt)
+      // From the Trial to a plan: what is left of the trial's credits lasts as long as the plan's
+      if (r.granted) await carryTrialCredits(c.userId, new Date(expiresAt.getTime() + 31 * 86_400_000))
+    }
   }
   // The payment and its invoice, on every delivery: it is recorded once whatever the number of tries,
   // and a failure here answers an error so Razorpay sends the event again
@@ -102,15 +108,40 @@ export async function endSubscription(c: Extract<SubscriptionChange, { kind: 'en
   })
 }
 
-/** The plan the user is on right now: a paid plan needs a paid-up Razorpay subscription (users from before payments have none and are left alone) */
+/**
+ * The plan the user is on right now: the higher of the plan they pay for and a plan Shortcut's admin
+ * gave them that is on now (givenPlan.ts; the admin never changes the paid plan)
+ */
 export async function effectivePlan(userId: string, storedPlan: string): Promise<string> {
+  const [paid, given] = await Promise.all([paidUpPlan(userId, storedPlan), givenPlan(userId)])
+  return higherPlan(paid, given)
+}
+
+/** The plan paid for: a paid plan needs a paid-up Razorpay subscription (users from before payments have none and are left alone) */
+async function paidUpPlan(userId: string, storedPlan: string): Promise<string> {
   if (storedPlan === 'free') return 'free'
+  // The Trial pack lasts TRIAL_DAYS from its payment, then the account has no plan again
+  if (storedPlan === 'trial') return (await trialSummary(userId)).active ? 'trial' : 'free'
   await ensureBillingSchema()
   const [row] = await sql<{ managed: boolean; valid: boolean }[]>`
     SELECT COUNT(*) > 0 AS managed,
       COALESCE(BOOL_OR(status IN ('active', 'cancelled') AND expires_at > ${new Date(Date.now() - GRACE_MS)}), false) AS valid
     FROM subscriptions WHERE user_id = ${userId} AND razorpay_subscription_id IS NOT NULL AND status <> 'created'`
   return row?.managed && !row.valid ? 'free' : storedPlan
+}
+
+/**
+ * The Trial pack (credits.ts TRIAL_PACK): bought or not (it is once per account), and while it lasts.
+ * Its paid order is the record: TRIAL_DAYS from the payment.
+ */
+export async function trialSummary(userId: string): Promise<{ used: boolean; active: boolean; endsAt: Date | null }> {
+  await ensureCreditsSchema()
+  const [row] = await sql<{ paid_at: Date }[]>`
+    SELECT paid_at FROM topup_orders WHERE user_id = ${userId} AND pack = 'trial' AND status = 'paid' AND paid_at IS NOT NULL
+    ORDER BY paid_at DESC LIMIT 1`
+  if (!row) return { used: false, active: false, endsAt: null }
+  const endsAt = new Date(new Date(row.paid_at).getTime() + TRIAL_DAYS * 86_400_000)
+  return { used: true, active: endsAt > new Date(), endsAt }
 }
 
 /** Cancel at the end of the month already paid for */

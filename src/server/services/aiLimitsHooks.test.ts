@@ -17,6 +17,8 @@ const users: string[] = []
 async function setup(plan = 'starter', videoMs = 20 * MIN, grantCredits = 0) {
   const [u] = await sql<{ id: string }[]>`INSERT INTO users (email, plan) VALUES (${`hook-ai-${Math.random().toString(36).slice(2)}@example.test`}, ${plan}) RETURNING id`
   users.push(u.id)
+  // The Trial counts while its paid order is under 14 days old (billing.ts trialSummary)
+  if (plan === 'trial') await sql`INSERT INTO topup_orders (order_id, user_id, pack, credits, amount_paise, status, paid_at) VALUES (${`order_t_${u.id}`}, ${u.id}, 'trial', 99, 5000, 'paid', now())`
   if (grantCredits) await credits.grant(u.id, { kind: 'plan', amount: grantCredits, expiresAt: new Date(Date.now() + 30 * 86_400_000), sourceRef: `hook-ai:${u.id}` })
   const [v] = await sql<{ id: string }[]>`INSERT INTO videos (user_id, source_type, storage_path, duration_ms, status) VALUES (${u.id}, 'upload', 'raw/x.mp4', ${videoMs}, 'ready') RETURNING id`
   // the whole video is read (so Best moments and Ask AI do not start a reading)
@@ -100,7 +102,7 @@ test('a fresh search past the included ones asks first, then takes its credits w
 })
 
 /** The day's cap is lower than the month's, so a test that fills the month lifts it (and puts it back) */
-async function withDayCap<T>(plan: 'starter' | 'free', n: number, fn: () => Promise<T>): Promise<T> {
+async function withDayCap<T>(plan: 'starter' | 'trial', n: number, fn: () => Promise<T>): Promise<T> {
   const { PLANS } = await import('@/lib/plans')
   const ai = PLANS[plan].ai as { clipsPerDay: number }
   const was = ai.clipsPerDay
@@ -151,20 +153,29 @@ test('a run that fails with nothing made gives all its credits back', opts, asyn
   assert.equal((await credits.balance(userId)).balance, 100)
 })
 
-test('the free plan stops at its 3 clips in total', opts, async () => {
-  const { userId, videoId } = await setup('free', 60 * MIN, 30)
+test('the Trial stops at its 3 AI clips in total, and no plan gets none', opts, async () => {
+  const { userId, videoId } = await setup('trial', 60 * MIN, 30)
   await ai.saveMoments(videoId, moments(5))
   await doneRun(videoId, 3)
-  await withDayCap('free', 1000, async () => {
-    await assert.rejects(videos.createAutoClips(userId, videoId, 2), (e: { status?: number }) => e.status === 403)
+  await withDayCap('trial', 1000, async () => {
+    await assert.rejects(videos.createAutoClips(userId, videoId, 2), (e: { status?: number; message?: string }) => e.status === 403 && /Upgrade to a plan/.test(e.message ?? ''))
   })
+  const none = await setup('free', 60 * MIN, 30)
+  await ai.saveMoments(none.videoId, moments(5))
+  await assert.rejects(videos.createAutoClips(none.userId, none.videoId, 2), (e: { status?: number; message?: string }) => e.status === 403 && /need a plan/.test(e.message ?? ''))
 })
 
 test('Ask AI past the daily cap is refused before any AI call', opts, async () => {
-  const { userId, videoId } = await setup('free', 20 * MIN, 10)
+  const { userId, videoId } = await setup('starter', 20 * MIN, 10)
   await sql`INSERT INTO ai_actions (user_id, kind) SELECT ${userId}, 'ask_ai' FROM generate_series(1, 5)`
   await sql`UPDATE ai_actions SET created_at = now() - interval '2 minutes' WHERE user_id = ${userId}`
-  await assert.rejects(videos.getVideoSuggestionsByCriteria(userId, videoId, 'funny moments'), (e: { status?: number }) => e.status === 429)
+  const { PLANS } = await import('@/lib/plans')
+  const ai = PLANS.starter.ai as { askAiPerDay: number }
+  const was = ai.askAiPerDay
+  ai.askAiPerDay = 5
+  try {
+    await assert.rejects(videos.getVideoSuggestionsByCriteria(userId, videoId, 'funny moments'), (e: { status?: number }) => e.status === 429)
+  } finally { ai.askAiPerDay = was }
 })
 
 test('Ask AI on a long video asks its price first; one hour or less just shows it', opts, async () => {
@@ -185,7 +196,7 @@ test('Ask AI on a long video asks its price first; one hour or less just shows i
 })
 
 test('a rewrite with no credits is refused (402)', opts, async () => {
-  const { userId, videoId } = await setup('free', 20 * MIN)
+  const { userId, videoId } = await setup('trial', 20 * MIN)
   const [c] = await sql<{ id: string }[]>`INSERT INTO clips (video_id, start_ms, end_ms, status) VALUES (${videoId}, 0, 1000, 'draft') RETURNING id`
   const { regenerateClipText } = await import('./clips')
   await assert.rejects(regenerateClipText(userId, c.id), (e: { status?: number }) => e.status === 402)

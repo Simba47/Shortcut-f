@@ -120,6 +120,8 @@ export interface PricingPlan {
   price: number
   /** Discounted per-month rate when billed annually */
   yearlyPrice: number
+  /** Paid once (the Trial pack): no annual price, "Paid once" instead of "Billed monthly" */
+  once?: boolean
   /** Bold one-line summary under the price, e.g. "999 credits every month" */
   headline: string
   subline: string
@@ -298,7 +300,7 @@ function PricingCard({ plan, index }: { plan: PricingPlan; index: number }) {
   const { isMonthly, currency, locale } = useContext(PricingContext)
   const isFree = plan.price === 0
   // In the annual view the big number is the yearly total, with the full-price year struck through
-  const showAnnual = !isMonthly && !isFree
+  const showAnnual = !isMonthly && !isFree && !plan.once
   const annualTotal = plan.yearlyPrice * 12
   const fullYear = plan.price * 12
   const savings = fullYear - annualTotal
@@ -351,6 +353,8 @@ function PricingCard({ plan, index }: { plan: PricingPlan; index: number }) {
       <p className="mt-2 text-[15px] text-[var(--muted)]">
         {isFree ? (
           "It's free"
+        ) : plan.once ? (
+          'Paid once'
         ) : showAnnual ? (
           <>
             Billed annually · <span className="font-semibold text-[var(--accent)]">save {money(savings)}</span>

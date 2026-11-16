@@ -2,10 +2,10 @@ import sql from '@/lib/db'
 import { creditsMode } from '@/lib/credits'
 import {
   aiLimitsFor, allowanceSince, videoClipCap, extraSearchCredits, istDayStart, rewriteCredits,
-  askAiCredits, AI_REQUESTS_PER_MINUTE, CLIP_CREDITS,
+  askAiCredits, AI_REQUESTS_PER_MINUTE, CLIP_CREDITS, moreLater,
 } from '@/lib/aiLimits'
 import { charge, release, settle, type Hold } from './credits'
-import { getUserPlan } from './quota'
+import { getUserPlan, NO_PLAN_AI_MESSAGE } from './quota'
 
 // Keeping AI cost bounded (lib/aiLimits.ts has the rules, plans.ts the numbers):
 //   - Moments found once per video are saved (video_moments): "Make more clips" and Best moments
@@ -179,17 +179,21 @@ export async function aiActionCounts(userId: string): Promise<{ askAiThisMonth: 
 }
 
 /** Past the month's limit a search is refused, whatever credits are left. `units`: what it counts as (aiLimits askAiUnits) */
-function refuseAskAi(limits: { askAiPerMonth: number; askAiPerDay: number }, counts: { askAiThisMonth: number; askAiToday: number }, units: number) {
-  if (counts.askAiToday >= limits.askAiPerDay) throw fail(`You've used today's ${limits.askAiPerDay} Ask AI searches. More tomorrow.`, 429)
+function refuseAskAi(plan: string, limits: { askAiPerMonth: number; askAiPerDay: number }, counts: { askAiThisMonth: number; askAiToday: number }, units: number) {
+  if (plan === 'free') throw fail(NO_PLAN_AI_MESSAGE, 403)
+  const more = moreLater(plan)
+  // The month's limit first: with both used up, "more tomorrow" would be wrong (the day and month caps are often equal)
   const left = limits.askAiPerMonth - counts.askAiThisMonth
-  if (left <= 0) throw fail(`You've used your ${limits.askAiPerMonth} Ask AI searches. More next month, or upgrade.`, 403)
-  if (units > left) throw fail(`A search on this video counts as ${units}, and you have ${left} left. More next month, or upgrade.`, 403)
+  if (left <= 0) throw fail(`You've used your ${limits.askAiPerMonth} Ask AI searches. ${more}`, 403)
+  if (counts.askAiToday >= limits.askAiPerDay) throw fail(`You've used today's ${limits.askAiPerDay} Ask AI searches. More tomorrow.`, 429)
+  if (units > left) throw fail(`A search on this video counts as ${units}, and you have ${left} left. ${more}`, 403)
 }
 
 /** The credits one Ask AI search takes (0 unless credits are on); refused first if it can't be done at all */
 export async function askAiPrice(userId: string, units: number): Promise<number> {
   if (creditsMode() !== 'on') return 0
-  refuseAskAi(aiLimitsFor(await getUserPlan(userId)), await aiActionCounts(userId), units)
+  const plan = await getUserPlan(userId)
+  refuseAskAi(plan, aiLimitsFor(plan), await aiActionCounts(userId), units)
   return askAiCredits(units)
 }
 
@@ -212,13 +216,15 @@ export async function beginAiAction(userId: string, kind: AiActionKind, videoId:
   const noop: AiActionHandle = { credits: 0, done: async () => {}, fail: async () => {} }
   if (mode === 'off') return noop
   await ensureAiUsageSchema()
-  const limits = aiLimitsFor(await getUserPlan(userId))
+  const plan = await getUserPlan(userId)
+  const limits = aiLimitsFor(plan)
   const counts = await aiActionCounts(userId)
   const enforce = mode === 'on'
   if (enforce && counts.lastMinute >= AI_REQUESTS_PER_MINUTE) throw fail('Too many AI requests in a minute. Wait a moment and try again.', 429)
-  if (enforce && kind === 'ask_ai') refuseAskAi(limits, counts, units)
+  if (enforce && kind === 'ask_ai') refuseAskAi(plan, limits, counts, units)
+  if (enforce && kind === 'rewrite' && plan === 'free') throw fail(NO_PLAN_AI_MESSAGE, 403)
   if (enforce && kind === 'rewrite' && counts.rewritesThisMonth >= limits.rewritesPerMonth) {
-    throw fail(`You've used your ${limits.rewritesPerMonth} rewrites. More next month, or upgrade.`, 403)
+    throw fail(`You've used your ${limits.rewritesPerMonth} rewrites. ${moreLater(plan)}`, 403)
   }
   const price = kind === 'ask_ai' ? askAiCredits(units) : rewriteCredits(counts.rewritesThisMonth)
 

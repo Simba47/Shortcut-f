@@ -24,17 +24,23 @@ test('a paid plan lists every limit the server applies, with the numbers from pl
   ])
 })
 
-test('the free plan says its clips are 3 in total, not per day', () => {
-  const rows = labels('free')
-  assert.ok(rows.includes('3 clips in total'))
-  assert.ok(!rows.some(r => /Unlimited|a day/.test(r)))
-  assert.ok(rows.includes('1 free AI moment search per video'))
-  assert.ok(rows.includes('30 minutes of video read in total'))
-  assert.ok(rows.includes('3 uploads in total'))
-  assert.ok(rows.includes('3 Ask AI searches in total'))
-  assert.ok(rows.includes('20 hook and title rewrites in total'))
-  assert.ok(rows.includes('x Captions on AI clips included'))
-  assert.ok(rows.includes('x No watermark'))
+test('the Trial lists its allowances as once only (in total), and how long it lasts', () => {
+  assert.deepEqual(labels('trial'), [
+    '30 minutes of video read in total',
+    '2 uploads in total',
+    '2 videos at a time',
+    'Up to 2 GB per video',
+    'Unlimited clips you cut yourself',
+    '3 AI clips in total',
+    'Up to 3 clips per Make my clips',
+    '1 free AI moment search per video',
+    '2 Ask AI searches in total',
+    '20 hook and title rewrites in total',
+    'Lasts 14 days',
+    'Captions on AI clips included',
+    'No watermark',
+    'x Priority exports',
+  ])
 })
 
 test('no plan claims unlimited AI clips, and only Agency gets priority exports', () => {

@@ -3,6 +3,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import sql from '@/lib/db'
 import { getUserPlan } from './quota'
+import { givenPlanSql, givenPlansReady, hasPlanSql, higherPlan } from './givenPlan'
 import { brandKitLimit, cleanBrandKitData, DEFAULT_BRAND_KIT, isBrandFont, brandFontKey, type BrandKit, type BrandKitData } from '@/lib/shared/brandKit'
 import { cleanRole, INVITE_DAYS, TEAM_PLANS, teamSeats, type KitInviteIn, type KitInviteOut, type KitMember, type KitRole, type KitTeam } from '@/lib/shared/brandTeam'
 import { hasColumn } from './clips'
@@ -135,12 +136,14 @@ async function invitesFor(userId: string): Promise<KitInviteIn[]> {
   if (!(await invitesReady())) return []
   const email = await emailOf(userId)
   if (!email) return []
-  const rows = await sql<{ id: string; kit_name: string; by: string | null; role: string; plan: string | null }[]>`
-    SELECT i.id, bk.name AS kit_name, COALESCE(NULLIF(o.name, ''), o.email) AS by, i.role, o.plan
+  const given = await givenPlansReady()
+  const rows = await sql<{ id: string; kit_name: string; by: string | null; role: string; plan: string | null; given_plan: string | null }[]>`
+    SELECT i.id, bk.name AS kit_name, COALESCE(NULLIF(o.name, ''), o.email) AS by, i.role, o.plan, ${givenPlanSql('o', given)} AS given_plan
     FROM brand_kit_invites i JOIN brand_kits bk ON bk.id = i.kit_id JOIN users o ON o.id = bk.user_id
     WHERE i.email = ${email} AND bk.user_id <> ${userId} AND i.created_at > now() - make_interval(days => ${INVITE_DAYS})
     ORDER BY i.created_at`
-  return rows.filter(r => teamSeats(r.plan) > 0).map(r => ({ id: r.id, kit_name: r.kit_name, by: r.by ?? 'A teammate', role: cleanRole(r.role) }))
+  // (a plan Shortcut's admin gave counts like a paid one: givenPlan.ts)
+  return rows.filter(r => teamSeats(higherPlan(r.plan, r.given_plan)) > 0).map(r => ({ id: r.id, kit_name: r.kit_name, by: r.by ?? 'A teammate', role: cleanRole(r.role) }))
 }
 
 /**
@@ -149,13 +152,14 @@ async function invitesFor(userId: string): Promise<KitInviteIn[]> {
  */
 export async function listBrandKits(userId: string): Promise<{ kits: BrandKit[]; limit: number; plan: string; invites: KitInviteIn[] }> {
   await tableReady()
+  const given = await givenPlansReady()
   const [rows, plan, shared, invites] = await Promise.all([
     sql<Row[]>`SELECT id, name, data FROM brand_kits WHERE user_id = ${userId} ORDER BY created_at, id`,
     getUserPlan(userId),
     (async (): Promise<Array<Row & { owner: string; by: string | null; role: string | null }>> => (!(await sharesReady()) ? [] : sql<(Row & { owner: string; by: string | null; role: string | null })[]>`
       SELECT bk.id, bk.name, bk.data, bk.user_id AS owner, COALESCE(NULLIF(u.name, ''), u.email) AS by, to_jsonb(s)->>'role' AS role
       FROM brand_kit_shares s JOIN brand_kits bk ON bk.id = s.kit_id JOIN users u ON u.id = bk.user_id
-      WHERE s.user_id = ${userId} AND u.plan = ANY(${TEAM_PLANS}) ORDER BY s.created_at, bk.id`))(),
+      WHERE s.user_id = ${userId} AND ${hasPlanSql('u', TEAM_PLANS, given)} ORDER BY s.created_at, bk.id`))(),
     invitesFor(userId).catch(() => []),
   ])
   const kits = await Promise.all([...rows.map(r => toKit(r, userId)), ...shared.map(r => toKit(r, r.owner, r.by ?? 'a teammate', cleanRole(r.role)))])
@@ -407,14 +411,14 @@ export async function brandWordsFor(userId: string, clipId: string | null): Prom
         SELECT data->'words' AS words FROM brand_kits WHERE user_id = ${userId} AND (data->>'is_default')::boolean LIMIT 1`
       return row ? cleanBrandWords(row.words) : null
     }
-    const shares = await sharesReady()
+    const [shares, given] = await Promise.all([sharesReady(), givenPlansReady()])
     // (the clip's own kit first, else the default)
     const [row] = await (shares
       ? sql<{ words: unknown }[]>`
           SELECT bk.data->'words' AS words FROM clips c JOIN videos v ON v.id = c.video_id
           JOIN brand_kits bk ON (bk.id::text = to_jsonb(c)->'brand'->>'kit_id'
               AND (bk.user_id = v.user_id OR (EXISTS (SELECT 1 FROM brand_kit_shares s WHERE s.kit_id = bk.id AND s.user_id = v.user_id)
-                AND EXISTS (SELECT 1 FROM users o WHERE o.id = bk.user_id AND o.plan = ANY(${TEAM_PLANS})))))
+                AND EXISTS (SELECT 1 FROM users o WHERE o.id = bk.user_id AND ${hasPlanSql('o', TEAM_PLANS, given)}))))
             OR (bk.user_id = v.user_id AND (bk.data->>'is_default')::boolean)
           WHERE c.id = ${clipId} AND v.user_id = ${userId}
           ORDER BY (bk.id::text = to_jsonb(c)->'brand'->>'kit_id') DESC LIMIT 1`

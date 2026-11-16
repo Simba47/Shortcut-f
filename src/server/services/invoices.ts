@@ -116,6 +116,7 @@ export async function recordCheckoutPayment(userId: string, subscriptionId: stri
 /** "topup:medium" is stored as the plan of a credit top-up's payment; shown as "150 credits top-up" */
 function topupLabel(plan: string): string | null {
   const pack = plan.startsWith('topup:') ? findTopupPack(plan.slice(6), { test: true }) : null
+  if (pack?.key === 'trial') return `Trial pack, ${pack.credits} credits`
   return pack ? `${pack.credits} credits top-up` : null
 }
 

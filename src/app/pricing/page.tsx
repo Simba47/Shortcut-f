@@ -4,13 +4,14 @@ import { useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { PLANS } from '@/lib/plans'
-import { FREE_SIGNUP_CREDITS, TOPUP_PACKS, TEST_PACK } from '@/lib/credits'
+import { TOPUP_PACKS, TEST_PACK, TRIAL_PACK, TRIAL_DAYS } from '@/lib/credits'
 import { planFeatureRows, creditUses, readingLabel } from '@/lib/planFeatures'
 import { BrandLogo } from '@/components/ui/brand-logo'
 import { CreditsBadge } from '@/components/ui/credits-badge'
 import { useCredits } from '@/lib/useCredits'
 
-const PLAN_ORDER = ['free', 'starter', 'creator', 'agency'] as const
+// (user, 2026-11-16) No free plan: the Trial pack (paid once) comes first
+const PLAN_ORDER = ['trial', 'starter', 'creator', 'agency'] as const
 
 declare global {
   interface Window { Razorpay: new (o: Record<string, unknown>) => { open: () => void; on: (e: string, cb: (r: never) => void) => void } }
@@ -34,7 +35,7 @@ export default function PricingPage() {
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const [mine, setMine] = useState<{ plan: string; testMode: boolean; paymentsMode?: 'off' | 'mock' | 'test' | 'live'; testPack?: boolean; subscription: { status: string; expiresAt: string | null } | null } | null>(null)
+  const [mine, setMine] = useState<{ plan: string; testMode: boolean; paymentsMode?: 'off' | 'mock' | 'test' | 'live'; testPack?: boolean; subscription: { status: string; expiresAt: string | null } | null; trial?: { used: boolean; active: boolean; endsAt: string | null } } | null>(null)
   useEffect(() => {
     if (!session) return
     fetch('/api/billing/plan').then(r => r.ok ? r.json() : null).then(d => d && setMine(d)).catch(() => {})
@@ -43,6 +44,8 @@ export default function PricingPage() {
   async function handleSubscribe(planKey: string) {
     if (!session) { router.push('/login'); return }
     if (planKey === 'free') return
+    // The Trial pack is paid once (an order, like a credit pack), not a subscription
+    if (planKey === 'trial') { await handleTopup('trial'); return }
     setLoading(planKey)
     setError(null)
     try {
@@ -113,6 +116,8 @@ export default function PricingPage() {
               setNotice(`${out.credits} credits added. You now have ${out.balance}.`)
               refreshCredits()
               resolve()
+              // The Trial is on: straight to uploading
+              if (packKey === 'trial') router.push('/dashboard')
             } catch (e) { reject(e) }
           },
           modal: { ondismiss: () => resolve() },
@@ -162,7 +167,7 @@ export default function PricingPage() {
       <main className="max-w-5xl mx-auto px-6 pt-14 pb-20">
         <h1 className="text-3xl font-bold text-white text-center mb-2">Simple, transparent pricing</h1>
         <p className="text-center mb-3" style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.9rem' }}>
-          Your plan gives you credits worth its price, and every action uses them, up to your plan&apos;s monthly limits. The editor is always free · Paid plans renew monthly · Cancel anytime
+          Your plan gives you credits worth its price, and every action uses them, up to your plan&apos;s monthly limits. Try everything first with the ₹{TRIAL_PACK.price} Trial pack, paid once · Paid plans renew monthly · Cancel anytime
         </p>
 
         {mine?.testMode && (
@@ -204,6 +209,8 @@ export default function PricingPage() {
           {PLAN_ORDER.map(key => {
             const plan = PLANS[key]
             const isPaid = plan.price > 0
+            // The Trial: paid once, its credits come with the payment
+            const once = plan.oneTime
             const isPopular = key === 'creator'
             const busy = loading === key
             return (
@@ -226,7 +233,7 @@ export default function PricingPage() {
                   {isPaid ? (
                     <>
                       <span className="text-3xl font-bold text-white">₹{plan.price}</span>
-                      <span className="text-sm pb-1" style={{ color: 'rgba(255,255,255,0.35)' }}>/month</span>
+                      <span className="text-sm pb-1" style={{ color: 'rgba(255,255,255,0.35)' }}>{once ? ' once' : '/month'}</span>
                     </>
                   ) : (
                     <span className="text-3xl font-bold text-white">Free</span>
@@ -236,12 +243,12 @@ export default function PricingPage() {
                 {/* What the plan gives, in credits: the number people compare first */}
                 <div className="mb-5 rounded-xl px-3 py-2.5" style={{ background: 'rgba(200,255,0,0.08)', border: '1px solid rgba(200,255,0,0.22)' }}>
                   <div className="text-base font-bold" style={{ color: '#c8ff00' }}>
-                    {isPaid ? `${plan.monthlyCredits} credits` : `${FREE_SIGNUP_CREDITS} credits`}
-                    <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.5)' }}>{isPaid ? ' every month' : ' to start, once'}</span>
+                    {once ? `${TRIAL_PACK.credits} credits` : `${plan.monthlyCredits} credits`}
+                    <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.5)' }}>{once ? ` for ${TRIAL_DAYS} days` : ' every month'}</span>
                   </div>
                   <div className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                    {readingLabel(plan.readingMinutes)} of video read {isPaid ? 'a month' : 'in total'}
-                    {isPaid ? ' · unused credits roll over one month' : ''}
+                    {readingLabel(plan.readingMinutes)} of video read {once ? 'in total' : 'a month'}
+                    {once ? ' · unused credits move into your plan when you upgrade' : ' · unused credits roll over one month'}
                   </div>
                 </div>
 
@@ -256,7 +263,28 @@ export default function PricingPage() {
                   ))}
                 </ul>
 
-                {isPaid ? (
+                {once ? (
+                  mine?.plan === 'trial' ? (
+                    <div aria-current="true" className="w-full py-2.5 rounded-xl text-sm font-semibold text-center cursor-default select-none"
+                      style={{ background: 'transparent', color: '#c8ff00', border: '1.5px solid rgba(200,255,0,0.55)' }}>
+                      ✓ Your trial{mine.trial?.endsAt ? ` — ends ${new Date(mine.trial.endsAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}
+                    </div>
+                  ) : mine && (mine.plan !== 'free' || mine.trial?.used) ? (
+                    // Once per account, and not for someone on a plan
+                    <div className="w-full py-2.5 rounded-xl text-sm font-semibold text-center" style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      {mine.plan !== 'free' ? 'You have a plan' : 'Trial used'}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleSubscribe(key)}
+                      disabled={!!loading || !!topupBusy}
+                      className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity"
+                      style={{ background: '#c8ff00', color: '#000', opacity: (loading || topupBusy) && topupBusy !== 'trial' ? 0.4 : 1, cursor: loading || topupBusy ? 'wait' : 'pointer' }}
+                    >
+                      {topupBusy === 'trial' ? 'Opening payment…' : `Start trial — ₹${plan.price} once`}
+                    </button>
+                  )
+                ) : isPaid ? (
                   mine?.plan === key ? (
                     // The plan they are on: a status, not a button (it must not look like something to press)
                     <div aria-current="true" className="w-full py-2.5 rounded-xl text-sm font-semibold text-center cursor-default select-none"
@@ -314,7 +342,7 @@ export default function PricingPage() {
                 <div className="text-2xl font-bold text-white">{pack.credits}</div>
                 <div className="text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>credits</div>
                 <div className="text-lg font-semibold text-white mt-2">₹{pack.price}</div>
-                {mine && (mine.plan !== 'free' || pack.key === 'test') ? (
+                {mine && ((mine.plan !== 'free' && mine.plan !== 'trial') || pack.key === 'test') ? (
                   <button onClick={() => handleTopup(pack.key)} disabled={!!topupBusy}
                     className="w-full mt-3 py-2 rounded-xl text-xs font-semibold transition-opacity"
                     style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', opacity: topupBusy && topupBusy !== pack.key ? 0.4 : 1, cursor: topupBusy ? 'wait' : 'pointer' }}>

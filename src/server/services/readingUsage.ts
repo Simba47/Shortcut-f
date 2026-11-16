@@ -5,7 +5,7 @@ import { allowanceSince, readingQuote } from '@/lib/aiLimits'
 import { readingLabel } from '@/lib/planFeatures'
 import { PLANS } from '@/lib/plans'
 import { balance, charge, ensureCreditsSchema, ensureFreeGrant, grant, settle } from './credits'
-import { getUserPlan } from './quota'
+import { getUserPlan, NO_PLAN_MESSAGE } from './quota'
 
 // The plan's hours of video read and its uploads (plans.ts readingMinutes, uploadsPerMonth). Our
 // transcriber reads a video at upload, whatever is done with it after, so it is counted and paid for
@@ -36,7 +36,7 @@ function ensureSchema(): Promise<void> {
 const minutes = (ms: number) => Math.ceil(ms / 60_000)
 const fail = (message: string, status: number) => Object.assign(new Error(message), { status, expose: true })
 
-/** What this user has used: since the month began (Free: ever). Lengths the worker has found since are counted, and paid for, first (credits.ts sweep does this too, so the balance is current). */
+/** What this user has used: since the month began (the Trial: ever). Lengths the worker has found since are counted, and paid for, first (credits.ts sweep does this too, so the balance is current). */
 export async function readingUse(userId: string): Promise<{ uploads: number; usedMs: number }> {
   await ensureSchema()
   const plan = await getUserPlan(userId)
@@ -103,10 +103,11 @@ export async function checkBeforeUpload(userId: string, durationMs: number | nul
   if (creditsMode() !== 'on') return
   const planKey = await getUserPlan(userId)
   const plan = PLANS[planKey]
-  const per = plan.allowancesOnce ? 'on the Free plan' : 'this month'
-  const more = plan.allowancesOnce ? 'Upgrade to upload more.' : 'More next month, or upgrade.'
+  if (planKey === 'free') throw fail(NO_PLAN_MESSAGE, 403)
+  const per = plan.allowancesOnce ? `on your ${plan.name}` : 'this month'
+  const more = plan.allowancesOnce ? 'Choose a plan to upload more.' : 'More next month, or upgrade.'
   const quote = readingQuote(plan, await readingUse(userId), durationMs)
-  if (quote.uploadsLeft <= 0) throw fail(`You've used your ${plan.uploadsPerMonth} uploads ${per}. ${more}`, 403)
+  if (quote.uploadsLeft <= 0) throw fail(`You've used your ${plan.uploadsPerMonth} upload${(plan.uploadsPerMonth as number) === 1 ? '' : 's'} ${per}. ${more}`, 403)
   const hours = readingLabel(plan.readingMinutes)
   if (quote.msLeft <= 0) throw fail(`You've used your ${hours} of video ${per}. ${more}`, 403)
   if (quote.overMs > 0) throw fail(`This video is ${minutes(durationMs ?? 0)} min, and only ${minutes(quote.msLeft)} min of your ${hours} ${plan.readingMinutes >= 120 ? 'are' : 'is'} left ${per}. Upload a shorter video, or upgrade.`, 403)

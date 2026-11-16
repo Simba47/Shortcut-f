@@ -15,6 +15,8 @@ const users: string[] = []
 async function user(plan: string, balance = 0) {
   const [u] = await sql<{ id: string }[]>`INSERT INTO users (email, plan) VALUES (${`reading-test-${Math.random().toString(36).slice(2)}@example.test`}, ${plan}) RETURNING id`
   users.push(u.id)
+  // The Trial counts while its paid order is under 14 days old (billing.ts trialSummary)
+  if (plan === 'trial') await sql`INSERT INTO topup_orders (order_id, user_id, pack, credits, amount_paise, status, paid_at) VALUES (${`order_rt_${u.id}`}, ${u.id}, 'trial', 99, 5000, 'paid', now())`
   if (balance > 0) await credits.grant(u.id, { kind: 'plan', amount: balance, expiresAt: new Date(Date.now() + 30 * 86_400_000), sourceRef: `reading-test:${u.id}` })
   return u.id
 }
@@ -40,7 +42,7 @@ after(async () => {
 })
 
 test('every video costs credits when it is uploaded, and is counted', opts, async () => {
-  const u = await user('free', 95)
+  const u = await user('trial', 95)
   const v = await video(u, 20 * MIN)
   await reading.checkBeforeUpload(u, 20 * MIN)
   await reading.recordReading(u, v, 20 * MIN)
@@ -51,7 +53,7 @@ test('every video costs credits when it is uploaded, and is counted', opts, asyn
 })
 
 test('the same video recorded twice (a repeated request) counts once', opts, async () => {
-  const u = await user('free', 95)
+  const u = await user('trial', 95)
   const v = await video(u, 5 * MIN)
   await reading.recordReading(u, v, 5 * MIN)
   await reading.recordReading(u, v, 5 * MIN)
@@ -60,7 +62,7 @@ test('the same video recorded twice (a repeated request) counts once', opts, asy
 })
 
 test('deleting a video gives no reading or credits back', opts, async () => {
-  const u = await user('free', 95)
+  const u = await user('trial', 95)
   const v = await video(u, 10 * MIN)
   await reading.recordReading(u, v, 10 * MIN)
   await sql`DELETE FROM videos WHERE id = ${v}`
@@ -71,8 +73,8 @@ test('deleting a video gives no reading or credits back', opts, async () => {
 })
 
 test('past the hours: refused, even with credits, and told to upgrade', opts, async () => {
-  const u = await user('free', 500)
-  await reading.recordReading(u, await video(u, 25 * MIN), 25 * MIN)
+  const u = await user('starter', 500)
+  await reading.recordReading(u, await video(u, 175 * MIN), 175 * MIN)
   await assert.rejects(reading.checkBeforeUpload(u, 20 * MIN), (e: { status?: number; message?: string }) =>
     e.status === 403 && /20 min/.test(e.message ?? '') && /only 5 min/.test(e.message ?? '') && /upgrade/i.test(e.message ?? ''))
   await reading.recordReading(u, await video(u, 5 * MIN), 5 * MIN)
@@ -101,9 +103,24 @@ test('a video that fails gives its credits, hours and upload back, once', opts, 
 })
 
 test('the uploads run out, even with short videos', opts, async () => {
+  const u = await user('trial', 500)
+  for (let i = 0; i < 2; i++) await reading.recordReading(u, await video(u, MIN), MIN)
+  await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number; message?: string }) => e.status === 403 && /your 2 uploads on your Trial/.test(e.message ?? ''))
+})
+
+test('no plan (no free plan since 2026-11-16): an upload is refused and told to start the Trial pack, even with credits', opts, async () => {
   const u = await user('free', 500)
-  for (let i = 0; i < 3; i++) await reading.recordReading(u, await video(u, MIN), MIN)
-  await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number; message?: string }) => e.status === 403 && /3 uploads/.test(e.message ?? ''))
+  await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number; message?: string }) => e.status === 403 && /Trial pack/.test(e.message ?? ''))
+  const quota = await import('./quota')
+  await assert.rejects(quota.checkVideoQuota(u), (e: { status?: number; message?: string }) => e.status === 403 && /Trial pack/.test(e.message ?? ''))
+})
+
+test('a Trial whose 14 days are over is no plan again', opts, async () => {
+  const u = await user('trial', 50)
+  await sql`UPDATE topup_orders SET paid_at = now() - interval '15 days' WHERE user_id = ${u}`
+  const quota = await import('./quota')
+  assert.equal(await quota.getUserPlan(u), 'free')
+  await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number; message?: string }) => e.status === 403 && /Trial pack/.test(e.message ?? ''))
 })
 
 test('a length found later (a link, an MKV) is counted and charged then, by the balance check too; short of credits, the video stays', opts, async () => {
@@ -135,8 +152,8 @@ test('a length not known yet: the lower of the hours and what the credits buy is
   await reading.recordReading(a, v, null)
   const [row] = await sql<{ reading_limit_ms: string }[]>`SELECT reading_limit_ms FROM videos WHERE id = ${v}`
   assert.equal(Number(row.reading_limit_ms), 20 * MIN)
-  const b = await user('free', 500)                                        // plenty of credits, 5 minutes left
-  await reading.recordReading(b, await video(b, 25 * MIN), 25 * MIN)
+  const b = await user('starter', 500)                                      // plenty of credits, 5 minutes left
+  await reading.recordReading(b, await video(b, 175 * MIN), 175 * MIN)
   const w = await video(b, null)
   await reading.recordReading(b, w, null)
   const [row2] = await sql<{ reading_limit_ms: string }[]>`SELECT reading_limit_ms FROM videos WHERE id = ${w}`
@@ -144,7 +161,7 @@ test('a length not known yet: the lower of the hours and what the credits buy is
 })
 
 test('a length known at upload needs no limit on the video', opts, async () => {
-  const u = await user('free', 95)
+  const u = await user('trial', 95)
   const v = await video(u, 5 * MIN)
   await reading.recordReading(u, v, 5 * MIN)
   const [row] = await sql<{ reading_limit_ms: string | null }[]>`SELECT reading_limit_ms FROM videos WHERE id = ${v}`
