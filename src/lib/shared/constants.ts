@@ -31,7 +31,7 @@ export const CAPTION_FONTS = [
 
 export const DEFAULT_CAPTION_STYLE = {
   font: 'noto-sans-telugu',
-  size: 80,   // (user, 2026-11-15: 52 read small on a phone — ~5% of the width now)
+  size: 100,  // (user, 2026-11-16: 80 still read small in most styles; 100 = a 3-word line ~65% of the width. Slider 20–140)
   color: '#FFFFFF',
   position: 'bottom-center',
   animation: 'karaoke',

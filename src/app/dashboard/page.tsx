@@ -1,5 +1,7 @@
 'use client'
 
+import { Spinner } from '@/components/ui/spinner'
+import { BrandTagIcon } from '@/components/brand/BrandTagIcon'
 import { openBrandKits } from '@/components/brand/brandKitsEvents'
 import { preloadMascot } from '@/components/ui/mascot'
 import './dashboard.css'
@@ -270,7 +272,7 @@ export default function DashboardPage() {
           )}
           {/* (the account's brand kits: set once, on every clip) */}
           <button type="button" onClick={() => openBrandKits()} className="dash-brand-link" aria-label="Brand kits: your logo, colours and caption look, on every clip">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2" /><circle cx="17.5" cy="10.5" r="2" /><circle cx="8.5" cy="7.5" r="2" /><circle cx="6.5" cy="12.5" r="2" /><path d="M12 22a10 10 0 110-20 9 9 0 019 9c0 3-2 4-4 4h-2a2 2 0 00-1 3.7A2 2 0 0112 22z" /></svg>
+            <BrandTagIcon />
             <span>Brand kits</span>
           </button>
           <AccountMenu planInfo={planInfo} />
@@ -415,7 +417,7 @@ export default function DashboardPage() {
             <button className="dash-upload-btn" disabled={uploading} aria-haspopup="dialog" onClick={() => { setUploadError(null); setChooserOpen(true) }}>
               {/* Arrow flies out to the top-right on hover while a copy slides in from the bottom-left */}
               <span className="dash-upload-icon" aria-hidden>
-                {uploading ? <span className="dash-spinner" /> : (
+                {uploading ? <Spinner /> : (
                   <>
                     <svg viewBox="0 0 14 15" width="10" fill="none" className="dash-upload-arrow"><path d="M13.376 11.552l-.264-10.44-10.44-.24.024 2.28 6.96-.048L.2 12.56l1.488 1.488 9.432-9.432-.048 6.912 2.304.024z" fill="currentColor" /></svg>
                     <svg viewBox="0 0 14 15" width="10" fill="none" className="dash-upload-arrow dash-upload-arrow--copy"><path d="M13.376 11.552l-.264-10.44-10.44-.24.024 2.28 6.96-.048L.2 12.56l1.488 1.488 9.432-9.432-.048 6.912 2.304.024z" fill="currentColor" /></svg>
@@ -743,7 +745,7 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
         )}
 
         {video.status === 'uploaded' && (
-          <div className="vcard-overlay"><span className="dash-spinner" />Waiting to start…</div>
+          <div className="vcard-overlay"><Spinner />Waiting to start…</div>
         )}
         {video.status === 'transcribing' && (
           <div className="vcard-overlay">
@@ -760,7 +762,7 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
             {!selecting && (
               <span className="vcard-failed-actions">
                 <button type="button" className="vcard-failed-btn" data-tone="primary" onClick={retry} disabled={retrying}>
-                  {retrying ? <><span className="dash-spinner" />Starting…</> : 'Try again'}
+                  {retrying ? <><Spinner />Starting…</> : 'Try again'}
                 </button>
                 <button type="button" className="vcard-failed-btn" onClick={onDelete} disabled={retrying}>Remove</button>
               </span>
@@ -1005,7 +1007,7 @@ function UploadChooser({ maxFileSizeGb, onClose, onDevice, onFile, onImported }:
               disabled={importing}
             />
             <button type="submit" className="dash-sheet-import" disabled={!link.trim() || importing}>
-              {importing ? <><span className="dash-spinner" /> Importing</> : 'Import'}
+              {importing ? <><Spinner /> Importing</> : 'Import'}
             </button>
           </div>
           {error ? (
@@ -1078,7 +1080,7 @@ function DeleteDialog({ items, onClose, onDeleted }: {
         <div className="dash-modal-actions">
           <button className="dash-btn" onClick={onClose} disabled={deleting} autoFocus>Cancel</button>
           <button className="dash-btn dash-btn-danger" onClick={confirm} disabled={deleting}>
-            {deleting ? <><span className="dash-spinner" /> Deleting</> : one ? 'Delete' : `Delete ${items.length} videos`}
+            {deleting ? <><Spinner /> Deleting</> : one ? 'Delete' : `Delete ${items.length} videos`}
           </button>
         </div>
       </div>
@@ -1218,7 +1220,7 @@ function EditModeDialog({ videoId, title, videoUrl, posterUrl, durationMs, credi
                 ))}
               </span>
               <span className="emd-cta">
-                {picked === o.mode ? <><span className="dash-spinner" />Opening…</> : <>{o.cta}
+                {picked === o.mode ? <><Spinner />Opening…</> : <>{o.cta}
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></>}
               </span>
             </button>

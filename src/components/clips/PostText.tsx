@@ -1,5 +1,6 @@
 'use client'
 
+import { Spinner } from '@/components/ui/spinner'
 import { useCallback, useEffect, useState } from 'react'
 import { TopUpLink } from '@/components/ui/credits-badge'
 
@@ -89,7 +90,7 @@ export function PostText({ clipId, value, onChange, compact = false, prepare }: 
         <button onClick={regenerate} disabled={busy} onMouseEnter={() => { if (compact && !note) loadNote() }}
           className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-50"
           style={{ color: fg(0.75), border: `1px solid ${fg(0.12)}` }}>
-          {busy && <span className="inline-block w-2.5 h-2.5 border-2 border-current border-t-transparent rounded-full animate-spin" />}
+          {busy && <Spinner />}
           {empty ? '✦ Write post text' : '✦ Regenerate'}
         </button>
         {error && <span className="text-[11px]" style={{ color: '#f87171' }}>{error}<TopUpLink message={error} /></span>}

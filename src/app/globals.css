@@ -1721,6 +1721,8 @@ button.mmc-opt-box:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outli
 .bls[data-mascot] { background: #000; }
 .bls[data-mascot] .bls-glow, .bls[data-mascot] .bls-grid { display: none; }
 .bls-mascot { position: relative; margin-bottom: 6px; }
+/* exporting in the editor: the panda as wide as the 9:16 card lets it be (EditorShell .ed-export-wait) */
+.ed-export-wait .pl { width: 94% !important; max-width: none; }
 /* motion turned down: the still picture only */
 @media (prefers-reduced-motion: reduce) {
   .pw-video { display: none; }
@@ -2090,7 +2092,14 @@ button.mmc-opt-box:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outli
   background: #0a0a0a;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
 }
-.am-usage-plan { font-size: 12.5px; font-weight: 700; color: #fff; }
+.am-usage-plan { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: #fff; }
+.am-plan-chip { display: inline-flex; align-items: center; gap: 5px; height: 21px; padding: 0 9px 0 7px; border-radius: 999px; font-size: 11.5px; font-weight: 700; letter-spacing: .01em; color: inherit; background: rgb(255 255 255 / 0.08); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12); }
+/* each plan's symbol (account-menu PlanSymbol): the only lime here, on the paid plans (user, 2026-11-16: "lower the
+   lime, only where it needs a highlight"); Free's grey. The top plan's pill a touch brighter, still neutral */
+.am-plan-sym { flex-shrink: 0; color: #c8ff00; }
+.am-plan-chip[data-tier="none"] .am-plan-sym { color: rgb(255 255 255 / 0.55); }
+.am-plan-chip[data-tier="agency"] { background: linear-gradient(180deg, rgb(255 255 255 / 0.12), rgb(255 255 255 / 0.06)); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.18); }
+.am-plan-word { font-weight: 500; opacity: .55; }
 .am-usage-count { font-size: 12px; color: rgba(244,244,245,0.55); font-variant-numeric: tabular-nums; }
 .am-usage-count b { color: #fff; }
 .am-bar { height: 6px; border-radius: 999px; overflow: hidden; background: rgba(255,255,255,0.08); }
@@ -2431,7 +2440,8 @@ html[data-theme="light"] .bs-step-line[data-on] { color: rgba(143, 196, 0, 0.7);
 .bk-invite span span, .bk-invite strong + span { display: block; font-size: 12px; color: rgb(var(--ed-fg) / 0.55); }
 .tx-brand-all { align-self: flex-start; font-size: 11px; font-weight: 600; color: rgb(var(--ed-fg) / 0.6); }
 .tx-brand-all:hover { color: var(--ed-text); text-decoration: underline; }
-.bcl { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; margin: 0 16px 4px; border-radius: 12px; background: rgba(200,255,0,0.05); box-shadow: inset 0 0 0 1px rgba(200,255,0,0.22); }
+/* (user, 2026-11-16: not a lime card — plain, just a white border) */
+.bcl { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; margin: 0 16px 4px; border-radius: 12px; background: none; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.22); }
 .bcl-chip { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: rgb(var(--ed-fg) / 0.8); background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.1); }
 .bcl-chip i { width: 9px; height: 9px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.25); }
 .bcl-chip[data-on] { color: var(--ed-text); background: rgba(200,255,0,0.12); box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.6); }
@@ -3476,6 +3486,8 @@ div:has(> .vscan[data-on][data-mode="find"]) > .sp .sp-controls { opacity: 0; vi
 .cbb-btn:disabled { opacity: .5; }
 .cbb-btn:focus-visible, .cbb-tag:focus-visible, .cbb-tag button:focus-visible { outline: 2px solid rgba(200,255,0,0.7); outline-offset: 2px; }
 .cbb-dots { display: inline-flex; gap: 2px; flex-shrink: 0; }
+/* the brand kit tag (components/brand/BrandTagIcon) */
+.brand-tag { flex-shrink: 0; display: block; }
 .cbb-dots i { width: 9px; height: 9px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.25); }
 .cbb-tag { display: inline-flex; align-items: center; gap: 4px; max-width: 140px; padding: 1px 4px 1px 6px; border-radius: 6px; font-size: 10px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgb(var(--cb-fg) / 0.8); background: rgba(200,255,0,0.08); border: 1px solid rgba(200,255,0,0.3); }
 .cbb-tag button { padding: 0 3px; border-radius: 4px; font-size: 12px; line-height: 1; color: rgb(var(--cb-fg) / 0.55); }
@@ -3875,6 +3887,8 @@ html:not([data-theme="light"]) .editor-theme [data-layout-panel="Editing panel"]
 [data-theme="light"] .editor-theme > .app-nav :is(.am-email, .am-usage-count, .am-legal) { color: #52525b; }
 [data-theme="light"] .editor-theme > .app-nav .am-usage { background: var(--ed-track); box-shadow: inset 0 0 0 1px var(--ed-hair); }
 [data-theme="light"] .editor-theme > .app-nav :is(.am-usage-plan, .am-usage-count b) { color: #18181b; }
+[data-theme="light"] .editor-theme > .app-nav .am-plan-chip { background: rgb(15 15 17 / 0.06); box-shadow: inset 0 0 0 1px rgb(15 15 17 / 0.14); }
+[data-theme="light"] .editor-theme > .app-nav .am-plan-sym { color: #5a7a00; filter: none; }
 [data-theme="light"] .editor-theme > .app-nav .am-bar { background: rgba(24, 24, 27, 0.1); }
 [data-theme="light"] .editor-theme > .app-nav .am-cta-ghost { color: #18181b; background: var(--ed-raise); box-shadow: inset 0 0 0 1px var(--ed-line); }
 [data-theme="light"] .editor-theme > .app-nav .am-group { border-top-color: var(--ed-hair); }
@@ -4324,6 +4338,8 @@ html .editor-theme .ed-body .ed-player .ed-play:focus-visible .ed-play-ring { fi
 [data-theme="light"] .app-nav :is(.am-email, .am-usage-count, .am-legal) { color: #52525b; }
 [data-theme="light"] .app-nav .am-usage { background: #b7b7bc; box-shadow: inset 0 0 0 1px rgba(15,15,17,0.12); }
 [data-theme="light"] .app-nav :is(.am-usage-plan, .am-usage-count b) { color: #18181b; }
+[data-theme="light"] .app-nav .am-plan-chip { background: rgb(15 15 17 / 0.06); box-shadow: inset 0 0 0 1px rgb(15 15 17 / 0.14); }
+[data-theme="light"] .app-nav .am-plan-sym { color: #5a7a00; filter: none; }
 [data-theme="light"] .app-nav .am-bar { background: rgba(24,24,27,0.12); }
 [data-theme="light"] .app-nav .am-cta-ghost { color: #18181b; background: #d8d8dd; box-shadow: inset 0 0 0 1px rgba(15,15,17,0.2); }
 [data-theme="light"] .app-nav .am-group { border-top-color: rgba(15,15,17,0.12); }
@@ -4846,7 +4862,7 @@ html[data-theme="light"] .editor-theme .ed-autobtn {
 .ebm-row[data-on] > .ebm-item:hover { background: transparent; }
 .ebm-row .ebm-item { background: transparent; }
 .ebm-check { color: var(--ed-accent-text); font-weight: 700; animation: ebm-pop .32s cubic-bezier(.34, 1.56, .64, 1); }
-.ebm-row[data-picked] .ebm-dots i { animation: ebm-dot .45s cubic-bezier(.34, 1.56, .64, 1); }
+.ebm-row[data-picked] .brand-tag { animation: ebm-dot .45s cubic-bezier(.34, 1.56, .64, 1); }
 .ebm-edit {
   flex-shrink: 0; height: 24px; margin-right: 4px; padding: 0 8px; display: inline-flex; align-items: center; gap: 5px;
   border-radius: 7px; font-size: 11px; font-weight: 600; color: rgb(var(--ed-fg) / 0.85);
@@ -4864,7 +4880,7 @@ html[data-theme="light"] .editor-theme .ed-autobtn {
 @keyframes ebm-dot { 0%, 100% { transform: scale(1); } 45% { transform: scale(1.35); } }
 @keyframes ebm-swap { from { opacity: 0; transform: translateY(5px); } }
 @media (prefers-reduced-motion: reduce) {
-  .ebm-menu, .ebm-check, .ebm-edit, .ebm-swap, .ebm-row[data-picked] .ebm-dots i { animation: none; }
+  .ebm-menu, .ebm-check, .ebm-edit, .ebm-swap, .ebm-row[data-picked] .brand-tag { animation: none; }
 }
 
 /* ── Brand kits as a popup (user, 2026-10-31; BrandKitDialog): clearly a window over the page — the page shows
@@ -5008,16 +5024,35 @@ html[data-theme="light"] .editor-theme .sp-tile-tick { background: #b4e600; }
 html[data-theme="light"] .sp-mode-pill { background: linear-gradient(135deg, rgba(150, 200, 0, 0.28), rgba(150, 200, 0, 0.1)); box-shadow: inset 0 0 0 1px rgba(110, 150, 0, 0.55); }
 @media (prefers-reduced-motion: reduce) { .sp-mode-pill { transition: none; } }
 
+/* The one "working…" spinner (components/ui/spinner.tsx): a faint ring and, running round it, a bright arc
+   whose tail fades out — in the text's colour, 1em (the text's size) unless given a size */
+.spin {
+  --spin-w: max(1.5px, 0.13em);
+  display: inline-block; flex-shrink: 0; width: 1em; height: 1em; border-radius: 50%; vertical-align: -0.14em;
+  background:
+    conic-gradient(from 0deg, transparent 0 30%, color-mix(in srgb, currentColor 35%, transparent) 55%, currentColor 99%, transparent 0),
+    color-mix(in srgb, currentColor 16%, transparent);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--spin-w) - 0.5px), #000 calc(100% - var(--spin-w)));
+  mask: radial-gradient(farthest-side, transparent calc(100% - var(--spin-w) - 0.5px), #000 calc(100% - var(--spin-w)));
+  animation: spin-turn 0.8s linear infinite;
+}
+@keyframes spin-turn { to { transform: rotate(360deg); } }
+/* (motion turned down: slower, not stopped — it still says the button is working) */
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
+
 /* The credit balance in a page's header, and "Get credits" beside an out-of-credits message */
 .credits-badge {
-  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 11px; border-radius: 999px; flex-shrink: 0;
-  border: 1px solid color-mix(in srgb, currentColor 18%, transparent); font-size: 12.5px; white-space: nowrap; text-decoration: none;
+  display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 6px; border-radius: 999px; flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent); background: color-mix(in srgb, currentColor 4%, transparent);
+  font-size: 12.5px; white-space: nowrap; text-decoration: none; transition: border-color .15s, background-color .15s;
 }
-.credits-badge svg { color: var(--ed-accent-text, var(--accent, #c8ff00)); }
-.credits-badge strong { font-weight: 700; }
-.credits-badge:hover { border-color: color-mix(in srgb, currentColor 40%, transparent); }
-.credits-badge.is-low { border-color: #f59e0b; }
-.credits-badge.is-low svg { color: #f59e0b; }
+/* the coin (CreditCoin): the one colour in the pill; the number bright, "credits" soft */
+.credit-coin { display: block; flex-shrink: 0; filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.45)); }
+.credits-num { font-variant-numeric: tabular-nums; }
+.credits-num strong { font-weight: 700; }
+.credits-word { opacity: .6; }
+.credits-badge:hover { border-color: color-mix(in srgb, currentColor 32%, transparent); background: color-mix(in srgb, currentColor 7%, transparent); }
+.credits-badge.is-low { border-color: rgb(245 158 11 / 0.55); }
 .credits-topup { margin-left: 6px; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; color: inherit; white-space: nowrap; }
 
 /* The clip board's AI edit / Manual edit, by the breadcrumb (ClipPickerShell BoardPicker, user 2026-11-12: a plain

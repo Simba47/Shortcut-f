@@ -1,5 +1,6 @@
 'use client'
 
+import { Spinner } from '@/components/ui/spinner'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AlertCircle, ArrowLeft, ArrowRight, ArrowUp, Check, Eye, EyeOff, Lock, Mail } from 'lucide-react'
@@ -135,7 +136,7 @@ export function CodeInput({ ref, id, value, onChange, invalid = false }: { ref?:
 export function SubmitButton({ busy, disabled, label, busyLabel }: { busy: boolean; disabled?: boolean; label: string; busyLabel: string }) {
   return (
     <button type="submit" disabled={busy || disabled} className="auth-submit" aria-busy={busy || undefined}>
-      {busy && <span className="auth-spinner" aria-hidden />}
+      {busy && <Spinner size={16} />}
       <span>{busy ? busyLabel : label}</span>
       {!busy && <ArrowRight className="auth-submit-arrow" aria-hidden />}
     </button>

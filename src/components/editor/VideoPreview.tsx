@@ -1370,6 +1370,8 @@ const BOUNCE_MS = 180
 const BOX_PAD = 14
 const WORD_SCALE = 1.5
 const EMPHASIS_SCALE = 1.15
+/** A caption line's widest, as a share of the frame's width (wider: drawn smaller to fit) — render.py _CAPTION_FIT */
+const CAPTION_FIT = 0.88
 const HORMOZI_SCALE = 1.15      // the spoken word
 const HORMOZI_STROKE = 2        // added to the outline
 const LINE_BOX = 'rgba(0,0,0,0.62)'   // box preset (render.py &H60000000)
@@ -1542,9 +1544,25 @@ function drawPresetCaptions(
   const baseFont: DrawFont = (ownFont ? templateFont(tpl.font) : null) ?? { family: plain.family, em: plain.em, weight: 700, italic: false }
   const liveFont = ownFont && tpl.liveFont ? templateFont(tpl.liveFont) : null
   // The caption size as libass takes it: every font is sized so its full height is this
-  const lineH = (style.size ?? DEFAULT_CAPTION_STYLE.size) * (tpl && latin ? tpl.size / 100 : 1) * k
+  let lineH = (style.size ?? DEFAULT_CAPTION_STYLE.size) * (tpl && latin ? tpl.size / 100 : 1) * k
   const fontOf = (f: DrawFont, scale: number) =>
     `${f.italic ? 'italic ' : ''}${f.weight} ${lineH * f.em * scale}px ${captionEmojiFamily(f.em)}, "${f.family}", sans-serif`
+  // Never past the frame's sides (user, 2026-11-16): a line wider than CAPTION_FIT of the width —
+  // with its spoken word at its biggest — is drawn smaller as a whole, to fit (render.py _preset_fit: the same)
+  {
+    ctx.save()
+    const sizes = chunk.map(w => {
+      ctx.font = fontOf(baseFont, baseScale * (emphasis[String(w.start_ms)] ? EMPHASIS_SCALE : 1))
+      return ctx.measureText(upper ? w.word.toUpperCase() : w.word).width
+    })
+    ctx.font = fontOf(baseFont, 1)
+    const space = ctx.measureText(' ').width
+    ctx.restore()
+    const grow = anim === 'hormozi' ? spokenScale - 1 : 0
+    const widest = tpl?.stack ? Math.max(0, ...sizes) * (1 + grow)
+      : sizes.reduce((a, b) => a + b, 0) + space * (sizes.length - 1) + Math.max(0, ...sizes) * grow
+    if (widest > CAPTION_FIT * W) lineH *= (CAPTION_FIT * W) / widest
+  }
   const lineStart = chunk[0].start_ms
   const lineEnd = chunk[chunk.length - 1].end_ms
 
