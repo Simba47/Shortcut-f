@@ -13,8 +13,10 @@ export interface CreditsInfo {
  * site then shows no prices). Looks again when the tab comes back into view, so a top-up made in
  * another tab, or a job that finished, shows without a reload.
  */
-export function useCredits(): { credits: CreditsInfo | null; refresh: () => void } {
-  const [credits, setCredits] = useState<CreditsInfo | null>(null)
+export function useCredits(initial?: CreditsInfo | null): { credits: CreditsInfo | null; refresh: () => void } {
+  // (`initial`: the balance the page was sent with — the editor's, 2026-11-17: shown in the first frame, not
+  // popping in a moment later; still looked up again at once. undefined: not known yet)
+  const [credits, setCredits] = useState<CreditsInfo | null>(initial ?? null)
   const refresh = useCallback(async () => {
     try {
       const res = await fetch('/api/credits', { cache: 'no-store' })

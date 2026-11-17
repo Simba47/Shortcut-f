@@ -745,7 +745,7 @@ button.mmc-opt-box:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outli
    each row its picture, name, what's picked in grey (cut short with … when long), and an arrow or a switch */
 .mmc-list { display: flex; flex-direction: column; border-radius: 14px; overflow: hidden;
   background: linear-gradient(180deg, rgb(var(--cb-fg) / 0.035), rgb(var(--cb-fg) / 0.015)); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.07); }
-.mmc-li { position: relative; display: flex; align-items: center; gap: 8px; min-height: 44px; padding-right: 12px; transition: background-color .15s; }
+.mmc-li { position: relative; display: flex; align-items: center; gap: 8px; min-height: 40px; padding-right: 12px; transition: background-color .15s; }
 .mmc-li + .mmc-li::before { content: ''; position: absolute; top: 0; left: 38px; right: 0; height: 1px; background: rgb(var(--cb-fg) / 0.06); }
 .mmc-li:hover, .mmc-li[data-open] { background: rgb(var(--cb-fg) / 0.04); }
 .mmc-li[data-open] { box-shadow: inset 2px 0 0 #c8ff00; }
@@ -818,11 +818,12 @@ button.mmc-opt-box:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outli
   text-align: center; line-height: 1.2; font-size: 10.5px; font-weight: 600; color: rgb(var(--cb-fg) / 0.6); }
 .mmc-frame[data-on] .mmc-frame-name { color: var(--cb-text); }
 /* Captions on / off, and the styles (dimmed while off) */
+/* (user, 2026-11-17: every switch a black track, the lime only on the knob when on — as the brand kit's Switch) */
 .mmc-switch { flex-shrink: 0; position: relative; width: 32px; height: 18px; border-radius: 99px; border: 0; padding: 0; cursor: pointer;
-  background: rgb(var(--cb-fg) / 0.18); transition: background-color .15s; }
-.mmc-switch > span { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }
-.mmc-switch[data-on] { background: #c8ff00; }
-.mmc-switch[data-on] > span { transform: translateX(14px); background: #000; }
+  background: #0a0a0a; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14); transition: box-shadow .15s; }
+.mmc-switch > span { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: rgba(255,255,255,0.45); transition: transform .15s, background-color .15s; }
+.mmc-switch[data-on] { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.22); }
+.mmc-switch[data-on] > span { transform: translateX(14px); background: #c8ff00; }
 .mmc-switch:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
 /* Over the video preview (user, 2026-11-15): the box fills the centre column, its name and ✕ on top, its body scrolling */
 .mmc-pop[data-over] { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
@@ -886,6 +887,25 @@ button.mmc-opt-box:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outli
 .mmc-pick-item[aria-selected="true"] .mmc-pick-eg { color: rgb(var(--cb-fg) / 0.55); }
 [data-theme="light"] .mmc-pick-btn { background: rgb(255 255 255 / 0.7); }
 /* Under Brand: the kit's caption / title look can't show while those boxes are off (amber edge, "Turn them on") */
+/* "From your brand kit" (components/brand/KitStyleBar.tsx): over the caption / title settings a kit on decides;
+   neutral (no lime), in the page's own text colour — the clip board and the editor alike */
+.kit-bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px;
+  background: color-mix(in srgb, currentColor 5%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 16%, transparent); }
+.kit-bar .brand-tag { opacity: .85; }
+.kit-bar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; font-size: 12.5px; line-height: 1.3; }
+.kit-bar-text b { font-weight: 600; }
+.kit-bar-text small { font-size: 11px; opacity: .55; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-bar-btn { flex-shrink: 0; height: 28px; padding: 0 10px; border-radius: 8px; font-size: 11.5px; font-weight: 600; color: inherit;
+  background: color-mix(in srgb, currentColor 7%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent); transition: background-color .15s; }
+.kit-bar-btn:hover { background: color-mix(in srgb, currentColor 12%, transparent); }
+.kit-bar-btn:focus-visible, .kit-back button:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outline-offset: 2px; }
+.kit-back { margin: 0; font-size: 11.5px; opacity: .7; }
+.kit-back button { font-weight: 600; text-decoration: underline; text-underline-offset: 2px; color: inherit; }
+/* Settings a kit on decides: shown, faded, not changeable */
+.kit-held { opacity: .4; pointer-events: none; user-select: none; }
+
+/* What the picked brand kit puts on the clips (Make my clips, under Brand) */
+.mmc-brand-adds { margin: 2px 2px 0; font-size: 11px; color: rgb(var(--cb-fg) / 0.5); }
 .mmc-brand-note {
   margin: 0; padding: 6px 9px; border-radius: 8px; font-size: 10.5px; line-height: 1.45;
   color: rgb(var(--cb-fg) / 0.78); background: rgba(251, 191, 36, 0.08); border-left: 2px solid rgba(251, 191, 36, 0.7);
@@ -2390,19 +2410,21 @@ button.mmc-opt-box:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outli
 .bs-steps li { display: flex; align-items: center; gap: 8px; }
 .bs-steps li + li { flex: 1; margin-left: 8px; }
 .bs-step { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px 0 6px; border-radius: 999px; font-size: 12.5px; font-weight: 600; white-space: nowrap; color: rgb(var(--ed-fg) / 0.6); transition: color .15s, background-color .15s, box-shadow .15s; }
+/* (user, 2026-11-17: white borders on both steps, no lime) */
+.bs-step { box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.18); }
 .bs-step:hover { color: var(--ed-text); background: rgb(var(--ed-fg) / 0.05); }
 .bs-step:focus-visible { outline: 2px solid rgba(200,255,0,0.7); outline-offset: 2px; }
 /* (the step you're on: a lime edge, no lime fill — as it was in the column) */
-.bs-step[data-on] { color: var(--ed-text); background: rgb(var(--ed-fg) / 0.05); box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.35); }
+.bs-step[data-on] { color: var(--ed-text); background: rgb(var(--ed-fg) / 0.05); box-shadow: inset 0 0 0 1.5px rgb(var(--ed-fg) / 0.55); }
 .bs-step-n { width: 24px; height: 24px; flex-shrink: 0; display: grid; place-items: center; border-radius: 999px; font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; color: rgb(var(--ed-fg) / 0.7); background: rgb(var(--ed-fg) / 0.08); }
-.bs-step[data-on] .bs-step-n { color: var(--ed-text); background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.4); }
-.bs-step[data-done] .bs-step-n { color: var(--ed-accent-text); background: rgba(200,255,0,0.1); }
+.bs-step[data-on] .bs-step-n { color: var(--ed-text); background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1.5px rgb(var(--ed-fg) / 0.55); }
+.bs-step[data-done] .bs-step-n { color: var(--ed-text); background: rgb(var(--ed-fg) / 0.1); }
 /* The arrow between two steps: a line that fills the room, its head at the end */
 .bs-step-line { position: relative; flex: 1; min-width: 18px; height: 2px; border-radius: 2px; color: rgb(var(--ed-fg) / 0.16); background: currentColor; }
 .bs-step-line::after { content: ''; position: absolute; right: 0; top: 50%; width: 7px; height: 7px; border-top: 2px solid currentColor; border-right: 2px solid currentColor; border-radius: 1px; transform: translateY(-50%) rotate(45deg); }
-.bs-step-line[data-on] { color: rgba(200,255,0,0.45); }
-html[data-theme="light"] .bs-step[data-on], html[data-theme="light"] .bs-step[data-on] .bs-step-n { box-shadow: inset 0 0 0 1.5px rgba(143, 196, 0, 0.55); }
-html[data-theme="light"] .bs-step-line[data-on] { color: rgba(143, 196, 0, 0.7); }
+.bs-step-line[data-on] { color: rgb(var(--ed-fg) / 0.4); }
+html[data-theme="light"] .bs-step[data-on], html[data-theme="light"] .bs-step[data-on] .bs-step-n { box-shadow: inset 0 0 0 1.5px rgba(15, 15, 17, 0.45); }
+html[data-theme="light"] .bs-step-line[data-on] { color: rgba(15, 15, 17, 0.35); }
 .bs-check { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .bs-check-row { display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 12px; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--ed-text); background: rgb(var(--ed-fg) / 0.04); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.08); }
 .bs-check-ico { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 999px; font-size: 12px; font-weight: 800; color: #0a0a0a; background: #fbbf24; }
@@ -2410,7 +2432,8 @@ html[data-theme="light"] .bs-step-line[data-on] { color: rgba(143, 196, 0, 0.7);
 .bs-swatch { width: 16px; height: 16px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.18); }
 .bs-default { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: rgba(200,255,0,0.06); box-shadow: inset 0 0 0 1px rgba(200,255,0,0.3); }
 /* The brand inside the editor (brand kit Phase 3): ready text styles in the Text tool, caption looks in the Captions tool */
-.tx-brand { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 12px; background: rgba(200,255,0,0.05); box-shadow: inset 0 0 0 1px rgba(200,255,0,0.22); }
+/* (user, 2026-11-17: as the Captions panel's brand card — plain, just a white border, no lime) */
+.tx-brand { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 12px; background: none; box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.22); }
 .tx-brand-label, .bcl-label { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: rgb(var(--ed-fg) / 0.5); }
 .tx-brand-btn { height: 30px; padding: 0 10px; border-radius: 8px; font-size: 12px; font-weight: 700; color: var(--ed-text); background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.12); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tx-brand-btn:hover { box-shadow: inset 0 0 0 1.5px rgba(200,255,0,0.55); }
@@ -2457,7 +2480,8 @@ html[data-theme="light"] .bs-step-line[data-on] { color: rgba(143, 196, 0, 0.7);
 /* The brand in the editor's top bar (components/brand/EditorBrandMenu.tsx) */
 .ebm-pill { height: 32px; max-width: 220px; display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 600; color: rgb(var(--ed-fg) / 0.7); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.14); transition: background .15s, color .15s; }
 .ebm-pill:hover { background: rgb(var(--ed-fg) / 0.06); color: var(--ed-text); }
-.ebm-pill[data-on] { color: var(--ed-text); background: rgba(200,255,0,0.08); box-shadow: inset 0 0 0 1px rgba(200,255,0,0.45); }
+/* A kit on: neutral, a touch brighter (user, 2026-11-17: no lime here — the tag in the kit's colours says it's on; lime is Export's) */
+.ebm-pill[data-on] { color: var(--ed-text); background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.22); }
 .ebm-pill:focus-visible, .ebm-item:focus-visible { outline: 2px solid rgba(200,255,0,0.7); outline-offset: 2px; }
 .ebm-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ebm-dots { display: inline-flex; gap: 2px; flex-shrink: 0; }
@@ -2543,6 +2567,23 @@ html[data-theme="light"] .kit-name-btn[data-danger]:hover { color: #dc2626; back
 .kit-cc .grid-cols-2 { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
 .bk-work { container: kit / inline-size; }
 /* (under what's on the step; on a long step it stays in view at the bottom) */
+/* The brand kit's step buttons (BrandKit.tsx): Save & next, solid lime with its arrow; Back, quiet, the same shape */
+.kit-next-btn, .kit-back-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 18px;
+  border-radius: 12px; font-size: 12.5px; font-weight: 700; white-space: nowrap; transition: background-color .15s, transform .1s, box-shadow .15s; }
+.kit-next-btn { color: #0a0a0a; background: #c8ff00; box-shadow: 0 6px 16px -10px rgba(200,255,0,0.6); }
+.kit-next-btn:not(:disabled):hover { background: #d4ff3a; }
+.kit-next-btn:not(:disabled):active, .kit-back-btn:active { transform: scale(.97); }
+.kit-next-btn:disabled { opacity: .6; cursor: progress; }
+.kit-next-btn svg { transition: transform .15s; }
+.kit-next-btn:not(:disabled):hover svg { transform: translateX(2px); }
+.kit-back-btn { padding: 0 16px 0 12px; color: var(--ed-text); background: rgb(var(--ed-fg) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--ed-fg) / 0.14); }
+.kit-back-btn:hover { background: rgb(var(--ed-fg) / 0.1); }
+.kit-next-btn:focus-visible, .kit-back-btn:focus-visible { outline: 2px solid rgba(200,255,0,0.7); outline-offset: 2px; }
+/* Save & next (the hover-fill button): a soft lime glow at rest, the same focus ring */
+.kit-next-ihb { box-shadow: 0 6px 16px -10px rgba(200,255,0,0.6); transition: box-shadow .3s, border-color .3s; }
+/* (pointed at: dark, its lime border crisp — no glow leaking under it) */
+.kit-next-ihb:not(:disabled):hover { box-shadow: none; }
+.kit-next-ihb:focus-visible { outline: 2px solid rgba(200,255,0,0.7); outline-offset: 2px; }
 .kit-step-bar { position: sticky; bottom: 0; z-index: 5; padding: 8px 0 12px; background: var(--ed-panel); }
 @container kit (max-width: 560px) { .bm-card { grid-template-columns: 1fr; } }
 @container kit (max-width: 480px) { .bs-steps .bs-step { font-size: 0; gap: 0; padding: 0 6px; } .bs-steps .bs-step .bs-step-n { font-size: 11px; } }
@@ -3303,6 +3344,10 @@ div:has(> .vscan[data-on][data-mode="find"]) > .sp .sp-controls { opacity: 0; vi
 /* the transition button between two parts */
 .tl2-trans { width: 20px; height: 20px; margin: -10px 0 0 -10px; display: grid; place-items: center; border-radius: 7px; background: #1b1b1f; color: rgb(var(--ed-fg) / 0.85); box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.85), 0 0 0 2.5px rgba(255, 255, 255, 0.16); z-index: 6; transition: transform .12s, color .15s, background .15s; }
 .tl2-trans:hover { transform: scale(1.12); color: #c8ff00; }
+/* The "+" on an empty frame lane, beside the playhead (Timeline.tsx): the same look as the "+" between parts */
+.tl2-lane-plus { width: 20px; height: 20px; margin-top: -10px; margin-left: 5px; display: grid; place-items: center; border-radius: 7px; background: #1b1b1f; color: rgb(var(--ed-fg) / 0.85); box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.85), 0 0 0 2.5px rgba(255, 255, 255, 0.16); z-index: 41; transition: transform .12s, color .15s; }
+.tl2-lane-plus:hover { transform: scale(1.12); color: #c8ff00; }
+.tl2-lane-plus:focus-visible { outline: 2px solid rgba(200,255,0,0.7); outline-offset: 2px; }
 .tl2-trans[data-on] { background: #c8ff00; color: #0a0a0a; }
 /* (too short to play: dimmed; a narrow part: a small dot; a tile dragged over it: lit up) */
 .tl2-trans[data-off] { background: #5b6b1f; color: rgba(10,10,10,0.75); }
@@ -3867,7 +3912,7 @@ html:not([data-theme="light"]) .editor-theme [data-layout-panel="Editing panel"]
 [data-theme="light"] .editor-theme > .app-nav > div:last-child > button[aria-label="Show the editor tour"] { width: 32px; }
 [data-theme="light"] .editor-theme > .app-nav .ebm-pill:hover,
 [data-theme="light"] .editor-theme > .app-nav > div:last-child > button[aria-label="Show the editor tour"]:hover { background: var(--ed-popover); color: #0f0f11 !important; }
-[data-theme="light"] .editor-theme > .app-nav .ebm-pill[data-on] { box-shadow: inset 0 0 0 1px rgba(110, 150, 0, 0.6), var(--ed-shadow-soft) !important; }
+[data-theme="light"] .editor-theme > .app-nav .ebm-pill[data-on] { box-shadow: inset 0 0 0 1px rgba(15, 15, 17, 0.22), var(--ed-shadow-soft) !important; }
 [data-theme="light"] .editor-theme > .app-nav button[role="switch"] {
   height: 32px !important; width: 60px !important; background: var(--ed-track) !important; border: 0 !important; box-shadow: inset 0 0 0 1px var(--ed-line) !important;
 }
@@ -4858,10 +4903,11 @@ html[data-theme="light"] .editor-theme .ed-autobtn {
 .ebm-menu { animation: ebm-in .16s cubic-bezier(.2, .8, .2, 1); transform-origin: top right; gap: 2px; }
 @keyframes ebm-in { from { opacity: 0; transform: translateY(-4px) scale(.97); } }
 .ebm-row { position: relative; display: flex; align-items: center; gap: 4px; border-radius: 8px; transition: background-color .2s ease; }
-.ebm-row[data-on] { background: rgba(200, 255, 0, 0.07); box-shadow: inset 2px 0 0 #c8ff00; }
+/* The kit that's on: a soft grey row, a white bar and ✓ (user, 2026-11-17: no lime in the brand menu) */
+.ebm-row[data-on] { background: rgb(var(--ed-fg) / 0.07); box-shadow: inset 2px 0 0 var(--ed-text); }
 .ebm-row[data-on] > .ebm-item:hover { background: transparent; }
 .ebm-row .ebm-item { background: transparent; }
-.ebm-check { color: var(--ed-accent-text); font-weight: 700; animation: ebm-pop .32s cubic-bezier(.34, 1.56, .64, 1); }
+.ebm-check { color: var(--ed-text); font-weight: 700; animation: ebm-pop .32s cubic-bezier(.34, 1.56, .64, 1); }
 .ebm-row[data-picked] .brand-tag { animation: ebm-dot .45s cubic-bezier(.34, 1.56, .64, 1); }
 .ebm-edit {
   flex-shrink: 0; height: 24px; margin-right: 4px; padding: 0 8px; display: inline-flex; align-items: center; gap: 5px;
@@ -5089,23 +5135,3 @@ html[data-theme="light"] .sp-mode-pill { background: linear-gradient(135deg, rgb
 /* A clip's download that didn't work: why, under its time (ClipPickerShell .cb-dl-error, user 2026-11-12) */
 .cb-dl-error { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 11px; line-height: 1.4; color: #f87171; cursor: default; }
 .cb-dl-error .credits-topup { font-weight: 700; }
-
-/* The fill-on-hover button (components/ui/interactive-hover-button.tsx — Brand kit's Save & next; user,
-   2026-11-13): at rest dot · label; pointed at or keyboard-focused, a circle grows from the middle and covers
-   the whole button (clip-path: no corners left showing), the label stays put and an arrow slides in. Nothing
-   while it's disabled (Saving…); an instant swap for reduced motion. */
-.ihb { isolation: isolate; }
-.ihb-row { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-.ihb-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.ihb-arrow { flex-shrink: 0; width: 14px; height: 14px; }
-.ihb-fill {
-  position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center;
-  clip-path: circle(0% at 50% 50%); transition: clip-path .45s cubic-bezier(.22, .8, .25, 1);
-}
-.ihb-fill .ihb-arrow { transform: translateX(-5px); opacity: 0; transition: transform .35s .08s cubic-bezier(.22, .8, .25, 1), opacity .25s .08s; }
-.ihb:is(:hover, :focus-visible):not(:disabled) .ihb-fill { clip-path: circle(75% at 50% 50%); }
-.ihb:is(:hover, :focus-visible):not(:disabled) .ihb-fill .ihb-arrow { transform: none; opacity: 1; }
-.ihb:focus-visible { outline: 2px solid #c8ff00; outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) {
-  .ihb-fill, .ihb-fill .ihb-arrow { transition: none; }
-}

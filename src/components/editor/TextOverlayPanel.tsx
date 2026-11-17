@@ -3,10 +3,11 @@
 import { useBrandPalette, useBrandLock, withBrand } from './brandPalette'
 import { InfoTip } from '@/components/ui/info-tip'
 import { useEffect, useRef, useState } from 'react'
-import type { TextOverlay } from '@chai-cut/shared'
+import type { TextOverlay, FrameItem, SegmentLocal } from '@chai-cut/shared'
 import { FontPicker, loadVideoFonts } from './CaptionStyler'
 import { EmptyState } from './EditorTour'
-import { TimeRange } from './ItemTimeRange'
+import { TimeRange, ItemTimeRange } from './ItemTimeRange'
+import { KitStyleBar, KitStyleBack } from '@/components/brand/KitStyleBar'
 import { EmojiButton, EmojiGrid, insertAtCursor } from './EmojiPicker'
 import { TEXT_ANIMATION_GROUPS, TEXT_PRESETS, replayTextAnimation, textCss, type TextStyle, type TextAnimation } from '@/modules/editor/textStyle'
 
@@ -43,6 +44,29 @@ interface Props {
    * text of the clip. Null: not now (no text picked / nothing copied). `look`: the copied look (its button shows it)
    */
   styleTools?: { copy: (() => void) | null; paste: (() => void) | null; pasteAll: (() => void) | null; look: Partial<TextOverlay> | null }
+  /**
+   * A frame's text picked (its band, a name tag…: user, 2026-11-17 — "the same new editor as the Text tool"):
+   * shown in this same preview with the Text and Look tabs — what a frame's text can be (its words, when it
+   * shows, font, size, colour, background); the Style and Motion tabs are for the clip's own texts
+   */
+  frameText?: FrameTextEdit | null
+  /**
+   * The brand kit on the clip brings its title look (user, 2026-11-17): while `fromKit`, the Style and Look tabs
+   * are its — said under the preview with "Use my own style" (this clip); `ownBack`: freed, with the way back
+   */
+  kitStyle?: { name: string; fromKit: boolean; ownBack: boolean; onOwn: () => void; onKit: () => void } | null
+}
+
+/** A frame's text as the Text panel edits it (EditorShell builds it from the picked frame item) */
+export type FrameTextEdit = {
+  item: FrameItem
+  /** How it looks now (its own settings over its area's) */
+  look: { font: string | null; size: number; color: string; bg: string }
+  /** "Band", "Name 1"…: where it sits in the frame */
+  where: string
+  segment: SegmentLocal
+  onUpdate: (patch: Partial<Omit<FrameItem, 'id'>>) => void
+  onRemove: () => void
 }
 
 /** The Text panel's sub-tabs (tabbed layout), as the Captions panel's */
@@ -71,7 +95,7 @@ const SHADOWS: { v: NonNullable<TextOverlay['shadow']>; label: string }[] = [
  * capitals, size, spacing, colour, outline, background box, shadow / glow, opacity, rotation and an
  * entrance animation. One text is open for styling at a time. (styles: .cap-* / .tx-* in globals.css)
  */
-export function TextOverlayPanel({ overlays, currentTimeMs, clipDurationMs, onAdd, onUpdate, onRemove, focusId, onFocused, selectedId = null, onSelect, brand = null, layout = 'stack', styleTools }: Props) {
+export function TextOverlayPanel({ overlays, currentTimeMs, clipDurationMs, onAdd, onUpdate, onRemove, focusId, onFocused, selectedId = null, onSelect, brand = null, layout = 'stack', styleTools, frameText = null, kitStyle = null }: Props) {
   const [newText, setNewText] = useState('')
   const [openId, setOpenId] = useState<string | null>(selectedId)
   const tabs = layout === 'tabs'
@@ -199,20 +223,38 @@ export function TextOverlayPanel({ overlays, currentTimeMs, clipDurationMs, onAd
   )
 
   if (tabs) {
-    const picked = overlays.find(o => o.id === openId) ?? null
-    const shown: TextTab = picked ? tab : 'text'
-    const pick = (id: string) => { if (openId !== id) onSelect?.(id); setOpenId(id) }
+    // A frame's text picked: it is what the preview and the tabs show (Text and Look only)
+    const ft = frameText
+    const picked = ft ? null : overlays.find(o => o.id === openId) ?? null
+    const tabList = ft ? TEXT_TABS.filter(t => t.id === 'text' || (t.id === 'look' && !ft.item.captions)) : TEXT_TABS
+    // (the kit's title look in charge: its Style and Look tabs aren't open to change)
+    const held = !!kitStyle?.fromKit
+    const heldTab = (t: TextTab) => held && (t === 'style' || t === 'look')
+    const shown0: TextTab = ft ? (tab === 'look' && !ft.item.captions ? 'look' : 'text') : picked ? tab : 'text'
+    const shown: TextTab = heldTab(shown0) ? 'text' : shown0
+    const pick = (id: string) => { if (openId !== id || ft) onSelect?.(id); setOpenId(id) }
     const sample = { ...(brand?.styles[0]?.look ?? TEXT_PRESETS[0].style), size: 72 }
+    const ftCss = ft ? textCss({ font: ft.look.font, color: ft.look.color, bg_color: ft.look.bg !== 'none' ? ft.look.bg : null, bg_opacity: 1, bg_radius: 10, weight: 700, shadow: 'none', size: ft.look.size }) : null
     return (
       <div className="flex flex-col">
         {/* Pinned at the top while the panel scrolls, as the Captions panel: the preview and the sub-bar */}
         <div className="sticky top-0 z-10 shrink-0 px-3 pt-2 pb-2" style={{ background: 'var(--ed-panel)' }}>
           {/* The picked text in its own style (none picked: a sample, dimmed) */}
-          <div className="cap-preview tx-preview" data-dim={!picked || undefined}>
-            <span className="tx-preview-text" style={{ ...textCss(picked ?? sample), fontSize: 26, whiteSpace: 'pre-wrap' }}>
-              {picked ? (picked.text || 'Text') : 'Your text'}
-            </span>
+          <div className="cap-preview tx-preview" data-dim={(!picked && !ft) || undefined}>
+            {ft ? (
+              <span className="tx-preview-text" style={{ ...ftCss, fontSize: 26, whiteSpace: 'pre-wrap' }}>
+                {ft.item.captions ? 'Captions' : ft.item.text?.trim() || 'Your text'}
+              </span>
+            ) : (
+              <span className="tx-preview-text" style={{ ...textCss(picked ?? sample), fontSize: 26, whiteSpace: 'pre-wrap' }}>
+                {picked ? (picked.text || 'Text') : 'Your text'}
+              </span>
+            )}
           </div>
+          {/* The kit's title look in charge (user, 2026-11-17), or freed for this clip with the way back */}
+          {kitStyle && (kitStyle.fromKit
+            ? <div className="mt-2"><KitStyleBar what="Text style" kitName={kitStyle.name} onOwn={kitStyle.onOwn} /></div>
+            : kitStyle.ownBack ? <div className="mt-2"><KitStyleBack what="Text" onKit={kitStyle.onKit} /></div> : null)}
           {/* Copy style: the picked text's look onto other texts (Ctrl+Alt+C / Ctrl+Alt+V); "Aa" in the look copied */}
           {styleTools && (
             <div className="tx-style-bar" role="group" aria-label="Copy style">
@@ -234,11 +276,11 @@ export function TextOverlayPanel({ overlays, currentTimeMs, clipDurationMs, onAd
           {/* Sub-bar: one kind of setting at a time; Style, Look and Motion need a text picked. (user, 2026-11-09:
               "looks so ordinary") each with its icon, a raised pill sliding under the one open, its icon lime */}
           <div role="tablist" aria-label="Text settings" className="ed-subtabs mt-2"
-            style={{ '--n': TEXT_TABS.length, '--i': TEXT_TABS.findIndex(t => t.id === shown) } as React.CSSProperties}>
+            style={{ '--n': tabList.length, '--i': tabList.findIndex(t => t.id === shown) } as React.CSSProperties}>
             <span className="ed-subtabs-pill" aria-hidden="true" />
-            {TEXT_TABS.map(t => {
+            {tabList.map(t => {
               const on = shown === t.id
-              const off = t.id !== 'text' && !picked
+              const off = (t.id !== 'text' && !picked && !ft) || heldTab(t.id)
               return (
                 <button key={t.id} type="button" role="tab" aria-selected={on} disabled={off} onClick={() => setTab(t.id)}
                   className="ed-subtab" data-on={on || undefined}>
@@ -255,6 +297,7 @@ export function TextOverlayPanel({ overlays, currentTimeMs, clipDurationMs, onAd
         {/* ── Text: add, the texts (the picked one's words and when it shows), emoji ── */}
         {shown === 'text' && (
           <div role="tabpanel" aria-label="Text" className="p-4 flex flex-col gap-4">
+            {ft && <FrameTextWords ft={ft} currentTimeMs={currentTimeMs} />}
             {addBlock}
             {overlays.length === 0 ? (
               <EmptyState icon={<path d="M4 7V5h16v2M9 19h6M12 5v14" />} title="No text yet"
@@ -291,6 +334,9 @@ export function TextOverlayPanel({ overlays, currentTimeMs, clipDurationMs, onAd
             <StyleTiles o={picked} onUpdate={u => onUpdate(picked.id, u)} />
           </div>
         )}
+
+        {/* ── Look of a frame's text: what it can be — font, size, colour, background ── */}
+        {shown === 'look' && ft && <FrameTextLook ft={ft} />}
 
         {/* ── Look: font and size, then colour and effects ── */}
         {shown === 'look' && picked && (
@@ -593,17 +639,21 @@ function Slider({ label, value, min, max, step, suffix = '', onChange }: {
   )
 }
 
-function Swatches({ label, value, onChange }: { label: string; value: string; onChange: (c: string) => void }) {
+function Swatches({ label, value, onChange, none = false }: { label: string; value: string; onChange: (c: string) => void; none?: boolean }) {
   // The brand kit's colours first (components/editor/brandPalette.ts)
   const brand = useBrandPalette()
   // (brand lock: the team kit's colours only, and no free picker)
   const lock = useBrandLock()
   const colors = lock ? lock.colors : withBrand(brand, COLORS)
-  const isPreset = colors.some(c => c.toLowerCase() === value.toLowerCase())
+  const isPreset = value === 'none' || colors.some(c => c.toLowerCase() === value.toLowerCase())
   return (
     <div className="flex flex-col gap-2">
       <span className="cap-label">{label}</span>
       <div className="flex flex-wrap items-center gap-2">
+        {/* (a background: none — see-through, the picture shows under the text) */}
+        {none && <button onClick={() => onChange('none')} aria-label={`${label}: none`} aria-pressed={value === 'none'} title="None (see-through)"
+          className="cap-swatch" data-on={value === 'none' || undefined}
+          style={{ background: 'linear-gradient(135deg, transparent 45%, #ef4444 45%, #ef4444 55%, transparent 55%)' }} />}
         {colors.map(c => (
           <button key={c} onClick={() => onChange(c)} aria-label={`${label} ${c}${brand.includes(c.toLowerCase()) ? ' (brand colour)' : ''}`} aria-pressed={c.toLowerCase() === value.toLowerCase()}
             title={brand.includes(c.toLowerCase()) ? 'Brand colour' : undefined}
@@ -626,10 +676,66 @@ function OnOff({ label, on, onChange }: { label: string; on: boolean; onChange: 
       <span className="cap-label">{label}</span>
       <button role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)}
         className="relative shrink-0 rounded-full transition-colors"
-        style={{ width: 36, height: 20, background: on ? '#c8ff00' : 'rgb(var(--ed-fg) / 0.15)' }}>
+        // (a black track, the lime only on the knob when on — user, 2026-11-17)
+        style={{ width: 36, height: 20, background: '#0a0a0a', boxShadow: `inset 0 0 0 1px ${on ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.14)'}` }}>
         <span className="absolute rounded-full transition-all"
-          style={{ top: 3, left: on ? 19 : 3, width: 14, height: 14, background: on ? '#0a0a0a' : '#fff' }} />
+          style={{ top: 3, left: on ? 19 : 3, width: 14, height: 14, background: on ? '#c8ff00' : 'rgba(255,255,255,0.45)' }} />
       </button>
+    </div>
+  )
+}
+
+/** A frame's text in the Text tab: its words (with an emoji), when it shows, captions instead, remove */
+function FrameTextWords({ ft, currentTimeMs }: { ft: FrameTextEdit; currentTimeMs: number }) {
+  const it = ft.item
+  return (
+    <section className="tx-row" data-on>
+      <div className="flex items-center gap-2 pb-1">
+        <span className="cap-heading flex-1">Frame text · {ft.where}</span>
+        <button onClick={ft.onRemove} aria-label="Remove this frame text" className="tx-del">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>
+        </button>
+      </div>
+      {it.captions ? (
+        <div className="flex flex-col gap-2">
+          <p className="flex items-center gap-1.5 text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
+            Your captions show in this band
+            <InfoTip label="About captions in the band" size={12}>Your captions show inside the band here instead of their usual spot. Style them in Captions.</InfoTip>
+          </p>
+          <button onClick={() => ft.onUpdate({ captions: false, text: '' })} className="self-start text-[11px] font-medium hover:underline" style={{ color: 'var(--ed-accent-text)' }}>Use your own text instead</button>
+        </div>
+      ) : (
+        <div className="flex gap-2 items-start">
+          <textarea rows={2} value={it.text ?? ''} placeholder="Type your title or hook…" aria-label="Frame text" autoFocus={!it.text}
+            data-frame-text={it.id} onChange={e => ft.onUpdate({ text: e.target.value })}
+            className="flex-1 px-3 py-2 rounded-lg text-sm outline-none resize-none text-[var(--ed-text)]"
+            style={{ background: 'rgb(var(--ed-fg) / 0.06)', border: '1px solid rgb(var(--ed-fg) / 0.12)' }} />
+          <EmojiButton label="Add an emoji to the text"
+            onPick={e => ft.onUpdate({ text: insertAtCursor(document.querySelector<HTMLTextAreaElement>(`[data-frame-text="${it.id}"]`), it.text ?? '', e) })} />
+        </div>
+      )}
+      <div className="pt-2"><ItemTimeRange item={it} segment={ft.segment} currentTimeMs={currentTimeMs} onChange={patch => ft.onUpdate(patch)} /></div>
+      {it.lane === 'band' && !it.captions && (
+        <button onClick={() => ft.onUpdate({ captions: true })} className="self-start pt-2 text-[11px] font-medium hover:underline" style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>Show captions here instead</button>
+      )}
+    </section>
+  )
+}
+
+/** A frame's text in the Look tab: font and size, then its colour and background */
+function FrameTextLook({ ft }: { ft: FrameTextEdit }) {
+  return (
+    <div role="tabpanel" aria-label="Look" className="p-4 flex flex-col gap-5">
+      <section className="flex flex-col gap-3">
+        <span className="cap-heading">Font</span>
+        <FontPicker value={ft.look.font} onChange={family => ft.onUpdate({ font: family })} />
+        <Slider label="Size" value={ft.look.size} min={32} max={120} step={2} onChange={v => ft.onUpdate({ size: v })} />
+      </section>
+      <section className="flex flex-col gap-3">
+        <span className="cap-heading">Colour</span>
+        <Swatches label="Text colour" value={ft.look.color} onChange={color => ft.onUpdate({ color })} />
+        <Swatches label="Background" none value={ft.look.bg} onChange={bg => ft.onUpdate({ bg })} />
+      </section>
     </div>
   )
 }

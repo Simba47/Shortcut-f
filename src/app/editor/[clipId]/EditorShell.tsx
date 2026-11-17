@@ -11,7 +11,7 @@ import { VideoPreview, OutputCanvas, buildCaptionChunks, captionWordsPerLine, ca
 import { withoutRanges, computeCutRanges, reactionRanges } from '@/lib/cuts'
 import { inLineText } from '@/lib/inLine'
 import { CAPTION_CREDITS_PER_MINUTE, CAPTION_GAP_MS, captionCredits, captionSpan, exportCredits } from '@/lib/credits'
-import { useCredits } from '@/lib/useCredits'
+import { useCredits, type CreditsInfo } from '@/lib/useCredits'
 import { cleanTrims, trimMap, addTrim, wordsOnTimeline, MAX_CLIP_MS, MIN_CLIP_MS } from '@/lib/trims'
 import { toTimelineState, toSourceState, rippleDelete, rippleStretch, lockedInRange, insertAtStart, extendEnd, type TimedState } from '@/modules/editor/trimState'
 import { freezeChanged, insertsOf, insertedMs, rippleInsert, isInsert, goesAfterMain, piecesOf, piecesLength, videoAtPieces, timelineAtPieces, rippleCut, pieceAt, speedOf, pieceVideoMs, mainFrom, wordPlaces } from '@/modules/editor/inserts'
@@ -34,7 +34,7 @@ import { TranscriptPanel } from '@/components/editor/TranscriptPanel'
 import { CaptionStyler } from '@/components/editor/CaptionStyler'
 import { useKeyWordsPick } from '@/components/editor/CaptionKeyWords'
 import { CaptionPreview } from '@/components/editor/CaptionPreview'
-import { TextOverlayPanel } from '@/components/editor/TextOverlayPanel'
+import { TextOverlayPanel, type FrameTextEdit } from '@/components/editor/TextOverlayPanel'
 import { AudioMixerPanel } from '@/components/editor/AudioMixerPanel'
 import { MediaPickerModal } from '@/components/editor/MediaPickerModal'
 import { shownSegment, addedVideoBox, isGapPart, isMainShot, STAND_IN_SUFFIX } from '@/modules/editor/visibility'
@@ -51,10 +51,11 @@ import { SpinningBorderButton } from '@/components/ui/spinning-border-button'
 import { FramesPanel } from '@/components/editor/FramesPanel'
 import { FrameTextPanel } from '@/components/editor/FrameTextPanel'
 import { useConfirm } from '@/components/editor/ConfirmDialog'
-import { BrandKitPanel, BrandKitStudio, useBrandKits } from '@/components/editor/BrandKit'
+import { BrandKitPanel, BrandKitStudio, useBrandKits, type BrandKitsLoad } from '@/components/editor/BrandKit'
 import { useBrandStore, setBrandOn, type BrandOn } from '@/modules/editor/brandState'
-import { putBrandOn, takeBrandOff, brandNewFrames, updateBrand, brandChanged, fillBrandCard, type BrandTarget } from '@/modules/brand/engine'
+import { putBrandOn, takeBrandOff, brandNewFrames, updateBrand, brandChanged, fillBrandCard, kitTitleOnTexts, type BrandTarget } from '@/modules/brand/engine'
 import { EditorBrandMenu } from '@/components/brand/EditorBrandMenu'
+import { KitStyleBar, KitStyleBack } from '@/components/brand/KitStyleBar'
 import { CleanupPanel, type CleanupRow } from '@/components/editor/CleanupPanel'
 import { cleanupCards, isDeleted } from '@/modules/editor/cleanup'
 import { BRAND_ENDS_ON, brandPalette, brandLockOf, brandTextStyle, brandCaptionLooks, brandCaptionStyleOn, captionCaseOf, captionBand, sameEndVideo, type FrameRect, type BrandKit, type BrandTextKind } from '@/lib/shared/brandKit'
@@ -138,6 +139,10 @@ interface Props {
   initialOriginalSound?: { volume: number; muted: boolean }
   /** The brand kit switched on for this clip, and what it changed (clips.brand); null = off */
   initialBrand?: BrandOn | null
+  /** The credit balance and the account's brand kits, read with the clip (2026-11-17: the top bar's Credits and
+   *  Brand buttons there in the first frame); absent: read once the editor is open */
+  initialCredits?: CreditsInfo | null
+  initialBrandKits?: BrandKitsLoad
   initialTransitions: Transition[]
   initialOverlays: Overlay[]
   /** The clip board it was opened from (the dashboard's AI edit / Manual edit choice), so "Clip board" returns to it */
@@ -262,7 +267,7 @@ type AutoRecord = { mode: AutoMode; places: Array<[number, number, string]>; gro
 export function EditorShell({
   clip: savedClip, aiMade = null, videoUrl, words: initialWords, initialSegments,
   initialCaptionStyles, initialTextOverlays, initialAudioTracks, initialTransitions, initialOverlays,
-  initialMusicUrls, initialOriginalSound, initialBrand, backStart,
+  initialMusicUrls, initialOriginalSound, initialBrand, initialCredits, initialBrandKits, backStart,
 }: Props) {
   // The picture inside the video's black bars (none: the whole frame): the views the editor makes keep inside it
   setFramePicture(pictureOrWhole((savedClip as { picture_box?: Parameters<typeof pictureOrWhole>[0] }).picture_box))
@@ -1748,7 +1753,7 @@ export function EditorShell({
   function turnCaptions(on: boolean) {
     setShowCaptions(on)
   }
-  const { credits, refresh: refreshCredits } = useCredits()
+  const { credits, refresh: refreshCredits } = useCredits(initialCredits)
   // An export taken, finished, cancelled or failed (which gives its credits back): the balance follows
   useEffect(() => { refreshCredits() }, [clipStatus, refreshCredits])
   /** The part of the clip Get captions reads, and its price: the server works it out the same way (captionSpan) */
@@ -3654,7 +3659,7 @@ export function EditorShell({
   // The account's kits (components/editor/BrandKit.tsx); Apply puts one on this clip as ordinary
   // edits — a photo, text styles, frame colours — so it shows in the Preview and the export, and
   // one Undo takes it all back.
-  const brand = useBrandKits()
+  const brand = useBrandKits(initialBrandKits)
   /**
    * The brand kit the server has on this clip, as this editor last loaded or saved it (brand kit
    * Phase 2). Back in view, a different one there means it was changed elsewhere — "Put on all" on
@@ -3874,6 +3879,28 @@ export function EditorShell({
   // (the clip board check above uses these: this render's, so never stale ones)
   brandSyncRef.current = { on: turnBrandOn, off: turnBrandOff, kits: brand.kits }
   const kitOn = brandOn ? brand.kits.find(k => k.id === brandOn.kit_id) ?? null : null
+  // The kit's look in charge (user, 2026-11-17): while the kit on this clip brings its captions / title, their
+  // Style and Look are its — said where they'd be changed, with "Use my own style" (this clip only)
+  const captionsFromKit = !!(brandOn && kitOn?.data.captions.on && !brandOn.own?.captions)
+  const titleFromKit = !!(brandOn && kitOn && kitOn.data.title.on !== false && !brandOn.own?.title)
+  /** This clip's own caption / title look from now on (the kit stays on: its logo, colours and the rest) */
+  function ownStyle(part: 'captions' | 'title') {
+    const on = useBrandStore.getState().on
+    if (!on) return
+    setBrandOn({ ...on, own: { ...on.own, [part]: true } })
+  }
+  /** The kit's caption / title look back on this clip (one undo step) */
+  function kitStyleAgain(part: 'captions' | 'title') {
+    const on = useBrandStore.getState().on
+    if (!on || !kitOn) return
+    const d = kitOn.data, was = brandTarget()
+    const next: BrandTarget = part === 'captions'
+      ? { ...was, caption: { ...was.caption, ...brandCaptionStyleOn(d.captions, was.caption) }, textCase: captionCaseOf(d.captions) }
+      : { ...was, texts: kitTitleOnTexts(was.texts, d) }
+    writeBrand(was, next)
+    const own = { ...on.own, [part]: false }
+    setBrandOn({ ...on, own: own.captions || own.title ? own : null })
+  }
   // The kit on this clip is gone (deleted, or no longer shared with this user): the clip keeps its
   // look, the switch goes off — it pointed at a kit no list had, so every kit said "another kit is
   // on" and none could switch it off. Only once the kits are read (not while they load or failed).
@@ -3900,6 +3927,9 @@ export function EditorShell({
     if (!brandChanged(on.applied, kitOn.data)) return
     const was = brandTarget()
     const r = updateBrand(was, on.applied, kitOn, on.before)
+    // (a part this clip styles itself — "Use my own style": the kit's change doesn't reach it)
+    if (on.own?.captions) r.target = { ...r.target, caption: was.caption, textCase: was.textCase }
+    if (on.own?.title) r.target = { ...r.target, texts: was.texts }
     writeBrand(was, r.target)
     setBrandOn({ ...on, before: r.before, applied: r.applied })
     if (r.note) notifyLocked(r.note)
@@ -6238,6 +6268,7 @@ export function EditorShell({
    * Locked ones (or in a locked section) are left as they are. One undo step.
    */
   function pasteTextStyle(all = false) {
+    if (titleFromKit) { notifyLocked('Text style comes from your brand kit — “Use my own style” in the Text panel first'); return }
     const look = copiedLook ?? readCopiedLook()
     if (!look) { notifyLocked('Copy a text’s style first (Ctrl+Alt+C)'); return }
     const want = all ? { texts: textOverlays.map(t => t.id), frame: frameTexts() } : lookTargets()
@@ -7945,9 +7976,10 @@ export function EditorShell({
                         )}
                         <button role="switch" aria-checked={showCaptions} aria-label="Show captions" onClick={() => turnCaptions(!showCaptions)}
                           className="relative shrink-0 rounded-full transition-colors"
-                          style={{ width: 40, height: 22, background: showCaptions ? ACCENT : 'rgb(var(--ed-fg) / 0.15)' }}>
+                          // (a black track, the lime only on the knob when on — user, 2026-11-17)
+                          style={{ width: 40, height: 22, background: '#0a0a0a', boxShadow: `inset 0 0 0 1px ${showCaptions ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.14)'}` }}>
                           <span className="absolute rounded-full transition-all"
-                            style={{ top: 3, left: showCaptions ? 21 : 3, width: 16, height: 16, background: showCaptions ? '#0a0a0a' : '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+                            style={{ top: 3, left: showCaptions ? 21 : 3, width: 16, height: 16, background: showCaptions ? ACCENT : 'rgba(255,255,255,0.45)', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
                         </button>
                         </div>
                       </div>
@@ -8001,8 +8033,15 @@ export function EditorShell({
                     )}
                   </div>}
 
+                  {/* The kit's caption look in charge (user, 2026-11-17): said over Style and Look, which it holds;
+                      "Use my own style" frees them for this clip — and the way back once freed */}
+                  {(captionTab === 'style' || captionTab === 'look') && kitOn && (captionsFromKit
+                    ? <div className="pt-3"><KitStyleBar what="Captions" kitName={kitOn.name} onOwn={() => ownStyle('captions')} /></div>
+                    : brandOn?.own?.captions && kitOn.data.captions.on
+                      ? <div className="pt-3"><KitStyleBack what="Captions" onKit={() => kitStyleAgain('captions')} /></div>
+                      : null)}
                   {/* Style and Look: which caption lines they change (selected on the timeline's Captions row, else all) */}
-                  {(captionTab === 'style' || captionTab === 'look') && words.length > 0 && (
+                  {(captionTab === 'style' || captionTab === 'look') && words.length > 0 && !captionsFromKit && (
                     <div className="pt-3">
                       <CaptionSelectBar lines={selectedLines} styles={playedCaptionParts?.length ?? 1}
                         onClear={() => setCaptionSel([])} onFromHere={selectCaptionsFromHere} onAll={() => setCaptionSel([[0, clipLengthMs + 1]])}
@@ -8010,13 +8049,16 @@ export function EditorShell({
                     </div>
                   )}
                   {/* (brand kit Phase 3) the kit's caption looks, one tap each */}
-                  {captionTab === 'style' && styleKit && (
+                  {captionTab === 'style' && styleKit && !captionsFromKit && (
                     <BrandCaptionLooks kitName={styleKit.name} current={panelCaptionStyle}
                       looks={brandCaptionLooks(styleKit.data).filter(l => l.id === 'main' && styleKit.data.captions.on)}
                       onPick={l => { changeCaptionStyle(brandCaptionStyleOn(l.captions, panelCaptionStyle)); setCaptionTextCase(captionCaseOf(l.captions)) }} />
                   )}
                   {captionTab !== 'captions' && (
-                    <div role="tabpanel" aria-label={CAPTION_TABS.find(t => t.id === captionTab)?.label}>
+                    // (Style and Look held by the kit: shown, faded, not changeable; Key words stay free)
+                    <div role="tabpanel" aria-label={CAPTION_TABS.find(t => t.id === captionTab)?.label}
+                      className={captionsFromKit && captionTab !== 'keywords' ? 'kit-held' : undefined}
+                      inert={(captionsFromKit && captionTab !== 'keywords') || undefined}>
                       <CaptionStyler
                         section={captionTab}
                         style={panelCaptionStyle} textCase={captionTextCase}
@@ -8219,8 +8261,8 @@ export function EditorShell({
               <FrameTextPanel
                 segment={frameSeg}
                 currentTimeMs={currentTimeMs}
-                selectedId={activeFrameItemId}
-                onSelect={setActiveFrameItemId}
+                selectedId={lastPick === 'frameItem' ? activeFrameItemId : null}
+                onSelect={id => selectFrameItem(id, frameSeg?.id, false)}
                 onAdd={lane => { if (frameSeg && isTextLane(lane)) addBandText(frameSeg.id, currentTimeMs, lane) }}
                 onUpdate={(id, patch) => { if (frameSeg && !frameItemBlocked(frameSeg.id, id)) updateFrameItem(frameSeg.id, id, patch) }}
                 onRemove={id => { if (frameSeg) askRemoveFrameItem(frameSeg.id, id) }}
@@ -8237,6 +8279,27 @@ export function EditorShell({
                 onFocused={() => setFocusTextId(null)}
                 selectedId={activeTextOverlayId}
                 onSelect={pickText}
+                // The kit on this clip brings its title look (user, 2026-11-17): Style and Look are its, or freed here
+                kitStyle={kitOn && brandOn && kitOn.data.title.on !== false
+                  ? { name: kitOn.name, fromKit: titleFromKit, ownBack: !!brandOn.own?.title, onOwn: () => ownStyle('title'), onKit: () => kitStyleAgain('title') }
+                  : null}
+                // A frame's text picked (its list above, the timeline or the preview): edited here, in this same
+                // preview and tabs (user, 2026-11-17 — the Text and Look tabs: what a frame's text can be)
+                frameText={((): FrameTextEdit | null => {
+                  if (lastPick !== 'frameItem' || !frameSeg || !activeFrameItemId) return null
+                  const it = frameOf(frameSeg).items?.find(x => x.id === activeFrameItemId)
+                  if (!it || it.kind !== 'text') return null
+                  const area = textLaneLook(frameSeg, it.lane)
+                  const seg = frameSeg
+                  return {
+                    item: it,
+                    look: { font: it.font ?? seg.frame?.band?.font ?? null, size: it.size || area.size, color: it.color || area.color, bg: it.bg || area.bg },
+                    where: frameLanes(seg.layout as FrameLayout).find(l => l.lane === it.lane)?.label ?? 'Band',
+                    segment: seg,
+                    onUpdate: patch => { if (!frameItemBlocked(seg.id, it.id)) updateFrameItem(seg.id, it.id, patch) },
+                    onRemove: () => askRemoveFrameItem(seg.id, it.id),
+                  }
+                })()}
                 onUpdate={(id, patch) => { if (!blocked({ kind: 'text', id })) updateTextOverlay(id, patch) }}
                 onRemove={askDeleteTextOverlay}
                 brand={styleKit && brandTextStyles ? { name: styleKit.name, styles: brandTextStyles, lines: styleKit.data.words?.lines ?? [], onFontAll: styleKit.data.title.font ? brandFontOnAll : undefined } : null}
@@ -8245,8 +8308,8 @@ export function EditorShell({
                   const tg = lookTargets()
                   return {
                     copy: lookSource() ? copyTextStyle : null,
-                    paste: copiedLook && (tg.texts.length || tg.frame.length) ? () => pasteTextStyle() : null,
-                    pasteAll: copiedLook && (textOverlays.length || frameTexts().length) ? () => pasteTextStyle(true) : null,
+                    paste: !titleFromKit && copiedLook && (tg.texts.length || tg.frame.length) ? () => pasteTextStyle() : null,
+                    pasteAll: !titleFromKit && copiedLook && (textOverlays.length || frameTexts().length) ? () => pasteTextStyle(true) : null,
                     look: copiedLook ? lookOnText(copiedLook) : null,
                   }
                 })()}
@@ -8429,10 +8492,16 @@ export function EditorShell({
                   overlays={overlays.filter(o => !o.hidden).map(o => (o.type === 'video' && o.source_video_id ? { ...o, preview_url: videoUrls[o.source_video_id] ?? o.preview_url } : o))} activeOverlayId={activeOverlayId}
                   onOverlayChange={(id, u) => { if (!blocked({ kind: 'photo', id })) updateOverlay(id, u) }} onSelectOverlay={id => { const o = overlays.find(x => x.id === id); if (o?.type === 'image') pickPhoto(id); else { setActiveOverlayId(id); setLastPick('overlay') } }} onDeleteOverlay={askDeleteOverlay}
                   textOverlays={textOverlays.filter(o => !o.hidden)} activeTextOverlayId={activeTextOverlayId}
-                  onTextOverlayChange={(id, u) => { if (!blocked({ kind: 'text', id })) updateTextOverlay(id, u) }} onSelectTextOverlay={id => { if (id) pickText(id, false); else setActiveTextOverlayId(null) }}
+                  onTextOverlayChange={(id, u) => {
+                    if (blocked({ kind: 'text', id })) return
+                    // (the kit's title look in charge: its size isn't changed here — moving, width and turning are)
+                    const v = titleFromKit && 'size' in u ? (({ size: _size, ...rest }) => rest)(u) : u
+                    if (Object.keys(v).length) updateTextOverlay(id, v)
+                  }} onSelectTextOverlay={id => { if (id) pickText(id, false); else setActiveTextOverlayId(null) }}
                   editTextOverlayId={previewOpen ? editTextId : null} onEditTextDone={() => setEditTextId(null)} onDeleteTextOverlay={askDeleteTextOverlay}
                   onCaptionPositionChange={(y, x) => updateCaptionStyle({ position_y: y, position_x: x })}
-                  onCaptionSizeChange={size => changeCaptionStyle({ size })}
+                  // (no resize handles while the kit's caption look is in charge — moving them stays free)
+                  onCaptionSizeChange={captionsFromKit ? undefined : size => changeCaptionStyle({ size })}
                   onCaptionTap={() => { clearPicksRef.current(); openSettings('captions') }}
                   frameMedia={framePool}
                   onFrameLaneClick={focusLane}
