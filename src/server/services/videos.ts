@@ -1,9 +1,10 @@
+import { TEXT_PRESETS, savedTextStyle } from '@/modules/editor/textStyle'
 import { askAiUnits } from '@/lib/aiLimits'
 import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { aiProvider, askGemini, GEMINI_MODEL, type GeminiUsage } from '@/lib/gemini'
 import { creditsMode } from '@/lib/credits'
-import { clipsAllowed, clipCredits, type LimitedBy } from '@/lib/aiLimits'
+import { clipsAllowed, clipCredits, moreLater, type LimitedBy } from '@/lib/aiLimits'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import sql from '@/lib/db'
 import { findClips, type FoundClip, type Subscores } from './clipFinder'
@@ -570,9 +571,18 @@ export interface AutoClipOptions {
 }
 
 /**
- * Make my clips' look choices made safe for the job (user, 2026-11-15). Today's worker reads none of them yet
- * (only `layouts` on / off): they wait in the payload for it.
+ * Make my clips' look choices made safe for the job (user, 2026-11-15). The worker uses the caption style, the
+ * title's look and the title font (user, 2026-11-16 — backend lib/makeLook.ts); the shape, layout list and frame
+ * wait in the payload (their options were taken off Make my clips).
  */
+/** A title style's look as the worker saves it on the title (text_overlays.style + its colour), or null */
+function titleLookOf(id: string | undefined) {
+  const p = id ? TEXT_PRESETS.find(t => t.id === id) : undefined
+  if (!p) return null
+  const style = savedTextStyle(p.style) as Record<string, string | number | boolean> | null
+  return { style, color: typeof p.style.color === 'string' ? p.style.color : null }
+}
+
 function makeLookOf(o: AutoClipOptions) {
   const aspect = ['9:16', '16:9', '1:1', '4:5'].includes(o.aspect as string) ? o.aspect as string : '9:16'
   const ids = ['fill', 'fit', 'split', 'three']
@@ -589,6 +599,8 @@ function makeLookOf(o: AutoClipOptions) {
     caption_style: caption_style && Object.keys(caption_style).length ? caption_style : null,
     frame: typeof o.frame === 'string' && /^frame_[a-z_]{2,40}$/.test(o.frame) ? o.frame : null,
     title_style: word(o.titleStyle, 30) ?? null,
+    // The title style's whole look (the Text tool's preset: its colour and look), so the worker saves it as is
+    title_look: titleLookOf(word(o.titleStyle, 30)),
     title_font: typeof o.titleFont === 'string' && /^[\w .'-]{1,60}$/.test(o.titleFont) ? o.titleFont : null,
   }
 }
@@ -639,9 +651,13 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
   let count = requested
   let limitedBy: LimitedBy | 'saved' = null
   if (mode === 'on') {
+    // No plan (a Trial that has ended keeps its videos): no AI clips until a plan
+    const { getUserPlan, NO_PLAN_AI_MESSAGE } = await import('./quota')
+    const planKey = await getUserPlan(userId)
+    if (planKey === 'free') throw Object.assign(new Error(NO_PLAN_AI_MESSAGE), { status: 403, expose: true })
     const r = clipsAllowed({ requested, perRun: allowance.perRun, dayLeft: allowance.dayLeft, videoLeft: allowance.videoLeft, monthLeft: allowance.monthLeft })
     if (r.count === 0) {
-      if (r.limitedBy === 'month') throw Object.assign(new Error(`You've used your ${allowance.clipsPerMonth} AI clips. More next month, or upgrade.`), { status: 403, expose: true })
+      if (r.limitedBy === 'month') throw Object.assign(new Error(`You've used your ${allowance.clipsPerMonth} AI clips. ${moreLater(planKey)}`), { status: 403, expose: true })
       throw Object.assign(new Error(r.limitedBy === 'day'
         ? `You've made ${allowance.clipsToday} of today's ${allowance.clipsPerDay} AI clips. More tomorrow.`
         : `This video already has ${allowance.videoClips} AI clips, the most for its length (1 per minute of video).`), { status: 429, expose: true })

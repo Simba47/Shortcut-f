@@ -496,7 +496,7 @@ a:hover > .brand .brand-bottom { translate: 12px 12px; }
 .lp-root .hero-meta-item svg { color: var(--text); }
 
 /* Speed stat: plain text line with a counting lime "10×" */
-/* Earnings line under the hero: "No credit card needed. Your first N clips are free."
+/* Earnings line under the hero: "Try everything for ₹N once. No subscription."
    A lime growth chart draws itself (line, then arrowhead), and the lime number flips in while it
    counts up, like earnings adding up. */
 .lp-root .hero-earn {

@@ -12,6 +12,10 @@ test('the higher plan wins; unknown or missing counts as free', () => {
   assert.equal(higherPlan(null, null), 'free')
   assert.equal(higherPlan('starter', null), 'starter')
   assert.equal(higherPlan(undefined, 'agency'), 'agency')
+  // the Trial pack sits between no plan and Starter: a trial user stays on it, a given plan above it wins
+  assert.equal(higherPlan('trial', null), 'trial')
+  assert.equal(higherPlan('trial', 'free'), 'trial')
+  assert.equal(higherPlan('trial', 'starter'), 'starter')
 })
 
 const HAS_DB = !!process.env.DATABASE_URL && /127\.0\.0\.1|localhost/.test(process.env.DATABASE_URL)

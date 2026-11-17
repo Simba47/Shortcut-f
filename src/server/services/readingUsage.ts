@@ -5,14 +5,15 @@ import { allowanceSince, readingQuote } from '@/lib/aiLimits'
 import { readingLabel } from '@/lib/planFeatures'
 import { PLANS } from '@/lib/plans'
 import { balance, charge, ensureCreditsSchema, ensureFreeGrant, grant, settle } from './credits'
-import { getUserPlan } from './quota'
+import { getUserPlan, NO_PLAN_MESSAGE } from './quota'
 
 // The plan's hours of video read and its uploads (plans.ts readingMinutes, uploadsPerMonth). Our
 // transcriber reads a video at upload, whatever is done with it after, so it is counted and paid for
 // there (lib/credits.ts readingCredits) and outlives the video: deleting one gives nothing back. Past
 // the hours or the uploads an upload is refused, whatever credits are left. A video that fails gives
-// everything back (refundFailedReadings). Like credits, all of it follows CREDITS_MODE: off = nothing
-// counted or refused; shadow = counted, never refused or charged; on = enforced.
+// everything back (refundFailedReadings). The same file uploaded again after its video was deleted, in
+// the same month, is not counted again (againOf). Like credits, all of it follows CREDITS_MODE: off =
+// nothing counted or refused; shadow = counted, never refused or charged; on = enforced.
 
 let ready: Promise<void> | null = null
 function ensureSchema(): Promise<void> {
@@ -29,6 +30,9 @@ function ensureSchema(): Promise<void> {
       )`
     await sql`CREATE INDEX IF NOT EXISTS reading_usage_user_idx ON reading_usage (user_id, created_at DESC)`
     await sql`ALTER TABLE videos ADD COLUMN IF NOT EXISTS reading_limit_ms BIGINT`
+    // The file's size (bytes) and, for an upload of a file already counted, the video it is again (againOf)
+    await sql`ALTER TABLE reading_usage ADD COLUMN IF NOT EXISTS file_size BIGINT`
+    await sql`ALTER TABLE reading_usage ADD COLUMN IF NOT EXISTS same_as UUID`
   })().catch(e => { ready = null; throw e })
   return ready
 }
@@ -36,7 +40,7 @@ function ensureSchema(): Promise<void> {
 const minutes = (ms: number) => Math.ceil(ms / 60_000)
 const fail = (message: string, status: number) => Object.assign(new Error(message), { status, expose: true })
 
-/** What this user has used: since the month began (Free: ever). Lengths the worker has found since are counted, and paid for, first (credits.ts sweep does this too, so the balance is current). */
+/** What this user has used: since the month began (the Trial: ever). Lengths the worker has found since are counted, and paid for, first (credits.ts sweep does this too, so the balance is current). */
 export async function readingUse(userId: string): Promise<{ uploads: number; usedMs: number }> {
   await ensureSchema()
   const plan = await getUserPlan(userId)
@@ -50,7 +54,7 @@ export async function readingUse(userId: string): Promise<{ uploads: number; use
       const [taken] = await tx`UPDATE reading_usage SET duration_ms = ${row.duration_ms} WHERE id = ${row.id} AND duration_ms IS NULL RETURNING id`
       if (!taken) return
       const [u] = await tx<{ uploads: number; used: string }[]>`
-        SELECT count(*)::int AS uploads, COALESCE(SUM(duration_ms), 0) AS used FROM reading_usage
+        SELECT count(*) FILTER (WHERE same_as IS NULL)::int AS uploads, COALESCE(SUM(duration_ms), 0) AS used FROM reading_usage
         WHERE user_id = ${userId} AND created_at >= ${since} AND id <> ${row.id}`
       const { credits } = readingQuote(PLANS[plan], { uploads: u.uploads, usedMs: Number(u.used) }, Number(row.duration_ms))
       // The video is already being read: if this cannot be paid, it stays, and what is used up stops the next upload
@@ -58,7 +62,7 @@ export async function readingUse(userId: string): Promise<{ uploads: number; use
     })
   }
   const [r] = await sql<{ uploads: number; used: string }[]>`
-    SELECT count(*)::int AS uploads, COALESCE(SUM(duration_ms), 0) AS used FROM reading_usage
+    SELECT count(*) FILTER (WHERE same_as IS NULL)::int AS uploads, COALESCE(SUM(duration_ms), 0) AS used FROM reading_usage
     WHERE user_id = ${userId} AND created_at >= ${since}`
   return { uploads: r.uploads, usedMs: Number(r.used) }
 }
@@ -69,12 +73,15 @@ async function chargeReading(userId: string, videoId: string, rowId: string, cre
   await tx`UPDATE reading_usage SET credits = ${credits} WHERE id = ${rowId}`
 }
 
-/** The price of uploading a video this long, for asking before the upload starts */
-export async function readingPrice(userId: string, durationMs: number | null | undefined) {
-  const plan = PLANS[await getUserPlan(userId)]
+/** The price of uploading a video this long, for asking before the upload starts (a file uploaded again after its video was deleted: nothing, againOf) */
+export async function readingPrice(userId: string, durationMs: number | null | undefined, fileSize?: number | null) {
+  const planKey = await getUserPlan(userId)
+  const plan = PLANS[planKey]
   const mode = creditsMode()
   if (mode === 'off') return { on: false as const }
-  const quote = readingQuote(plan, await readingUse(userId), durationMs)
+  const use = await readingUse(userId)
+  const again = await againOf(userId, durationMs, fileSize, planKey)
+  const quote = again ? { ...readingQuote(plan, use, 0), credits: 0, overMs: 0 } : readingQuote(plan, use, durationMs)
   await ensureFreeGrant(userId)
   return { on: true as const, ...quote, balance: (await balance(userId)).balance, durationMs: durationMs ?? null }
 }
@@ -98,15 +105,41 @@ export async function refundFailedReadings(userId: string): Promise<void> {
   }
 }
 
-/** Refuses an upload the plan cannot take: out of uploads or past the hours (403, whatever credits are left), or without the credits for it (402) */
-export async function checkBeforeUpload(userId: string, durationMs: number | null | undefined): Promise<void> {
+/** Lengths within this are one file's (the browser and the worker read a length a little differently) */
+const SAME_LENGTH_MS = 1_000
+
+/**
+ * The reading this file was already counted as (user, 2026-11-17: a 3-hour video uploaded, deleted and
+ * uploaded again was counted twice, 364 of the month's 840 minutes): one this month (the Trial: ever) of
+ * a file of the same size in bytes and length, whose video has been deleted, and not already taken by
+ * another upload — so each deleted video gives one upload again, never copies side by side. Null when
+ * there is none, or the size or length isn't known (a link).
+ */
+async function againOf(userId: string, durationMs: number | null | undefined, fileSize: number | null | undefined,
+  plan: string, db: postgres.Sql | postgres.TransactionSql = sql): Promise<{ video_id: string } | null> {
+  if (durationMs == null || !(Number(fileSize) > 0)) return null
+  await ensureSchema()
+  const [row] = await db<{ video_id: string }[]>`
+    SELECT r.video_id FROM reading_usage r
+    WHERE r.user_id = ${userId} AND r.created_at >= ${allowanceSince(plan)} AND r.same_as IS NULL
+      AND r.file_size = ${Number(fileSize)} AND abs(r.duration_ms - ${Math.round(durationMs)}) <= ${SAME_LENGTH_MS}
+      AND NOT EXISTS (SELECT 1 FROM videos v WHERE v.id = r.video_id)
+      AND NOT EXISTS (SELECT 1 FROM reading_usage o WHERE o.same_as = r.video_id)
+    ORDER BY r.created_at DESC LIMIT 1`
+  return row ?? null
+}
+
+/** Refuses an upload the plan cannot take: out of uploads or past the hours (403, whatever credits are left), or without the credits for it (402). A file uploaded again after its video was deleted (againOf) is let through: it was counted already */
+export async function checkBeforeUpload(userId: string, durationMs: number | null | undefined, fileSize?: number | null): Promise<void> {
   if (creditsMode() !== 'on') return
   const planKey = await getUserPlan(userId)
   const plan = PLANS[planKey]
-  const per = plan.allowancesOnce ? 'on the Free plan' : 'this month'
-  const more = plan.allowancesOnce ? 'Upgrade to upload more.' : 'More next month, or upgrade.'
+  if (planKey === 'free') throw fail(NO_PLAN_MESSAGE, 403)
+  if (await againOf(userId, durationMs, fileSize, planKey)) return
+  const per = plan.allowancesOnce ? `on your ${plan.name}` : 'this month'
+  const more = plan.allowancesOnce ? 'Choose a plan to upload more.' : 'More next month, or upgrade.'
   const quote = readingQuote(plan, await readingUse(userId), durationMs)
-  if (quote.uploadsLeft <= 0) throw fail(`You've used your ${plan.uploadsPerMonth} uploads ${per}. ${more}`, 403)
+  if (quote.uploadsLeft <= 0) throw fail(`You've used your ${plan.uploadsPerMonth} upload${(plan.uploadsPerMonth as number) === 1 ? '' : 's'} ${per}. ${more}`, 403)
   const hours = readingLabel(plan.readingMinutes)
   if (quote.msLeft <= 0) throw fail(`You've used your ${hours} of video ${per}. ${more}`, 403)
   if (quote.overMs > 0) throw fail(`This video is ${minutes(durationMs ?? 0)} min, and only ${minutes(quote.msLeft)} min of your ${hours} ${plan.readingMinutes >= 120 ? 'are' : 'is'} left ${per}. Upload a shorter video, or upgrade.`, 403)
@@ -122,17 +155,26 @@ export async function checkBeforeUpload(userId: string, durationMs: number | nul
  * a file the browser can't read): the lower of what the plan and the credits still cover is written on the video, and the worker refuses it if it turns out longer, before reading it
  * (chai-cut-backend lib/readingLimit.ts); it is charged when the length is found (readingUse).
  */
-export async function recordReading(userId: string, videoId: string, durationMs: number | null | undefined): Promise<void> {
+export async function recordReading(userId: string, videoId: string, durationMs: number | null | undefined, fileSize?: number | null): Promise<void> {
   if (creditsMode() === 'off') return
   await ensureSchema()
   const plan = await getUserPlan(userId)
   await sql.begin(async tx => {
     await tx`SELECT pg_advisory_xact_lock(hashtext(${`reading:${userId}`}))`
+    const size = Number(fileSize) > 0 ? Number(fileSize) : null
+    // The same file again after its video was deleted: written down (so it is taken once), not counted or charged
+    const again = await againOf(userId, durationMs, size, plan, tx)
+    if (again) {
+      await tx`
+        INSERT INTO reading_usage (user_id, video_id, duration_ms, file_size, same_as) VALUES (${userId}, ${videoId}, 0, ${size}, ${again.video_id})
+        ON CONFLICT (video_id) DO NOTHING`
+      return
+    }
     const [u] = await tx<{ uploads: number; used: string }[]>`
-      SELECT count(*)::int AS uploads, COALESCE(SUM(duration_ms), 0) AS used FROM reading_usage
+      SELECT count(*) FILTER (WHERE same_as IS NULL)::int AS uploads, COALESCE(SUM(duration_ms), 0) AS used FROM reading_usage
       WHERE user_id = ${userId} AND created_at >= ${allowanceSince(plan)}`
     const [row] = await tx<{ id: string }[]>`
-      INSERT INTO reading_usage (user_id, video_id, duration_ms) VALUES (${userId}, ${videoId}, ${durationMs ?? null})
+      INSERT INTO reading_usage (user_id, video_id, duration_ms, file_size) VALUES (${userId}, ${videoId}, ${durationMs ?? null}, ${size})
       ON CONFLICT (video_id) DO NOTHING RETURNING id`
     if (!row) return
     const { credits, msLeft } = readingQuote(PLANS[plan], { uploads: u.uploads, usedMs: Number(u.used) }, durationMs)

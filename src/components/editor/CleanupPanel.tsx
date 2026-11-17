@@ -1,5 +1,6 @@
 'use client'
 
+import { Spinner } from '@/components/ui/spinner'
 import { useEffect, useRef, useState } from 'react'
 import type { CleanupCard, CleanupKind } from '@/modules/editor/cleanup'
 
@@ -69,7 +70,7 @@ export function CleanupPanel({ rows, detected, working, error, blockedNote, onDe
         style={detected
           ? { background: 'rgb(var(--ed-fg) / 0.06)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)' }
           : { background: '#c8ff00', color: '#000' }}>
-        {working && <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" aria-hidden="true" />}
+        {working && <Spinner />}
         {working ? 'Detecting…' : detected ? 'Detect again' : 'Detect silences, fillers & repeats'}
       </button>
       {working && <p role="status" className="-mt-1 text-[11.5px] leading-relaxed" style={{ color: 'var(--ed-accent-text)' }}>{working}</p>}

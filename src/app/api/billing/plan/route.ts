@@ -3,7 +3,7 @@ import { requireUser } from '@/server/auth'
 import { getUserPlan, getUserPlanConfig } from '@/server/services/quota'
 import sql from '@/lib/db'
 import { razorpayConfigured, razorpayMode } from '@/lib/razorpay'
-import { subscriptionSummary } from '@/server/services/billing'
+import { subscriptionSummary, trialSummary } from '@/server/services/billing'
 import { readingUse } from '@/server/services/readingUsage'
 import { testPackAllowed } from '@/lib/credits'
 
@@ -20,6 +20,8 @@ export async function GET() {
   ])
 
   const subscription = await subscriptionSummary(user.id).catch(() => null)
+  // The Trial pack: bought yet (once per account), and when it ends
+  const trial = await trialSummary(user.id).catch(() => ({ used: false, active: false, endsAt: null }))
   const [videoRow, clipRow] = await Promise.all([
     // Only the user's own videos: B-roll and overlay files (role 'asset') don't count, as in checkVideoQuota
     sql<{ count: string }[]>`SELECT COUNT(*) as count FROM videos WHERE user_id = ${user.id} AND role IS DISTINCT FROM 'asset'`,
@@ -45,6 +47,7 @@ export async function GET() {
     retentionDays: plan.retentionDays,
     // Paying: a Razorpay subscription (state, and when it renews or ends); testMode = no keys, plans switch on without payment
     subscription: subscription && { status: subscription.status, expiresAt: subscription.expiresAt },
+    trial,
     paymentsEnabled: razorpayConfigured(),
     // off | mock (dummy keys, nothing is charged) | test (Razorpay test mode) | live
     paymentsMode: razorpayMode(),

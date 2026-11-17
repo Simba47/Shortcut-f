@@ -25,25 +25,26 @@ import { InsightsSection, ProblemSection, ProofSection } from '@/components/land
 import { neutralStyle, useLiteMotion } from '@/components/ui/use-lite-motion'
 import { PLANS } from '@/lib/plans'
 import { readingLabel } from '@/lib/planFeatures'
-import { FREE_SIGNUP_CREDITS } from '@/lib/credits'
+import { TRIAL_PACK, TRIAL_DAYS } from '@/lib/credits'
 import { COMPANY } from '@/lib/company'
 import { GMAIL_COMPOSE, openMailAppOnPhones } from '@/components/ui/email-link'
 
-const free = PLANS.free
+// (user, 2026-11-16) No free plan: a ₹50 Trial pack, paid once, to try everything
+const trial = PLANS.trial
 
 // (user, 2026-11-14) The landing page shows the real plans, read from lib/plans.ts — the same source as the
 // Pricing page and the app — so its names, prices and limits can't drift apart again. (It used to have its own
 // copy: Starter shown as "Pro", Agency as "Business", Creator left out, and an Annual price billing doesn't offer.)
 // The key facts only; the Pricing page lists every limit.
-const LANDING_PLANS = ['free', 'starter', 'creator', 'agency'] as const
+const LANDING_PLANS = ['trial', 'starter', 'creator', 'agency'] as const
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 function planFeatures(plan: (typeof PLANS)[keyof typeof PLANS]) {
-  // (Free's allowances are once only; a paid plan's renew every month)
+  // (the Trial's allowances are once only; a paid plan's renew every month)
   const per = plan.allowancesOnce ? 'in total' : 'a month'
   return [
     { text: `${readingLabel(plan.readingMinutes)} of video read ${per}`, included: true },
     { text: `${count(plan.uploadsPerMonth, 'upload', 'uploads')} ${per}`, included: true },
-    { text: plan.maxClips ? `${count(plan.maxClips, 'clip', 'clips')} in total` : `${plan.ai.clipsPerMonth} AI clips a month`, included: true },
+    { text: plan.maxClips ? `${count(plan.maxClips, 'clip', 'clips')} in total` : `${plan.ai.clipsPerMonth} AI clips ${per}`, included: true },
     { text: 'Unlimited clips you cut yourself', included: !plan.maxClips },
     { text: `Up to ${plan.maxFileSizeGb} GB per video`, included: true },
     { text: 'Captions on AI clips', included: plan.autoCaption },
@@ -54,20 +55,21 @@ function planFeatures(plan: (typeof PLANS)[keyof typeof PLANS]) {
 
 const PRICING_PLANS: PricingPlan[] = LANDING_PLANS.map(key => {
   const plan = PLANS[key]
-  const paid = plan.price > 0
+  const once = plan.oneTime
   return {
     name: plan.name,
     price: plan.price,
     // (user, 2026-11-14) Annual shown for now while the plans are discussed: 20% off the monthly price.
     // Billing is monthly only — the buttons still lead to the monthly plans.
     yearlyPrice: Math.round(plan.price * 0.8),
-    headline: paid ? `${plan.monthlyCredits.toLocaleString('en-IN')} credits every month` : `${FREE_SIGNUP_CREDITS} credits to start`,
-    subline: paid ? 'Unused credits roll over one month' : 'No credit card needed',
+    once,
+    headline: once ? `${TRIAL_PACK.credits} credits to try everything` : `${plan.monthlyCredits.toLocaleString('en-IN')} credits every month`,
+    subline: once ? `Lasts ${TRIAL_DAYS} days · no subscription` : 'Unused credits roll over one month',
     features: planFeatures(plan),
-    buttonText: paid ? `Choose ${plan.name}` : 'Start for free',
-    // A paid plan: sign up first (landing visitors are signed out), then straight to the Pricing page to pay
+    buttonText: once ? `Start for ₹${plan.price}` : `Choose ${plan.name}`,
+    // Sign up first (landing visitors are signed out), then straight to the Pricing page to pay
     // (lib/nextPath.ts keeps ?callbackUrl through the email code and Google)
-    href: paid ? '/signup?callbackUrl=%2Fpricing' : '/signup',
+    href: '/signup?callbackUrl=%2Fpricing',
     ...(key === 'creator' ? { badge: 'Most popular', isPopular: true } : {}),
   }
 })
@@ -97,7 +99,7 @@ const FAQS: FaqItem[] = [
   },
   {
     question: 'Is there a free plan?',
-    answer: `Yes. Your first ${free.maxClips} clips are free, no credit card needed.`,
+    answer: `No. Instead there's a ₹${trial.price} Trial pack, paid once: ${TRIAL_PACK.credits} credits for ${TRIAL_DAYS} days to try everything, from AI clips and captions to exports with no watermark. No subscription, and if you pick a plan, your unused credits move into it.`,
   },
 ]
 
@@ -358,12 +360,12 @@ export function LandingPage() {
   // Desktop: sections fly in (FlyIn) instead of the tilt / zoom entrances
   const Sec = tunnel ? PlainSection : SectionTransition
 
-  // "Your first N clips are free": N counts up from 0 once the line has faded in, like earnings
-  // adding up (N is the Free plan's clip limit, so it always matches Pricing)
-  const [freeClips, setFreeClips] = useState(0)
+  // "Try everything for ₹N": N counts up from 0 once the line has faded in, like earnings
+  // adding up (N is the Trial pack's price, so it always matches Pricing)
+  const [trialPrice, setTrialPrice] = useState(0)
   useEffect(() => {
-    if (reduceMotion) { setFreeClips(free.maxClips); return }
-    const t = setTimeout(() => setFreeClips(free.maxClips), 1300)
+    if (reduceMotion) { setTrialPrice(trial.price); return }
+    const t = setTimeout(() => setTrialPrice(trial.price), 1300)
     return () => clearTimeout(t)
   }, [reduceMotion])
 
@@ -508,7 +510,7 @@ export function LandingPage() {
           </p>
           <div className="hero-ctas intro" style={{ '--d': '.7s' } as React.CSSProperties}>
             <Link href="/signup" className="btn-nav-primary arrow-btn hero-cta-main">
-              <span className="arrow-btn-label">Start clipping free</span>
+              <span className="arrow-btn-label">Start clipping</span>
               <SquiggleArrow />
             </Link>
             <a href="#process" onClick={e => goToSection(e, '#process')} className="btn-nav-ghost fill-btn hero-cta-ghost">
@@ -523,13 +525,13 @@ export function LandingPage() {
               <path className="earn-head" d="M16 4h6v6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             <p className="earn-text">
-              No credit card needed. Your first{' '}
+              Try everything for{' '}
               <span className="earn-num">
                 <span className="earn-coin">
-                  <NumberFlow value={freeClips} className="tabular-nums" />
+                  ₹<NumberFlow value={trialPrice} className="tabular-nums" />
                 </span>
               </span>{' '}
-              clips are free.
+              once. No subscription.
             </p>
           </div>
           </motion.div>
@@ -643,7 +645,7 @@ export function LandingPage() {
           plans={PRICING_PLANS}
           eyebrow="Pricing"
           title="Simple pricing. Serious reels."
-          description={'Start free. Upgrade when your content takes off. Cancel anytime.'}
+          description={`Try it all for ₹${trial.price}, paid once. Upgrade when your content takes off. Cancel anytime.`}
         />
       </SectionTransition>
 
@@ -679,7 +681,7 @@ export function LandingPage() {
         <p className="reveal">Upload one video. Leave with a week of clips.</p>
         <div className="reveal">
           <Link href="/signup" className="btn-nav-primary arrow-btn hero-cta-main">
-            <span className="arrow-btn-label">Start clipping free</span>
+            <span className="arrow-btn-label">Start clipping</span>
             <SquiggleArrow />
           </Link>
         </div>

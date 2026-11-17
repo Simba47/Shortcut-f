@@ -53,7 +53,18 @@ export async function grantPlanCredits(userId: string, plan: PlanKey, cycleRef: 
   return grant(userId, { kind: 'plan', amount, expiresAt, sourceRef: `plan:${cycleRef}` }, db)
 }
 
-/** The one-time free credits, given the first time an account is seen with credits switched on */
+/**
+ * A paid plan after the Trial pack (user, 2026-11-16): the trial's unused credits are not lost when it
+ * ends, they last until `until` (the plan credits' own end). Only ever lengthens their life.
+ */
+export async function carryTrialCredits(userId: string, until: Date, db: Db = sql): Promise<void> {
+  await ensureCreditsSchema()
+  await db`
+    UPDATE credit_grants SET expires_at = ${until}
+    WHERE user_id = ${userId} AND kind = 'trial' AND remaining > 0 AND expires_at > now() AND expires_at < ${until}`
+}
+
+/** The one-time free credits, given the first time an account is seen with credits switched on (none since the Trial pack) */
 export async function ensureFreeGrant(userId: string): Promise<void> {
   const amount = freeSignupCredits()
   if (creditsMode() === 'off' || amount <= 0) return
