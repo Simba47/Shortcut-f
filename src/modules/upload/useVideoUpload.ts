@@ -167,7 +167,7 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
     durationRef.current = await readDurationMs(file)
     if (asset || !durationRef.current || pricePaidForRef.current === file) return
     const res = await fetch('/api/ingest/reading-price', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ duration_ms: durationRef.current }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ duration_ms: durationRef.current, file_size: file.size }),
     }).catch(() => null)
     const p = await res?.json().catch(() => null) as { on?: boolean; credits?: number; overMs?: number; balance?: number } | null
     if (!p?.on || !p.credits) return
