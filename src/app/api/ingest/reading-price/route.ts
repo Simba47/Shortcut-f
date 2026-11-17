@@ -12,7 +12,8 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const body = await req.json().catch(() => null)
   try {
-    return NextResponse.json(await readingPrice(user.id, typeof body?.duration_ms === 'number' ? body.duration_ms : null))
+    return NextResponse.json(await readingPrice(user.id, typeof body?.duration_ms === 'number' ? body.duration_ms : null,
+      typeof body?.file_size === 'number' ? body.file_size : null))
   } catch (err) {
     return apiError(err)
   }

@@ -188,3 +188,46 @@ test('shadow: counted, never refused', opts, async () => {
     assert.equal((await reading.readingUse(u)).usedMs, 300 * MIN)
   } finally { process.env.CREDITS_MODE = 'on' }
 })
+
+test('the same file uploaded again after its video was deleted is not counted again (user, 2026-11-17)', opts, async () => {
+  // Starter: 180 min. A 150-min video, deleted, then the same file again: it fits, costs nothing, isn't an upload
+  const u = await user('starter', 500)
+  const SIZE = 3_456_789_012
+  const first = await video(u, 150 * MIN)
+  await reading.recordReading(u, first, 150 * MIN, SIZE)
+  const paid = await left(u)
+  await sql`DELETE FROM videos WHERE id = ${first}`
+  // (the browser's length can differ a little from the first time's)
+  await reading.checkBeforeUpload(u, 150 * MIN + 400, SIZE)
+  assert.deepEqual(await reading.readingPrice(u, 150 * MIN + 400, SIZE).then(p => p.on && [p.credits, p.overMs]), [0, 0], 'nothing to ask on the upload card')
+  const again = await video(u, 150 * MIN + 400)
+  await reading.recordReading(u, again, 150 * MIN + 400, SIZE)
+  const use = await reading.readingUse(u)
+  assert.equal(use.usedMs, 150 * MIN, 'counted once')
+  assert.equal(use.uploads, 1)
+  assert.equal(await left(u), paid, 'no credits for it')
+
+  // Only once per deleted video: a third copy, after deleting the second, is a new upload (and too long here)
+  await sql`DELETE FROM videos WHERE id = ${again}`
+  await assert.rejects(reading.checkBeforeUpload(u, 150 * MIN, SIZE), (e: { status?: number }) => e.status === 403)
+})
+
+test('not the same file: another size, another length, or the first copy still there — counted as usual', opts, async () => {
+  const u = await user('agency', 5000)
+  const SIZE = 1_000_000_000
+  const kept = await video(u, 60 * MIN)
+  await reading.recordReading(u, kept, 60 * MIN, SIZE)
+  // the first copy is still there: a second copy side by side is counted
+  await reading.recordReading(u, await video(u, 60 * MIN), 60 * MIN, SIZE)
+  assert.equal((await reading.readingUse(u)).usedMs, 120 * MIN)
+  const gone = await video(u, 30 * MIN)
+  await reading.recordReading(u, gone, 30 * MIN, 2 * SIZE)
+  await sql`DELETE FROM videos WHERE id = ${gone}`
+  // another size (a different file of the same length), another length, no size (a link): all counted
+  await reading.recordReading(u, await video(u, 30 * MIN), 30 * MIN, 2 * SIZE + 1)
+  await reading.recordReading(u, await video(u, 32 * MIN), 32 * MIN, 2 * SIZE)
+  await reading.recordReading(u, await video(u, 30 * MIN), 30 * MIN)
+  const use = await reading.readingUse(u)
+  assert.equal(use.usedMs, (120 + 30 + 30 + 32 + 30) * MIN)
+  assert.equal(use.uploads, 6)
+})
