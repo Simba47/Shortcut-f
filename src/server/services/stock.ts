@@ -443,7 +443,7 @@ export async function brollIdeas(userId: string, clipId: string): Promise<string
   const key = `${clipId}|${t.id}|${clip.start_ms}|${clip.end_ms}`
   let asking = ideasAsking.get(key)
   if (!asking) {
-    asking = askBrollIdeas(t.id, clip.start_ms, clip.end_ms).then(async ideas => {
+    asking = askBrollIdeas(t.id, clip.start_ms, clip.end_ms, { userId, videoId: clip.video_id }).then(async ideas => {
       if (ideas.length) await sql`
         INSERT INTO clip_broll_ideas (clip_id, transcript_id, start_ms, end_ms, ideas)
         VALUES (${clipId}, ${t.id}, ${clip.start_ms}, ${clip.end_ms}, ${sql.json(ideas)})
@@ -457,7 +457,7 @@ export async function brollIdeas(userId: string, clipId: string): Promise<string
   return asking
 }
 
-async function askBrollIdeas(transcriptId: string, startMs: number, endMs: number): Promise<string[]> {
+async function askBrollIdeas(transcriptId: string, startMs: number, endMs: number, who: { userId: string; videoId: string }): Promise<string[]> {
   const words = await sql<{ word: string }[]>`
     SELECT word FROM transcript_words WHERE transcript_id = ${transcriptId} AND start_ms >= ${startMs} AND start_ms < ${endMs} ORDER BY start_ms`
   if (!words.length) return []
@@ -468,7 +468,12 @@ Suggest 6 short English searches (2-3 words each) for stock B-roll footage that 
 Return ONLY a JSON array of strings.`
   try {
     // (a plain list of search words: no thinking needed — about 5× cheaper, user 2026-10-30)
-    const out = await askGemini(prompt, { thinkingBudget: 0 })
+    // What it cost (admin Costs: "B-roll ideas"); never slows down or fails the answer
+    const onUsage = (u: { model: string; inputTokens: number; outputTokens: number }) => {
+      import('./aiUsage').then(m => m.recordAiUsage({ ...who, purpose: 'broll', ...u }))
+        .catch(e => console.warn('[ai-usage] not recorded:', e instanceof Error ? e.message : e))
+    }
+    const out = await askGemini(prompt, { thinkingBudget: 0, onUsage })
     const arr = JSON.parse(out.match(/\[[\s\S]*\]/)?.[0] ?? '[]') as unknown[]
     return arr.filter((s): s is string => typeof s === 'string').map(s => s.trim().slice(0, 40)).filter(Boolean).slice(0, 6)
   } catch (e) {
