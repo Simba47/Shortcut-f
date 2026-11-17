@@ -139,6 +139,13 @@ export const AUTH = {
     },
   },
 
+  // The tick under Create account (user, 2026-11-17): required for email and for Continue with Google
+  agree: {
+    before: 'I agree to the',
+    and: 'and',
+    after: '.',
+  },
+
   legal: {
     before: 'By creating an account, you agree to our',
     terms: 'Terms',
@@ -166,6 +173,7 @@ export const AUTH = {
   },
   errors: {
     generic: 'Something went wrong. Try again.',
+    agree: 'Tick the box to agree to the Terms and Privacy Policy before creating your account.',
     network: 'Something went wrong. Check your connection and try again.',
     googleOnly: 'This email signs in with Google — use Continue with Google. (Or set a password with “Forgot password?”)',
     wrongPassword: 'Wrong password. Try again, or reset it with “Forgot password?”',

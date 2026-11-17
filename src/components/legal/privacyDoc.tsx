@@ -6,7 +6,7 @@ import { EmailLink } from '@/components/ui/email-link'
 
 // Privacy Policy: its words, shared by its page (app/privacy) and the popup in the profile menu
 // (components/ui/account-menu.tsx) — one place to change them.
-const UPDATED = 'October 8, 2026'
+const UPDATED = 'November 17, 2026'
 const mail = <EmailLink />
 
 // The services named in "Sharing of Information" must stay in step with the code (src/lib, src/server/services).
@@ -24,7 +24,7 @@ export const privacyCards: LegalCard[] = [
   {
     icon: Share2,
     title: 'Sharing of Information',
-    body: <>Your videos and clips are private to your account and are only published if you download and post them yourself. We never sell your personal data to third parties. Information is only shared with trusted service providers who process it on our behalf to run Shortcut: Cloudflare (storing your videos and clips), our database host (account and project data), Sarvam AI (turning the speech in your videos into text), Google Gemini and Anthropic Claude (AI that reads your transcripts to pick moments and write captions), Resend (sending email codes), and Pexels and Pixabay (the stock video search words you type). We may also share information when the law requires it or to protect the rights and safety of our users.</>,
+    body: <>Your videos and clips are private to your account and are only published if you download and post them yourself. We never sell your personal data to third parties. Information is only shared with trusted service providers who process it on our behalf to run Shortcut: Cloudflare (storing your videos and clips), our database host (account and project data), Sarvam AI (turning the speech in your videos into text), Google Gemini and Anthropic Claude (AI that reads your transcripts to pick moments and write captions), Resend (sending email codes), Pexels and Pixabay (the stock video search words you type), and Google Analytics (how the website is used, as described under Cookies &amp; Tracking). We may also share information when the law requires it or to protect the rights and safety of our users.</>,
   },
   {
     icon: Lock,
@@ -34,7 +34,7 @@ export const privacyCards: LegalCard[] = [
   {
     icon: Cookie,
     title: 'Cookies & Tracking',
-    body: <>We use only the cookies and similar on-device storage needed for Shortcut to work, such as keeping you signed in and remembering your settings. We do not use advertising cookies, and we do not track you across other apps or websites. You may control cookie settings through your browser, but disabling cookies will sign you out and may limit certain features.</>,
+    body: <>We use the cookies and similar on-device storage that Shortcut needs to work, such as keeping you signed in and remembering your settings. We also use Google Analytics to understand how people find and use Shortcut so we can improve it: for example which pages are visited, where visitors come from, which features and editor tools are used, and when an account is created or a plan or credits are bought. Google Analytics sets its own cookies (named “_ga”) and receives a random identifier for your browser, your device and browser type, your approximate location (country and city, worked out from your IP address, which Google Analytics does not store) and, when you are signed in, our internal number for your account. We never send Google your name, email address, videos, clip titles or anything you type, and Google keeps this information for up to 14 months. We have turned off Google’s advertising features, we do not use advertising cookies, we do not track you across other apps or websites, and we do not sell this information. You can opt out of Google Analytics at any time with Google’s <a href="https://tools.google.com/dlpage/gaoptout" target="_blank" rel="noopener noreferrer">opt-out browser add-on</a>, by blocking its cookies in your browser, or by writing to us at {mail}. You may control other cookie settings through your browser, but blocking Shortcut’s own cookies will sign you out and may limit certain features.</>,
   },
   {
     icon: UserCheck,
