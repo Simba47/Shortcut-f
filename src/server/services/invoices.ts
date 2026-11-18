@@ -6,6 +6,7 @@ import { type PaidPayment, fetchRazorpayPayment, paidPayment } from '@/lib/razor
 import { splitTax, fiscalYear, formatInvoiceNo, normalizeGstin, GST_STATES, stateName } from '@/lib/invoice'
 import { ensureBillingSchema } from '@/server/services/billingSchema'
 import { sendReceiptEmail } from '@/modules/auth/mailer'
+import { queuePurchase } from '@/server/analytics'
 
 /**
  * Who we invoice as. Set these for real GST invoices; without a GSTIN the paper says "Payment
@@ -102,6 +103,8 @@ export async function recordPayment(userId: string, subscriptionId: string | nul
   })
   if (paymentRowId) {
     await emailReceipt(paymentRowId).catch(e => console.error('[billing] receipt email failed:', e instanceof Error ? e.message : e))
+    // Google Analytics: the purchase, once per payment like the invoice (server/analytics.ts; never throws)
+    queuePurchase(userId, { transactionId: p.id, plan, itemName: PLANS[plan as keyof typeof PLANS]?.name ?? topupLabel(plan) ?? plan, amountPaise: p.amountPaise })
   }
   return paymentRowId
 }

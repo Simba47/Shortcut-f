@@ -8,6 +8,7 @@ import { verifyPassword } from './modules/auth/password'
 import { startSession, isCurrentSession } from './modules/auth/one-device'
 import sql from './lib/db'
 import { clientIp, loginSucceeded, startLoginAttempt } from './modules/auth/limits'
+import { queueServerEvent } from './server/analytics'
 
 const g = global as typeof globalThis & { _pgPool?: Pool }
 if (!g._pgPool) {
@@ -97,6 +98,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         // One device per account: this sign-in becomes the only one, any other device is signed out
         token.sid = await startSession(user.id as string)
         delete token.replaced
+        // Google Analytics (server/analytics.ts): a Google sign-in that made the account is a sign_up
+        // (an email sign-up's is sent when its code is confirmed), any other a login. By id only.
+        const method = account?.provider === 'google' ? 'google' : 'email'
+        queueServerEvent(trigger === 'signUp' && method === 'google' ? 'sign_up' : 'login', { method }, user.id as string)
       } else if (token.id && !token.replaced && !(await isCurrentSession(token.id as string, token.sid as string | undefined))) {
         token.replaced = true
       }

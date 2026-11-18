@@ -16,6 +16,13 @@ function inTx<T>(db: Db, fn: (tx: postgres.TransactionSql) => Promise<T>): Promi
 }
 
 export interface Hold { id: string; amount: number }
+
+/**
+ * Why an export stopped by its person failed (jobs.error, set by export.ts cancelRender). Such a job
+ * keeps its credits (user, 2026-11-17: "if he stops, the credit is used"); one that failed by itself
+ * gives them back.
+ */
+export const RENDER_CANCELLED = 'Cancelled by the user'
 export interface ReserveArgs { amount: number; refType: 'transcribe' | 'caption' | 'render' | 'search' | 'ai_clips' | 'ask_ai' | 'rewrite' | 'subjects' | 'reading'; refId?: string; jobId?: string | null }
 
 type GrantRow = { id: string; remaining: number; expires_at: Date | null; kind: GrantKind; created_at: Date }
@@ -158,8 +165,8 @@ export async function release(holdId: string, db: Db = sql): Promise<void> {
 export async function sweep(userId?: string): Promise<void> {
   if (creditsMode() === 'off') return
   await ensureCreditsSchema()
-  const open = await sql<{ id: string; user_id: string; amount: number; ref_type: string; status: string | null; stale: boolean; run: string | null; run_status: string | null; made: number; very_stale: boolean }[]>`
-    SELECT h.id, h.user_id, h.amount, h.ref_type, j.status, (h.created_at < now() - make_interval(hours => ${HOLD_TTL_HOURS})) AS stale,
+  const open = await sql<{ id: string; user_id: string; amount: number; ref_type: string; status: string | null; job_type: string | null; error: string | null; stale: boolean; run: string | null; run_status: string | null; made: number; very_stale: boolean }[]>`
+    SELECT h.id, h.user_id, h.amount, h.ref_type, j.status, j.type AS job_type, j.error, (h.created_at < now() - make_interval(hours => ${HOLD_TTL_HOURS})) AS stale,
       (h.created_at < now() - interval '7 days') AS very_stale, a.id AS run, a.status AS run_status,
       (SELECT count(*)::int FROM clips c WHERE c.ai_edit_job_id = a.id) AS made
     FROM credit_holds h LEFT JOIN jobs j ON j.id = h.job_id
@@ -175,7 +182,8 @@ export async function sweep(userId?: string): Promise<void> {
       } else if (h.very_stale) await release(h.id)
       continue
     }
-    if (h.status === 'done') await settle(h.id)
+    // (an export its person stopped is paid for: only one that failed by itself gives its credits back)
+    if (h.status === 'done' || (h.status === 'failed' && h.job_type === 'render' && h.error === RENDER_CANCELLED)) await settle(h.id)
     else if (h.status === 'failed' || h.stale) await release(h.id)
   }
   // The reading of videos: lengths the worker has found since are paid for, and a video that failed gives its credits back

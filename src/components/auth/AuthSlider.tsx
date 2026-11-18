@@ -12,7 +12,7 @@ import { AUTH } from './strings'
 
 type Mode = 'signin' | 'signup'
 /** The box an error is about (shown under it); none → the form's own message line */
-type ErrorAt = 'email' | 'password' | 'confirm' | 'code'
+type ErrorAt = 'email' | 'password' | 'confirm' | 'code' | 'agree'
 type FormError = { text: string; at?: ErrorAt }
 
 /** Set by app/api/auth/signed-out for the sign-in form to say why */
@@ -81,6 +81,11 @@ function AuthFlow({ mode, setMode, flip, google }: {
   const confirmRef = useRef<HTMLInputElement>(null)
   const passwordRef = useRef<HTMLInputElement>(null)
   const codeRef = useRef<HTMLInputElement>(null)
+  /** "I agree to the Terms and Privacy Policy": ticked before an account is made (email or Google) */
+  const [agreed, setAgreed] = useState(false)
+  const agreeRef = useRef<HTMLInputElement>(null)
+  /** Not ticked yet: say so under the tick, and go to it */
+  const askToAgree = () => { setFormError({ text: AUTH.errors.agree, at: 'agree' }); agreeRef.current?.focus() }
   /** An error, under the box it's about (or the form's message line when it's about none) */
   const setError = (text: string | null, at?: ErrorAt) => setFormError(text ? { text, at } : null)
   /** The error under a box, if there's one there */
@@ -163,6 +168,7 @@ function AuthFlow({ mode, setMode, flip, google }: {
   // Create account: already one → signed in with the right password, else Sign in says so; new → the code
   const onCreate = (e: React.FormEvent) => run(e, async () => {
     if (password !== confirm) { setError(AUTH.errors.mismatch, 'confirm'); return }
+    if (!agreed) { askToAgree(); return }
     const s = await status()
     if (!s) return
     if (s === 'google') { setError(AUTH.errors.googleOnly, 'email'); return }
@@ -247,7 +253,8 @@ function AuthFlow({ mode, setMode, flip, google }: {
           <h1>{copy.title}</h1>
           <p className="auth-sub">{copy.sub}</p>
         </div>
-        {google && <GoogleButton />}
+        {/* (Create account: Google makes the account too, so the tick comes first there as well) */}
+        {google && <GoogleButton allowed={() => { if (signup && !agreed) { askToAgree(); return false } return true }} />}
         <EmailField id="auth-email" value={email} error={errorAt('email')} onChange={v => { setEmail(v); typed('email') }} />
         <Field
           id="auth-password" label={AUTH.fields.password} error={errorAt('password')}
@@ -269,21 +276,26 @@ function AuthFlow({ mode, setMode, flip, google }: {
                 required={signup} placeholder={AUTH.signup.confirmPlaceholder} autoComplete="new-password"
               />
             </Field>
+            <div className="auth-agree-wrap">
+              <label className="auth-agree" data-invalid={errorAt('agree') ? true : undefined}>
+                <input ref={agreeRef} type="checkbox" checked={agreed} aria-invalid={!!errorAt('agree')} aria-describedby={errorAt('agree') ? 'auth-agree-error' : undefined}
+                  onChange={e => { setAgreed(e.target.checked); typed('agree') }} />
+                <span>
+                  {AUTH.agree.before} <Link href="/terms" target="_blank">{AUTH.legal.terms}</Link> {AUTH.agree.and} <Link href="/privacy" target="_blank">{AUTH.legal.privacy}</Link>{AUTH.agree.after}
+                </span>
+              </label>
+              {errorAt('agree') && <p id="auth-agree-error" className="auth-field-error" role="alert">{errorAt('agree')}</p>}
+            </div>
           </div>
         </div>
         {messages}
         <SubmitButton busy={loading} label={copy.submit} busyLabel={copy.busy} />
-        {signup ? (
-          <p key="legal" className="auth-legal">
-            {AUTH.legal.before} <Link href="/terms">{AUTH.legal.terms}</Link> {AUTH.legal.and} <Link href="/privacy">{AUTH.legal.privacy}</Link>{AUTH.legal.after}
-          </p>
-        ) : (
-          <p key="secure" className="auth-legal auth-secure">
-            <span><ShieldCheck aria-hidden />{AUTH.legal.secure}</span>
-            <Link href="/terms">{AUTH.legal.terms}</Link>
-            <Link href="/privacy">{AUTH.legal.privacy}</Link>
-          </p>
-        )}
+        {/* (Create account's agreement is the tick above, user 2026-11-17: both tabs end with this line) */}
+        <p key="secure" className="auth-legal auth-secure">
+          <span><ShieldCheck aria-hidden />{AUTH.legal.secure}</span>
+          <Link href="/terms">{AUTH.legal.terms}</Link>
+          <Link href="/privacy">{AUTH.legal.privacy}</Link>
+        </p>
       </form>
     </>
   )
@@ -294,12 +306,12 @@ function AuthFlow({ mode, setMode, flip, google }: {
  * form. Signs in or up — a new Google account gets a Shortcut account straight away, no code (Google
  * confirmed the email); one with the same email as an existing account signs into that one (auth.ts).
  */
-function GoogleButton() {
+function GoogleButton({ allowed }: { allowed: () => boolean }) {
   const [going, setGoing] = useState(false)
   return (
     <>
       <button type="button" className="auth-google" disabled={going}
-        onClick={() => { setGoing(true); void signIn('google', { redirectTo: takeNextPath() }) }}>
+        onClick={() => { if (!allowed()) return; setGoing(true); void signIn('google', { redirectTo: takeNextPath() }) }}>
         <svg viewBox="0 0 48 48" aria-hidden="true">
           <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
           <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />

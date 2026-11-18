@@ -44,6 +44,7 @@ import { freezePart, partButtonsTarget, restsOnSplit, splitTargets } from '@/mod
 import { AccountMenu, openShortcuts } from '@/components/ui/account-menu'
 import { CreditsBadge, TopUpLink } from '@/components/ui/credits-badge'
 import { friendlyError } from '@/lib/friendlyError'
+import { track } from '@/lib/analytics'
 import { BrandLogo } from '@/components/ui/brand-logo'
 import { PandaLoader } from '@/components/ui/panda-loader'
 import { BrandLoader } from '@/components/ui/brand-loader'
@@ -7012,6 +7013,13 @@ export function EditorShell({
    */
   const captionsPanelOpen = optionsOpen && tool === 'captions'
   useEffect(() => { if (!captionsPanelOpen) setCaptionSel(s => (s.length ? [] : s)) }, [captionsPanelOpen])
+  // Google Analytics (lib/analytics.ts): each tool opened, and the Captions panel's tab, by name.
+  // (not the tool the editor opens on by itself: only one picked)
+  const toolSeen = useRef(false)
+  useEffect(() => {
+    if (!toolSeen.current) { toolSeen.current = true; return }
+    if (optionsOpen) track('editor_tool_open', { tool, section: tool === 'captions' ? captionTabPicked : undefined, editor: 'desktop' })
+  }, [tool, optionsOpen, captionTabPicked])
   // Anything else picked: the caption lines aren't any more
   useEffect(() => {
     if (lastPick || pickedSegId || activeOverlayId || activeTextOverlayId || pickedMusicId) setCaptionSel(s => (s.length ? [] : s))

@@ -6,6 +6,8 @@ import { useMediaStore } from '@/modules/media/store'
 import { useCaptionStore } from '@/modules/captions/store'
 import { useBrandStore } from './brandState'
 import { useGroupStore } from './groups'
+import { describeEdits } from './editTracking'
+import { track } from '@/lib/analytics'
 
 // Undo / redo for everything the editor saves: formats and frames, crop boxes and their motion,
 // removed parts of the video, overlays, text, audio, transitions, filters and the caption style.
@@ -86,7 +88,14 @@ function sync() {
 function endBurst() {
   if (timer) { clearTimeout(timer); timer = null }
   inBurst = false
+  const before = past[past.length - 1]
   committed = take()
+  // Google Analytics: what kind of edit this step was (editTracking.ts), never what it says
+  if (before) {
+    try {
+      for (const e of describeEdits(before, committed, useEditorStore.getState().mainVideoId)) track('editor_edit', { area: e.area, change: e.change, detail: e.detail })
+    } catch { /* counting never stops an edit */ }
+  }
 }
 
 function settle() {
@@ -114,6 +123,7 @@ export function undo() {
   if (inBurst) endBurst()
   const prev = past.pop()
   if (!prev) { sync(); return }
+  track('editor_action', { action: 'undo' })
   future.push(take())
   restoring = true
   restore(prev)
@@ -126,6 +136,7 @@ export function redo() {
   if (inBurst) endBurst()
   const next = future.pop()
   if (!next) { sync(); return }
+  track('editor_action', { action: 'redo' })
   past.push(take())
   restoring = true
   restore(next)

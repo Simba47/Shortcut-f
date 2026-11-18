@@ -13,6 +13,7 @@ import { ScrubPlayer } from '@/components/clips/ScrubPlayer'
 import { useLocalVideo } from '@/modules/clips/localVideo'
 import { usePolling } from '@/lib/usePolling'
 import { useCredits } from '@/lib/useCredits'
+import { exportCredits, MAX_CLIP_MS } from '@/lib/credits'
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { AiScan } from '@/components/clips/AiScan'
@@ -532,9 +533,58 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     a.click()
     a.remove()
   }
-  async function downloadClip(id: string) {
+  /**
+   * Export, then Download (user, 2026-11-17): a clip with an export that has all its edits downloads (as
+   * often as wanted, free); any other — never exported, or changed since — shows Export, which asks first
+   * what it costs (the server's own price: exportCredits, per started minute) and saves the file by
+   * itself once it's ready. A Stop still uses the credits; an export that fails gives them back.
+   */
+  const fresh = (c: { status: string; output_url: string | null; changed?: boolean } | undefined) =>
+    !!c && c.status === 'done' && !!c.output_url && !c.changed
+  /** The card's (or select mode's) button: downloads what's exported, asks about exporting the rest */
+  function exportOrDownload(ids: string[]) {
+    const list = ids.map(id => clips.find(x => x.id === id)).filter((c): c is NonNullable<typeof c> => !!c)
+    const toSave = list.filter(fresh)
+    // (already exporting: it saves by itself when done)
+    const toExport = list.filter(c => !fresh(c) && c.status !== 'rendering' && dlState[c.id] !== 'exporting' && dlState[c.id] !== 'stopping')
+    for (const c of toSave) saveFile(c.id)
+    if (!toExport.length) return
+    let need = 0
+    try {
+      for (const c of toExport) need += exportCredits(c.end_ms - c.start_ms)
+    } catch (e) {
+      // (over 5 minutes: the server refuses it too; said on the card)
+      const error = (e as Error).message
+      for (const c of toExport) if (c.end_ms - c.start_ms > MAX_CLIP_MS) setDlState(d => ({ ...d, [c.id]: { error } }))
+      const ok = toExport.filter(c => c.end_ms - c.start_ms <= MAX_CLIP_MS)
+      if (ok.length) exportOrDownload(ok.map(c => c.id))
+      return
+    }
+    const n = toExport.length
+    const what = n === 1 ? 'this clip' : `${n} clips`
+    const start = () => { for (const c of toExport) void exportClip(c.id); window.setTimeout(refreshCredits, 1500) }
+    if (!credits) {
+      // (credits off: no prices anywhere on the site)
+      confirm({ title: `Export ${what}?`, body: `${n === 1 ? 'It saves' : 'They save'} to your device when ready.`, confirmLabel: 'Export', cancelLabel: 'Cancel', tone: 'warning' }, start)
+      return
+    }
+    const cr = (x: number) => `${x} credit${x === 1 ? '' : 's'}`
+    if (credits.balance < need) {
+      confirm({
+        title: 'Not enough credits', body: `Exporting ${what} needs ${cr(need)}. You have ${cr(credits.balance)}.`,
+        confirmLabel: 'Get credits', cancelLabel: 'Cancel', tone: 'warning',
+      }, () => router.push('/pricing#topups'))
+      return
+    }
+    confirm({
+      title: `${cr(need)} ${need === 1 ? 'is' : 'are'} used for ${n === 1 ? 'this export' : `exporting ${n} clips`}`,
+      body: `${n === 1 ? 'It saves' : 'They save'} to your device when ready. You have ${cr(credits.balance)}.`,
+      confirmLabel: 'Export', cancelLabel: 'Cancel', tone: 'warning',
+    }, start)
+  }
+  async function exportClip(id: string) {
     const c = clips.find(x => x.id === id)
-    if (c?.status === 'done' && c.output_url) { saveFile(id); return }
+    if (fresh(c)) { saveFile(id); return }
     setDlState(d => ({ ...d, [id]: 'exporting' }))
     if (c?.status !== 'rendering') {
       const ask = fetch('/api/export', {
@@ -562,8 +612,10 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       const res = await fetch(`/api/clips/${id}/cancel-export`, { method: 'POST' })
       const d = await res.json().catch(() => null) as { status?: string; output_url?: string | null; error?: string } | null
       if (!res.ok || !d?.status) throw new Error(d?.error ?? '')
-      setClips(cs => cs.map(x => x.id === id ? { ...x, status: d.status!, output_url: d.output_url ?? null } : x))
+      // (edited before this export: its last file is the old one again — Export, not Download)
+      setClips(cs => cs.map(x => x.id === id ? { ...x, status: d.status!, output_url: d.output_url ?? null, changed: !!(d as { changed?: boolean }).changed } : x))
       setDlState(s => { const n = { ...s }; delete n[id]; return n })
+      refreshCredits()
     } catch (e) {
       setDlState(s => ({ ...s, [id]: 'exporting' }))
       setClipError('Couldn’t stop the export', e)
@@ -581,7 +633,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         saveFile(id)
       } else if (d.status === 'failed') {
         setClips(cs => cs.map(x => x.id === id ? { ...x, status: 'failed' } : x))
-        setDlState(s => ({ ...s, [id]: { error: 'The export failed' } }))
+        setDlState(s => ({ ...s, [id]: { error: 'The export failed. Your credits were given back.' } }))
+        refreshCredits()
       }
     }).catch(() => {}))), !!waitingDl)
   // Which section of the clip list is showing
@@ -783,11 +836,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     }
   }
 
-  /** Download every ticked clip (in the list's order), each as its card's Download does; then out of select mode */
+  /** Every ticked clip (in the list's order): the exported ones download, the rest export after one ask with the total; then out of select mode */
   function downloadSelected() {
     const ids = shownClips.filter(c => selected.has(c.id)).map(c => c.id)
     if (!ids.length) return
-    for (const id of ids) void downloadClip(id)
+    exportOrDownload(ids)
     stopSelecting()
   }
 
@@ -2530,7 +2583,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 previewing={viewMode === 'preview' && previewId === clip.id}
                 open={previewId === clip.id}
                 onClose={() => { setPreviewId(null); setViewMode('video') }}
-                onDownload={() => downloadClip(clip.id)}
+                onDownload={() => exportOrDownload([clip.id])}
                 onStopDownload={() => stopDownload(clip.id)}
                 manual={manualOnly}
                 edited={manualOnly && isEdited(clip)}
@@ -2574,12 +2627,19 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
                     Delete{selected.size > 0 ? ` ${selected.size}` : ''}
                   </button>
-                  {/* (each ticked clip as its own Download does it: exported, then saved when ready — their
-                      cards show it, so select mode closes) */}
-                  <button type="button" disabled={selected.size === 0} onClick={downloadSelected} className="cb-bulk" data-tone="primary">
-                    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    Download{selected.size > 0 ? ` ${selected.size}` : ''}
-                  </button>
+                  {/* (Export N while any ticked clip still needs an export — one ask with the total, the exported
+                      ones just download; Download N when all are exported. Their cards show it, so select mode closes) */}
+                  {(() => {
+                    const allFresh = selected.size > 0 && shownClips.filter(c => selected.has(c.id)).every(fresh)
+                    return (
+                      <button type="button" disabled={selected.size === 0} onClick={downloadSelected} className="cb-bulk" data-tone="primary">
+                        {allFresh
+                          ? <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                          : <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 9.5V2M4 5l3-3 3 3M2 8.5v3h10v-3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                        {allFresh ? 'Download' : 'Export'}{selected.size > 0 ? ` ${selected.size}` : ''}
+                      </button>
+                    )
+                  })()}
                 </div>
               </div>
             )
@@ -3447,7 +3507,14 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
   const renameIcon = (size: number) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 4h1a3 3 0 013 3 3 3 0 013-3h1" /><path d="M13 20h-1a3 3 0 01-3-3 3 3 0 01-3 3H5" /><path d="M5 16H4a2 2 0 01-2-2v-4a2 2 0 012-2h1" /><path d="M13 8h7a2 2 0 012 2v4a2 2 0 01-2 2h-7" /><path d="M9 7v10" /></svg>
   // Download's button: Stop while the clip exports
   const exporting = download === 'preparing' || download === 'stopping'
-  const downloadLabel = download === 'preparing' ? 'Stop' : download === 'stopping' ? 'Stopping…' : download === 'failed' ? 'Retry' : 'Download'
+  // (user, 2026-11-17) Export until there's an export with all its edits, then Download; changed again → Export
+  const fresh = status === 'done' && !!outputUrl && !changed
+  const downloadLabel = download === 'preparing' ? 'Stop' : download === 'stopping' ? 'Stopping…' : fresh ? 'Download' : 'Export'
+  const actIcon = (size: number) => exporting ? stopIcon(size) : fresh ? (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  ) : (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 9.5V2M4 5l3-3 3 3M2 8.5v3h10v-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  )
   const tapDownload = (e: React.MouseEvent) => { e.stopPropagation(); if (download === 'preparing') onStopDownload(); else onDownload() }
   const stopIcon = (size: number) => <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
   const sub = useSubEdit(id, onSubEdited)
@@ -3545,10 +3612,8 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
                   Edit
                 </button>
                 <button type="button" onClick={tapDownload} disabled={download === 'stopping'} className="cb-act justify-center"
-                  data-tone={download === 'failed' || exporting ? 'danger' : undefined}>
-                  {exporting ? stopIcon(11) : (
-                    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  )}
+                  data-tone={exporting ? 'danger' : undefined}>
+                  {actIcon(12)}
                   {downloadLabel}
                 </button>
                 {onRename && (
@@ -3658,10 +3723,8 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
           </button>
           <button onClick={tapDownload} disabled={download === 'stopping'}
             className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-90 disabled:opacity-70"
-            style={download === 'failed' || exporting ? { color: '#f87171', border: '1px solid rgba(239,68,68,0.45)' } : { background: ACCENT, color: '#000' }}>
-            {exporting ? stopIcon(12) : (
-              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            )}
+            style={exporting ? { color: '#f87171', border: '1px solid rgba(239,68,68,0.45)' } : { background: ACCENT, color: '#000' }}>
+            {actIcon(13)}
             {downloadLabel}
           </button>
           {onRename && (

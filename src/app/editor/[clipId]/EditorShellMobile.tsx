@@ -9,6 +9,7 @@ import { VideoPreview, OutputCanvas } from '@/components/editor/VideoPreview'
 import { computeCutRanges, reactionRanges, removedMs } from '@/lib/cuts'
 import { captionCredits, captionSpan } from '@/lib/credits'
 import { useCredits } from '@/lib/useCredits'
+import { track } from '@/lib/analytics'
 import { SegmentTimeline } from '@/components/editor/SegmentTimeline'
 import { CaptionStyler } from '@/components/editor/CaptionStyler'
 import { TextOverlayPanel } from '@/components/editor/TextOverlayPanel'
@@ -188,6 +189,12 @@ export function EditorShellMobile({
 
   // ── Local UI state ────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<MobileTab>('timeline')
+  // Google Analytics (lib/analytics.ts): each tab opened by name (not the one it opens on)
+  const tabSeen = useRef(false)
+  useEffect(() => {
+    if (!tabSeen.current) { tabSeen.current = true; return }
+    track('editor_tool_open', { tool: activeTab, editor: 'mobile' })
+  }, [activeTab])
   const [activeTextOverlayId, setActiveTextOverlayId] = useState<string | null>(null)
   // Captions are on their way while a caption job for this video is waiting/running and this
   // clip doesn't have its words yet (same rule as the desktop editor)

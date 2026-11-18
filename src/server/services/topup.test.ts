@@ -220,3 +220,38 @@ test('a Razorpay plan made under one set of keys is not reused under another', o
     await sql`DELETE FROM billing_plans WHERE key_id IN ('rzp_test_firstkey0000001', 'rzp_test_secondkey000002')`
   }
 })
+
+test('Google Analytics: a top-up confirmed by the browser and by the webhook is one purchase, by the account id only', opts, async () => {
+  // (server/analytics.ts: on with a Measurement ID and the API secret; Google's address caught here)
+  const sent: { url: string; body: { client_id: string; user_id: string; events: { name: string; params: Record<string, unknown> }[] } }[] = []
+  const inner = globalThis.fetch
+  Object.assign(process.env, { NEXT_PUBLIC_GA_ID: 'G-TEST000', GA4: 'test-secret' })
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).startsWith('https://www.google-analytics.com/')) { sent.push({ url: String(url), body: JSON.parse(String(init?.body)) }); return new Response(null, { status: 204 }) }
+    return inner(url as never, init)
+  }) as typeof fetch
+  try {
+    const u = await newUser()
+    const order = await topup.startTopup(u, 'medium')
+    const paid = await mock.mockPay({ orderId: order.orderId, outcome: 'success' }, collect)
+    await topup.completeTopup(u, { orderId: order.orderId, paymentId: paid.razorpay_payment_id, signature: paid.razorpay_signature })
+    await deliverAll()
+    await topup.completeTopup(u, { orderId: order.orderId, paymentId: paid.razorpay_payment_id, signature: paid.razorpay_signature })
+    // (on the site it goes after the answer; here, outside a request, at once: let it land)
+    await new Promise(r => setTimeout(r, 50))
+    assert.equal(sent.length, 1, 'one purchase for one payment')
+    assert.match(sent[0].url, /\/mp\/collect\?measurement_id=G-TEST000&api_secret=test-secret$/)
+    const b = sent[0].body
+    assert.equal(b.user_id, u)
+    assert.match(b.client_id, /^\d+\.1$/)            // no browser here: the id made from the account
+    assert.equal(b.events[0].name, 'purchase')
+    const p = b.events[0].params
+    assert.equal(p.transaction_id, paid.razorpay_payment_id)
+    assert.equal(p.value, 489); assert.equal(p.currency, 'INR')
+    assert.deepEqual(p.items, [{ item_id: 'topup:medium', item_name: '500 credits top-up', item_category: 'topup', price: 489, quantity: 1 }])
+    assert.ok(!JSON.stringify(b).includes('@'), 'no email goes to Google')
+  } finally {
+    globalThis.fetch = inner
+    delete process.env.NEXT_PUBLIC_GA_ID; delete process.env.GA4
+  }
+})

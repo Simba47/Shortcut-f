@@ -16,6 +16,7 @@
     "test:brand-link": "npx tsx --test src/server/services/brandFromLink.test.ts",
     "test:email": "npx tsx --test src/lib/shared/email.test.ts",
     "test:routes": "npx tsx --test src/lib/publicPaths.test.ts",
+    "test:analytics": "npx tsx --test src/lib/analytics.test.ts",
     "test:editor-words": "npx tsx --test src/modules/editor/transcriptWindow.test.ts"
   },
   "dependencies": {

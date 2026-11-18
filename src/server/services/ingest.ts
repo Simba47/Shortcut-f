@@ -103,7 +103,7 @@ export async function signUploadRequest(userId: string, r: SignUploadRequest): P
       await checkVideoQuota(userId)
       await checkFileSizeQuota(userId, r.file.size)
       const { checkBeforeUpload } = await import('./readingUsage')
-      await checkBeforeUpload(userId, typeof r.file.duration_ms === 'number' ? r.file.duration_ms : null)
+      await checkBeforeUpload(userId, typeof r.file.duration_ms === 'number' ? r.file.duration_ms : null, r.file.size)
     }
     const key = `raw/${userId}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}${ext}`
     const contentType = r.file.type || 'video/mp4'
@@ -178,7 +178,7 @@ export async function completeUpload(userId: string, storagePath: string, durati
     } else {
       await checkFileSizeQuota(userId, size)
       await checkVideoQuota(userId)
-      await checkBeforeUpload(userId, durationMs ?? null)
+      await checkBeforeUpload(userId, durationMs ?? null, size)
     }
   } catch (e) {
     await r2.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: storagePath })).catch(() => {})
@@ -196,7 +196,7 @@ export async function completeUpload(userId: string, storagePath: string, durati
     // Counted now, whatever is done with the video after. Credits spent between the check above and
     // here: the upload is taken back, as if the check had said so.
     try {
-      await recordReading(userId, video.id, durationMs ?? null)
+      await recordReading(userId, video.id, durationMs ?? null, size)
     } catch (e) {
       await sql`DELETE FROM videos WHERE id = ${video.id}`
       await r2.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: storagePath })).catch(() => {})
