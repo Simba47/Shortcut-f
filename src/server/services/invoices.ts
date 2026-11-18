@@ -7,6 +7,7 @@ import { splitTax, fiscalYear, formatInvoiceNo, normalizeGstin, GST_STATES, stat
 import { ensureBillingSchema } from '@/server/services/billingSchema'
 import { sendReceiptEmail } from '@/modules/auth/mailer'
 import { describePurchase } from '@/lib/purchase'
+import { invoiceFileName, invoicePdf } from '@/server/services/invoicePdf'
 import { queuePurchase } from '@/server/analytics'
 
 /**
@@ -160,8 +161,13 @@ async function emailReceipt(paymentRowId: string) {
   const [r] = await sql<(DbRow & { emailed_at: Date | null })[]>`SELECT * FROM payments WHERE id = ${paymentRowId}`
   if (!r || r.emailed_at || !r.customer?.email) return
   const inv = toInvoice(r)
+  const purchase = describePurchase(inv.plan, inv.paidAt)
+  // The invoice / receipt goes with the email as a PDF; if it can't be made, the email still goes (it links to the page)
+  const pdf = await invoicePdf(inv, purchase)
+    .then(content => ({ filename: invoiceFileName(inv), content }))
+    .catch(e => { console.error('[billing] invoice PDF failed:', e instanceof Error ? e.message : e); return null })
   await sendReceiptEmail({
-    to: inv.customer.email, name: inv.customer.name, purchase: describePurchase(inv.plan, inv.paidAt), amountPaise: inv.amountPaise,
+    to: inv.customer.email, name: inv.customer.name, purchase, amountPaise: inv.amountPaise, pdf,
     invoiceNo: inv.invoiceNo, paidAt: inv.paidAt, paymentId: inv.razorpayPaymentId, invoiceId: inv.id, taxInvoice: !!inv.seller?.taxInvoice,
   })
   await sql`UPDATE payments SET emailed_at = now() WHERE id = ${paymentRowId}`

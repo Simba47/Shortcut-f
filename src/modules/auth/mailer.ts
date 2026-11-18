@@ -66,9 +66,13 @@ export async function sendOtpEmail(
 }
 
 /** The receipt for a payment, with a link to its invoice on the billing page (lib/receiptEmail.ts builds it) */
-export async function sendReceiptEmail(r: Omit<ReceiptEmailInput, 'base'> & { to: string }): Promise<void> {
+export async function sendReceiptEmail(r: Omit<ReceiptEmailInput, 'base' | 'attached'> & {
+  to: string
+  /** The invoice / receipt as a PDF, when it could be made */
+  pdf?: { filename: string; content: Uint8Array } | null
+}): Promise<void> {
   const base = (process.env.APP_URL || process.env.AUTH_URL || 'https://shortcutapp.in').replace(/\/$/, '')
-  const mail = receiptEmail({ ...r, base })
+  const mail = receiptEmail({ ...r, base, attached: !!r.pdf })
   const { error } = await getResend().emails.send({
     from: FROM,
     to: r.to,
@@ -77,6 +81,7 @@ export async function sendReceiptEmail(r: Omit<ReceiptEmailInput, 'base'> & { to
     subject: mail.subject,
     html: mail.html,
     text: mail.text,
+    ...(r.pdf ? { attachments: [{ filename: r.pdf.filename, content: Buffer.from(r.pdf.content), contentType: 'application/pdf' }] } : {}),
   })
   if (error) {
     console.error('[mailer] Resend rejected the receipt email:', error)

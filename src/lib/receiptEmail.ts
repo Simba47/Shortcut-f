@@ -15,6 +15,8 @@ export interface ReceiptEmailInput {
   taxInvoice: boolean
   /** The site's address, no trailing slash (https://shortcutapp.in) */
   base: string
+  /** The invoice / receipt goes with the email as a PDF (server/services/invoicePdf.ts) */
+  attached?: boolean
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
@@ -97,7 +99,7 @@ export function receiptEmail(r: ReceiptEmailInput): { subject: string; html: str
         </td></tr>
         <tr><td style="padding:24px 28px 8px;">
           <a href="${esc(link)}" style="display:inline-block;background:#0a0a0a;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 22px;border-radius:10px;">View ${doc}</a>
-          <span style="display:inline-block;margin-left:10px;font-size:12.5px;color:#71717a;">Print it or save it as a PDF from there.</span>
+          <span style="display:inline-block;margin-left:10px;font-size:12.5px;color:#71717a;">${r.attached ? `Your ${doc} is also attached as a PDF.` : 'Print it or save it as a PDF from there.'}</span>
         </td></tr>
         <tr><td style="padding:16px 28px 28px;">
           ${note ? `<p style="margin:0 0 10px;font-size:13px;line-height:1.55;color:#52525b;">${esc(note)}</p>` : ''}
@@ -123,6 +125,7 @@ export function receiptEmail(r: ReceiptEmailInput): { subject: string; html: str
     ...rows.map(([k, v]) => `${k}: ${v}`),
     '',
     `View your ${doc}: ${link}`,
+    ...(r.attached ? [`Your ${doc} is also attached to this email as a PDF.`] : []),
     '',
     ...(note ? [note] : []),
     `Questions? Reply to this email or write to ${COMPANY.email}.`,
