@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { CreditsInfo } from '@/lib/useCredits'
 
 // Uploads a video straight from the browser to R2 as a multipart upload: the file goes up in
 // 16 MB parts, PARALLEL_PARTS at once (one at a time left most of the connection idle — each part
@@ -131,7 +132,7 @@ function online(): Promise<void> {
 interface Multipart { key: string; uploadId: string; etags: (string | null)[] }
 
 /** `asset`: B-roll uploaded in the editor (kept off the dashboard, not counted as a video) */
-export function useVideoUpload(onDone: (videoId: string) => void, { asset = false }: { asset?: boolean } = {}) {
+export function useVideoUpload(onDone: (videoId: string, credits?: CreditsInfo) => void, { asset = false }: { asset?: boolean } = {}) {
   const [state, setState] = useState<UploadState>(IDLE)
   const fileRef = useRef<File | null>(null)
   const mpRef = useRef<Multipart | null>(null)
@@ -421,7 +422,9 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw userError(data.error ?? 'Upload failed', res.status < 500)
-    return data.video_id as string
+    // (the balance after this upload was paid for, when credits are on: the header shows it at once)
+    const credits = data.credits && typeof data.credits.balance === 'number' ? data.credits as CreditsInfo : undefined
+    return { videoId: data.video_id as string, credits }
   }
 
   async function run(resumes = 0) {
@@ -443,10 +446,10 @@ export function useVideoUpload(onDone: (videoId: string) => void, { asset = fals
         uploadedKeyRef.current = key
         mpRef.current = null
       }
-      const videoId = await finish(file, key)
+      const { videoId, credits } = await finish(file, key)
       setState(IDLE)
       fileRef.current = null; uploadedKeyRef.current = null
-      onDoneRef.current(videoId)
+      onDoneRef.current(videoId, credits)
     } catch (e) {
       if (fileRef.current !== file) return   // cancelled, or another upload started
       stopAll()
