@@ -6,6 +6,7 @@ import { type PaidPayment, fetchRazorpayPayment, paidPayment } from '@/lib/razor
 import { splitTax, fiscalYear, formatInvoiceNo, normalizeGstin, GST_STATES, stateName } from '@/lib/invoice'
 import { ensureBillingSchema } from '@/server/services/billingSchema'
 import { sendReceiptEmail } from '@/modules/auth/mailer'
+import { describePurchase } from '@/lib/purchase'
 import { queuePurchase } from '@/server/analytics'
 
 /**
@@ -160,8 +161,8 @@ async function emailReceipt(paymentRowId: string) {
   if (!r || r.emailed_at || !r.customer?.email) return
   const inv = toInvoice(r)
   await sendReceiptEmail({
-    to: inv.customer.email, name: inv.customer.name, planName: inv.planName, amountPaise: inv.amountPaise,
-    invoiceNo: inv.invoiceNo, paidAt: inv.paidAt, invoiceId: inv.id, taxInvoice: !!inv.seller?.taxInvoice,
+    to: inv.customer.email, name: inv.customer.name, purchase: describePurchase(inv.plan, inv.paidAt), amountPaise: inv.amountPaise,
+    invoiceNo: inv.invoiceNo, paidAt: inv.paidAt, paymentId: inv.razorpayPaymentId, invoiceId: inv.id, taxInvoice: !!inv.seller?.taxInvoice,
   })
   await sql`UPDATE payments SET emailed_at = now() WHERE id = ${paymentRowId}`
 }
