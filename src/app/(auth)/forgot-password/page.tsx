@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 import { AuthShell, RECOVERY_BRAND } from '@/components/auth/AuthShell'
@@ -14,6 +14,11 @@ export default function ForgotPasswordPage() {
   const [sent, setSent] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const t = AUTH.recovery.forgot
+  // (from the sign-in form's "Forgot password?" or "Use a different email": what was typed there)
+  useEffect(() => {
+    const given = new URLSearchParams(window.location.search).get('email')
+    if (given) setEmail(given)
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()

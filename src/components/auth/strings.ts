@@ -107,6 +107,7 @@ export const AUTH = {
       busy: 'Updating…',
       missingEmail: 'This page needs the email you’re resetting. Start again from “Forgot password?”.',
       startAgain: 'Start again',
+      otherEmail: 'Use a different email',
     },
     verify: {
       title: 'Check your email',

@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { ArrowLeft, ShieldCheck } from 'lucide-react'
 import { keepNextPath, takeNextPath } from '@/lib/nextPath'
 import { AuthShell, NavSwitch } from './AuthShell'
-import { CodeInput, EmailField, Field, PasswordInput, PasswordRules, SubmitButton, passwordOk } from './fields'
+import { CodeInput, EmailField, Field, PasswordInput, PasswordRules, SubmitButton, emailLooksRight, passwordOk } from './fields'
 import { AUTH } from './strings'
 
 type Mode = 'signin' | 'signup'
@@ -78,6 +78,8 @@ function AuthFlow({ mode, setMode, flip, google }: {
   const [notice, setNotice] = useState<string | null>(null)
   const [cooldown, setCooldown] = useState(0)
   const router = useRouter()
+  /** "Forgot password?" is sending the code */
+  const [forgotBusy, setForgotBusy] = useState(false)
   const confirmRef = useRef<HTMLInputElement>(null)
   const passwordRef = useRef<HTMLInputElement>(null)
   const codeRef = useRef<HTMLInputElement>(null)
@@ -208,6 +210,26 @@ function AuthFlow({ mode, setMode, flip, google }: {
     if (!r?.ok) { const d = r ? await r.json().catch(() => ({})) : {}; setError(r?.status === 429 && d.error ? d.error : AUTH.errors.resendFailed) }
   }
 
+  /** "Forgot password?" without the script (opened in a new tab…): the email page, what was typed in it */
+  const forgotHref = `/forgot-password${email.trim() ? `?email=${encodeURIComponent(email.trim())}` : ''}`
+  /**
+   * "Forgot password?" (user, 2026-11-18): an email typed in the box → the code goes to it now and on
+   * to the code page; none, or not an email yet → the email page asks for it (what was typed in it).
+   */
+  async function forgot(e: React.MouseEvent<HTMLAnchorElement>) {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return   // (a new tab: the plain link)
+    e.preventDefault()
+    if (forgotBusy) return
+    if (!emailLooksRight(email)) { router.push(forgotHref); return }
+    setForgotBusy(true)
+    const to = norm()
+    const r = await fetch('/api/auth/forgot-password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: to }),
+    }).catch(() => null)
+    // (could not reach the server: the email page, to try again from there)
+    router.push(r?.ok ? `/reset-password?email=${encodeURIComponent(to)}` : forgotHref)
+  }
+
   const signup = mode === 'signup'
   const copy = signup ? AUTH.signup : AUTH.signin
   // (an error about a box shows under that box; only the rest use the form's message line)
@@ -258,7 +280,7 @@ function AuthFlow({ mode, setMode, flip, google }: {
         <EmailField id="auth-email" value={email} error={errorAt('email')} onChange={v => { setEmail(v); typed('email') }} />
         <Field
           id="auth-password" label={AUTH.fields.password} error={errorAt('password')}
-          aside={<Link href="/forgot-password" className="auth-link auth-forgot" data-off={signup || undefined} tabIndex={signup ? -1 : undefined}>{AUTH.fields.forgot}</Link>}
+          aside={<Link href={forgotHref} onClick={forgot} aria-disabled={forgotBusy || undefined} className="auth-link auth-forgot" data-off={signup || undefined} tabIndex={signup ? -1 : undefined}>{forgotBusy ? AUTH.recovery.forgot.busy : AUTH.fields.forgot}</Link>}
         >
           <PasswordInput
             ref={passwordRef} id="auth-password" value={password} invalid={!!errorAt('password')}

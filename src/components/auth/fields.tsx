@@ -87,6 +87,8 @@ export const PASSWORD_RULES = [
 ] as const
 
 export const passwordOk = (p: string) => PASSWORD_RULES.every(r => r.ok(p))
+/** Typed well enough to send a code to (name@place.tld) — the same shape the servers accept */
+export const emailLooksRight = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())
 
 /** The three rules under a new password, each ticking as it's met */
 export function PasswordRules({ value }: { value: string }) {
