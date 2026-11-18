@@ -341,6 +341,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const [formEnd, setFormEnd] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  // The work under way only adds a clip to the board (no editor to open): its button's spinner says so, not the
+  // full-screen loader (user, 2026-11-18: "+" looked like the whole page reloading)
+  const [busyAdding, setBusyAdding] = useState(false)
   // The Clipboard's error banner (user, 2026-11-12): what failed (title) and why, in plain words (detail)
   const [clipError, setClipErrorState] = useState<{ title: string; detail: string } | null>(null)
   const setClipError = (title: string | null, e?: unknown) => setClipErrorState(title ? { title, detail: friendlyError(e) } : null)
@@ -997,6 +1000,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
 
   async function createClip(startMs: number, endMs: number, key: string, title?: string, from?: { s: Suggestion; source: 'best_moments' | 'clip_search' }, open = true) {
     setBusy(key)
+    setBusyAdding(!open)
     setClipError(null)
     try {
       const res = await fetch('/api/clips', {
@@ -1348,8 +1352,16 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // The one shown open (wide): the one picked, else Ask AI while it has results (its list needs the room; both
   // at their usual sizes left it none — user, 2026-11-17), unless the bar between them was dragged
   const openPanel: 'mmc' | 'ask' | null = aiFocus ?? (hasAskResults && mmcH === null ? 'ask' : null)
-  /** A click anywhere in a panel opens it (after the click does what it was for: nothing jumps under it) */
-  const openOnClick = (which: 'mmc' | 'ask') => wide ? () => { if (openPanel !== which) setAiFocus(which) } : undefined
+  /**
+   * A click in a panel's own space opens it (user, 2026-11-18): not on what's there to use — its buttons, links,
+   * boxes, switches, choices, the clips in it — those only do their own job and the other panel stays as it is
+   */
+  const openOnClick = (which: 'mmc' | 'ask') => wide ? (e: React.MouseEvent) => {
+    if (openPanel === which) return
+    const t = e.target as HTMLElement
+    if (t.closest('button, a, input, textarea, select, label, summary, video, [contenteditable="true"], [role="button"], [role="switch"], [role="radio"], [role="checkbox"], [role="option"], [role="tab"], [role="menuitem"], [role="slider"], [role="listbox"], [role="combobox"]')) return
+    setAiFocus(which)
+  } : undefined
   function startSplitResize(e: React.PointerEvent) {
     if (e.button !== 0) return
     e.preventDefault(); e.stopPropagation()
@@ -2365,7 +2377,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     <div className="cb-page h-screen flex flex-col overflow-hidden">
       {/* Opening a clip: covers the page while the clip is created and the editor loads */}
       {confirmDialog}
-      {busy && <BrandLoaderScreen mascot overlay label="Getting your clip ready, please wait…" />}
+      {busy && !busyAdding && <BrandLoaderScreen mascot overlay label="Getting your clip ready, please wait…" />}
       {/* Nav */}
       <nav className="cb-nav app-nav relative z-10 flex items-center gap-3 px-4 shrink-0" style={{ height: 56 }}>
         {/* Where am I: Shortcut | Dashboard › Clip board */}
