@@ -6,6 +6,7 @@ import { useEffect } from 'react'
 import { needsSignIn } from '@/lib/publicPaths'
 import { BrandKitDialogHost } from '@/components/brand/BrandKitDialog'
 import { GoogleAnalytics } from '@/components/analytics/GoogleAnalytics'
+import { LastSeenPing } from '@/components/LastSeenPing'
 
 function SessionWatcher() {
   const { status, data } = useSession()
@@ -34,6 +35,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <SessionWatcher />
       {/* Google Analytics: only where NEXT_PUBLIC_GA_ID is set (the live site) */}
       <GoogleAnalytics />
+      {/* Signed in with the site open: the admin's green "online" dot */}
+      <LastSeenPing />
       {children}
       {/* Brand kits, as a popup over any page (openBrandKits) */}
       <BrandKitDialogHost />
