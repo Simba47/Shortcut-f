@@ -409,7 +409,8 @@ function paintFrameText(ctx: CanvasRenderingContext2D, it: FrameItem, fallbackBg
   ctx.save()
   clipArea(ctx, a)
   const bg = it.bg || fallbackBg
-  if (bg && bg !== 'none') { ctx.fillStyle = bg; ctx.fillRect(a.x, a.y, a.w, a.h) }
+  // (at its opacity: what's behind shows through — render.py the same)
+  if (bg && bg !== 'none') { ctx.save(); ctx.globalAlpha = Math.min(1, Math.max(0.1, it.bg_opacity ?? 1)); ctx.fillStyle = bg; ctx.fillRect(a.x, a.y, a.w, a.h); ctx.restore() }
   // A ticker runs inside its band. Any other frame text can be dragged anywhere in the frame (user,
   // 2026-11-06): its words go on top of everything (`later`), not cut at its area's edge — its
   // area's colour stays where the area is
@@ -751,12 +752,27 @@ function paintFrame(
   // The frame's own background (frame.bg, or a Branded card's look): a colour, gradient or pattern
   // behind and around its videos — as the export draws it
   const ownBg = frameBackgroundOf(layout, frame)
+  // (less than solid — its Opacity, user 2026-11-19: the main video, blurred as Blur fill blurs it, shows through)
+  const bgAlpha = ownBg ? Math.min(1, Math.max(0, ownBg.opacity ?? 1)) : 1
+  if (ownBg && bgAlpha < 1) {
+    ctx.fillStyle = '#000'
+    ctx.fillRect(0, 0, W, H)
+    if (vW && vH) {
+      ctx.save()
+      ctx.filter = `blur(${Math.round(W / 22)}px) brightness(0.65)`
+      coverSource(ctx, video, vW, vH, -W * 0.05, -H * 0.05, W * 1.1, H * 1.1)
+      ctx.restore()
+    }
+  }
+  ctx.save()
+  ctx.globalAlpha = bgAlpha
   ctx.fillStyle = ownBg ? ownBg.color : base === 'band' ? bandBg : '#000'
   ctx.fillRect(0, 0, W, H)
   if (ownBg) {
     const bgImg = frameBackground(ownBg, W, H)
     if (bgImg) ctx.drawImage(bgImg, 0, 0)
   }
+  ctx.restore()
   if (base === 'blur') {
     // The blurred picture follows what its slot shows: a photo or video put there, else the main video
     const over = itemAt(frame, BLUR_SOURCE_SLOT, tMs, seg)
@@ -781,8 +797,9 @@ function paintFrame(
   for (const area of frameAreas(layout, frameBandShown(seg), seg.frame)) {
     const a = px(area)
     if (area.kind === 'caption') {
-      // A plain strip the captions are drawn on
-      const bg = area.bg ?? bandBg
+      // A plain strip the captions are drawn on (the frame's own background shows through it: one background
+      // for the whole frame, user 2026-11-19 — unless the template gives the strip a colour of its own)
+      const bg = area.bg ?? (ownBg ? 'none' : bandBg)
       if (bg !== 'none') { ctx.fillStyle = bg; ctx.fillRect(a.x, a.y, a.w, a.h) }
       continue
     }
@@ -792,22 +809,28 @@ function paintFrame(
     const at = itemAt(frame, lane, tMs, seg)
     const it = at?.hidden ? null : at
     if (area.kind === 'band') {
-      const bg = area.bg ?? bandBg
+      // (the frame's own background shows through the text strip, as through the captions strip)
+      const bg = area.bg ?? (ownBg ? 'none' : bandBg)
       const elapsed = it ? tMs - Math.max(it.start_ms, seg.start_ms) : 0
       // Captions on the band are drawn with the other captions, positioned here
-      if (it?.kind === 'text' && !it.captions) paintFrameText(ctx, it, bg, a, !!area.ticker, elapsed, words)
+      // (text that took the strip's colour, with the frame's own background: see-through too — a colour picked
+      // for the text itself stays; render.py the same)
+      const shown = it?.kind === 'text' && ownBg && area.bg === undefined && (!it.bg || it.bg.toLowerCase() === bandBg.toLowerCase()) ? { ...it, bg: 'none' } : it
+      if (shown?.kind === 'text' && !shown.captions) paintFrameText(ctx, shown, bg, a, !!area.ticker, elapsed, words)
       else if (bg !== 'none') { ctx.save(); clipArea(ctx, a); ctx.fillStyle = bg; ctx.fillRect(a.x, a.y, a.w, a.h); ctx.restore() }
       continue
     }
     const contain = area.fit === 'contain'
-    const fill = area.fill ?? (contain ? '#000' : '#111')
+    // (with the frame's own background, a slot is see-through where nothing covers it: empty, round a picture
+    // shown whole, round a smaller or rounded box — the one background shows there)
+    const fill = ownBg ? 'none' : area.fill ?? (contain ? '#000' : '#111')
     // A photo or video put in a shown-whole slot replaces the main video while it shows (shown whole
     // too, it wouldn't cover it: the main video would peek around it)
     const coveredHere = contain && !!it && (it.kind === 'photo' || it.kind === 'video')
     // With its own background, a slot showing a video or photo leaves the ring around a rounded
     // one see-through: the background shows there, not black (render.py: the slot's alpha mask)
     const showsMedia = (main.has(area.slot) && !frame.main_hidden?.[String(area.slot)]) || (!!it && (it.kind === 'photo' || it.kind === 'video'))
-    const ring = ownBg && !contain && showsMedia ? 'none' : '#000'
+    const ring = ownBg ? 'none' : '#000'
     // Underneath: the main video if this slot shows it, otherwise an empty (dark) slot
     if (fill !== 'none' && ring !== 'none') { ctx.save(); clipArea(ctx, a); ctx.fillStyle = fill; ctx.fillRect(a.x, a.y, a.w, a.h); ctx.restore() }
     if (main.has(area.slot) && !frame.main_hidden?.[String(area.slot)] && vW && vH && !coveredHere) {

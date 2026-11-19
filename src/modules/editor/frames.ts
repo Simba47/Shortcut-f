@@ -1,5 +1,5 @@
 import type { FrameLayout, FrameBand, FrameHold, FrameItem, FrameLane, FrameSettings, LayoutType, SegmentLocal, CornerStyle } from '@chai-cut/shared'
-import { cardAreas, cleanCardLook } from '@/lib/shared/brandCard'
+import { cardAreas, cleanCardLook, frameBackgroundOf } from '@/lib/shared/brandCard'
 
 // Frame templates. Most divide the 9:16 reel top-to-bottom into rows (media slots, a letterbox
 // band for text, a caption strip) whose lines can be dragged; the others place areas anywhere —
@@ -531,6 +531,23 @@ export function frameHasBand(layout: FrameLayout): boolean {
   return frameAreas(layout).some(a => a.kind === 'band')
 }
 
+/**
+ * Whether the band's colour shows anywhere on this frame (user, 2026-11-19: on Blur fill "Band colour" changed
+ * nothing): it fills a band-based frame's background, and every band or captions strip that has no background of
+ * its own. Nowhere on Blur fill (its strips are see-through on its blur), nor on a frame with its own background
+ * (a colour, gradient or a Branded card: one background for the whole frame, its strips see-through over it).
+ * (As VideoPreview paints it.)
+ */
+export function frameBandColourShows(seg: SegmentLocal): boolean {
+  if (!isFrameLayout(seg.layout)) return false
+  const layout = seg.layout as FrameLayout
+  const f = frameOf(seg)
+  // (the frame's own background: one for the whole frame, its strips see-through over it — user, 2026-11-19)
+  if (frameBackgroundOf(layout, f)) return false
+  if (frameBase(layout) === 'band') return true
+  return frameAreas(layout, frameBandShown(seg), f).some(x => (x.kind === 'band' || x.kind === 'caption') && x.bg === undefined)
+}
+
 /** The frame's text lanes, top to bottom ('band', and 'band2' where it has a second text area) */
 export function frameTextLanes(layout: FrameLayout): TextLane[] {
   return frameAreas(layout).flatMap(a => a.kind === 'band' ? [a.lane] : [])
@@ -541,7 +558,9 @@ export function textLaneLook(seg: Pick<SegmentLocal, 'layout' | 'frame'>, lane: 
   const band = { ...DEFAULT_BAND, ...seg.frame?.band }
   if (!isFrameLayout(seg.layout) || !isTextLane(lane)) return { bg: '#000000', color: band.color, size: 80 }
   const a = frameTextArea(seg.layout, lane, seg.frame)
-  return { bg: a?.bg ?? band.bg, color: a?.color ?? band.color, size: a?.size ?? band.size }
+  // (with the frame's own background, new text is see-through on it, as the strip is)
+  const own = !a?.bg && frameBackgroundOf(seg.layout, seg.frame ?? null)
+  return { bg: a?.bg ?? (own ? 'none' : band.bg), color: a?.color ?? band.color, size: a?.size ?? band.size }
 }
 
 /**

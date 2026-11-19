@@ -6625,6 +6625,15 @@ export function EditorShell({
   // The export, always in the top bar's right end (user, 2026-11-12: it was in the preview column, gone when
   // that was closed). One place that says how things are: Export · Exporting (Cancel) · Download · Export again
   const exportOutdated = hasOutput && editedSinceExport
+  // The note under the preview that says so: 5 s each time it starts to apply (the first edit after an export, or
+  // a clip opened that way), then it fades and folds away (user, 2026-11-19) — the top bar's Export again stays
+  const [staleNote, setStaleNote] = useState(0)
+  useEffect(() => {
+    if (!exportOutdated) { setStaleNote(0); return }
+    setStaleNote(Date.now())
+    const t = setTimeout(() => setStaleNote(0), 5000)
+    return () => clearTimeout(t)
+  }, [exportOutdated])
   const exportPrice = credits && clipLengthMs <= MAX_CLIP_MS ? ` · ${exportCredits(clipLengthMs)} credit${exportCredits(clipLengthMs) === 1 ? '' : 's'}` : ''
   const exportControls = (
     <div data-tour="export" className="flex items-center gap-1.5 shrink-0">
@@ -8307,7 +8316,7 @@ export function EditorShell({
                   const seg = frameSeg
                   return {
                     item: it,
-                    look: { font: it.font ?? seg.frame?.band?.font ?? null, size: it.size || area.size, color: it.color || area.color, bg: it.bg || area.bg },
+                    look: { font: it.font ?? seg.frame?.band?.font ?? null, size: it.size || area.size, color: it.color || area.color, bg: it.bg || area.bg, bgOpacity: it.bg_opacity ?? 1 },
                     where: frameLanes(seg.layout as FrameLayout).find(l => l.lane === it.lane)?.label ?? 'Band',
                     segment: seg,
                     onUpdate: patch => { if (!frameItemBlocked(seg.id, it.id)) updateFrameItem(seg.id, it.id, patch) },
@@ -8382,7 +8391,9 @@ export function EditorShell({
                 onSelectBox={(segId, boxId) => { setActiveSegmentId(segId); setActiveBoxId(boxId) }}
                 onBoxChange={handleBoxChange}
                 marking={marking} onMark={(x, y) => markSubject(x, y, undefined, true)} subjectsAt={subjectsAt}
-                captionScan={transcribing || retranscribing ? (retranscribePlace ? 'Waiting its turn…' : 'Making captions…') : null}
+                // (no scan over the picture while captions are made — user, 2026-11-19: removed; the Captions panel
+                // shows how it's going. The phone editor keeps its own)
+                captionScan={null}
               />
               {playingAdded && !playingAdded.hidden && (playingSegment && isInsert(playingSegment, mainVideoId)
                 // (a quiet see-through tag; its dot says which: lime = a video put in between, as on the film strip; orange = B-roll)
@@ -8462,8 +8473,8 @@ export function EditorShell({
           </div>
 
           {/* Edited since the export (user, 2026-11-12): said where the reel is watched; the top bar's Export again fixes it */}
-          {exportOutdated && !rendering && (
-            <p role="status" className="ed-pv-stale shrink-0 mx-2 mt-2 flex items-start gap-2 px-2.5 py-2 rounded-lg text-[11px] leading-snug">
+          {exportOutdated && !rendering && staleNote > 0 && (
+            <p key={staleNote} role="status" className="ed-pv-stale shrink-0 mx-2 mt-2 flex items-start gap-2 px-2.5 py-2 rounded-lg text-[11px] leading-snug">
               <span className="ed-pv-stale-dot" aria-hidden="true" />
               <span>Your latest edits aren&apos;t in the downloaded file yet. Press <b>Export again</b> to add them.</span>
             </p>

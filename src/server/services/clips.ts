@@ -714,6 +714,8 @@ function cleanFrame(frame: FrameSettings): FrameSettings {
     return [{
       ...base, text: typeof it.text === 'string' ? it.text.slice(0, 500) : '', captions: !!it.captions,
       bg: bgHex(it.bg), color: hex(it.color), size: num(it.size, 16, 200),
+      // (its background's opacity: kept only below 1)
+      bg_opacity: typeof it.bg_opacity === 'number' && isFinite(it.bg_opacity) && it.bg_opacity < 1 ? Math.round(Math.max(0.1, it.bg_opacity) * 100) / 100 : undefined,
       // Its font (the Text tool, a brand kit's font, Paste style): it wasn't kept before 2026-11-12
       ...(typeof it.font === 'string' && it.font.trim() && it.font.length <= 120 ? { font: it.font } : {}),
       // (x, y: shares of its area — beyond 0–1 when it's been moved out of it, anywhere in the frame)

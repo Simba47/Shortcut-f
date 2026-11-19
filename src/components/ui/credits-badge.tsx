@@ -109,10 +109,12 @@ export function CreditsBadge({ credits, className = 'credits-badge', onClick }: 
   const low = credits.balance <= 5
   return (
     <a href="/billing#credits" onClick={onClick} className={`${className} credits-live${low ? ' is-low' : ''}`} title={`${soon}Buy credits`}>
-      <span key={change?.key ?? 0} className={`credit-coin-turn${change ? ' is-turning' : ''}`}><CreditCoin low={low} /></span>
+      {/* (own keys: the coin's — new each change, so its turn plays again — and the chip's must never be the same,
+          or React keeps the old coin beside the new one: two coins, user 2026-11-19) */}
+      <span key={`coin-${change?.key ?? 0}`} className={`credit-coin-turn${change ? ' is-turning' : ''}`}><CreditCoin low={low} /></span>
       <span className="credits-num"><strong><span aria-hidden="true"><Odometer value={credits.balance} /></span><span className="sr-only">{credits.balance}</span></strong> <span className="credits-word">credits</span></span>
       {change && (
-        <span key={change.key} className={`credits-change ${change.n < 0 ? 'is-spent' : 'is-added'}`} aria-hidden="true">
+        <span key={`chip-${change.key}`} className={`credits-change ${change.n < 0 ? 'is-spent' : 'is-added'}`} aria-hidden="true">
           {change.n < 0 ? `−${Math.abs(change.n)}` : `+${change.n}`}
         </span>
       )}

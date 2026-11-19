@@ -1208,6 +1208,11 @@ button.mmc-opt-box:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outli
 
 /* The preview's note while the downloaded file is older than the edits: calm amber, not an error */
 .ed-pv-stale { color: rgb(var(--ed-fg) / 0.75); background: rgba(245,158,11,0.08); box-shadow: inset 0 0 0 1px rgba(245,158,11,0.22); }
+/* (shown 5 s — EditorShell staleNote — then it fades and folds away, so the preview grows smoothly, no jump) */
+.ed-pv-stale { max-height: 80px; overflow: hidden; animation: ed-stale-in .25s ease both, ed-stale-out .5s cubic-bezier(.4, 0, .2, 1) 4.5s both; }
+@keyframes ed-stale-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes ed-stale-out { to { opacity: 0; max-height: 0; margin-top: 0; padding-top: 0; padding-bottom: 0; } }
+@media (prefers-reduced-motion: reduce) { .ed-pv-stale { animation: ed-stale-out .01s linear 4.99s both; } }
 .ed-pv-stale b { color: var(--ed-text); font-weight: 600; }
 .ed-pv-stale-dot { flex-shrink: 0; width: 6px; height: 6px; margin-top: 5px; border-radius: 999px; background: #f59e0b; }
 [data-theme="light"] .ed-pv-stale-dot { background: #d97706; }
@@ -3665,9 +3670,33 @@ div:has(> .vscan[data-on][data-mode="find"]) > .sp .sp-controls { opacity: 0; vi
 .cb-card:hover .cb-thumb img { transform: scale(1.07); }
 /* a card's Edit · Download · Delete: closed (no height), sliding open while the card is pointed at
    or tabbed into (always open where there's no hover: phones, tablets) */
+/* New clip: "You already have this part" (ClipPickerShell, user 2026-11-19) — a small amber heads-up just above the
+   bar, sliding up, gone after 4 s (the timer is in JS; this fades it out at the end) */
+.cb-dup-warn {
+  position: absolute; left: 16px; bottom: calc(100% + 8px); z-index: 30; max-width: calc(100% - 32px);
+  display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 11px; border-radius: 10px;
+  font-size: 12px; line-height: 1.35; color: #fde7b0; background: #2a1f08; border: 1px solid rgb(245 158 11 / 0.45);
+  box-shadow: 0 10px 28px -10px rgb(0 0 0 / 0.6);
+  animation: cb-dup-in .28s cubic-bezier(.2, .8, .2, 1) both, cb-dup-out .35s ease 3.65s both;
+}
+.cb-dup-warn svg { flex-shrink: 0; color: #f5a623; }
+.cb-dup-warn b { font-weight: 700; color: #ffe8b8; }
+.cb-dup-warn button { flex-shrink: 0; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; cursor: pointer; border-radius: 6px; color: rgb(253 231 176 / 0.7); font-size: 14px; line-height: 1; }
+.cb-dup-warn button:hover { background: rgb(245 158 11 / 0.15); color: #fde7b0; }
+@keyframes cb-dup-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes cb-dup-out { to { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .cb-dup-warn { animation: cb-dup-out .01s linear 3.99s both; } }
+[data-theme="light"] .cb-dup-warn { color: #6b4500; background: #fff7e6; border-color: rgb(217 119 6 / 0.45); }
+[data-theme="light"] .cb-dup-warn b { color: #5a3a00; }
+[data-theme="light"] .cb-dup-warn svg { color: #d97706; }
+[data-theme="light"] .cb-dup-warn button { color: #6b4500; }
+
 .cb-reveal { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .32s cubic-bezier(.2, .8, .2, 1), opacity .22s ease; }
 .cb-reveal-in { min-height: 0; overflow: hidden; }
-.cb-card:hover .cb-reveal, .cb-card:focus-within .cb-reveal, .cb-reveal[data-open] { grid-template-rows: 1fr; opacity: 1; }
+/* (opened by the pointer, or by the keyboard: :focus-visible — not :focus-within, user 2026-11-19: a heart clicked
+   kept its card open by its focus; pressing the next card's heart took the focus, the first card closed while
+   the button was down, the cards moved up, and the click missed — it took two) */
+.cb-card:hover .cb-reveal, .cb-card:is(:focus-visible, :has(:focus-visible)) .cb-reveal, .cb-reveal[data-open] { grid-template-rows: 1fr; opacity: 1; }
 @media (hover: none) { .cb-reveal { grid-template-rows: 1fr; opacity: 1; } }
 .cb-act { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 8px; font-size: 11px; font-weight: 600;
   color: rgba(255, 255, 255, 0.85); border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.03); transition: background-color .15s, border-color .15s, color .15s; }
@@ -3677,9 +3706,9 @@ div:has(> .vscan[data-on][data-mode="find"]) > .sp .sp-controls { opacity: 0; vi
 .cb-act[data-tone="danger-soft"]:hover { color: #f87171; border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.1); }
 /* …and they rise in one after the other as the row opens */
 .cb-reveal .cb-act { opacity: 0; transform: translateY(6px); transition: opacity .25s ease, transform .35s cubic-bezier(.2, .8, .2, 1), background-color .15s, border-color .15s, color .15s; }
-.cb-card:hover .cb-reveal .cb-act, .cb-card:focus-within .cb-reveal .cb-act, .cb-reveal[data-open] .cb-act { opacity: 1; transform: none; }
-.cb-card:hover .cb-reveal .cb-act:nth-child(2), .cb-card:focus-within .cb-reveal .cb-act:nth-child(2) { transition-delay: .05s; }
-.cb-card:hover .cb-reveal .cb-act:nth-child(3), .cb-card:focus-within .cb-reveal .cb-act:nth-child(3) { transition-delay: .1s; }
+.cb-card:hover .cb-reveal .cb-act, .cb-card:is(:focus-visible, :has(:focus-visible)) .cb-reveal .cb-act, .cb-reveal[data-open] .cb-act { opacity: 1; transform: none; }
+.cb-card:hover .cb-reveal .cb-act:nth-child(2), .cb-card:is(:focus-visible, :has(:focus-visible)) .cb-reveal .cb-act:nth-child(2) { transition-delay: .05s; }
+.cb-card:hover .cb-reveal .cb-act:nth-child(3), .cb-card:is(:focus-visible, :has(:focus-visible)) .cb-reveal .cb-act:nth-child(3) { transition-delay: .1s; }
 /* ♡ and 🗑 at the top right: one size, side by side; the bin slides in beside the heart on hover */
 .cb-tools { flex-shrink: 0; display: flex; align-items: center; gap: 2px; }
 .cb-tool { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: rgba(255, 255, 255, 0.55);
@@ -3692,7 +3721,7 @@ div:has(> .vscan[data-on][data-mode="find"]) > .sp .sp-controls { opacity: 0; vi
 .cb-rename { flex: 1; min-width: 0; height: 28px; margin: -3px 0 -3px -6px; padding: 0 6px; border-radius: 7px; font: inherit; font-size: 14px; font-weight: 600;
   color: var(--cb-text); background: rgb(var(--cb-fg) / 0.06); border: 1px solid rgb(var(--cb-fg) / 0.28); outline: none; }
 .cb-rename:focus { border-color: rgb(var(--cb-fg) / 0.45); box-shadow: 0 0 0 3px rgb(var(--cb-fg) / 0.08); }
-.cb-card:hover .cb-tool-hide, .cb-card:focus-within .cb-tool-hide, .cb-tool-hide[data-on] { opacity: 1; transform: none; pointer-events: auto; }
+.cb-card:hover .cb-tool-hide, .cb-card:is(:focus-visible, :has(:focus-visible)) .cb-tool-hide, .cb-tool-hide[data-on] { opacity: 1; transform: none; pointer-events: auto; }
 @media (hover: none) { .cb-tool-hide, .cb-reveal .cb-act { opacity: 1; transform: none; pointer-events: auto; } }
 /* a soft light sweeps across the card as it's pointed at */
 .cb-sheen { position: relative; overflow: hidden; }
