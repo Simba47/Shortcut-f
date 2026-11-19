@@ -19,14 +19,14 @@ test('a text\'s look pasted on another: the whole look, nothing of its words, pl
   assert.deepEqual([after.text, after.x, after.y, after.start_ms, after.end_ms, after.rotation], ['Step 2', 0.5, 0.7, 5000, 7000, -5])
 })
 
-test('onto a frame text: only its font, size, colour and background', () => {
+test('onto a frame text: only its font, size, colour and background (with its opacity)', () => {
   assert.deepEqual(lookOnFrameText(textLook(styled)), { font: 'Anton', size: 90, color: '#FFE600' })
-  assert.deepEqual(lookOnFrameText(textLook(plain)), { font: null, size: 60, color: '#ffffff', bg: '#ff0000' })
+  assert.deepEqual(lookOnFrameText(textLook(plain)), { font: null, size: 60, color: '#ffffff', bg: '#ff0000', bg_opacity: 0.5 })
 })
 
 test('from a frame text: only those four; pasted on a text, the rest of its look stays', () => {
   const look = frameTextLook({ font: 'Bebas Neue', size: 70, color: '#c8ff00', bg: 'none' })
-  assert.deepEqual(look, { font: 'Bebas Neue', size: 70, color: '#c8ff00', bg_color: null })
+  assert.deepEqual(look, { font: 'Bebas Neue', size: 70, color: '#c8ff00', bg_color: null, bg_opacity: null })
   const after = { ...styled, ...lookOnText(look) }
   assert.deepEqual([after.font, after.size, after.color, after.bg_color, after.stroke_width, after.animation], ['Bebas Neue', 70, '#c8ff00', undefined, 8, 'pop'])
 })

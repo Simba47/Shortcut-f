@@ -25,6 +25,10 @@ export interface ClipBrands {
   branded: number
   /** What's being changed: 'all', or one clip's id */
   busy: string | null
+  /** While several clips are changed: how many are done, of how many, and whether the brand goes on or off */
+  progress: { done: number; total: number; on: boolean } | null
+  /** The kits have been read (until then the bar shows a placeholder, not "Make a brand kit") */
+  loaded: boolean
   note: { text: string; bad: boolean } | null
   applyAll: (kitId: string | null) => Promise<void>
   /** The kit (or none) on just these clips — the ones ticked with Select */
@@ -44,14 +48,25 @@ async function json<T>(res: Response): Promise<T> {
  */
 export function useClipBrands(videoId: string, clipIds: string[], onChanged?: (clipIds: string[]) => void): ClipBrands {
   const [kits, setKits] = useState<KitLite[]>([])
+  const [kitsLoaded, setKitsLoaded] = useState(false)
   const [of, setOf] = useState<Record<string, string | null>>({})
-  const [pick, setPick] = useState('')
+  const [clipsLoaded, setClipsLoaded] = useState(false)
+  const [pick, setPickState] = useState('')
+  // (a kit chosen in the picker stays chosen — and is kept for this video in this browser, so a reload keeps it
+  // on, user 2026-11-19; until one is chosen the picker follows the clips — below)
+  const pickKey = `shortcut.brandPick.${videoId}`
+  const picked = useRef(false)
+  const setPick = useCallback((id: string) => {
+    picked.current = true; setPickState(id)
+    try { localStorage.setItem(pickKey, id) } catch { /* storage blocked: kept for this visit only */ }
+  }, [pickKey])
   const [busy, setBusy] = useState<string | null>(null)
+  const [progress, setProgress] = useState<{ done: number; total: number; on: boolean } | null>(null)
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null)
   const clipsKey = clipIds.join(',')
 
   const loadClips = useCallback(() => fetch(`/api/videos/${videoId}/brand`).then(r => json<{ clips: Record<string, string | null> }>(r))
-    .then(d => setOf(d.clips ?? {})).catch(() => { /* tags left as they were */ }), [videoId])
+    .then(d => { setOf(d.clips ?? {}); setClipsLoaded(true) }).catch(() => { /* tags left as they were */ }), [videoId])
   // (read again when the Brand kits popup closes: a kit made, renamed or recoloured there shows here)
   const [kitsRead, setKitsRead] = useState(0)
   useEffect(() => {
@@ -65,51 +80,71 @@ export function useClipBrands(videoId: string, clipIds: string[], onChanged?: (c
         const ks = d.kits.map(k => ({ id: k.id, name: k.name, isDefault: !!k.data.is_default, main: k.data.colors.main, accent: k.data.colors.accent }))
         setKits(ks)
         // (user, 2026-11-12) Off until a kit is picked — not the default kit by itself; a kit picked stays picked
-        setPick(p => (p === NO_KIT || ks.some(k => k.id === p) ? p : NO_KIT))
+        setPickState(p => (p === NO_KIT || ks.some(k => k.id === p) ? p : NO_KIT))
       }).catch(() => { /* no kits shown */ })
+      .finally(() => setKitsLoaded(true))
   }, [kitsRead])
   useEffect(() => { loadClips() }, [loadClips, clipsKey])
+  // After a reload the picker shows: what was last chosen for this video (a kit since deleted aside), else the
+  // kit that is on the clips (the one on most of them), else Off (user, 2026-11-19: it went back to Off — once
+  // with "Turn off on all 2" while both clips had the kit on, once with a kit chosen but not yet put on)
+  const followed = useRef(false)
+  useEffect(() => {
+    if (followed.current || picked.current || !kitsLoaded) return
+    let saved: string | null = null
+    try { saved = localStorage.getItem(pickKey) } catch { /* storage blocked */ }
+    if (saved && (saved === NO_KIT || kits.some(k => k.id === saved))) {
+      followed.current = true; picked.current = true; setPickState(saved); return
+    }
+    if (!clipsLoaded) return
+    followed.current = true
+    const count = new Map<string, number>()
+    for (const id of clipIds) { const k = of[id]; if (k && kits.some(x => x.id === k)) count.set(k, (count.get(k) ?? 0) + 1) }
+    const top = [...count.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
+    if (top) setPickState(top)
+  }, [kitsLoaded, clipsLoaded, kits, of, clipsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const kitOf = (clipId: string) => { const id = of[clipId]; return id ? kits.find(k => k.id === id) ?? null : null }
   const branded = clipIds.filter(id => !!of[id]).length
 
-  async function applyAll(kitId: string | null) {
+  /**
+   * A kit (or none) on these clips (user, 2026-11-19: "Working…" for ~12 s with nothing to see): their tags
+   * change at once; they go 4 at a time, the button counting them; then the tags are read back, so a clip
+   * that couldn't be changed (being exported) shows as it really is.
+   */
+  async function applyMany(ids: string[], kitId: string | null) {
+    if (!ids.length) return
     setBusy('all'); setNote(null)
+    setOf(o => { const n = { ...o }; for (const id of ids) n[id] = kitId; return n })
+    setProgress({ done: 0, total: ids.length, on: !!kitId })
+    let changed = 0, skipped = 0, failed = 0, next = 0
+    const worker = async () => {
+      while (next < ids.length) {
+        const id = ids[next++]
+        try {
+          const r = await fetch(`/api/videos/${videoId}/brand`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kit_id: kitId, clip_ids: [id] }) })
+            .then(res => json<{ changed: number; skipped: number }>(res))
+          changed += r.changed; skipped += r.skipped
+        } catch { failed++ }
+        setProgress(p => (p ? { ...p, done: p.done + 1 } : p))
+      }
+    }
     try {
-      const r = await fetch(`/api/videos/${videoId}/brand`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kit_id: kitId, clip_ids: clipIds }) })
-        .then(res => json<{ changed: number; skipped: number }>(res))
+      await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker))
       await loadClips()
-      onChanged?.(clipIds)
+      onChanged?.(ids)
       const kit = kits.find(k => k.id === kitId)
       setNote({
-        bad: false,
-        text: `${kit ? `${kit.name} is on` : 'Brand taken off'} ${r.changed} clip${r.changed === 1 ? '' : 's'}${r.skipped ? ` · ${r.skipped} being exported left as they are` : ''}`,
+        bad: failed > 0,
+        text: `${kit ? `${kit.name} is on` : 'Brand taken off'} ${changed} clip${changed === 1 ? '' : 's'}`
+          + `${skipped ? ` · ${skipped} being exported left as ${skipped === 1 ? 'it is' : 'they are'}` : ''}`
+          + `${failed ? ` · ${failed} couldn’t be changed, please try again` : ''}`,
       })
-    } catch (e) {
-      setNote({ text: e instanceof Error ? e.message : String(e), bad: true })
-    } finally { setBusy(null) }
+    } finally { setBusy(null); setProgress(null) }
   }
-  /** The kit (or none) on the clips ticked with Select: one by one, as a clip's own tag does it */
-  async function applyTo(clipIds: string[], kitId: string | null) {
-    if (!clipIds.length) return
-    setBusy('all'); setNote(null)
-    let changed = 0, failed = 0
-    for (const id of clipIds) {
-      try {
-        await fetch(`/api/clips/${id}/brand`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kit_id: kitId }) })
-          .then(res => json<{ on: boolean }>(res))
-        changed++
-      } catch { failed++ }
-    }
-    await loadClips()
-    onChanged?.(clipIds)
-    const kit = kits.find(k => k.id === kitId)
-    setNote({
-      bad: failed > 0,
-      text: `${kit ? `${kit.name} is on` : 'Brand taken off'} ${changed} clip${changed === 1 ? '' : 's'}${failed ? ` · ${failed} couldn’t be changed (being exported?)` : ''}`,
-    })
-    setBusy(null)
-  }
+  const applyAll = (kitId: string | null) => applyMany(clipIds, kitId)
+  /** The kit (or none) on the clips ticked with Select */
+  const applyTo = (ids: string[], kitId: string | null) => applyMany(ids, kitId)
   async function setClip(clipId: string, kitId: string | null) {
     setBusy(clipId); setNote(null)
     try {
@@ -129,7 +164,7 @@ export function useClipBrands(videoId: string, clipIds: string[], onChanged?: (c
     return () => clearTimeout(t)
   }, [note])
   useEffect(() => { setNote(null) }, [clipsKey])
-  return { kits, kitOf, pick, setPick, branded, busy, note, applyAll, applyTo, setClip }
+  return { kits, kitOf, pick, setPick, branded, busy, progress, loaded: kitsLoaded, note, applyAll, applyTo, setClip }
 }
 
 /** The brand tag in a kit's colours (BrandTagIcon) */
@@ -200,6 +235,18 @@ function KitPick({ kits, value, onChange, disabled }: { kits: KitLite[]; value: 
 /** Above the clips: the kit, "Put on all N clips", how many have one, and "Take off all" */
 export function BrandAllBar({ b, total, selected = [] }: { b: ClipBrands; total: number; selected?: string[] }) {
   if (!total) return null
+  // (still reading the kits: the bar's own shape, quiet — not "Make a brand kit", user 2026-11-19)
+  if (!b.loaded) {
+    return (
+      <div className="cbb-card" aria-busy="true" aria-label="Loading your brand kits">
+        <div className="cbb-meta"><span className="cbb-label">Brand</span></div>
+        <div className="cbb-bar">
+          <span className="h-[30px] flex-1 min-w-[120px] rounded-lg animate-pulse" style={{ background: 'rgb(var(--cb-fg) / 0.07)' }} />
+          <span className="h-[30px] w-[92px] rounded-lg animate-pulse" style={{ background: 'rgb(var(--cb-fg) / 0.07)' }} />
+        </div>
+      </div>
+    )
+  }
   if (!b.kits.length) {
     return (
       <div className="cbb-card">
@@ -242,7 +289,9 @@ export function BrandAllBar({ b, total, selected = [] }: { b: ClipBrands; total:
           title={none ? 'Take the brand off, putting back what it changed'
             : some ? `Put ${kit?.name ?? 'this kit'} on the ${selected.length} clip${selected.length === 1 ? '' : 's'} you ticked`
             : allOn ? 'Put it on again: a clip whose kit changed gets the newest version' : `Put ${kit?.name ?? 'this kit'} on all ${total} clips`}>
-          {b.busy === 'all' ? 'Working…' : `${none ? 'Turn off on' : 'Put on'} ${some ? `${selected.length} selected` : `all ${total}`}`}
+          {b.busy === 'all'
+            ? (b.progress && b.progress.total > 1 ? `${b.progress.on ? 'Putting on' : 'Taking off'}… ${b.progress.done} of ${b.progress.total}` : b.progress?.on === false ? 'Taking off…' : 'Putting on…')
+            : `${none ? 'Turn off on' : 'Put on'} ${some ? `${selected.length} selected` : `all ${total}`}`}
         </button>
       </div>
       {b.note && <span role={b.note.bad ? 'alert' : 'status'} className="cbb-note text-[10.5px]" style={{ color: b.note.bad ? '#f87171' : '#c8ff00' }}>{b.note.text}</span>}
