@@ -19,12 +19,18 @@ import { AccountMenu } from '@/components/ui/account-menu'
 import { DashSkeleton } from './DashSkeleton'
 import { FillButtonContent } from '@/components/ui/fill-button'
 import { useVideoUpload, formatBytes, uploadPace } from '@/modules/upload/useVideoUpload'
+import { useSmoothPct } from '@/lib/useSmoothPct'
 
 type DashVideo = Video & { video_url?: string | null; clip_count?: number; error?: string | null
   /** Its picture (the worker's jobs/poster.ts), when it has one: shown instead of loading the video */
   poster_url?: string | null
   /** How many of its clips were cut by hand (the rest the AI's); null: not known ("Open clips" asks AI or Manual then) */
-  manual_clip_count?: number | null }
+  manual_clip_count?: number | null
+  /** A link import: how much of the file is in (getting) or saved (saving), and its size — the import card's MB, speed, time left */
+  download_bytes?: number | null
+  download_total?: number | null
+  /** A link import: 'Google Drive' / 'Dropbox' */
+  link_from?: string | null }
 type SortKey = 'newest' | 'oldest' | 'name'
 interface PlanInfo {
   plan: string
@@ -117,6 +123,13 @@ export default function DashboardPage() {
   }, [])
 
   usePolling(fetchVideos, videos.some(v => v.status === 'uploaded' || v.status === 'transcribing'))
+  // A Drive / Dropbox import running, or waiting for the OK on its credits: shown on the upload strip as a
+  // file upload is (user, 2026-11-19), the newest one; a file upload in progress comes first
+  // (one waiting for an answer before one still coming in)
+  const linkJob = upload.state.phase === 'idle' && !upload.priceAsk
+    ? videos.find(v => v.source_type === 'link' && v.status === 'awaiting_ok')
+      ?? videos.find(v => v.source_type === 'link' && (v.status === 'uploaded' || v.status === 'transcribing')) ?? null
+    : null
 
   // "/" anywhere on the page puts the cursor in the search box (user, 2026-11-11: as YouTube, GitHub, Gmail) —
   // not while typing somewhere (a rename, a link), with a key held (Ctrl, Alt, ⌘), or with a window open
@@ -351,6 +364,13 @@ export default function DashboardPage() {
               <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
           </div>
+          {linkJob ? (
+            <LinkImportStrip
+              key={linkJob.id}
+              video={linkJob}
+              onChanged={() => { fetchVideos(); fetchPlan(); refreshCredits() }}
+            />
+          ) : (<>
           <div className="dash-drop-text">
             {upload.state.phase === 'failed' ? (
               <>
@@ -413,7 +433,8 @@ export default function DashboardPage() {
           ) : upload.state.phase === 'uploading' ? (
             <button type="button" className="dash-link-btn" onClick={upload.cancel}>Cancel</button>
           ) : null}
-          {!atLimit && upload.state.phase === 'idle' && (
+          </>)}
+          {!atLimit && upload.state.phase === 'idle' && !linkJob && (
             <button className="dash-upload-btn" disabled={uploading} aria-haspopup="dialog" onClick={() => { setUploadError(null); setChooserOpen(true) }}>
               {/* Arrow flies out to the top-right on hover while a copy slides in from the bottom-left */}
               <span className="dash-upload-icon" aria-hidden>
@@ -592,6 +613,139 @@ function SortMenu({ value, onChange }: { value: SortKey; onChange: (v: SortKey) 
   )
 }
 
+/**
+ * A link import's speed and time left, from the bytes the worker reports with each check (the getting step and
+ * the saving step each count their own bytes: a count that goes down starts the measuring again)
+ */
+function useLinkPace(bytes: number | null | undefined, total: number | null | undefined, step: 'get' | 'save' | 'other') {
+  const last = useRef<{ t: number; b: number; step: string } | null>(null)
+  const [speed, setSpeed] = useState<number | null>(null)
+  useEffect(() => {
+    if (bytes == null || !total || step === 'other') { last.current = null; setSpeed(null); return }
+    const now = Date.now(), prev = last.current
+    last.current = { t: now, b: bytes, step }
+    if (!prev || prev.step !== step || bytes < prev.b) { setSpeed(null); return }
+    if (bytes === prev.b || now - prev.t < 500) return
+    const sample = (bytes - prev.b) / ((now - prev.t) / 1000)
+    setSpeed(s => (s == null ? sample : s * 0.6 + sample * 0.4))
+  }, [bytes, total, step])
+  const left = speed && total && bytes != null ? Math.max(0, (total - bytes) / speed) : null
+  return speed && left != null ? uploadPace({ bytesPerSec: speed, secondsLeft: Math.round(left) } as Parameters<typeof uploadPace>[0]) : null
+}
+
+/**
+ * A Drive / Dropbox import on the upload strip, the way a file upload shows (user, 2026-11-19): its name, the
+ * step, how much is in with the speed and time left, the bar counting up a percent at a time, Cancel. Once
+ * the file is in (status 'awaiting_ok'), the reading's credits are asked before anything reads it, as a file
+ * upload asks before it starts: Continue charges it, Cancel deletes it (nothing charged).
+ */
+function LinkImportStrip({ video, onChanged }: { video: DashVideo; onChanged: () => void }) {
+  const from = video.link_from ?? 'your link'
+  const name = video.title?.trim() || null
+  const waiting = video.status === 'awaiting_ok'
+  const real = waiting ? 100 : video.status === 'uploaded' ? 0 : (video.download_progress ?? 0)
+  const pct = useSmoothPct(real)
+  const whole = Math.floor(pct)
+  // The worker's steps (its lib/linkProgress.ts): getting 5–50, checking 51, saving 52–95, almost 96 — by the real value
+  const step: 'get' | 'save' | 'other' = video.status !== 'transcribing' ? 'other' : real <= 50 ? 'get' : real >= 52 && real < 96 ? 'save' : 'other'
+  const pace = useLinkPace(video.download_bytes, video.download_total, step)
+  const [busy, setBusy] = useState<'continue' | 'cancel' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [price, setPrice] = useState<{ on: boolean; credits?: number; balance?: number; overMs?: number; uploadsLeft?: number } | null>(null)
+
+  // Waiting for the OK: what reading it costs (asked once it is waiting)
+  useEffect(() => {
+    if (!waiting) return
+    let gone = false
+    fetch(`/api/videos/${video.id}/import`, { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null).then(p => { if (!gone) setPrice(p ?? { on: false }) })
+      .catch(() => { if (!gone) setPrice({ on: false }) })
+    return () => { gone = true }
+  }, [waiting, video.id])
+
+  async function cancel() {
+    setBusy('cancel'); setError(null)
+    const r = await fetch('/api/videos', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [video.id] }) }).catch(() => null)
+    if (!r?.ok) { setError('Could not cancel it. Try again.'); setBusy(null); return }
+    onChanged()
+  }
+  async function go() {
+    setBusy('continue'); setError(null)
+    const r = await fetch(`/api/videos/${video.id}/import`, { method: 'POST' }).catch(() => null)
+    if (!r?.ok) {
+      const d = r ? await r.json().catch(() => ({})) : {}
+      setError(d.error ?? 'Could not continue. Try again.'); setBusy(null); return
+    }
+    onChanged()
+  }
+
+  const credits = price?.credits ?? 0
+  const minutes = Math.max(1, Math.ceil((video.duration_ms ?? 0) / 60_000))
+  // (past the plan's hours or uploads, or short of credits: said here, Continue would only be refused)
+  const blocked = waiting && price?.on
+    ? (price.uploadsLeft ?? 1) <= 0 ? 'You have no uploads left on your plan.'
+      : (price.overMs ?? 0) > 0 ? `This ${minutes} min video is longer than the time left on your plan.`
+        : credits > (price.balance ?? 0) ? `Reading it needs ${credits} credits and you have ${price.balance ?? 0}. Top up to continue.`
+          : null
+    : null
+  const stepWords = video.status === 'uploaded' ? 'Waiting to start…'
+    : step === 'get' ? `Getting it from ${from}`
+      : real < 52 ? 'Checking the video…'
+        : step === 'save' ? 'Saving your video' : 'Almost ready…'
+
+  if (waiting) {
+    return (
+      <>
+        <div className="dash-drop-text">
+          <p className="dash-upload-title" title={name ?? undefined}>Import {name ?? 'this video'}?</p>
+          {!price ? (
+            <p className="dash-upload-pace">Working out the credits…</p>
+          ) : !price.on ? (
+            <p className="dash-upload-pace">It&apos;s in. Continue to start reading it.</p>
+          ) : (
+            <p className="dash-upload-pace">
+              {credits > 0
+                ? <>Reading this {minutes} min video costs <b>{credits} credits</b>. You have {price.balance ?? 0}.</>
+                : <>Reading this {minutes} min video uses no credits.</>}
+            </p>
+          )}
+          {(error || blocked) && <p className="dash-drop-error" role="alert">{error ?? blocked}</p>}
+          <p className="dash-upload-hint">Nothing is charged until you continue. Cancel removes it.</p>
+        </div>
+        <div className="dash-drop-actions">
+          <button type="button" className="dash-link-btn" disabled={!!busy} onClick={cancel}>{busy === 'cancel' ? 'Cancelling…' : 'Cancel'}</button>
+          {!blocked && (
+            <button type="button" className="dash-upload-btn dash-upload-btn--plain" disabled={!!busy || !price} onClick={go}>
+              {busy === 'continue' ? 'Starting…' : price?.on && credits > 0 ? `Continue · ${credits} credits` : 'Continue'}
+            </button>
+          )}
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <div className="dash-drop-text">
+        <p className="dash-upload-title" title={name ?? undefined}>Importing {name ?? 'your video'} from {from}</p>
+        <p className="dash-upload-pace">
+          {stepWords}
+          {(step === 'get' || step === 'save') && video.download_total
+            ? ` · ${formatBytes(video.download_bytes ?? 0)} of ${formatBytes(video.download_total)}${pace ? ` · ${pace}` : ''}`
+            : ''}
+        </p>
+        <div className="dash-progress-row">
+          <div className="dash-progress"><div style={{ width: `${Math.max(2, pct)}%` }} /></div>
+          <span className="dash-progress-pct">{whole}%</span>
+        </div>
+        {error && <p className="dash-drop-error" role="alert">{error}</p>}
+        <p className="dash-upload-hint">You can leave this page: the import carries on, and the video shows below when it&apos;s in.</p>
+      </div>
+      <button type="button" className="dash-link-btn" disabled={!!busy} onClick={cancel}>{busy === 'cancel' ? 'Cancelling…' : 'Cancel'}</button>
+    </>
+  )
+}
+
 function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDelete, onOpen, onGo, onRetry }: {
   video: DashVideo
   title: string
@@ -667,7 +821,8 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
   }, [usePoster, posterFailed, thumbSrc, thumbFailed, video.status, video.video_url, video.poster_url])
 
   const ready = video.status === 'ready'
-  const pct = video.download_progress ?? 0
+  // (counts up a percent at a time between the checks, user 2026-11-19: it used to jump 5 → 15 → 27)
+  const pct = Math.floor(useSmoothPct(video.status === 'transcribing' ? (video.download_progress ?? 0) : 0))
   // A video fetched from a Drive or Dropbox link: the worker's steps (its lib/linkProgress.ts — keep in step):
   // the file comes in 5 → 50, is checked at 51, is saved to storage 52 → 95, then 96 until it's ready.
   // (user, 2026-11-11) one plain journey: getting it, checking it, saving it — no "Transcribing" it never reached
@@ -746,6 +901,10 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
 
         {video.status === 'uploaded' && (
           <div className="vcard-overlay"><Spinner />Waiting to start…</div>
+        )}
+        {/* A link import that's in, waiting for the OK on its credits (asked on the upload strip above) */}
+        {video.status === 'awaiting_ok' && (
+          <div className="vcard-overlay">Imported · confirm the credits above to start</div>
         )}
         {video.status === 'transcribing' && (
           <div className="vcard-overlay">

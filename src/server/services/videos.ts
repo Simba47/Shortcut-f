@@ -37,6 +37,8 @@ export async function listVideos(userId: string, includeAssets = false) {
       to_jsonb(videos)->>'proxy_path' AS proxy_path,
       -- Its picture for the dashboard (the worker's jobs/poster.ts), once made
       to_jsonb(videos)->>'poster_path' AS poster_path,
+      -- A link import: how much of the file is in / saved (the dashboard's import card: MB, speed, time left)
+      (to_jsonb(videos)->>'download_bytes')::bigint AS download_bytes, (to_jsonb(videos)->>'download_total')::bigint AS download_total,
       (SELECT COUNT(*)::int FROM clips c WHERE c.video_id = videos.id) AS clip_count
     -- Stock clips saved for auto B-roll are the user's assets, not videos they uploaded
     FROM videos WHERE user_id = ${userId} AND (${includeAssets} OR role <> 'asset') ORDER BY created_at DESC

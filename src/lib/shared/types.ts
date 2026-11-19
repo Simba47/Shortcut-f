@@ -2,7 +2,8 @@ import type { CardLook, FrameBackground } from './brandCard'
 
 // ─── Domain types mirroring the database schema ───────────────────────────────
 
-export type VideoStatus = 'uploaded' | 'transcribing' | 'ready' | 'failed'
+// awaiting_ok: a link import is in, its length known, waiting for the user to OK the reading's credits (ingest.ts continueLinkImport)
+export type VideoStatus = 'uploaded' | 'transcribing' | 'awaiting_ok' | 'ready' | 'failed'
 export type ClipStatus = 'draft' | 'rendering' | 'done' | 'failed'
 export type JobType = 'transcribe' | 'render'
 export type JobStatus = 'queued' | 'processing' | 'done' | 'failed'
