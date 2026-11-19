@@ -22,6 +22,11 @@ export interface CardLook {
     pattern: CardPattern
     /** The pattern's size, px at 1080 wide */
     scale: number
+    /**
+     * How solid it is, 0–1 (user, 2026-11-19); absent = 1. Below 1 the video, blurred, shows through it (render.py
+     * the same: frames.py clean_background, the frame's base)
+     */
+    opacity?: number
   }
   /** The video: its width (share of the frame), the height its middle sits at (share), its corner rounding (0–100) */
   video: { width: number; y: number; corners: number }
@@ -64,6 +69,8 @@ export function cleanFrameBackground(raw: unknown, fallback: FrameBackground = D
     direction: bg.direction === 'diagonal' ? 'diagonal' : bg.direction === 'down' ? 'down' : fallback.direction,
     pattern: CARD_PATTERNS.includes(bg.pattern as CardPattern) ? bg.pattern as CardPattern : fallback.pattern,
     scale: Math.round(num(bg.scale, CARD_PATTERN_SCALE[0], CARD_PATTERN_SCALE[1], fallback.scale)),
+    // (kept only below 1: a solid background saves as it always has)
+    ...(() => { const o = Math.round(num(bg.opacity, 0, 1, fallback.opacity ?? 1) * 100) / 100; return o < 1 ? { opacity: o } : {} })(),
   }
 }
 
