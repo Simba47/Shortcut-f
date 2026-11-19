@@ -212,8 +212,9 @@ export function textLook(t: Partial<TextOverlay>): CopiedLook {
 }
 
 /** A frame text's look: its font, size, colour and background (a colour; see-through or the band's own: none) */
-export function frameTextLook(it: { font?: string | null; size?: number; color?: string; bg?: string }): CopiedLook {
-  return { font: it.font ?? null, size: it.size ?? null, color: it.color ?? null, bg_color: it.bg && /^#[0-9a-f]{6}$/i.test(it.bg) ? it.bg : null }
+export function frameTextLook(it: { font?: string | null; size?: number; color?: string; bg?: string; bg_opacity?: number }): CopiedLook {
+  const bg = it.bg && /^#[0-9a-f]{6}$/i.test(it.bg) ? it.bg : null
+  return { font: it.font ?? null, size: it.size ?? null, color: it.color ?? null, bg_color: bg, bg_opacity: bg ? it.bg_opacity ?? 1 : null }
 }
 
 /** A copied look as a text's settings (what it doesn't set: back to plain) */
@@ -224,12 +225,13 @@ export function lookOnText(look: CopiedLook): Partial<TextOverlay> {
 }
 
 /** A copied look as a frame text's settings: its font, size and colour, and a background colour when the look has one */
-export function lookOnFrameText(look: CopiedLook): { font?: string | null; size?: number; color?: string; bg?: string } {
+export function lookOnFrameText(look: CopiedLook): { font?: string | null; size?: number; color?: string; bg?: string; bg_opacity?: number } {
   return {
     ...('font' in look ? { font: typeof look.font === 'string' ? look.font : null } : {}),
     ...(typeof look.size === 'number' ? { size: look.size } : {}),
     ...(typeof look.color === 'string' ? { color: look.color } : {}),
-    ...(typeof look.bg_color === 'string' ? { bg: look.bg_color } : {}),
+    // (a background colour comes with its opacity: solid when the look has none)
+    ...(typeof look.bg_color === 'string' ? { bg: look.bg_color, bg_opacity: typeof look.bg_opacity === 'number' ? look.bg_opacity : 1 } : {}),
   }
 }
 

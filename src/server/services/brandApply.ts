@@ -229,11 +229,14 @@ async function save(l: Loaded, next: BrandTarget, brand: BrandOn | null) {
  * putting back what it changed. The clip must be the user's; the kit theirs or shared with them.
  * Returns whether the clip has a brand on now.
  */
-export async function brandClip(userId: string, clipId: string, kitId: string | null): Promise<boolean> {
-  const l = await load(clipId)
+export async function brandClip(userId: string, clipId: string, kitId: string | null, given?: BrandKit | null): Promise<boolean> {
+  // (`given`: the kit already looked up by the caller — "Put on all" looks it up once for every clip)
+  const [l, kit] = await Promise.all([
+    load(clipId),
+    kitId ? (given !== undefined && given?.id === kitId ? given : usableKit(userId, kitId)) : null,
+  ])
   if (!l) throw err('Clip not found', 404)
   if (l.userId !== userId) throw err('Clip not found', 404)
-  const kit = kitId ? await usableKit(userId, kitId) : null
   if (kitId && !kit) throw err('That brand kit isn’t yours to use', 403)
   // (the same kit again: the clip takes the kit as it is now — "Put on all" says so)
   if (kit && l.brand?.kit_id === kit.id) { await followKit(l, kit); return true }
@@ -246,7 +249,7 @@ export async function brandClip(userId: string, clipId: string, kitId: string | 
   let t = l.target
   if (l.brand) {
     // (the kit on now, else — deleted since — as it was when it went on)
-    const old = (await usableKit(userId, l.brand.kit_id))?.data ?? l.brand.applied ?? null
+    const old = (kit && l.brand.kit_id === kit.id ? kit : await usableKit(userId, l.brand.kit_id))?.data ?? l.brand.applied ?? null
     t = takeBrandOff(t, old, l.brand.before)
   }
   if (!kit) {
@@ -313,15 +316,24 @@ export async function brandVideoClips(userId: string, videoId: string, kitId: st
     SELECT c.id, c.status FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.video_id = ${videoId} AND v.user_id = ${userId}`
   const only = clipIds ? new Set(clipIds) : null
   const rows = only ? all.filter(r => only.has(r.id)) : all
-  if (kitId && !(await usableKit(userId, kitId))) throw err('That brand kit isn’t yours to use', 403)
+  // The kit looked up once for every clip, and up to 4 clips done at a time (user, 2026-11-19: "Put on all 2"
+  // took ~12 s one by one) — each clip is its own rows, saved in its own transaction
+  const kit = kitId ? await usableKit(userId, kitId) : null
+  if (kitId && !kit) throw err('That brand kit isn’t yours to use', 403)
   let changed = 0, skipped = 0
-  for (const r of rows) {
-    if (r.status === 'rendering') { skipped++; continue }
-    try { await brandClip(userId, r.id, kitId); changed++ } catch (e) {
-      skipped++
-      console.error('[brand] a clip could not be branded:', e)
+  const todo = rows.filter(r => r.status !== 'rendering')
+  skipped += rows.length - todo.length
+  let next = 0
+  const worker = async () => {
+    while (next < todo.length) {
+      const r = todo[next++]
+      try { await brandClip(userId, r.id, kitId, kit); changed++ } catch (e) {
+        skipped++
+        console.error('[brand] a clip could not be branded:', e)
+      }
     }
   }
+  await Promise.all(Array.from({ length: Math.min(4, todo.length) }, worker))
   return { changed, skipped }
 }
 

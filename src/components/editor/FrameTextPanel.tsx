@@ -2,12 +2,12 @@
 
 import { useBrandPalette, useBrandLock, withBrand } from './brandPalette'
 import type { SegmentLocal, FrameItem, FrameLane, FrameBand } from '@chai-cut/shared'
-import { isFrameLayout, frameHasBand, frameLanes, frameOf, DEFAULT_BAND, frameTextLanes, isTextLane } from '@/modules/editor/frames'
+import { isFrameLayout, frameHasBand, frameLanes, frameOf, DEFAULT_BAND, frameTextLanes, isTextLane, frameBandColourShows } from '@/modules/editor/frames'
 import { frameItemColor } from './SegmentTimeline'
 
 const ACCENT = '#c8ff00'
 // 'none': no background (the video or picture under it shows)
-const TEXT_BG = ['none', '#000000', '#ffffff', '#c8ff00', '#ef4444', '#2563eb', '#f59e0b']
+export const TEXT_BG = ['none', '#000000', '#ffffff', '#c8ff00', '#ef4444', '#2563eb', '#f59e0b']
 
 interface Props {
   /** The frame under the playhead (null when the playhead isn't in a frame) */
@@ -85,7 +85,8 @@ export function FrameTextPanel({ segment, currentTimeMs, selectedId, onSelect, o
         )
       })}
 
-      {hasBand && (
+      {/* (only where the colour shows: not on Blur fill, whose strips are see-through — frameBandColourShows) */}
+      {hasBand && frameBandColourShows(segment) && (
         <Swatches title="Band colour (where there's no text)" colors={TEXT_BG} value={frame.band?.bg ?? DEFAULT_BAND.bg} onChange={bg => onUpdateBand({ bg })} />
       )}
     </div>
@@ -93,12 +94,13 @@ export function FrameTextPanel({ segment, currentTimeMs, selectedId, onSelect, o
 }
 
 
-function Swatches({ title, colors: own, value, onChange }: { title: string; colors: string[]; value: string; onChange: (c: string) => void }) {
-  // The brand kit's colours first (components/editor/brandPalette.ts); "none" stays where it was
-  // (brand lock: the team kit's colours only, and no free picker)
+export function Swatches({ title, colors: own, value, onChange, disabled }: { title: string; colors: string[]; value: string; onChange: (c: string) => void; disabled?: boolean }) {
+  // "None" (see-through) always first (user, 2026-11-19), then the brand kit's colours
+  // (components/editor/brandPalette.ts), then the rest (brand lock: the team kit's colours only, and no free picker)
   const lock = useBrandLock()
-  const palette = withBrand(useBrandPalette(), own)
-  const colors = lock ? [...lock.colors, ...own.filter(c => c === 'none')] : palette
+  const none = own.filter(c => c === 'none')
+  const palette = withBrand(useBrandPalette(), own.filter(c => c !== 'none'))
+  const colors = [...none, ...(lock ? lock.colors : palette).filter(c => c !== 'none')]
   const isPreset = colors.some(c => c.toLowerCase() === value.toLowerCase())
   return (
     <div className="flex flex-col gap-1.5">
@@ -107,7 +109,7 @@ function Swatches({ title, colors: own, value, onChange }: { title: string; colo
         {colors.map(c => {
           const on = c.toLowerCase() === value.toLowerCase()
           return (
-            <button key={c} onClick={() => onChange(c)} aria-label={c === 'none' ? `${title}: none` : `${title} ${c}`} aria-pressed={on}
+            <button key={c} onClick={() => onChange(c)} disabled={disabled} aria-label={c === 'none' ? `${title}: none` : `${title} ${c}`} aria-pressed={on}
               title={c === 'none' ? 'None (see-through)' : undefined}
               style={{
                 width: 22, height: 22, borderRadius: '50%', border: `2px solid ${on ? ACCENT : 'rgb(var(--ed-fg) / 0.15)'}`, boxShadow: on ? '0 0 0 2px rgba(200,255,0,0.25)' : 'none',
@@ -116,7 +118,7 @@ function Swatches({ title, colors: own, value, onChange }: { title: string; colo
               }} />
           )
         })}
-        {!lock && <label style={{ width: 22, height: 22, borderRadius: '50%', position: 'relative', cursor: 'pointer', flexShrink: 0 }} title="Custom colour">
+        {!lock && !disabled && <label style={{ width: 22, height: 22, borderRadius: '50%', position: 'relative', cursor: 'pointer', flexShrink: 0 }} title="Custom colour">
           <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)', border: `2px solid ${!isPreset ? ACCENT : 'rgb(var(--ed-fg) / 0.2)'}` }} />
           <input type="color" value={value.startsWith('#') ? value : '#000000'} onChange={e => onChange(e.target.value)} aria-label={`Custom ${title.toLowerCase()}`}
             style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }} />

@@ -44,6 +44,14 @@ export function FrameBackgroundFields({ value, onChange, disabled }: {
             <ColorPick label={value.style === 'gradient' ? 'To' : 'Pattern'} value={bg.color2} disabled={disabled} onChange={color2 => set({ color2 })} />
           )}
           {value.style === 'gradient' && seg('Direction', [['down', 'Top to bottom'], ['diagonal', 'Diagonal']], bg.direction, direction => set({ direction }))}
+          {/* How solid it is (user, 2026-11-19): below 100%, the video, blurred, shows through */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-medium w-14 shrink-0" style={{ color: muted }}>Opacity</span>
+            <input type="range" min={0} max={100} step={5} value={Math.round((bg.opacity ?? 1) * 100)} disabled={disabled} aria-label="Background opacity"
+              onChange={e => { const o = Number(e.target.value) / 100; onChange({ ...bg, opacity: o }) }}
+              className="ed-zoom-range flex-1 min-w-0" style={{ width: 'auto', '--p': `${Math.round((bg.opacity ?? 1) * 100)}%` } as React.CSSProperties} />
+            <span className="w-9 shrink-0 text-right text-[11px] tabular-nums" style={{ color: muted }}>{Math.round((bg.opacity ?? 1) * 100)}%</span>
+          </div>
           {value.style === 'pattern' && (
             <>
               <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Pattern">

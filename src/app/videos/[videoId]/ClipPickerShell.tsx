@@ -79,8 +79,9 @@ const ASK_EXAMPLES = ['funny reactions', 'controversial takes', 'emotional momen
 const CLIP_TABS: Array<{ id: ClipTab; label: string; empty: string }> = [
   { id: 'all', label: 'All clips', empty: '' },
   { id: 'yours', label: 'Your clips', empty: 'Clips you make yourself (New clip) show here.' },
-  { id: 'ask', label: 'Ask AI', empty: 'Describe what you want in Ask AI, then press + on a result.' },
+  // (Make my clips before Ask AI, user 2026-11-19)
   { id: 'auto', label: 'Make my clips', empty: 'Clips AI makes for you with Make my clips show here.' },
+  { id: 'ask', label: 'Ask AI', empty: 'Describe what you want in Ask AI, then press + on a result.' },
   // (Best moments: removed 2026-11-09 (user), kept commented; clips it made stay under All clips)
   // { id: 'best', label: 'Best moments', empty: 'Find best moments, then press + on the ones you want.' },
   { id: 'edited', label: 'Edited clips', empty: 'Clips you open in the editor show here.' },
@@ -974,6 +975,22 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // Parsed form range, for the live duration readout
   const formStartMs = parseTime(formStart)
   const formEndMs = parseTime(formEnd)
+  // The same part of the video as a clip already made (start and end within half a second: the times are set to
+  // the second) — a short heads-up, gone after 4 s (user, 2026-11-19); the clip can still be made
+  const sameClip = formStartMs !== null && formEndMs !== null && formEndMs > formStartMs
+    ? clips.find(c => Math.abs(c.start_ms - formStartMs) <= 500 && Math.abs(c.end_ms - formEndMs) <= 500) ?? null : null
+  const [dupWarn, setDupWarn] = useState<{ title: string; start: number; end: number; key: number } | null>(null)
+  const warnSame = (c: (typeof clips)[number]) => setDupWarn({ title: c.title?.trim() || `Clip ${c.index}`, start: c.start_ms, end: c.end_ms, key: Date.now() })
+  // (when the times come to match one: once per match, not on every keystroke)
+  const sameKey = sameClip ? `${sameClip.id}:${formStartMs}:${formEndMs}` : ''
+  useEffect(() => {
+    if (sameClip) warnSame(sameClip); else setDupWarn(null)
+  }, [sameKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!dupWarn) return
+    const t = setTimeout(() => setDupWarn(null), 4000)
+    return () => clearTimeout(t)
+  }, [dupWarn])
 
   /** `open`: open the new clip in the editor (Create & edit); otherwise just add it to the board */
   function submitForm(open = true) {
@@ -982,6 +999,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     if (formEndMs <= formStartMs) { setFormError('End must be after start'); return }
     if (maxMs > 0 && formEndMs > maxMs) { setFormError(`The video is only ${msToDisplay(maxMs)} long`); return }
     setFormError(null)
+    if (sameClip) warnSame(sameClip)
     createClip(formStartMs, formEndMs, open ? 'form' : 'board', formTitle.trim() || undefined, undefined, open)
   }
 
@@ -1225,6 +1243,18 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     // }
   // }
 
+  // A search's results shown (new or saved): the Ask AI card scrolls to them if they're out of sight below
+  const askResultsRef = useRef<HTMLDivElement>(null)
+  const askScrollNext = useRef(false)
+  useEffect(() => {
+    if (!askScrollNext.current || !aiSuggestions?.length) return
+    askScrollNext.current = false
+    const box = askRef.current, list = askResultsRef.current
+    if (!box || !list) return
+    const top = list.getBoundingClientRect().top - box.getBoundingClientRect().top
+    if (top > box.clientHeight - 60) box.scrollTo({ top: box.scrollTop + top - 8, behavior: 'smooth' })
+  }, [aiSuggestions])
+
   /** The clip a result already became (same start and end), if any */
   function clipFor(s: Suggestion) {
     return clips.find(c => c.id === s.clip_id) ?? clips.find(c => c.start_ms === s.start_ms && c.end_ms === s.end_ms) ?? null
@@ -1253,6 +1283,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
 
   // On demand — asks AI to find moments matching a specific, user-typed criteria
   async function findByCriteria(query?: string, fresh = false, pay = false) {
+    askScrollNext.current = true
     const q = (query ?? aiCriteria).trim()
     if (!q) return
     const key = searchKey(q)
@@ -1630,8 +1661,16 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     card.querySelector<HTMLButtonElement>('.mmc-go:not(:disabled)')?.focus({ preventScroll: true })
   }
   const newClipBar = formOpen ? (
-    <form className="cb-form shrink-0 p-4 flex flex-col gap-3"
+    <form className="cb-form relative shrink-0 p-4 flex flex-col gap-3"
       onSubmit={e => { e.preventDefault(); submitForm(true) }}>
+      {/* The heads-up: this part is already a clip (amber, small, above the bar; 4 s, or ×) */}
+      {dupWarn && (
+        <div key={dupWarn.key} role="status" className="cb-dup-warn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3.5l9.5 16.5h-19z" /><path d="M12 10v4.5M12 17.5h.01" /></svg>
+          <span className="min-w-0"><b>You already have this part:</b> “{dupWarn.title}” ({msToDisplay(dupWarn.start)} – {msToDisplay(dupWarn.end)})</span>
+          <button type="button" aria-label="Close" onClick={() => setDupWarn(null)}>×</button>
+        </div>
+      )}
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1 flex-1" style={{ minWidth: 200 }}>
           <label htmlFor="clip-title" className="cb-label">New clip <span style={{ color: 'rgb(var(--cb-fg) / 0.3)', letterSpacing: '0.04em', textTransform: 'none', fontWeight: 500 }}>· title (optional)</span></label>
@@ -2204,8 +2243,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               : `${allowance.askAi.perMonth - allowance.askAi.usedThisMonth} of ${allowance.askAi.perMonth} searches left · ${allowance.askAi.nextCredits} credits a search${allowance.askAi.countsAs > 1 ? ` (on this video one counts as ${allowance.askAi.countsAs})` : ''}`}
           </p>
         )}
-        {/* Results scroll inside the card, so the card never grows (no scrollbar shown) */}
-        <div className="cb-noscroll flex-1 min-h-0 overflow-y-auto flex flex-col gap-2">
+        {/* The results under the rest: the card is the one thing that scrolls — title, search, chips and results
+            move together (user, 2026-11-19: the results' own scroll inside the card's looked like two frames) */}
+        <div ref={askResultsRef} className="shrink-0 flex flex-col gap-2">
         {aiError && <p className="text-xs" style={{ color: '#f87171' }}>{aiError}<TopUpLink message={aiError} /></p>}
         {!loadingAi && askFrom && aiSuggestions && (
           <div className="shrink-0 flex items-center gap-2 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
@@ -2526,6 +2566,23 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 )}
               </div>
             )}
+            {/* Select mode: what's ticked, and Select all / Clear — up here, under Cancel, where selecting starts
+                (user, 2026-11-19: at the foot of the panel it was out of sight with more clips); above the list,
+                so it doesn't scroll away */}
+            {selecting && (() => {
+              const allOn = shownClips.length > 0 && shownClips.every(c => selected.has(c.id))
+              return (
+                <div className="mt-2 flex items-center gap-2 pl-3 pr-1 py-1 rounded-xl" style={{ background: 'rgb(var(--cb-fg) / 0.05)', border: '1px solid rgb(var(--cb-fg) / 0.08)' }}>
+                  <span className="text-xs font-semibold text-white flex-1 min-w-0 truncate" aria-live="polite">
+                    {selected.size === 0 ? 'Tap clips to select them' : `${selected.size} of ${shownClips.length} selected`}
+                  </span>
+                  <button type="button" disabled={shownClips.length === 0} onClick={() => setSelected(allOn ? new Set() : new Set(shownClips.map(c => c.id)))}
+                    className="shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:bg-white/10 disabled:opacity-40" style={{ color: 'rgb(var(--cb-fg) / 0.85)' }}>
+                    {allOn ? 'Clear' : `Select all${shownClips.length > 1 ? ` ${shownClips.length}` : ''}`}
+                  </button>
+                </div>
+              )
+            })()}
           </div>
           {clipError && (
             // (user, 2026-11-12) calm, not alarming: a neutral card with a soft red edge and icon; what failed, then
@@ -2616,22 +2673,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             {/* (the "Tip: tap a clip to open it" box under the list: out, user 2026-11-09) */}
           </div>
 
-          {/* Select mode: what's ticked, and what to do with it */}
+          {/* Select mode: what to do with the ticked clips (what's ticked, and Select all: at the top, under Cancel) */}
           {selecting && (() => {
-            const allOn = shownClips.length > 0 && shownClips.every(c => selected.has(c.id))
             return (
               <div className="shrink-0 px-4 py-3 flex flex-col gap-2" style={{ borderTop: PANEL_LINE, background: PANEL_BG }} role="toolbar" aria-label="Selected clips">
                 {deleteError && !confirmDelete && <p role="alert" className="text-xs" style={{ color: '#f87171' }}>{deleteError}</p>}
-                {/* (two rows, for the narrow panel: what's ticked and Select all / Clear; then what to do with them) */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-white flex-1 min-w-0" aria-live="polite">
-                    {selected.size === 0 ? 'Tap clips to select them' : `${selected.size} selected`}
-                  </span>
-                  <button type="button" onClick={() => setSelected(allOn ? new Set() : new Set(shownClips.map(c => c.id)))}
-                    className="shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:bg-white/10" style={{ color: 'rgb(var(--cb-fg) / 0.75)' }}>
-                    {allOn ? 'Clear' : 'Select all'}
-                  </button>
-                </div>
                 {/* (small pills at the right, Delete first: quiet until pointed at; Download the one lime action) */}
                 <div className="flex items-center justify-end gap-2">
                   <button type="button" disabled={selected.size === 0} onClick={() => { setDeleteError(null); setConfirmDelete(true) }}
@@ -3532,15 +3578,19 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
   const sub = useSubEdit(id, onSubEdited)
   // Opened: a click anywhere outside the card closes it again (not while picking clips, nor in its
   // own pop-ups, nor on the centre panel where it is being previewed: data-keep-clip-open)
+  // (on the click, not the press — user 2026-11-19: closing on the press shrank this card while the button was
+  // down, the cards under it moved up, and the click missed the heart it was aimed at on the next card. On the
+  // click, in the capture phase: what was clicked is already settled, and its own handler still runs — even
+  // one that stops the click going further)
   useEffect(() => {
     if (!open || selecting) return
-    const away = (e: PointerEvent) => {
+    const away = (e: MouseEvent) => {
       const t = e.target as HTMLElement | null
       if (!t || t.closest(`#clip-${CSS.escape(id)}`) || t.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [data-keep-clip-open]')) return
       onClose?.()
     }
-    document.addEventListener('pointerdown', away)
-    return () => document.removeEventListener('pointerdown', away)
+    document.addEventListener('click', away, true)
+    return () => document.removeEventListener('click', away, true)
   }, [open, selecting, id, onClose])
   const chip = clipState(status, outputUrl, !!edited, !!changed, !!opened)
   const stateTag = (

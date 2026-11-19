@@ -61,7 +61,7 @@ interface Props {
 export type FrameTextEdit = {
   item: FrameItem
   /** How it looks now (its own settings over its area's) */
-  look: { font: string | null; size: number; color: string; bg: string }
+  look: { font: string | null; size: number; color: string; bg: string; bgOpacity: number }
   /** "Band", "Name 1"…: where it sits in the frame */
   where: string
   segment: SegmentLocal
@@ -234,7 +234,7 @@ export function TextOverlayPanel({ overlays, currentTimeMs, clipDurationMs, onAd
     const shown: TextTab = heldTab(shown0) ? 'text' : shown0
     const pick = (id: string) => { if (openId !== id || ft) onSelect?.(id); setOpenId(id) }
     const sample = { ...(brand?.styles[0]?.look ?? TEXT_PRESETS[0].style), size: 72 }
-    const ftCss = ft ? textCss({ font: ft.look.font, color: ft.look.color, bg_color: ft.look.bg !== 'none' ? ft.look.bg : null, bg_opacity: 1, bg_radius: 10, weight: 700, shadow: 'none', size: ft.look.size }) : null
+    const ftCss = ft ? textCss({ font: ft.look.font, color: ft.look.color, bg_color: ft.look.bg !== 'none' ? ft.look.bg : null, bg_opacity: ft.look.bgOpacity, bg_radius: 10, weight: 700, shadow: 'none', size: ft.look.size }) : null
     return (
       <div className="flex flex-col">
         {/* Pinned at the top while the panel scrolls, as the Captions panel: the preview and the sub-bar */}
@@ -735,6 +735,11 @@ function FrameTextLook({ ft }: { ft: FrameTextEdit }) {
         <span className="cap-heading">Colour</span>
         <Swatches label="Text colour" value={ft.look.color} onChange={color => ft.onUpdate({ color })} />
         <Swatches label="Background" none value={ft.look.bg} onChange={bg => ft.onUpdate({ bg })} />
+        {/* How solid the background is (user, 2026-11-19): what's behind shows through; the words stay solid */}
+        {ft.look.bg !== 'none' && (
+          <Slider label="Background opacity" value={Math.round(ft.look.bgOpacity * 100)} min={10} max={100} step={5} suffix="%"
+            onChange={v => ft.onUpdate({ bg_opacity: v / 100 })} />
+        )}
       </section>
     </div>
   )
