@@ -121,6 +121,14 @@ export function useClipBrands(videoId: string, clipIds: string[], onChanged?: (c
       setNote({ text: e instanceof Error ? e.message : String(e), bad: true })
     } finally { setBusy(null) }
   }
+  // (user, 2026-11-18: "Mythri Movie Makers is on 1 clip" stayed after the clip was changed) a result shows for a
+  // few seconds; a problem until the next action. Both go when the board's clips change
+  useEffect(() => {
+    if (!note || note.bad) return
+    const t = setTimeout(() => setNote(null), 4500)
+    return () => clearTimeout(t)
+  }, [note])
+  useEffect(() => { setNote(null) }, [clipsKey])
   return { kits, kitOf, pick, setPick, branded, busy, note, applyAll, applyTo, setClip }
 }
 

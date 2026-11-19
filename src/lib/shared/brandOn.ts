@@ -59,6 +59,11 @@ export interface BrandOn {
    * editor takes the kit as it is then, and follows it from there.
    */
   applied?: BrandKitData | null
+  /**
+   * This clip's own caption / title look while the kit stays on (user, 2026-11-17: the kit's look is in charge;
+   * "Use my own style" frees it for this clip). Set: the kit no longer changes that part here. Absent: the kit's
+   */
+  own?: { captions?: boolean; title?: boolean } | null
 }
 
 function cleanInsert(raw: unknown): InsertBefore | null {
@@ -88,8 +93,11 @@ export function cleanBrandOn(raw: unknown): BrandOn | null {
   if (typeof r.kit_id !== 'string' || !/^[0-9a-f-]{36}$/i.test(r.kit_id)) return null
   const b = r.before && typeof r.before === 'object' ? r.before as Partial<BrandBefore> : null
   const applied = (raw as { applied?: unknown }).applied
+  const o = (raw as { own?: unknown }).own
+  const own = o && typeof o === 'object' ? { captions: (o as { captions?: unknown }).captions === true, title: (o as { title?: unknown }).title === true } : null
   return {
     kit_id: r.kit_id.toLowerCase(),
+    ...(own && (own.captions || own.title) ? { own } : {}),
     applied: applied && typeof applied === 'object' ? cleanBrandKitData(applied) : null,
     before: b ? {
       texts: b.texts && typeof b.texts === 'object' ? b.texts : {},

@@ -86,7 +86,8 @@ export default function DashboardPage() {
   // "Make clips" first asks how: AI edit or manual edit. A finished upload doesn't ask: the new
   // video just appears in the list (the user picks Make clips when they want)
   const [choosing, setChoosing] = useState<{ id: string; title: string; videoUrl?: string | null; posterUrl?: string | null; durationMs?: number | null } | null>(null)
-  const upload = useVideoUpload(() => { fetchVideos(); fetchPlan() })
+  // (the reading is paid for as the upload finishes — the balance looked at again then, user 2026-11-18)
+  const upload = useVideoUpload((_id, paid) => { fetchVideos(); fetchPlan(); if (paid) applyCredits(paid); else refreshCredits() })
   const uploading = upload.state.phase === 'uploading' || upload.state.phase === 'finishing'
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -102,7 +103,7 @@ export default function DashboardPage() {
     try { sessionStorage.setItem('dashSeenLow', String(n)) } catch { /* storage blocked: hidden for now only */ }
   }
   // Credits (null while loading, and when credits are off: no prices are shown then)
-  const { credits, refresh: refreshCredits } = useCredits()
+  const { credits, refresh: refreshCredits, apply: applyCredits } = useCredits()
 
   async function fetchVideos() {
     const res = await fetch('/api/videos')
@@ -122,7 +123,18 @@ export default function DashboardPage() {
     Promise.all([fetchVideos(), fetchPlan()]).finally(() => setLoading(false))
   }, [])
 
-  usePolling(fetchVideos, videos.some(v => v.status === 'uploaded' || v.status === 'transcribing'))
+  // A video's reading is paid for once the worker has found its length — at the next look at /api/credits
+  // (credits.ts sweep). So while one is processing, the balance is looked at with the list, and once more,
+  // with the plan's hours, when one finishes or fails (user, 2026-11-18: it showed only after a reload)
+  const processingIds = videos.filter(v => v.status === 'uploaded' || v.status === 'transcribing').map(v => v.id)
+  usePolling(() => Promise.all([fetchVideos(), refreshCredits()]), processingIds.length > 0)
+  const processingKey = processingIds.join(',')
+  const prevProcessing = useRef<string[]>([])
+  useEffect(() => {
+    const now = processingKey ? processingKey.split(',') : []
+    if (prevProcessing.current.some(id => !now.includes(id))) { refreshCredits(); fetchPlan() }
+    prevProcessing.current = now
+  }, [processingKey]) // eslint-disable-line react-hooks/exhaustive-deps
   // A Drive / Dropbox import running, or waiting for the OK on its credits: shown on the upload strip as a
   // file upload is (user, 2026-11-19), the newest one; a file upload in progress comes first
   // (one waiting for an answer before one still coming in)
@@ -130,7 +142,6 @@ export default function DashboardPage() {
     ? videos.find(v => v.source_type === 'link' && v.status === 'awaiting_ok')
       ?? videos.find(v => v.source_type === 'link' && (v.status === 'uploaded' || v.status === 'transcribing')) ?? null
     : null
-
   // "/" anywhere on the page puts the cursor in the search box (user, 2026-11-11: as YouTube, GitHub, Gmail) —
   // not while typing somewhere (a rename, a link), with a key held (Ctrl, Alt, ⌘), or with a window open
   const searchRef = useRef<HTMLInputElement>(null)
@@ -468,6 +479,7 @@ export default function DashboardPage() {
                   const res = await fetch(`/api/videos/${video.id}/retry`, { method: 'POST' }).catch(() => null)
                   if (!res?.ok) return (res ? (await res.json().catch(() => ({}))).error : null) ?? 'Couldn’t start it again. Please try once more.'
                   await fetchVideos()
+                  refreshCredits()
                   return null
                 }}
                 onOpen={() => setChoosing({ id: video.id, title, videoUrl: video.video_url, posterUrl: video.poster_url, durationMs: video.duration_ms })}
@@ -510,7 +522,7 @@ export default function DashboardPage() {
           onClose={() => setChooserOpen(false)}
           onDevice={() => { setChooserOpen(false); fileInputRef.current?.click() }}
           onFile={f => { setChooserOpen(false); startUpload(f) }}
-          onImported={() => { setChooserOpen(false); fetchVideos(); fetchPlan() }}
+          onImported={() => { setChooserOpen(false); fetchVideos(); fetchPlan(); refreshCredits() }}
         />
       )}
 

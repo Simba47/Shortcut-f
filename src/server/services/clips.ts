@@ -14,6 +14,11 @@ interface CreateClipInput {
   video_id: string; start_ms?: number; end_ms?: number; layout?: string; title?: string
   /** The Ask AI / Best moments result this clip is made from */
   from?: { source?: unknown; suggestion?: unknown }
+  /**
+   * The brand kit it starts with (user, 2026-11-17: the clip board's Brand picker decides — Off: none, not the
+   * default kit): 'none', or a kit's id. Absent: the account's default kit, as before
+   */
+  brand_kit?: unknown
 }
 
 export async function createClip(userId: string, input: CreateClipInput) {
@@ -52,8 +57,15 @@ export async function createClip(userId: string, input: CreateClipInput) {
 
   // No captions yet: they cost money, so the clip opens with captions off and they're made when
   // switched on in the editor (for this clip only). The account's default brand kit goes on it
-  const { brandNewClips } = await import('./brandKits')
-  await brandNewClips(userId, [{ id: clip.id as string, lengthMs: endMs - startMs }])
+  // — or what the clip board's Brand picker says: Off, no kit; a kit, that one (it must be one the user can use)
+  const kitPick = typeof input.brand_kit === 'string' ? input.brand_kit : undefined
+  if (kitPick === undefined) {
+    const { brandNewClips } = await import('./brandKits')
+    await brandNewClips(userId, [{ id: clip.id as string, lengthMs: endMs - startMs }])
+  } else if (kitPick !== 'none' && /^[0-9a-f-]{36}$/i.test(kitPick)) {
+    const { brandClip } = await import('./brandApply')
+    await brandClip(userId, clip.id as string, kitPick).catch(e => console.error('[brand] the picked kit could not be put on a new clip:', e))
+  }
 
   return { clip_id: clip.id, layout }
 }
