@@ -44,7 +44,7 @@ const FIELDS: Record<string, Record<string, How>> = {
   FrameItem: {
     id: 'frame', lane: 'frame', kind: 'frame', start_ms: 'frame', end_ms: 'frame', source_video_id: 'frame',
     source_offset_ms: 'frame', volume: 'frame', muted: 'frame', hidden: 'frame', rect: 'frame', image_path: 'frame',
-    motion: 'frame', corners: 'frame', text: 'frame', bg: 'frame', color: 'frame', size: 'frame', font: 'frame',
+    motion: 'frame', corners: 'frame', text: 'frame', bg: 'frame', bg_opacity: 'frame', color: 'frame', size: 'frame', font: 'frame',
     x: 'frame', y: 'frame', w: 'frame', h: 'frame', rotation: 'frame', captions: 'frame',
     pan: 'frame', freeze: 'frame', dim: 'frame', holds: 'frame',
     // (mirrored / turned 90° steps: render.py _mirror_filter / _turn_filter on frame items — 2026-11-12 Mirror + Rotate)

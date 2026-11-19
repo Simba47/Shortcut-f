@@ -46,6 +46,10 @@ export async function GET(req: NextRequest) {
           manual_clip_count: manual ? manual[v.id] ?? 0 : null,
           status: v.status,
           download_progress: v.download_progress,
+          download_bytes: v.download_bytes == null ? null : Number(v.download_bytes),
+          download_total: v.download_total == null ? null : Number(v.download_total),
+          // A link import: where from, for the import card ("Importing … from Google Drive")
+          link_from: v.source_type === 'link' ? (/dropbox\.com|db\.tt/i.test(String(v.source_url ?? '')) ? 'Dropbox' : 'Google Drive') : null,
           duration_ms: v.duration_ms,
           created_at: v.created_at,
           source_type: v.source_type,

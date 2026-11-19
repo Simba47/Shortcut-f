@@ -2,7 +2,8 @@ import type { CardLook, FrameBackground } from './brandCard'
 
 // ─── Domain types mirroring the database schema ───────────────────────────────
 
-export type VideoStatus = 'uploaded' | 'transcribing' | 'ready' | 'failed'
+// awaiting_ok: a link import is in, its length known, waiting for the user to OK the reading's credits (ingest.ts continueLinkImport)
+export type VideoStatus = 'uploaded' | 'transcribing' | 'awaiting_ok' | 'ready' | 'failed'
 export type ClipStatus = 'draft' | 'rendering' | 'done' | 'failed'
 export type JobType = 'transcribe' | 'render'
 export type JobStatus = 'queued' | 'processing' | 'done' | 'failed'
@@ -113,6 +114,8 @@ export interface FrameItem {
   // Text (a card in a slot, or text on the band)
   text?: string
   bg?: string
+  /** Text: how solid its background is, 0.1–1 (user, 2026-11-19); absent = 1. What's behind shows through */
+  bg_opacity?: number
   color?: string
   size?: number
   font?: string | null

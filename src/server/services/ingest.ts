@@ -42,17 +42,23 @@ export async function ingestLink(userId: string, rawUrl: string) {
 
   const { checkVideoQuota, getUserPlanConfig } = await import('./quota')
   const { checkBeforeUpload, recordReading } = await import('./readingUsage')
+  const { creditsMode } = await import('@/lib/credits')
   await checkVideoQuota(userId)
   await checkBeforeUpload(userId, null)
   const plan = await getUserPlanConfig(userId)
+  await ensureLinkColumns()
+  // Credits on: the reading's price is asked once the file is in and its length known (user, 2026-11-19:
+  // a file upload asks first, a Drive link used to be charged without asking). The worker stops at
+  // 'awaiting_ok'; continueLinkImport charges it and queues it. Otherwise counted now, as before.
+  const ask = creditsMode() === 'on'
 
   const [video] = await sql`
-    INSERT INTO videos (user_id, source_type, source_url, status)
-    VALUES (${userId}, 'link', ${url.toString()}, 'uploaded')
+    INSERT INTO videos (user_id, source_type, source_url, status, ask_ok)
+    VALUES (${userId}, 'link', ${url.toString()}, 'uploaded', ${ask})
     RETURNING id
   `
   if (!video) throw err('Failed to create video record', 500)
-  await recordReading(userId, video.id, null)
+  if (!ask) await recordReading(userId, video.id, null)
 
   // Every link import needs this job: it downloads the file (on every plan). Captions are not
   // made here: they cost money, so they're made when someone asks (captions switched on in the
@@ -62,6 +68,49 @@ export async function ingestLink(userId: string, rawUrl: string) {
   await sql`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${sql.json(payload)}, 'queued')`
 
   return { video_id: video.id }
+}
+
+/** The link import's columns (the worker's index.ts adds them too): made once per process */
+let linkColumns: Promise<void> | null = null
+function ensureLinkColumns(): Promise<void> {
+  linkColumns ??= sql`ALTER TABLE videos ADD COLUMN IF NOT EXISTS ask_ok BOOLEAN NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS download_bytes BIGINT, ADD COLUMN IF NOT EXISTS download_total BIGINT`
+    .then(() => undefined).catch(e => { linkColumns = null; throw e })
+  return linkColumns
+}
+
+/** A link import waiting for the OK (status 'awaiting_ok'): what reading it costs, as a file upload is asked */
+export async function linkImportPrice(userId: string, videoId: string) {
+  const [v] = await sql<{ status: string; duration_ms: number | null }[]>`SELECT status, duration_ms FROM videos WHERE id = ${videoId} AND user_id = ${userId}`
+  if (!v) throw err('Not found', 404)
+  const { readingPrice } = await import('./readingUsage')
+  return { status: v.status, ...(await readingPrice(userId, v.duration_ms)) }
+}
+
+/**
+ * "Continue" on a link import waiting for the OK: checked as an upload of that length is (uploads, hours,
+ * credits), charged, and queued like an uploaded file (the worker marks it ready, makes its editing copy,
+ * starts its reading). Once only: a second Continue finds it no longer waiting. Cancel deletes the video.
+ */
+export async function continueLinkImport(userId: string, videoId: string): Promise<{ ok: true }> {
+  const [v] = await sql<{ status: string; duration_ms: number | null; storage_path: string | null }[]>`
+    SELECT status, duration_ms, storage_path FROM videos WHERE id = ${videoId} AND user_id = ${userId}`
+  if (!v) throw err('Not found', 404)
+  if (v.status !== 'awaiting_ok' || !v.storage_path) throw Object.assign(err('This video isn\'t waiting for an OK any more.', 409), { expose: true })
+  const { checkBeforeUpload, recordReading } = await import('./readingUsage')
+  await checkBeforeUpload(userId, v.duration_ms)
+  const [taken] = await sql`UPDATE videos SET status = 'uploaded', ask_ok = false WHERE id = ${videoId} AND status = 'awaiting_ok' RETURNING id`
+  if (!taken) throw Object.assign(err('This video isn\'t waiting for an OK any more.', 409), { expose: true })
+  try {
+    await recordReading(userId, videoId, v.duration_ms)
+  } catch (e) {
+    // (credits spent elsewhere in between: still waiting, the reason shown)
+    await sql`UPDATE videos SET status = 'awaiting_ok', ask_ok = true WHERE id = ${videoId}`
+    throw e
+  }
+  const payload = { video_id: videoId, storage_path: v.storage_path, transcribe_full: false }
+  await sql`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${sql.json(payload)}, 'queued')`
+  return { ok: true }
 }
 
 // ── Direct upload to R2 (browser → R2, resumable) ─────────────────────────────

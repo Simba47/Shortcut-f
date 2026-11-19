@@ -218,8 +218,36 @@ export function FramesPanel({
   }, [segment?.id, current]) // eslint-disable-line react-hooks/exhaustive-deps
   const toggle = (id: string) => setOpen(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
 
+  // The frame under the playhead: its one background, at the top where it's seen (user, 2026-11-19: one colour for
+  // the whole frame — set, it shows behind everything, through the text and captions strips and in empty parts)
+  const bgSeg = segment && current ? segment : null
+  const bgCard = bgSeg && (
+    <div className="mx-3 mt-3 p-3 rounded-xl flex flex-col gap-2.5" style={{ background: 'rgb(var(--ed-fg) / 0.03)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.08)' }}
+      aria-label="This frame's background">
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>Background</span>
+        <span className="ml-auto text-[11px] truncate" style={{ color: 'rgb(var(--ed-fg) / 0.42)' }}>{FRAME_TEMPLATES[current!].name}</span>
+      </div>
+      {current === 'frame_blur_fill' ? (
+        <p className="text-[11.5px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
+          Blur fill&rsquo;s background is the video itself, blurred. For a colour, gradient or pattern, pick another frame.
+        </p>
+      ) : (
+        <>
+          <p className="text-[11px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
+            One background for the whole frame: behind your media and video, and through its text strip.
+          </p>
+          <FrameBackgroundFields value={frameOf(bgSeg).bg ?? null} disabled={!!bgSeg.locked}
+            onChange={bg => onUpdateFrame(bgSeg.id, { bg })} />
+        </>
+      )}
+      {bgSeg.locked && <span className="text-[10.5px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>This frame is locked: unlock it to change its background.</span>}
+    </div>
+  )
+
   return (
     <div className="flex flex-col">
+      {bgCard}
       {/* Gallery */}
       {/* (the tiles 9% narrower — user, 2026-11-11 — by a wider margin each side, so no row ends in a gap) */}
       <div className="py-3 flex flex-col gap-2.5" style={{ paddingInline: 25, borderBottom: '1px solid rgb(var(--ed-fg) / 0.06)' }}>
@@ -339,13 +367,7 @@ ${mediaTip(id)}`}
               </div>
               {isOpen && (
                 <div onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()} className="cursor-default">
-                  {/* The frame's own background behind and around its videos (not Blur fill's: that's the video blurred) */}
-                  {seg.layout !== 'frame_blur_fill' && (
-                    <div className="mx-1 mb-2 p-2.5 rounded-lg" style={{ background: 'rgb(var(--ed-fg) / 0.03)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.07)' }}>
-                      <FrameBackgroundFields value={frameOf(seg).bg ?? null} disabled={!!seg.locked}
-                        onChange={bg => onUpdateFrame(seg.id, { bg })} />
-                    </div>
-                  )}
+                  {/* (the frame's background: at the top of the panel, for the frame under the playhead — bgCard) */}
                   <FrameContents seg={seg} currentTimeMs={currentTimeMs} videoTitles={videoTitles}
                     selected={isActive ? selected : null}
                     onSelectItem={(id, atMs) => onSelectItem(seg.id, id, atMs)}
