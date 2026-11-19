@@ -126,6 +126,9 @@ export function brandFrame(seg: SegmentLocal, kit: Pick<BrandKit, 'name' | 'data
     if (it.locked) return it
     if (it.kind === 'text' && !it.captions) {
       before.items[it.id] = { color: it.color ?? null, bg: it.bg ?? null, font: it.font ?? null }
+      // ("Brand title" off: the frame's text keeps its colour and font; its band still takes the kit's colour)
+      // (a Branded card's own title and @handle colours still come from the card's settings)
+      if (d.title.on === false && !card) return isTextLane(it.lane) && it.bg === band.bg ? { ...it, bg: bandBg } : it
       // (a band's text carries the band's colour: it follows it; a see-through or own colour stays;
       // the kit's title font when it has one — brand kit Phase 3: brand fonts on frames too)
       return {
@@ -136,7 +139,7 @@ export function brandFrame(seg: SegmentLocal, kit: Pick<BrandKit, 'name' | 'data
     if (it.kind !== 'text') before.item_corners![it.id] = it.corners ?? null
     return it
   })
-  let next: SegmentLocal = { ...seg, frame: { ...f, band: { ...band, bg: bandBg, color: d.title.color }, items } }
+  let next: SegmentLocal = { ...seg, frame: { ...f, band: { ...band, bg: bandBg, color: d.title.on === false && !card ? band.color : d.title.color }, items } }
   if (card) {
     before.card = f.card ?? null
     const had = new Set((next.frame?.items ?? []).map(it => it.id))
@@ -283,6 +286,11 @@ function logoOverlay(t: BrandTarget, kit: Pick<BrandKit, 'data' | 'logo_url'>, r
  * aren't switched on or made), the brand on every frame and its end card. Returns what it
  * changed, to put back, and the kit's settings as the clip got them (appliedOf).
  */
+/** A kit's title look on a clip's texts: its font (for Latin text), colour and size; locked ones stay as they are */
+export function kitTitleOnTexts(texts: TextOverlay[], d: BrandKitData): TextOverlay[] {
+  return texts.map(x => (x.locked ? x : { ...x, font: textFontOf(d, x), color: d.title.color, size: d.title.size }))
+}
+
 export function putBrandOn(t: BrandTarget, kit: BrandKit): { target: BrandTarget; before: BrandBefore; applied: BrandKitData; note?: string } {
   const d = kit.data
   const before: BrandBefore = {
@@ -305,7 +313,8 @@ export function putBrandOn(t: BrandTarget, kit: BrandKit): { target: BrandTarget
   const on: BrandTarget = {
     ...t,
     overlays: logo ? [...rest, logo] : rest,
-    texts: t.texts.map(x => (x.locked ? x : { ...x, font: textFontOf(d, x), color: d.title.color, size: d.title.size })),
+    // (its title style on the clip's texts only with "Brand title" on — user, 2026-11-17)
+    texts: d.title.on === false ? t.texts : kitTitleOnTexts(t.texts, d),
     caption: d.captions.on ? { ...t.caption, ...brandCaptionStyleOn(d.captions, t.caption) } : t.caption,
     textCase: d.captions.on ? caseOf(d) : t.textCase,
     segments,
@@ -470,6 +479,7 @@ export function updateBrand(t: BrandTarget, old: BrandKitData, kit: BrandKit, be
   // Text on the clip
   const texts = t.texts.map(x => {
     if (x.locked) return x
+    if (n.title.on === false || old.title.on === false) return x
     const font = x.font === titleFont(old) && isLatinText(x.text ?? '') ? titleFont(n) : x.font
     const color = x.color === old.title.color ? n.title.color : x.color
     const size = x.size === old.title.size ? n.title.size : x.size
@@ -500,8 +510,9 @@ export function updateBrand(t: BrandTarget, old: BrandKitData, kit: BrandKit, be
       if (it.locked) return it
       if (it.kind === 'text' && !it.captions) {
         let next = it
-        if (it.color === itemColourOf(old, card, it.lane)) next = { ...next, color: itemColourOf(n, card, it.lane) }
-        if (old.title.font !== n.title.font && n.title.font && (it.font ?? null) === (old.title.font ?? null)) next = { ...next, font: n.title.font }
+        // (a Branded card's own text colours follow always; a frame's text follows the kit's title colour only while Brand title is on)
+        if ((card || (n.title.on !== false && old.title.on !== false)) && it.color === itemColourOf(old, card, it.lane)) next = { ...next, color: itemColourOf(n, card, it.lane) }
+        if (n.title.on !== false && old.title.on !== false && old.title.font !== n.title.font && n.title.font && (it.font ?? null) === (old.title.font ?? null)) next = { ...next, font: n.title.font }
         if (isTextLane(it.lane) && it.bg === oldBg) next = { ...next, bg: newBg }
         if (card && it.lane === 'band' && oldTitle && it.text === oldTitle && newTitle) next = { ...next, text: newTitle }
         if (card && it.lane === 'band2' && it.text === showHandle(old.handle) && n.handle) next = { ...next, text: showHandle(n.handle) }
@@ -514,7 +525,7 @@ export function updateBrand(t: BrandTarget, old: BrandKitData, kit: BrandKit, be
     })
     const frame: FrameSettings = {
       ...f, items,
-      band: { ...band, ...(band.bg === oldBg ? { bg: newBg } : {}), ...(band.color === old.title.color ? { color: n.title.color } : {}) },
+      band: { ...band, ...(band.bg === oldBg ? { bg: newBg } : {}), ...(n.title.on !== false && old.title.on !== false && band.color === old.title.color ? { color: n.title.color } : {}) },
       ...(card && sameJson(f.card, cardLookOf(old.card)) ? { card: cardLookOf(n.card) } : {}),
       ...(old.frames.corners !== null && n.frames.corners !== null && f.main_corners
         ? { main_corners: Object.fromEntries(Object.entries(f.main_corners).map(([k, v]) => [k, v === old.frames.corners ? n.frames.corners! : v])) }

@@ -78,6 +78,15 @@ export async function ensureFreeGrant(userId: string): Promise<void> {
   await grant(userId, { kind: 'free', amount, expiresAt: null, sourceRef: `free:${userId}` })
 }
 
+/**
+ * The balance as the header's pill shows it (useCredits' CreditsInfo), or null with credits off — sent back
+ * with whatever just spent or added credits (an upload), so the pill shows the new number at once
+ */
+export async function creditsNow(userId: string): Promise<{ balance: number; held: number; nextExpiry: { amount: number; at: Date } | null } | null> {
+  if (creditsMode() === 'off') return null
+  return balance(userId)
+}
+
 /** Credits the user can spend right now (what is held for running jobs is already taken out) */
 export async function balance(userId: string, db: Db = sql): Promise<{ balance: number; held: number; nextExpiry: { amount: number; at: Date } | null }> {
   await ensureCreditsSchema()
@@ -172,7 +181,9 @@ export async function sweep(userId?: string): Promise<void> {
     FROM credit_holds h LEFT JOIN jobs j ON j.id = h.job_id
       LEFT JOIN ai_edit_jobs a ON h.ref_type = 'ai_clips' AND a.id::text = j.payload->>'ai_edit_job_id'
     WHERE h.status = 'held' ${userId ? sql`AND h.user_id = ${userId}` : sql``}`
-  for (const h of open) {
+  // (the holds, and the reading of videos below, are separate tables and separate credits: done side by side,
+  // so the balance comes back sooner — user 2026-11-18)
+  const holds = (async () => { for (const h of open) {
     if (h.run) {
       // A Make my clips run's clips: paid for what it made. It may wait a long time on "found fewer: make these?", with its first job done
       if (h.run_status === 'done' || h.run_status === 'failed') {
@@ -185,13 +196,15 @@ export async function sweep(userId?: string): Promise<void> {
     // (an export its person stopped is paid for: only one that failed by itself gives its credits back)
     if (h.status === 'done' || (h.status === 'failed' && h.job_type === 'render' && h.error === RENDER_CANCELLED)) await settle(h.id)
     else if (h.status === 'failed' || h.stale) await release(h.id)
-  }
-  // The reading of videos: lengths the worker has found since are paid for, and a video that failed gives its credits back
-  if (userId) {
-    const { readingUse, refundFailedReadings } = await import('./readingUsage')
+  } })()
+  // The reading of videos: a video that failed gives its credits back, then lengths the worker has found since
+  // are paid for (in this order: one refund and one charge of the same video must never cross)
+  const reading = userId ? (async () => {
+    const { payFoundReadings, refundFailedReadings } = await import('./readingUsage')
     await refundFailedReadings(userId)
-    await readingUse(userId)
-  }
+    await payFoundReadings(userId)
+  })() : Promise.resolve()
+  await Promise.all([holds, reading])
 }
 
 export interface LedgerRow { id: string; delta: number; reason: string; refType: string | null; refId: string | null; shadow: boolean; createdAt: Date }

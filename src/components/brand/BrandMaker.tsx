@@ -213,7 +213,7 @@ export function BrandCard({ kit, brand, now, set, found, readOnly = false, start
           <div className="bm-logo">
             {d.logo.path && kit.logo_url
               // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={kit.logo_url} alt="Your logo" className="max-w-[85%] max-h-[85%] object-contain" />
+              ? <img src={kit.logo_url} alt="Your logo" className="max-w-[85%] max-h-[85%] object-contain" style={{ opacity: d.logo.opacity }} />
               : <span className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.4)' }}>No logo</span>}
           </div>
           {/* (one pair, as tall together as the logo: user, 2026-11-10) */}
@@ -231,6 +231,20 @@ export function BrandCard({ kit, brand, now, set, found, readOnly = false, start
             )}
           </div>
         </div>
+        {/* How see-through the logo is on the clips (user, 2026-11-17): 10–100 %, the logo here and the
+            preview change as it moves; the export puts it on at this (lib/brandKit.ts logo.opacity) */}
+        {d.logo.path && (() => {
+          const pct = Math.round(d.logo.opacity * 100)
+          return (
+            <div className="flex items-center gap-3 pt-1">
+              <span className="cap-label shrink-0">Opacity</span>
+              <input type="range" min={10} max={100} step={5} value={pct} aria-label="Logo opacity" aria-valuetext={`${pct}%`}
+                onChange={e => set({ ...now(), logo: { ...now().logo, opacity: Number(e.target.value) / 100 } })}
+                className="ed-zoom-range flex-1 min-w-0" style={{ width: 'auto', '--p': `${((pct - 10) / 90) * 100}%` } as React.CSSProperties} />
+              <span className="cap-value shrink-0 tabular-nums" style={{ minWidth: 36, textAlign: 'right' }}>{pct}%</span>
+            </div>
+          )
+        })()}
         {logoError && <p role="alert" className="text-[11px]" style={{ color: '#fca5a5' }}>{logoError}</p>}
       </div>
 

@@ -3571,7 +3571,7 @@ function OverlayBox({ overlay, isActive, onChange, onSelect, onDelete }: Overlay
 // ── CaptionBox — the captions on the preview: moved and resized like a text ────
 
 /** The caption sizes the Size slider allows (CaptionStyler) */
-const CAPTION_SIZE_MIN = 20, CAPTION_SIZE_MAX = 100
+const CAPTION_SIZE_MIN = 20, CAPTION_SIZE_MAX = 140   // (the Size slider's range — 2026-11-16)
 
 /**
  * A box round the captions where they are drawn (`rect`, from the canvas). Pointed at: a faint

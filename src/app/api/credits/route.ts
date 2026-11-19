@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
 import { requireUser } from '@/server/auth'
 import { apiError } from '@/lib/api-error'
 import { creditsMode, TOPUP_PACKS } from '@/lib/credits'
@@ -12,7 +12,9 @@ export const dynamic = 'force-dynamic'
  * running jobs, when the next credits expire, and the latest ledger rows. With credits off it says
  * so and nothing else (the page then shows no balance).
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // (?brief=1: the header's pill — the balance only, without the history the billing page lists)
+  const brief = req.nextUrl.searchParams.get('brief') === '1'
   const user = await requireUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const mode = creditsMode()
@@ -21,7 +23,8 @@ export async function GET() {
     await ensureFreeGrant(user.id)
     // Jobs that finished since the last look settle or give their credits back first
     await sweep(user.id)
-    const [b, ledger] = await Promise.all([balance(user.id), recentLedger(user.id, 30)])
+    const [b, ledger] = await Promise.all([balance(user.id), brief ? null : recentLedger(user.id, 30)])
+    if (brief) return NextResponse.json({ mode, balance: b.balance, held: b.held, nextExpiry: b.nextExpiry })
     return NextResponse.json({
       mode, balance: b.balance, held: b.held, nextExpiry: b.nextExpiry, ledger,
       topupPacks: TOPUP_PACKS,

@@ -91,11 +91,12 @@ export const FRAME_TEMPLATES: Record<FrameLayout, FrameTemplate> = {
     defaults: ['video'],
   },
   frame_video_photo: {
-    // In the gallery as Pic + Text + Video (user, 2026-11-01): a picture on top, text in the middle,
-    // the video below — the rows start in that order (startOrder) and can be swapped anywhere after.
-    // (Was "Video + Photo", the video on top: clips that have it keep their own order, export the same)
-    name: 'Pic + Text + Video', description: 'A picture, a line of text and the video, stacked — move them into any order.',
-    rows: [{ kind: 'slot', slot: 0, h: 0.42, label: 'Video' }, { kind: 'band', h: 0.16, label: 'Text' }, { kind: 'slot', slot: 1, h: 0.42, label: 'Pic' }],
+    // In the gallery as Media + Text + Video (user, 2026-11-17; was Pic + Text + Video): a photo or a video —
+    // whichever the user adds — on top, text in the middle, the video below. The rows start in that order
+    // (startOrder) and can be swapped anywhere after. (Was "Video + Photo", the video on top: clips that
+    // have it keep their own order, export the same)
+    name: 'Media + Text + Video', description: 'A photo or video, a line of text and your video, stacked — move them into any order.',
+    rows: [{ kind: 'slot', slot: 0, h: 0.42, label: 'Video' }, { kind: 'band', h: 0.16, label: 'Text' }, { kind: 'slot', slot: 1, h: 0.42, label: 'Media' }],
     defaults: ['video', 'photo'],
     startOrder: [2, 1, 0],
   },
@@ -730,7 +731,9 @@ export function slotOffers(layout: FrameLayout, slot: number): { video: boolean;
   if (own) return { video: own.video, photo: own.photo, text: !!own.text }
   switch (layout) {
     case 'frame_single': return { video: true, photo: true, text: true }
-    case 'frame_video_photo': return { video: slot === 0, photo: slot !== 0, text: true }
+    // (its Media spot takes a photo or a video — user, 2026-11-17; the Video spot is your video. No text in
+    // either: the frame has its own Text row for that — user, 2026-11-17)
+    case 'frame_video_photo': return { video: true, photo: slot !== 0, text: false }
     case 'frame_dual': return { video: true, photo: true, text: false }
     case 'frame_dual_letterbox': return { video: true, photo: false, text: false }
     case 'frame_triple': return { video: true, photo: true, text: false }
