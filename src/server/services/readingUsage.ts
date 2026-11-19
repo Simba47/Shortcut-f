@@ -42,12 +42,23 @@ const fail = (message: string, status: number) => Object.assign(new Error(messag
 
 /** What this user has used: since the month began (the Trial: ever). Lengths the worker has found since are counted, and paid for, first (credits.ts sweep does this too, so the balance is current). */
 export async function readingUse(userId: string): Promise<{ uploads: number; usedMs: number }> {
+  await payFoundReadings(userId)
+  const since = allowanceSince(await getUserPlan(userId))
+  const [r] = await sql<{ uploads: number; used: string }[]>`
+    SELECT count(*) FILTER (WHERE same_as IS NULL)::int AS uploads, COALESCE(SUM(duration_ms), 0) AS used FROM reading_usage
+    WHERE user_id = ${userId} AND created_at >= ${since}`
+  return { uploads: r.uploads, usedMs: Number(r.used) }
+}
+
+/** Videos whose length the worker has found since: counted and paid for now (credits.ts sweep, on every look at the balance) */
+export async function payFoundReadings(userId: string): Promise<void> {
   await ensureSchema()
-  const plan = await getUserPlan(userId)
-  const since = allowanceSince(plan)
   const found = await sql<{ id: string; video_id: string; duration_ms: number }[]>`
     SELECT r.id, r.video_id, v.duration_ms FROM reading_usage r JOIN videos v ON v.id = r.video_id
     WHERE r.user_id = ${userId} AND r.duration_ms IS NULL AND v.duration_ms IS NOT NULL ORDER BY r.id`
+  if (!found.length) return
+  const plan = await getUserPlan(userId)
+  const since = allowanceSince(plan)
   for (const row of found) {
     await sql.begin(async tx => {
       await tx`SELECT pg_advisory_xact_lock(hashtext(${`reading:${userId}`}))`
@@ -61,10 +72,6 @@ export async function readingUse(userId: string): Promise<{ uploads: number; use
       if (credits > 0) await chargeReading(userId, row.video_id, row.id, credits, tx).catch(e => { if (e?.status !== 402) throw e })
     })
   }
-  const [r] = await sql<{ uploads: number; used: string }[]>`
-    SELECT count(*) FILTER (WHERE same_as IS NULL)::int AS uploads, COALESCE(SUM(duration_ms), 0) AS used FROM reading_usage
-    WHERE user_id = ${userId} AND created_at >= ${since}`
-  return { uploads: r.uploads, usedMs: Number(r.used) }
 }
 
 async function chargeReading(userId: string, videoId: string, rowId: string, credits: number, tx: postgres.TransactionSql) {

@@ -2185,8 +2185,8 @@ export function Timeline({
     const plusAt = seg ? (inSection ? currentTimeMs : seg.start_ms) : 0
     const itemName = (it: FrameItem) => it.kind === 'video' ? (videoTitles[it.source_video_id ?? ''] ?? 'Video') : it.kind === 'photo' ? 'Photo' : it.captions ? 'Captions' : (it.text?.trim() || 'Text')
     const isMainLane = (f: SegmentLocal, lane: FrameLane) => !isTextLane(lane) && (frameOf(f).main_slots ?? [0]).includes(lane as number)
-    // The empty spots of the frame's lane (user, 2026-11-06: named, dashed, "+ Add" on
-    // hover — a faint grey strip didn't say what it was). Clicked: the add menu for that spot there
+    // The empty spots of the frame's lane (user, 2026-11-06: named, dashed — a faint grey strip didn't say
+    // what it was; 2026-11-17: no "+ Add" on hover, the "+" by the playhead adds). Clicked: the add menu there
     const empties = (f: SegmentLocal, lane: FrameLane, label: string) => {
       if (isMainLane(f, lane)) return null
       const out: Array<{ from: number; to: number }> = []
@@ -2209,8 +2209,8 @@ export function Timeline({
           aria-label={`${label}, empty ${msToLabel(g.from)}–${msToLabel(g.to)}: add ${what} here`}
           title={`${label} is empty here · click to add ${what}`}
           style={{ left: `${at(g.from)}%`, width: `${pct(g.to - g.from)}%`, borderRadius: 5, background: 'rgb(var(--ed-fg) / 0.035)', border: '1px dashed rgb(var(--ed-fg) / 0.25)' }}>
-          <span className="pl-2 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>{label} · empty</span>
-          <span className="shrink-0 pr-2 text-[10px] font-bold pointer-events-none opacity-0 group-hover/empty:opacity-100 transition-opacity" style={{ color: ACCENT }}>+ Add</span>
+          {/* (pl-8: room for the "+" beside the playhead at the very start; no "+ Add" — user, 2026-11-17: the "+" is enough) */}
+          <span className="pl-8 truncate text-[10px] font-semibold pointer-events-none" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>{label} · empty</span>
         </button>
       ))
     }
@@ -2316,9 +2316,11 @@ export function Timeline({
                       onClick={e => { e.stopPropagation(); onAddFrameItem?.(row.lane, e.currentTarget.getBoundingClientRect()) }}
                       aria-label={`Add to the ${row.label.toLowerCase()} ${isTextLane(row.lane) ? 'area' : 'slot'} at ${msToLabel(plusAt)}`}
                       title={isTextLane(row.lane) ? 'Add text here' : 'Add a photo, video or text here'}
-                      className="absolute top-1/2 flex items-center justify-center rounded-full hover:scale-110"
-                      style={{ left: `${at(plusAt)}%`, transform: 'translate(-50%, -50%)', width: 18, height: 18, zIndex: 41, background: ACCENT, color: '#000', border: '1.5px solid rgba(0,0,0,0.7)' }}>
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                      // (user, 2026-11-17: beside the playhead's line, not under it; the look of the "+" between
+                      // two parts — tl2-lane-plus in globals.css, as .tl2-trans)
+                      className="tl2-lane-plus absolute top-1/2"
+                      style={{ left: `${at(plusAt)}%` }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
                     </button>
                   )
                 })()}

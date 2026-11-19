@@ -1,5 +1,6 @@
 'use client'
 
+import { InteractiveHoverButton } from '@/components/ui/interactive-hover-button'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useConfirm } from './ConfirmDialog'
@@ -8,7 +9,6 @@ import { PlatformOverlay, PLATFORM_SAFE, type Platform } from './PlatformOverlay
 import { ensureBrandFont, KitFontsContext } from './brandFonts'
 import { KitColoursContext } from './brandPalette'
 import { openBrandKits, BRAND_KITS_CLOSED } from '@/components/brand/brandKitsEvents'
-import { InteractiveHoverButton } from '@/components/ui/interactive-hover-button'
 import { BrandStart, BrandCard, type Found } from '@/components/brand/BrandMaker'
 import type { KitInviteIn } from '@/lib/shared/brandTeam'
 import * as kitHistory from '@/modules/brand/kitHistory'
@@ -98,15 +98,24 @@ function pictureRatio(file: File): Promise<number> {
 export const saveLabel = (b: Pick<BrandKits, 'saveState' | 'saveError'>) =>
   b.saveState === 'saving' ? 'Saving…' : b.saveState === 'error' ? (b.saveError ? `Not saved — ${b.saveError}` : 'Not saved yet — trying again…') : 'Saved'
 
-/** The account's brand kits: loaded once, changes saved shortly after they're made */
-export function useBrandKits(): BrandKits {
-  const [kits, setKits] = useState<BrandKit[]>([])
-  const [limit, setLimit] = useState(1)
-  const [plan, setPlan] = useState('free')
-  const [loading, setLoading] = useState(true)
+/** The account's brand kits as the server lists them (api/brand-kits; a page can be sent them: `useBrandKits(initial)`) */
+export type BrandKitsLoad = { kits: BrandKit[]; limit: number; plan: string; invites?: KitInviteIn[] }
+
+/**
+ * The account's brand kits: loaded once, changes saved shortly after they're made. `initial`: the kits the
+ * page was sent with (the editor's, 2026-11-17 — its Brand button there in the first frame, not a moment
+ * later); they're still read again at once, quietly
+ */
+export function useBrandKits(initial?: BrandKitsLoad): BrandKits {
+  const [kits, setKits] = useState<BrandKit[]>(initial?.kits ?? [])
+  const [limit, setLimit] = useState(initial?.limit ?? 1)
+  const [plan, setPlan] = useState(initial?.plan ?? 'free')
+  const [loading, setLoading] = useState(!initial)
   const [error, setError] = useState<string | null>(null)
-  const [currentId, setCurrentId] = useState<string | null>(null)
-  const [invites, setInvites] = useState<KitInviteIn[]>([])
+  const [currentId, setCurrentId] = useState<string | null>(initial?.kits[0]?.id ?? null)
+  const [invites, setInvites] = useState<KitInviteIn[]>(initial?.invites ?? [])
+  /** Sent with the kits: the first read is a quiet one (nothing shows "loading") */
+  const quietFirst = useRef(!!initial)
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [saveError, setSaveError] = useState<string | null>(null)
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
@@ -120,7 +129,9 @@ export function useBrandKits(): BrandKits {
   const flushRef = useRef<(id: string, keepalive?: boolean) => void>(() => {})
 
   const load = useCallback(() => {
-    setLoading(true); setError(null)
+    if (quietFirst.current) quietFirst.current = false
+    else setLoading(true)
+    setError(null)
     fetch('/api/brand-kits').then(r => json<{ kits: BrandKit[]; limit: number; plan: string; invites?: KitInviteIn[] }>(r))
       .then(d => {
         setKits(d.kits); setLimit(d.limit); setPlan(d.plan); setInvites(d.invites ?? [])
@@ -504,13 +515,6 @@ const STEPS: Array<{ id: StepId; name: string }> = [
   { id: 'style', name: 'Text & captions' },
 ]
 
-/** The Brand kit's Next / Done: lime with a small dark dot; on hover a dark circle covers it and the label stays
-    put in lime with an arrow (user, 2026-11-13: the button rebuilt — components/ui/interactive-hover-button.tsx) */
-// (its own background turns dark too once the circle has covered it, so no lime hairline shows round the corners)
-const KIT_NEXT_BTN = 'h-9 px-5 rounded-lg bg-[#c8ff00] text-[#0a0a0a] text-xs font-bold transition-[background-color] duration-100 enabled:hover:bg-[#0a0a0a] enabled:hover:delay-300 enabled:focus-visible:bg-[#0a0a0a] enabled:focus-visible:delay-300'
-// (a faint light edge, so the dark button still reads against the dark window)
-const KIT_NEXT_FILL = 'bg-[#0a0a0a] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.14)]'
-const KIT_NEXT_HOVER_TEXT = 'text-[#c8ff00]'
 
 export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onClose, closeLabel = 'Back to the video', clipMock = true }: Partial<BrandSwitchProps> & {
   brand: BrandKits; onClose: () => void
@@ -694,17 +698,20 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
             {/* Back / Save & next: right under the boxes (user, 2026-11-10) */}
             <div className="kit-step-bar flex items-center justify-between gap-3">
               {at > 0 ? (
-                <button type="button" onClick={() => go(steps[at - 1].id)} className="h-9 px-4 rounded-lg text-xs font-semibold shrink-0"
-                  style={{ color: 'var(--ed-text)', background: 'rgb(var(--ed-fg) / 0.06)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.1)' }}>
-                  ← {steps[at - 1].name}
+                <button type="button" onClick={() => go(steps[at - 1].id)} className="kit-back-btn shrink-0">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
+                  {steps[at - 1].name}
                 </button>
               ) : <span />}
               <div className="flex items-center gap-3 min-w-0">
                 {notSaved && <span role="alert" className="text-[11px] min-w-0" style={{ color: '#fca5a5' }}>{notSaved}</span>}
-                {/* (on hover the label slides away, a dot grows to fill the button dark, and it comes back in lime with an arrow) */}
+                {/* 21st.dev's Interactive Hover Button as published (user, 2026-11-17): a lime pill with a small dark dot;
+                    pointed at, the label slides away, the dot grows to fill it dark and the label comes back in lime
+                    with an arrow (components/ui/interactive-hover-button.tsx) */}
                 <InteractiveHoverButton type="button" disabled={saving} text={nextLabel}
                   onClick={() => saveThen(() => (at < steps.length - 1 ? go(steps[at + 1].id) : onClose()))}
-                  className={`${KIT_NEXT_BTN} shrink-0 disabled:opacity-60`} fillClassName={KIT_NEXT_FILL} hoverTextClassName={KIT_NEXT_HOVER_TEXT} />
+                  className="kit-next-ihb shrink-0 w-[140px] h-9 p-0 text-[12.5px] font-bold bg-[#c8ff00] text-[#0a0a0a] border-[rgba(0,0,0,0.12)] enabled:hover:border-[rgba(200,255,0,0.6)] disabled:opacity-60 disabled:cursor-progress"
+                  dotClassName="bg-[#0a0a0a]" hoverTextClassName="text-[#c8ff00]" />
               </div>
             </div>
           </div>
@@ -849,11 +856,10 @@ export function captionPatch(u: Partial<import('@/lib/shared/types').CaptionStyl
 export function Switch({ on, label, onChange }: { on: boolean; label: string; onChange: (on: boolean) => void }) {
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={e => { e.preventDefault(); onChange(!on) }}
-      // (user, 2026-10-31: less of the palette colour, not none) on: a faint lime track with a fine lime edge
-      // and a lime knob, instead of a solid lime track
+      // (user, 2026-11-17: a black track, the lime only on the knob — when it's on; off: a grey knob)
       className="relative shrink-0 rounded-full transition-colors"
-      style={{ width: 34, height: 19, background: on ? 'rgba(200,255,0,0.16)' : 'rgb(var(--ed-fg) / 0.18)', boxShadow: on ? 'inset 0 0 0 1px rgba(200,255,0,0.45)' : 'none' }}>
-      <span className="absolute top-[2px] rounded-full transition-[left,background-color]" style={{ left: on ? 17 : 2, width: 15, height: 15, background: on ? 'var(--ed-accent-text)' : '#fff' }} />
+      style={{ width: 34, height: 19, background: '#0a0a0a', boxShadow: `inset 0 0 0 1px ${on ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.14)'}` }}>
+      <span className="absolute top-[2px] rounded-full transition-[left,background-color]" style={{ left: on ? 17 : 2, width: 15, height: 15, background: on ? '#c8ff00' : 'rgba(255,255,255,0.45)' }} />
     </button>
   )
 }
@@ -952,7 +958,7 @@ const CaptionPreview = lazy(() => import('./CaptionPreview').then(m => ({ defaul
 
 type KitTab = 'captions' | 'style' | 'look' | 'fonts'
 const KIT_TABS: Array<{ id: KitTab; label: string; tip: string }> = [
-  { id: 'captions', label: 'Captions', tip: 'Brand captions on or off' },
+  { id: 'captions', label: 'Captions & title', tip: 'Brand captions and Brand title on or off' },
   { id: 'style', label: 'Style', tip: 'How the captions look and move' },
   { id: 'look', label: 'Look', tip: 'Caption colours' },
   // (user, 2026-11-12: no Text tab — its Title style is under Fonts, its Corners card gone)
@@ -1043,6 +1049,22 @@ function TextAndCaptions({ d, now, set }: { d: BrandKitData; now: () => BrandKit
             </div>
             <Switch on={d.captions.on} label="Brand captions" onChange={on => setCaptions({ on })} />
           </div>
+          {/* Brand title (user, 2026-11-17: "captions and title both from the brand kit"): new clips and the kit going
+              on a clip take its title style — set under Fonts → Title style */}
+          <div className="cap-card flex items-center justify-between gap-3">
+            <div className="min-w-0 flex items-center gap-2.5">
+              <span className="cap-card-icon" data-on={d.title.on || undefined} aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 6V4.5h14V6M12 4.5v15M9 19.5h6" /></svg>
+              </span>
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold text-[var(--ed-text)]">Brand title</p>
+                <p className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>
+                  {d.title.on ? 'New clips and the brand kit switch use your title style (Fonts → Title style)' : 'Off: titles keep the look they have'}
+                </p>
+              </div>
+            </div>
+            <Switch on={d.title.on} label="Brand title" onChange={on => set({ ...now(), title: { ...now().title, on } })} />
+          </div>
         </div>
       )}
       {tab === 'style' && styler('style')}
@@ -1063,6 +1085,11 @@ function TextAndCaptions({ d, now, set }: { d: BrandKitData; now: () => BrandKit
           <div onPointerDownCapture={() => setSampleOf('title')} onFocusCapture={() => setSampleOf('title')}>
           <Section title="Title style">
             <p className="text-[11px] -mt-1" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>For text on the clip and frame titles: new text starts in it.</p>
+            {!d.title.on && (
+              <p className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>
+                Brand title is off (Captions &amp; title tab): clips keep their own title look. This style is still used by &ldquo;+ Title&rdquo; in the Text tool.
+              </p>
+            )}
             <FontPicker stayOpen value={d.title.font} onChange={font => set({ ...now(), title: { ...now().title, font: font === 'sans-serif' ? null : font } })} />
             <ColorRow label="Colour" value={d.title.color} onChange={color => set({ ...now(), title: { ...now().title, color } })} suggest={suggest} />
             <RangeRow label="Size" min={24} max={160} step={2} value={d.title.size} text={`${d.title.size}`}

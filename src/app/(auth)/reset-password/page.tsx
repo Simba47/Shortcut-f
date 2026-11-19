@@ -120,6 +120,11 @@ function ResetPasswordForm() {
       <Messages notice={notice} error={error && !error.at ? error.text : null} />
       <SubmitButton busy={loading} disabled={!prefillOtp && otp.length < 6} label={t.submit} busyLabel={t.busy} />
       {!prefillOtp && <ResendLine cooldown={cooldown} onResend={resend} />}
+      {!prefillOtp && (
+        <p className="auth-switch">
+          <Link href={`/forgot-password?email=${encodeURIComponent(email)}`}>{t.otherEmail}</Link>
+        </p>
+      )}
     </form>
   )
 }

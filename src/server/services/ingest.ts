@@ -209,5 +209,9 @@ export async function completeUpload(userId: string, storagePath: string, durati
   // (captions switched on in the editor, Make my clips, Best moments, Ask AI)
   const payload = { video_id: video.id, storage_path: storagePath, transcribe_full: false }
   await sql`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${sql.json(payload)}, 'queued')`
-  return { video_id: video.id }
+  // The balance after this upload's reading was paid for, for the header at once (user, 2026-11-18). Only
+  // ever extra: the upload is done whatever this does
+  const { creditsNow } = await import('./credits')
+  const credits = asset ? undefined : await creditsNow(userId).catch(() => undefined)
+  return { video_id: video.id, ...(credits !== undefined ? { credits } : {}) }
 }

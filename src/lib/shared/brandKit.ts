@@ -93,7 +93,12 @@ export interface BrandKitData {
   /** The channel's @handle (shown on the Branded card) */
   handle: string
   /** Frame titles and text on the clip: font family (null = the default), colour and size (px at 1080 wide) */
-  title: { font: string | null; color: string; size: number }
+  title: {
+    /** "Brand title" (user, 2026-11-17): new clips and the kit going on a clip take this title style (off: titles
+     *  keep their own look). Kits from before the switch: on */
+    on: boolean
+    font: string | null; color: string; size: number
+  }
   /** Its other ready text styles: a subtitle and a call to action ("Follow for more") */
   styles: { subtitle: BrandTextStyle; cta: BrandTextStyle }
   /** More caption looks besides `captions` ("Bold for hooks"…), switched to in one tap in the editor */
@@ -194,7 +199,7 @@ export const DEFAULT_BRAND_KIT: BrandKitData = {
   lock: false,
   fonts: [],
   handle: '',
-  title: { font: null, color: '#ffffff', size: 64 },
+  title: { on: true, font: null, color: '#ffffff', size: 64 },
   styles: {
     subtitle: { font: null, color: '#ffffff', size: 44, bg: null, uppercase: false },
     cta: { font: null, color: '#0a0a0a', size: 48, bg: 'accent', uppercase: true },
@@ -273,6 +278,7 @@ export function cleanBrandKitData(raw: unknown, userId?: string): BrandKitData {
       .slice(0, MAX_BRAND_FONTS),
     handle: text(d.handle, 40).replace(/\s+/g, ''),
     title: {
+      on: d.title?.on !== false,
       font: typeof d.title?.font === 'string' && d.title.font.length <= 60 ? d.title.font : null,
       color: color(d.title?.color, def.title.color),
       size: Math.round(num(d.title?.size, 24, 160, def.title.size)),

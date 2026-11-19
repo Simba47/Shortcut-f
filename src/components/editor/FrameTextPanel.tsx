@@ -1,17 +1,13 @@
 'use client'
 
 import { useBrandPalette, useBrandLock, withBrand } from './brandPalette'
-import { InfoTip } from '@/components/ui/info-tip'
-import { EmojiButton, insertAtCursor } from './EmojiPicker'
 import type { SegmentLocal, FrameItem, FrameLane, FrameBand } from '@chai-cut/shared'
-import { isFrameLayout, frameHasBand, frameLanes, frameOf, DEFAULT_BAND, frameTextLanes, isTextLane, textLaneLook } from '@/modules/editor/frames'
-import { FRAME_ITEM_COLORS, frameItemColor } from './SegmentTimeline'
-import { ItemTimeRange } from './ItemTimeRange'
+import { isFrameLayout, frameHasBand, frameLanes, frameOf, DEFAULT_BAND, frameTextLanes, isTextLane } from '@/modules/editor/frames'
+import { frameItemColor } from './SegmentTimeline'
 
 const ACCENT = '#c8ff00'
 // 'none': no background (the video or picture under it shows)
 const TEXT_BG = ['none', '#000000', '#ffffff', '#c8ff00', '#ef4444', '#2563eb', '#f59e0b']
-const TEXT_COLOR = ['#ffffff', '#000000', '#c8ff00', '#facc15']
 
 interface Props {
   /** The frame under the playhead (null when the playhead isn't in a frame) */
@@ -32,7 +28,7 @@ function msToLabel(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
-/** Text of a frame — on its band or as cards in its slots — edited in the Text tool */
+/** Text of a frame — on its band or as cards in its slots: listed here; the one picked is edited in the Text tool's editor (TextOverlayPanel frameText) */
 export function FrameTextPanel({ segment, currentTimeMs, selectedId, onSelect, onAdd, onUpdate, onRemove, onUpdateBand }: Props) {
   if (!segment || !isFrameLayout(segment.layout)) return null
   const frame = frameOf(segment)
@@ -76,64 +72,15 @@ export function FrameTextPanel({ segment, currentTimeMs, selectedId, onSelect, o
         return (
           <div key={it.id} className="flex flex-col rounded-lg overflow-hidden"
             style={{ background: 'rgb(var(--ed-fg) / 0.03)', boxShadow: `inset 0 0 0 ${on ? 1.5 : 1}px ${on ? frameItemColor(it) : 'rgb(var(--ed-fg) / 0.08)'}` }}>
-            <button onClick={() => onSelect(on ? null : it.id)} aria-expanded={on}
+            {/* (user, 2026-11-17: picked, it is edited in the Text tool's new editor below — its preview, Text and
+                Look tabs — not in an old form here) */}
+            <button onClick={() => onSelect(on ? null : it.id)} aria-pressed={on}
               className="flex items-center gap-2 h-9 px-3 text-left transition-colors hover:bg-[rgb(var(--ed-fg)/0.04)]">
               <span className="w-2 h-2 rounded-full shrink-0" style={{ background: frameItemColor(it) }} />
               <span className="text-xs truncate flex-1" style={{ color: it.text?.trim() || it.captions ? 'var(--ed-text)' : 'rgb(var(--ed-fg) / 0.4)' }}>{name}</span>
               <span className="text-[11px] tabular-nums shrink-0" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>{laneName(it.lane)} · {msToLabel(from)}–{msToLabel(to)}</span>
             </button>
 
-            {on && (
-              <div className="flex flex-col gap-3 px-3 pb-3 pt-1">
-                {it.captions ? (
-                  <>
-                    <p className="flex items-center gap-1.5 text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
-                      Captions in this band
-                      <InfoTip label="About captions in the band" size={12}>Your captions show inside the band here instead of their usual spot. Style them in Captions.</InfoTip>
-                    </p>
-                    <button onClick={() => onUpdate(it.id, { captions: false, text: '' })}
-                      className="self-start text-[11px] font-medium hover:underline" style={{ color: 'var(--ed-accent-text)' }}>Use your own text instead</button>
-                  </>
-                ) : (() => {
-                  const t = { ...DEFAULT_BAND, ...textLaneLook(segment, it.lane), ...pickStyle(it) }
-                  return (
-                    <>
-                      <div className="flex gap-2 items-start">
-                        <textarea rows={2} value={it.text ?? ''} placeholder="Type your title or hook…" aria-label="Text" autoFocus={!it.text}
-                          data-frame-text={it.id}
-                          onChange={e => onUpdate(it.id, { text: e.target.value })}
-                          className="flex-1 px-3 py-2 rounded-lg text-sm outline-none resize-none text-[var(--ed-text)]"
-                          style={{ background: 'rgb(var(--ed-fg) / 0.06)', border: '1px solid rgb(var(--ed-fg) / 0.12)' }} />
-                        <EmojiButton label="Add an emoji to the text"
-                          onPick={e => onUpdate(it.id, { text: insertAtCursor(document.querySelector<HTMLTextAreaElement>(`[data-frame-text="${it.id}"]`), it.text ?? '', e) })} />
-                      </div>
-                      <Swatches title="Background" colors={TEXT_BG} value={t.bg} onChange={bg => onUpdate(it.id, { bg })} />
-                      <Swatches title="Text colour" colors={TEXT_COLOR} value={t.color} onChange={color => onUpdate(it.id, { color })} />
-                      <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-medium" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>Text size</span>
-                          <span className="text-[11px] tabular-nums" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>{t.size}px</span>
-                        </div>
-                        <input type="range" min={32} max={120} step={2} value={t.size} aria-label="Text size"
-                          // (white, not lime — user, 2026-11-01; the editor's text colour, so dark on the light theme)
-                          onChange={e => onUpdate(it.id, { size: Number(e.target.value) })} style={{ accentColor: 'var(--ed-text)' }} />
-                      </div>
-                    </>
-                  )
-                })()}
-
-                <ItemTimeRange item={it} segment={segment} currentTimeMs={currentTimeMs} onChange={patch => onUpdate(it.id, patch)} />
-
-                <div className="flex items-center justify-between">
-                  {it.lane === 'band' && !it.captions ? (
-                    <button onClick={() => onUpdate(it.id, { captions: true })}
-                      className="text-[11px] font-medium hover:underline" style={{ color: FRAME_ITEM_COLORS.captions }}>Show captions here instead</button>
-                  ) : <span />}
-                  <button onClick={() => onRemove(it.id)}
-                    className="text-[11px] font-medium hover:underline" style={{ color: '#f87171' }}>Remove</button>
-                </div>
-              </div>
-            )}
           </div>
         )
       })}
@@ -145,13 +92,6 @@ export function FrameTextPanel({ segment, currentTimeMs, selectedId, onSelect, o
   )
 }
 
-function pickStyle(it: FrameItem) {
-  const out: { bg?: string; color?: string; size?: number } = {}
-  if (it.bg) out.bg = it.bg
-  if (it.color) out.color = it.color
-  if (it.size) out.size = it.size
-  return out
-}
 
 function Swatches({ title, colors: own, value, onChange }: { title: string; colors: string[]; value: string; onChange: (c: string) => void }) {
   // The brand kit's colours first (components/editor/brandPalette.ts); "none" stays where it was

@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, type MouseEvent } from 'react'
+import { useEffect, useId, useRef, useState, type MouseEvent } from 'react'
 import type { CreditsInfo } from '@/lib/useCredits'
 import { BRAND_TOP, BRAND_BOTTOM } from '@/components/ui/brand-logo'
 
@@ -40,15 +40,83 @@ export function CreditCoin({ size = 20, low = false }: { size?: number; low?: bo
   )
 }
 
-/** The balance in a page's header; it opens the credit history on the billing page */
+/**
+ * The balance as a counter of reels (user, 2026-11-18: "numbers go up and stops at that number"): each digit
+ * that changes spins upward through 0–9 — the last digit twice round, the others once — slowing and settling
+ * on its digit of the new balance; left to right they stop one after another, the last digit last (~1.1s).
+ * Lit while they spin: white when credits are taken, lime when added. Digits that stay the same stay still; a
+ * digit gained or lost (999 ↔ 1000) opens or closes its slot. The first balance, and every change with motion
+ * turned down, is shown as it is.
+ */
+function Odometer({ value }: { value: number }) {
+  const [roll, setRoll] = useState<{ value: number; from: string | null; key: number }>({ value, from: null, key: 0 })
+  if (roll.value !== value) {
+    // (set while rendering, React's way of following a prop: the new number never shows a frame before its spin)
+    const still = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    setRoll({ value, from: still ? null : String(roll.value), key: roll.key + 1 })
+  }
+  const to = String(value)
+  if (roll.from == null || roll.value !== value) return <span className="odo">{to}</span>
+  const n = Math.max(roll.from.length, to.length)
+  const A = roll.from.padStart(n, ' '), B = to.padStart(n, ' ')
+  const tone = value < Number(roll.from) ? 'is-spent' : 'is-added'
+  const changed = [...B].map((d, i) => d !== A[i])
+  const total = changed.filter(Boolean).length
+  let k = 0
+  return (
+    <span className="odo">
+      {[...B].map((now, i) => {
+        const was = A[i]
+        if (!changed[i]) return <span key={`${roll.key}-${i}`} className="odo-slot">{now}</span>
+        const fromD = was === ' ' ? 0 : Number(was), toD = now === ' ' ? 0 : Number(now)
+        const turns = i === n - 1 ? 2 : 1
+        const steps = turns * 10 + ((toD - fromD + 10) % 10)
+        const strip = Array.from({ length: steps + 1 }, (_, j) => (fromD + j) % 10)
+        if (now === ' ') strip[strip.length - 1] = -1           // a digit lost: lands on nothing, its slot closes
+        strip.push(now === ' ' ? -1 : (toD + 1) % 10)           // (the one just past it, seen as it settles back)
+        const order = k++
+        const ms = total > 1 ? 800 + Math.round((300 * order) / (total - 1)) : 1000
+        const size = was === ' ' ? ' odo-grow' : now === ' ' ? ' odo-shrink' : ''
+        return (
+          <span key={`${roll.key}-${i}`} className={`odo-slot is-rolling ${tone}${size}`}>
+            <span className="odo-strip" style={{ animationDuration: `${ms}ms`, ['--odo-to' as string]: `${-1.25 * steps}em` }}>
+              {strip.map((d, j) => <span key={j} className="odo-digit">{d < 0 ? ' ' : d}</span>)}
+            </span>
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
+/**
+ * The balance in a page's header; it opens the credit history on the billing page. When it changes, the
+ * digits roll to the new number (Odometer), the coin turns once, and the change itself ("−15", "+50") shows by the pill:
+ * credits taken drop away from it (neutral), credits added rise into it (lime) — then fade.
+ */
 export function CreditsBadge({ credits, className = 'credits-badge', onClick }: { credits: CreditsInfo | null; className?: string; onClick?: (e: MouseEvent<HTMLAnchorElement>) => void }) {
+  const balance = credits?.balance ?? null
+  const last = useRef(balance)
+  const [change, setChange] = useState<{ n: number; key: number } | null>(null)
+  useEffect(() => {
+    const before = last.current
+    last.current = balance
+    if (before == null || balance == null || before === balance) return
+    setChange({ n: balance - before, key: Date.now() })
+  }, [balance])
   if (!credits) return null
   const soon = credits.nextExpiry ? `${credits.nextExpiry.amount} credits expire ${new Date(credits.nextExpiry.at).toLocaleDateString()}. ` : ''
   const low = credits.balance <= 5
   return (
-    <a href="/billing#credits" onClick={onClick} className={`${className}${credits.balance <= 5 ? ' is-low' : ''}`} title={`${soon}See your credit history`}>
-      <CreditCoin low={low} />
-      <span className="credits-num"><strong>{credits.balance}</strong> <span className="credits-word">credits</span></span>
+    <a href="/billing#credits" onClick={onClick} className={`${className} credits-live${low ? ' is-low' : ''}`} title={`${soon}See your credit history`}>
+      <span key={change?.key ?? 0} className={`credit-coin-turn${change ? ' is-turning' : ''}`}><CreditCoin low={low} /></span>
+      <span className="credits-num"><strong><span aria-hidden="true"><Odometer value={credits.balance} /></span><span className="sr-only">{credits.balance}</span></strong> <span className="credits-word">credits</span></span>
+      {change && (
+        <span key={change.key} className={`credits-change ${change.n < 0 ? 'is-spent' : 'is-added'}`} aria-hidden="true">
+          {change.n < 0 ? `−${Math.abs(change.n)}` : `+${change.n}`}
+        </span>
+      )}
+      <span className="sr-only" aria-live="polite">{change ? `${Math.abs(change.n)} credits ${change.n < 0 ? 'used' : 'added'}. ${credits.balance} left.` : ''}</span>
     </a>
   )
 }

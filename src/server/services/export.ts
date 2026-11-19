@@ -1,7 +1,7 @@
 import sql from '@/lib/db'
 import type { RenderQuality } from '@chai-cut/shared'
 import { creditsMode, exportCredits } from '@/lib/credits'
-import { charge, linkJob, release, type Hold } from './credits'
+import { charge, linkJob, release, RENDER_CANCELLED, type Hold } from './credits'
 
 // retranscribe: regenerate this clip's captions first (Gemini), then render —
 // the worker queues the render once the new transcript is saved.
@@ -43,7 +43,10 @@ async function startRender(
   await sql`UPDATE clips SET status = 'rendering' WHERE id = ${clipId}`
   // This export has every edit saved so far: the editor's "edited since the last export" note goes (user,
   // 2026-11-12 — an export from the clip board too). Never fails the export
-  await sql`UPDATE clips SET layers = layers - 'editedSinceExport' WHERE id = ${clipId} AND layers ? 'editedSinceExport'`.catch(() => {})
+  // (kept as staleBeforeExport, so a Stop puts it back: the last file doesn't have those edits — cancelRender)
+  await sql`UPDATE clips SET layers = CASE WHEN layers ? 'editedSinceExport'
+      THEN (layers - 'editedSinceExport') || '{"staleBeforeExport": true}'::jsonb ELSE layers - 'staleBeforeExport' END
+    WHERE id = ${clipId} AND (layers ? 'editedSinceExport' OR layers ? 'staleBeforeExport')`.catch(() => {})
   // "Remove pauses and filler words", as the editor shows it when exporting
   if (typeof removeFillers === 'boolean') {
     const { clipsHasRemoveFillers } = await import('./clips')
@@ -81,8 +84,8 @@ async function startRender(
   return { job_id: job.id }
 }
 
-/** Why a cancelled export's job stopped (jobs.error) */
-export const RENDER_CANCELLED = 'Cancelled by the user'
+/** Why a cancelled export's job stopped (jobs.error): its credits are kept (credits.ts sweep) */
+export { RENDER_CANCELLED } from './credits'
 
 /**
  * Stop an export (the editor's Cancel): its job — waiting, or running: the worker sees it within a
@@ -95,15 +98,17 @@ export const RENDER_CANCELLED = 'Cancelled by the user'
  * statement is atomic, as the transaction was). It was a read, then BEGIN, two updates and COMMIT: five
  * trips of ~0.3 s each from far away, the database work itself well under a millisecond.
  */
-export async function cancelRender(userId: string, clipId: string): Promise<{ status: string; output_storage_path: string | null }> {
+export async function cancelRender(userId: string, clipId: string): Promise<{ status: string; output_storage_path: string | null; changed?: boolean }> {
   const [row] = await sql`
     WITH c AS (
       SELECT c.id, c.status, c.output_storage_path, v.user_id = ${userId} AS mine
       FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.id = ${clipId}
     ), put_back AS (
-      UPDATE clips SET status = CASE WHEN output_storage_path IS NOT NULL THEN 'done' ELSE 'draft' END
+      UPDATE clips SET status = CASE WHEN output_storage_path IS NOT NULL THEN 'done' ELSE 'draft' END,
+        -- (edited before this export: the last file still doesn't have those edits — "Edited after export" again)
+        layers = CASE WHEN layers ? 'staleBeforeExport' THEN (layers - 'staleBeforeExport') || '{"editedSinceExport": true}'::jsonb ELSE layers END
       WHERE id IN (SELECT id FROM c WHERE mine) AND status = 'rendering'
-      RETURNING status, output_storage_path
+      RETURNING status, output_storage_path, COALESCE(layers->>'editedSinceExport' = 'true', false) AS changed
     ), stopped AS (
       UPDATE jobs SET status = 'failed', error = ${RENDER_CANCELLED}
       WHERE type = 'render' AND payload->>'clip_id' = ${clipId} AND status IN ('queued', 'processing')
@@ -111,7 +116,7 @@ export async function cancelRender(userId: string, clipId: string): Promise<{ st
       RETURNING id
     )
     SELECT c.mine, c.status, c.output_storage_path,
-      p.status AS new_status, p.output_storage_path AS new_output_storage_path,
+      p.status AS new_status, p.output_storage_path AS new_output_storage_path, p.changed AS new_changed,
       (SELECT count(*) FROM stopped)::int AS jobs_stopped
     FROM c LEFT JOIN put_back p ON true
   `
@@ -119,6 +124,6 @@ export async function cancelRender(userId: string, clipId: string): Promise<{ st
   if (!row.mine) throw Object.assign(new Error('Forbidden'), { status: 403 })
   // (not exporting any more: finished or failed meanwhile — as it is now)
   return row.new_status
-    ? { status: row.new_status, output_storage_path: row.new_output_storage_path }
+    ? { status: row.new_status, output_storage_path: row.new_output_storage_path, changed: !!row.new_changed }
     : { status: row.status, output_storage_path: row.output_storage_path }
 }

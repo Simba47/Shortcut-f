@@ -6,6 +6,9 @@ import { type PaidPayment, fetchRazorpayPayment, paidPayment } from '@/lib/razor
 import { splitTax, fiscalYear, formatInvoiceNo, normalizeGstin, GST_STATES, stateName } from '@/lib/invoice'
 import { ensureBillingSchema } from '@/server/services/billingSchema'
 import { sendReceiptEmail } from '@/modules/auth/mailer'
+import { describePurchase } from '@/lib/purchase'
+import { invoiceFileName, invoicePdf } from '@/server/services/invoicePdf'
+import { queuePurchase } from '@/server/analytics'
 
 /**
  * Who we invoice as. Set these for real GST invoices; without a GSTIN the paper says "Payment
@@ -102,6 +105,8 @@ export async function recordPayment(userId: string, subscriptionId: string | nul
   })
   if (paymentRowId) {
     await emailReceipt(paymentRowId).catch(e => console.error('[billing] receipt email failed:', e instanceof Error ? e.message : e))
+    // Google Analytics: the purchase, once per payment like the invoice (server/analytics.ts; never throws)
+    queuePurchase(userId, { transactionId: p.id, plan, itemName: PLANS[plan as keyof typeof PLANS]?.name ?? topupLabel(plan) ?? plan, amountPaise: p.amountPaise })
   }
   return paymentRowId
 }
@@ -156,9 +161,14 @@ async function emailReceipt(paymentRowId: string) {
   const [r] = await sql<(DbRow & { emailed_at: Date | null })[]>`SELECT * FROM payments WHERE id = ${paymentRowId}`
   if (!r || r.emailed_at || !r.customer?.email) return
   const inv = toInvoice(r)
+  const purchase = describePurchase(inv.plan, inv.paidAt)
+  // The invoice / receipt goes with the email as a PDF; if it can't be made, the email still goes (it links to the page)
+  const pdf = await invoicePdf(inv, purchase)
+    .then(content => ({ filename: invoiceFileName(inv), content }))
+    .catch(e => { console.error('[billing] invoice PDF failed:', e instanceof Error ? e.message : e); return null })
   await sendReceiptEmail({
-    to: inv.customer.email, name: inv.customer.name, planName: inv.planName, amountPaise: inv.amountPaise,
-    invoiceNo: inv.invoiceNo, paidAt: inv.paidAt, invoiceId: inv.id, taxInvoice: !!inv.seller?.taxInvoice,
+    to: inv.customer.email, name: inv.customer.name, purchase, amountPaise: inv.amountPaise, pdf,
+    invoiceNo: inv.invoiceNo, paidAt: inv.paidAt, paymentId: inv.razorpayPaymentId, invoiceId: inv.id, taxInvoice: !!inv.seller?.taxInvoice,
   })
   await sql`UPDATE payments SET emailed_at = now() WHERE id = ${paymentRowId}`
 }

@@ -6,6 +6,9 @@ import { requireUser } from '@/server/auth'
 import { EditorShell, type AiMade } from './EditorShell'
 import { EditorShellMobile } from './EditorShellMobile'
 import sql from '@/lib/db'
+import { creditsMode } from '@/lib/credits'
+import { balance, ensureFreeGrant, sweep } from '@/server/services/credits'
+import { listBrandKits } from '@/server/services/brandKits'
 import { cleanBrandOn } from '@/lib/shared/brandOn'
 import { brandCaptionWords } from '@/lib/brandWords'
 import { transcriptWindow } from '@/modules/editor/transcriptWindow'
@@ -46,6 +49,19 @@ export default async function EditorPage({
   if (!clip || clip.user_id !== user.id) notFound()
   // Only the stretch of the transcript this clip can reach, not the whole video's (F2 bug 8)
   const wordsWindow = transcriptWindow(clip as unknown as Parameters<typeof transcriptWindow>[0])
+
+  // The top bar's credit balance and brand kits, read alongside the rest (user, 2026-11-17: its Credits and Brand
+  // buttons popped in a moment after the page). Either failing: the editor reads it itself once open, as before
+  const headStart = Promise.all([
+    (async () => {
+      if (creditsMode() === 'off') return null
+      await ensureFreeGrant(user.id)
+      await sweep(user.id)
+      const b = await balance(user.id)
+      return { balance: b.balance, held: b.held, nextExpiry: b.nextExpiry ? { amount: b.nextExpiry.amount, at: b.nextExpiry.at.toISOString() } : null }
+    })().catch(() => undefined),
+    listBrandKits(user.id).catch(() => undefined),
+  ])
 
   // Fire all independent queries in parallel — one round-trip after the clip fetch
   const [
@@ -238,5 +254,7 @@ export default async function EditorPage({
     initialOverlays: overlays ?? [],
   }
 
-  return isMobile ? <EditorShellMobile {...shellProps} /> : <EditorShell {...shellProps} backStart={backStart} aiMade={aiMade} />
+  const [initialCredits, initialBrandKits] = await headStart
+  return isMobile ? <EditorShellMobile {...shellProps} />
+    : <EditorShell {...shellProps} backStart={backStart} aiMade={aiMade} initialCredits={initialCredits} initialBrandKits={initialBrandKits} />
 }

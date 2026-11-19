@@ -370,6 +370,22 @@
 .auth-secure { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 4px 14px; }
 .auth-secure span { display: inline-flex; align-items: center; gap: 5px; }
 .auth-secure svg { width: 13px; height: 13px; }
+/* Create account: "I agree to the Terms and Privacy Policy" (a tick, required) */
+.auth-agree-wrap { display: flex; flex-direction: column; gap: 6px; padding: 2px; }
+.auth-agree {
+  display: flex; align-items: flex-start; gap: 10px; cursor: pointer;
+  font-size: 13px; line-height: 1.5; color: var(--text-muted);
+}
+.auth-agree input {
+  flex-shrink: 0; width: 18px; height: 18px; margin: 1px 0 0; cursor: pointer;
+  accent-color: var(--auth-lime);
+}
+.auth-agree input:focus-visible { outline: 2px solid var(--auth-lime); outline-offset: 2px; }
+.auth-agree[data-invalid] input { outline: 2px solid var(--auth-danger); outline-offset: 2px; }
+.auth-agree a {
+  color: var(--text); text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px;
+}
+.auth-agree a:hover { text-decoration-color: var(--text-muted); }
 /* The browser's own surfaces, in the palette: selection, the caret, the form side's scrollbar */
 .auth-root ::selection { background: color-mix(in srgb, var(--auth-lime) 30%, transparent); color: #fff; }
 .auth-root input { caret-color: var(--auth-lime); }

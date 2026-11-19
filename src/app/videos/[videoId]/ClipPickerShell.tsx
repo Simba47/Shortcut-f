@@ -13,7 +13,8 @@ import { ScrubPlayer } from '@/components/clips/ScrubPlayer'
 import { useLocalVideo } from '@/modules/clips/localVideo'
 import { usePolling } from '@/lib/usePolling'
 import { useCredits } from '@/lib/useCredits'
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useSyncExternalStore } from 'react'
+import { exportCredits, MAX_CLIP_MS } from '@/lib/credits'
+import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { AiScan } from '@/components/clips/AiScan'
 import { MmcPop, CaptionChoices, TitleChoices, cleanMakeLook, captionStyleName, titleStyleName, frameName, DEFAULT_MAKE_LOOK, CLIP_LAYOUTS, type MakeLook } from '@/components/clips/MakeClipsChoices'
@@ -273,7 +274,7 @@ const AI_MIN = 300
 const CLIPS_RANGE: [number, number] = [280, 720]
 const CENTRE_MIN = 420
 // The AI column's split: the least Make my clips and Ask AI keep
-const MMC_MIN = 120, ASK_MIN = 260, ASK_MIN_EMPTY = 170
+const MMC_MIN = 120, ASK_MIN_EMPTY = 170
 function useWide() {
   return useSyncExternalStore(
     cb => { const mq = window.matchMedia(WIDE_QUERY); mq.addEventListener('change', cb); return () => mq.removeEventListener('change', cb) },
@@ -340,6 +341,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const [formEnd, setFormEnd] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  // The work under way only adds a clip to the board (no editor to open): its button's spinner says so, not the
+  // full-screen loader (user, 2026-11-18: "+" looked like the whole page reloading)
+  const [busyAdding, setBusyAdding] = useState(false)
   // The Clipboard's error banner (user, 2026-11-12): what failed (title) and why, in plain words (detail)
   const [clipError, setClipErrorState] = useState<{ title: string; detail: string } | null>(null)
   const setClipError = (title: string | null, e?: unknown) => setClipErrorState(title ? { title, detail: friendlyError(e) } : null)
@@ -387,7 +391,12 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const askKey = `clipboard.ask.${video.id}`
   // const bestKey = `clipboard.best.${video.id}`   (Best moments: removed 2026-11-09 (user), kept commented)
   useEffect(() => {
-    setAskSaved(readSaved<Record<string, Suggestion[]>>(askKey) ?? {})
+    const saved = readSaved<Record<string, Suggestion[]>>(askKey) ?? {}
+    setAskSaved(saved)
+    // (user, 2026-11-17: the results were gone after a reload) the newest search's results back on the board —
+    // saved, so free; "Search again" asks anew
+    const newest = Object.entries(saved).pop()
+    if (newest) { setAiSuggestions(cur => cur ?? newest[1]); setAskFrom(cur => cur ?? newest[0]) }
     // const best = readSaved<Suggestion[]>(bestKey)
     // if (best) setSuggestions(prev => prev ?? best)
   }, [askKey])
@@ -402,16 +411,22 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const [autoOpts, setAutoOpts] = useState<Record<AutoOption, boolean>>({ captions: true, title: true, motion: true, layouts: true })
   // What the captions and the title are written in (remembered per browser, like the checkboxes)
   // Make my clips: the brand kit its clips get ('default': the account's default kit; 'none'; or a kit's id)
-  const [brandKits, setBrandKits] = useState<Array<{ id: string; name: string; isDefault: boolean }>>([])
+  // (`captions` / `title`: the kit's Brand captions and Brand title switches — what it adds, said under Brand)
+  const [brandKits, setBrandKits] = useState<Array<{ id: string; name: string; isDefault: boolean; captions: boolean; title: boolean; logo: boolean }>>([])
   const [brandPick, setBrandPickState] = useState<string>('default')
   // (picked by the person: the list arriving later doesn't change it)
   const brandPicked = useRef(false)
   const setBrandPick = (v: string) => { brandPicked.current = true; setBrandPickState(v) }
+  // The kit picked (none: Off, or no default kit), and what it brings (user, 2026-11-17): while it brings its
+  // captions / title, they're on, in its look — the rows say so; Off: the person's own choices again
+  const pickedKit = brandPick === 'none' ? null
+    : brandPick === 'default' ? brandKits.find(k => k.isDefault) ?? null : brandKits.find(k => k.id === brandPick) ?? null
+  const capFromKit = !!pickedKit?.captions, titleFromKit = !!pickedKit?.title
   useEffect(() => {
     fetch('/api/brand-kits').then(r => (r.ok ? r.json() : null))
-      .then((d: { kits?: Array<{ id: string; name: string; shared_by?: string | null; data?: { is_default?: boolean } }> } | null) => {
+      .then((d: { kits?: Array<{ id: string; name: string; shared_by?: string | null; data?: { is_default?: boolean; captions?: { on?: boolean }; title?: { on?: boolean }; logo?: { path?: string | null } } }> } | null) => {
         if (!d?.kits) return
-        setBrandKits(d.kits.map(k => ({ id: k.id, name: k.name, isDefault: !!k.data?.is_default })))
+        setBrandKits(d.kits.map(k => ({ id: k.id, name: k.name, isDefault: !!k.data?.is_default, captions: k.data?.captions?.on === true, title: k.data?.title?.on !== false, logo: !!k.data?.logo?.path })))
         // No kit marked as the default: start on the newest of the account's own kits, not on
         // "Default (none set)" — which puts no kit on (user, 2026-10-31: the kit didn't apply)
         const own = d.kits.filter(k => !k.shared_by)
@@ -456,14 +471,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   function toggleAutoOpt(id: AutoOption) {
     setAutoOpts(o => {
       const next = { ...o, [id]: !o[id] }
-      try { localStorage.setItem(AUTO_OPTIONS_KEY, JSON.stringify(next)) } catch { /* storage blocked */ }
-      return next
-    })
-  }
-  /** "Turn them on" under Brand: Captions and Title on (remembered, as a click on their boxes) */
-  function captionsAndTitleOn() {
-    setAutoOpts(o => {
-      const next = { ...o, captions: true, title: true }
       try { localStorage.setItem(AUTO_OPTIONS_KEY, JSON.stringify(next)) } catch { /* storage blocked */ }
       return next
     })
@@ -529,9 +536,58 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     a.click()
     a.remove()
   }
-  async function downloadClip(id: string) {
+  /**
+   * Export, then Download (user, 2026-11-17): a clip with an export that has all its edits downloads (as
+   * often as wanted, free); any other — never exported, or changed since — shows Export, which asks first
+   * what it costs (the server's own price: exportCredits, per started minute) and saves the file by
+   * itself once it's ready. A Stop still uses the credits; an export that fails gives them back.
+   */
+  const fresh = (c: { status: string; output_url: string | null; changed?: boolean } | undefined) =>
+    !!c && c.status === 'done' && !!c.output_url && !c.changed
+  /** The card's (or select mode's) button: downloads what's exported, asks about exporting the rest */
+  function exportOrDownload(ids: string[]) {
+    const list = ids.map(id => clips.find(x => x.id === id)).filter((c): c is NonNullable<typeof c> => !!c)
+    const toSave = list.filter(fresh)
+    // (already exporting: it saves by itself when done)
+    const toExport = list.filter(c => !fresh(c) && c.status !== 'rendering' && dlState[c.id] !== 'exporting' && dlState[c.id] !== 'stopping')
+    for (const c of toSave) saveFile(c.id)
+    if (!toExport.length) return
+    let need = 0
+    try {
+      for (const c of toExport) need += exportCredits(c.end_ms - c.start_ms)
+    } catch (e) {
+      // (over 5 minutes: the server refuses it too; said on the card)
+      const error = (e as Error).message
+      for (const c of toExport) if (c.end_ms - c.start_ms > MAX_CLIP_MS) setDlState(d => ({ ...d, [c.id]: { error } }))
+      const ok = toExport.filter(c => c.end_ms - c.start_ms <= MAX_CLIP_MS)
+      if (ok.length) exportOrDownload(ok.map(c => c.id))
+      return
+    }
+    const n = toExport.length
+    const what = n === 1 ? 'this clip' : `${n} clips`
+    const start = () => { for (const c of toExport) void exportClip(c.id); window.setTimeout(refreshCredits, 1500) }
+    if (!credits) {
+      // (credits off: no prices anywhere on the site)
+      confirm({ title: `Export ${what}?`, body: `${n === 1 ? 'It saves' : 'They save'} to your device when ready.`, confirmLabel: 'Export', cancelLabel: 'Cancel', tone: 'warning' }, start)
+      return
+    }
+    const cr = (x: number) => `${x} credit${x === 1 ? '' : 's'}`
+    if (credits.balance < need) {
+      confirm({
+        title: 'Not enough credits', body: `Exporting ${what} needs ${cr(need)}. You have ${cr(credits.balance)}.`,
+        confirmLabel: 'Get credits', cancelLabel: 'Cancel', tone: 'warning',
+      }, () => router.push('/pricing#topups'))
+      return
+    }
+    confirm({
+      title: `${cr(need)} ${need === 1 ? 'is' : 'are'} used for ${n === 1 ? 'this export' : `exporting ${n} clips`}`,
+      body: `${n === 1 ? 'It saves' : 'They save'} to your device when ready. You have ${cr(credits.balance)}.`,
+      confirmLabel: 'Export', cancelLabel: 'Cancel', tone: 'warning',
+    }, start)
+  }
+  async function exportClip(id: string) {
     const c = clips.find(x => x.id === id)
-    if (c?.status === 'done' && c.output_url) { saveFile(id); return }
+    if (fresh(c)) { saveFile(id); return }
     setDlState(d => ({ ...d, [id]: 'exporting' }))
     if (c?.status !== 'rendering') {
       const ask = fetch('/api/export', {
@@ -559,8 +615,10 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       const res = await fetch(`/api/clips/${id}/cancel-export`, { method: 'POST' })
       const d = await res.json().catch(() => null) as { status?: string; output_url?: string | null; error?: string } | null
       if (!res.ok || !d?.status) throw new Error(d?.error ?? '')
-      setClips(cs => cs.map(x => x.id === id ? { ...x, status: d.status!, output_url: d.output_url ?? null } : x))
+      // (edited before this export: its last file is the old one again — Export, not Download)
+      setClips(cs => cs.map(x => x.id === id ? { ...x, status: d.status!, output_url: d.output_url ?? null, changed: !!(d as { changed?: boolean }).changed } : x))
       setDlState(s => { const n = { ...s }; delete n[id]; return n })
+      refreshCredits()
     } catch (e) {
       setDlState(s => ({ ...s, [id]: 'exporting' }))
       setClipError('Couldn’t stop the export', e)
@@ -578,7 +636,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         saveFile(id)
       } else if (d.status === 'failed') {
         setClips(cs => cs.map(x => x.id === id ? { ...x, status: 'failed' } : x))
-        setDlState(s => ({ ...s, [id]: { error: 'The export failed' } }))
+        setDlState(s => ({ ...s, [id]: { error: 'The export failed. Your credits were given back.' } }))
+        refreshCredits()
       }
     }).catch(() => {}))), !!waitingDl)
   // Which section of the clip list is showing
@@ -780,11 +839,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     }
   }
 
-  /** Download every ticked clip (in the list's order), each as its card's Download does; then out of select mode */
+  /** Every ticked clip (in the list's order): the exported ones download, the rest export after one ask with the total; then out of select mode */
   function downloadSelected() {
     const ids = shownClips.filter(c => selected.has(c.id)).map(c => c.id)
     if (!ids.length) return
-    for (const id of ids) void downloadClip(id)
+    exportOrDownload(ids)
     stopSelecting()
   }
 
@@ -941,6 +1000,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
 
   async function createClip(startMs: number, endMs: number, key: string, title?: string, from?: { s: Suggestion; source: 'best_moments' | 'clip_search' }, open = true) {
     setBusy(key)
+    setBusyAdding(!open)
     setClipError(null)
     try {
       const res = await fetch('/api/clips', {
@@ -950,6 +1010,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           video_id: video.id, start_ms: startMs, end_ms: endMs, layout: 'vertical', ...(title ? { title } : {}),
           // (saved with the clip: it's how the board knows this one is the AI's)
           ...(from ? { from: { source: from.source, suggestion: suggestionLog(from.s) } } : {}),
+          // (the Brand picker over "Your clips" decides its kit — user, 2026-11-17: Off means none, not the default)
+          brand_kit: brands.pick && brands.pick !== 'none' ? brands.pick : 'none',
         }),
       })
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? '')
@@ -1012,16 +1074,19 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   const busyBefore = useRef({ mmc: false, ask: false })
   // (the bar between them can be dragged any time — both then show at the dragged split — and the next task
   // that starts or ends pops its panel up again as usual: user, 2026-11-13)
+  // (user, 2026-11-17: Ask AI's results were hidden under a full Make my clips) with neither working, Ask AI has
+  // the room while it has results to show — after a search, and after a reload that brings its saved ones back;
+  // a click on Make my clips' bar opens it, and stays so until the next search or run
+  const hasAskResults = !!aiSuggestions?.length
   useEffect(() => {
     const was = busyBefore.current
     busyBefore.current = { mmc: mmcBusy, ask: loadingAi }
-    if (!mmcBusy && !loadingAi) { setAiFocus(null); return }
+    if (!mmcBusy && !loadingAi) { setAiFocus(hasAskResults ? 'ask' : null); return }
     if (mmcBusy && !was.mmc) setAiFocus('mmc')
     else if (loadingAi && !was.ask) setAiFocus('ask')
-    else if (!mmcBusy && !loadingAi) setAiFocus(null)
     else if (!mmcBusy && was.mmc) setAiFocus('ask')
     else if (!loadingAi && was.ask) setAiFocus('mmc')
-  }, [mmcBusy, loadingAi])
+  }, [mmcBusy, loadingAi, hasAskResults])
   // Show an earlier run on load, then poll (usePolling's rhythm) while the job runs or its clips export
   useEffect(() => { if (video.status === 'ready') loadAutoClips().catch(() => {}) }, [video.id, video.status]) // eslint-disable-line react-hooks/exhaustive-deps
   usePolling(() => loadAutoClips().catch(() => {}), autoRunning || autoRendering)
@@ -1044,11 +1109,13 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           clip_count: count, add_broll: autoBroll, ...autoOpts, motion: true,
+          // (a kit bringing its captions / title: they're on, in its look — the own picks aren't sent)
+          ...(capFromKit ? { captions: true } : {}), ...(titleFromKit ? { title: true } : {}),
           // (today's worker reads layouts as Split screen on / off: on when Split or Three may be used)
           // (no Layout or Frame options any more — user, 2026-11-16: the usual shape and layouts, no frame)
           layouts: DEFAULT_MAKE_LOOK.layouts.includes('split') || DEFAULT_MAKE_LOOK.layouts.includes('three'),
-          aspect: DEFAULT_MAKE_LOOK.aspect, layout_list: DEFAULT_MAKE_LOOK.layouts, caption_style: look.captionStyle, frame: null,
-          title_style: look.titleStyle, title_font: look.titleFont,
+          aspect: DEFAULT_MAKE_LOOK.aspect, layout_list: DEFAULT_MAKE_LOOK.layouts, caption_style: capFromKit ? null : look.captionStyle, frame: null,
+          title_style: titleFromKit ? null : look.titleStyle, title_font: titleFromKit ? null : look.titleFont,
           caption_language: captionLang, title_language: titleLang, brand_kit: brandPick, search, pay,
         }),
       })
@@ -1280,29 +1347,21 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   useEffect(() => () => { if (lockFlashTimer.current) clearTimeout(lockFlashTimer.current) }, [])
   const aiColRef = useRef<HTMLElement>(null)
   const clipsColRef = useRef<HTMLElement>(null)
-  // What Ask AI keeps: its box and one-tap searches while it has nothing to show, more once results come.
-  // Never less than what its fixed parts need (title, box, the one-tap searches on however many rows they
-  // wrap to, "searches left"): user, 2026-11-16 — that line came out below the card
+  // (Ask AI scrolls inside itself when it's short of room — nothing of it ever spills past its card)
   const askRef = useRef<HTMLElement>(null)
-  const [askNeed, setAskNeed] = useState(0)
-  useLayoutEffect(() => {
-    const el = askRef.current
-    if (!el) return
-    const measure = () => {
-      const kids = [...el.children].filter(c => (c as HTMLElement).classList.contains('shrink-0')) as HTMLElement[]
-      const cs = getComputedStyle(el)
-      const gap = parseFloat(cs.rowGap) || 0
-      const need = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
-        + kids.reduce((n, k) => n + k.offsetHeight, 0) + gap * kids.length   // (and the gap before the results)
-      setAskNeed(Math.ceil(need))
-    }
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    for (const k of el.children) ro.observe(k)
-    return () => ro.disconnect()
-  })
-  const askMin = Math.max(aiSuggestions?.length || loadingAi || aiError ? ASK_MIN : ASK_MIN_EMPTY, askNeed)
+  // The one shown open (wide): the one picked, else Ask AI while it has results (its list needs the room; both
+  // at their usual sizes left it none — user, 2026-11-17), unless the bar between them was dragged
+  const openPanel: 'mmc' | 'ask' | null = aiFocus ?? (hasAskResults && mmcH === null ? 'ask' : null)
+  /**
+   * A click in a panel's own space opens it (user, 2026-11-18): not on what's there to use — its buttons, links,
+   * boxes, switches, choices, the clips in it — those only do their own job and the other panel stays as it is
+   */
+  const openOnClick = (which: 'mmc' | 'ask') => wide ? (e: React.MouseEvent) => {
+    if (openPanel === which) return
+    const t = e.target as HTMLElement
+    if (t.closest('button, a, input, textarea, select, label, summary, video, [contenteditable="true"], [role="button"], [role="switch"], [role="radio"], [role="checkbox"], [role="option"], [role="tab"], [role="menuitem"], [role="slider"], [role="listbox"], [role="combobox"]')) return
+    setAiFocus(which)
+  } : undefined
   function startSplitResize(e: React.PointerEvent) {
     if (e.button !== 0) return
     e.preventDefault(); e.stopPropagation()
@@ -1310,11 +1369,17 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     // (from the slim bar, or from all of the column: dragging shows both, at the split dragged to)
     const h0 = mmcRef.current?.getBoundingClientRect().height ?? 44
     setAiFocus(null)
-    // (the column less its padding, the gap, and what Ask AI keeps)
+    // (user, 2026-11-17: the drag decides) down as far as Make my clips shows all it holds — never stretched past
+    // it — and the column less its padding, the gap and Ask AI's search box (its results then scroll inside it)
     const colH = aiColRef.current?.clientHeight ?? 800
-    const max = Math.max(MMC_MIN, colH - 24 - 12 - askMin)
+    const room = Math.max(MMC_MIN, colH - 24 - 12 - ASK_MIN_EMPTY)
     setResizing('split')
-    const move = (ev: PointerEvent) => setMmcH(Math.round(Math.max(MMC_MIN, Math.min(max, h0 + ev.clientY - y0))))
+    const move = (ev: PointerEvent) => {
+      // (what it holds, read as it shows: a slim bar when the drag began has become the card by now)
+      const all = mmcRef.current?.scrollHeight ?? room
+      const max = Math.max(MMC_MIN, Math.min(room, all))
+      setMmcH(Math.round(Math.max(MMC_MIN, Math.min(max, h0 + ev.clientY - y0))))
+    }
     const up = () => {
       window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up)
       setResizing(null)
@@ -1701,9 +1766,13 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     <>
       {/* (styles: .mmc-* in globals.css) */}
       {/* (wide: its height is shared with Ask AI at the bar under it; what doesn't fit scrolls, no scrollbar) */}
-      {wide && aiFocus === 'ask' ? mmcBar : (
-      <section ref={mmcRef} className={`mmc p-3.5 flex flex-col gap-3 rounded-2xl ${wide ? 'cb-split-top cb-noscroll' : 'shrink-0'}`} data-start-target="ai"
-        style={wide ? { flex: aiFocus === 'mmc' ? '1 1 0' : `0 1 ${mmcH ?? MMC_H}px` } : undefined}>
+      {wide && openPanel === 'ask' ? mmcBar : (
+      <section ref={mmcRef} className={`mmc p-3.5 flex flex-col gap-2.5 rounded-2xl ${wide ? 'cb-split-top cb-noscroll' : 'shrink-0'}`} data-start-target="ai"
+        // (user, 2026-11-17: everything in Make my clips seen, no scroll in it — it never shrinks: as tall as what it
+        // holds, unless the bar under it was dragged; on a short window Ask AI gives way, scrolling inside itself)
+        // (open: as tall as what it holds — not stretched with empty room inside)
+        style={wide ? { flex: mmcH && openPanel !== 'mmc' ? `0 1 ${mmcH}px` : '0 0 auto' } : undefined}
+        onClickCapture={openOnClick('mmc')}>
         {/* Header: a spark badge (glass, the spark lime), the title and its ⓘ; on the right, the way to the clips already made.
             A click on it pops Make my clips up */}
         <div className="flex items-center gap-2.5" data-popup={wide || undefined} onClick={popUp('mmc')}>
@@ -1798,7 +1867,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           // A kit goes on, but with Captions or Title off its caption / title look has nothing to
           // go on — only the logo would show (user, 2026-10-31): say so, with a way to turn them on
           const kitOn = brandPick !== 'none' && (brandPick !== 'default' || !!def)
-          const missing = [!autoOpts.captions && 'Captions', !autoOpts.title && 'Title'].filter(Boolean) as string[]
           const langOf = (list: Array<{ id: string; label: string }>, id: string) => list.find(l => l.id === id)?.label ?? ''
           const icon = (d: React.ReactNode) => (
             <span className="mmc-li-icon" aria-hidden="true">
@@ -1828,12 +1896,17 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               <div className="flex flex-col gap-1.5">
                 <p id={`mmc-gets-${video.id}`} className="mmc-heading">Each clip gets</p>
                 <div className="mmc-list" role="group" aria-labelledby={`mmc-gets-${video.id}`}>
-                  {opener('captions', AUTO_ICONS.captions, 'Captions',
-                    `${captionStyleName(look.captionStyle)} · ${langOf(CAPTION_LANGUAGES, captionLang)}`,
-                    { on: autoOpts.captions, flip: () => toggleAutoOpt('captions') })}
-                  {opener('title', AUTO_ICONS.title, 'Title',
-                    `${titleStyleName(look.titleStyle)}${look.titleFont ? ` · ${look.titleFont}` : ''} · ${langOf(TITLE_LANGUAGES, titleLang)}`,
-                    { on: autoOpts.title, flip: () => toggleAutoOpt('title') })}
+                  {/* (a brand kit picked that brings its captions / title: "From brand kit", no switch — on, in its look) */}
+                  {capFromKit
+                    ? opener('captions', AUTO_ICONS.captions, 'Captions', `From brand kit · ${langOf(CAPTION_LANGUAGES, captionLang)}`)
+                    : opener('captions', AUTO_ICONS.captions, 'Captions',
+                      `${captionStyleName(look.captionStyle)} · ${langOf(CAPTION_LANGUAGES, captionLang)}`,
+                      { on: autoOpts.captions, flip: () => toggleAutoOpt('captions') })}
+                  {titleFromKit
+                    ? opener('title', AUTO_ICONS.title, 'Title', `From brand kit · ${langOf(TITLE_LANGUAGES, titleLang)}`)
+                    : opener('title', AUTO_ICONS.title, 'Title',
+                      `${titleStyleName(look.titleStyle)}${look.titleFont ? ` · ${look.titleFont}` : ''} · ${langOf(TITLE_LANGUAGES, titleLang)}`,
+                      { on: autoOpts.title, flip: () => toggleAutoOpt('title') })}
                 </div>
               </div>
               {/* Look: the brand kit the clips get (user, 2026-11-16: Layout and Frame taken out — only Brand here,
@@ -1856,26 +1929,25 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                         ]} />
                     </div>
                 </div>
-                {kitOn && missing.length > 0 && !autoRunning && (
-                  <p className="mmc-brand-note" role="status">
-                    {missing.length > 1
-                      ? 'Captions and Title are off, so only the kit’s logo goes on.'
-                      : `${missing[0]} is off, so the kit’s ${missing[0] === 'Captions' ? 'caption' : 'title'} look won’t show.`}{' '}
-                    <button type="button" onClick={captionsAndTitleOn}>Turn {missing.length > 1 ? 'them' : 'it'} on</button>
-                  </p>
-                )}
+                {/* What the picked kit puts on (user, 2026-11-17: its Brand captions and Brand title switches) */}
+                {kitOn && (() => {
+                  const kit = brandPick === 'default' ? def : brandKits.find(k => k.id === brandPick)
+                  if (!kit) return null
+                  const adds = [kit.logo && 'logo', kit.captions && 'captions', kit.title && 'title'].filter(Boolean).join(' · ')
+                  return <p className="mmc-brand-adds">{adds ? `Adds its ${adds}` : 'Adds its colours'}</p>
+                })()}
               </div>
               )}
 
               {/* The boxes the rows open (over the video preview on a wide screen). What the captions and the
                   title are written in now sits in their box. */}
               <MmcPop anchor={popAt} over={wide ? stageEl : null} open={pop === 'captions'} onClose={() => setPop(null)} label="Captions">
-                <CaptionChoices on={autoOpts.captions} onToggle={() => toggleAutoOpt('captions')}
+                <CaptionChoices on={autoOpts.captions} onToggle={() => toggleAutoOpt('captions')} kitName={capFromKit ? pickedKit?.name : null}
                   style={look.captionStyle} onStyle={captionStyle => setLook({ ...look, captionStyle })}
                   language={<MmcPick value={captionLang} options={CAPTION_LANGUAGES} onChange={id => pickLanguage({ caption: id as CaptionLanguage })} label="What the captions are written in" />} />
               </MmcPop>
               <MmcPop anchor={popAt} over={wide ? stageEl : null} open={pop === 'title'} onClose={() => setPop(null)} label="Title">
-                <TitleChoices on={autoOpts.title} onToggle={() => toggleAutoOpt('title')} styleId={look.titleStyle} font={look.titleFont}
+                <TitleChoices on={autoOpts.title} onToggle={() => toggleAutoOpt('title')} kitName={titleFromKit ? pickedKit?.name : null} styleId={look.titleStyle} font={look.titleFont}
                   onStyle={titleStyle => setLook({ ...look, titleStyle })} onFont={titleFont => setLook({ ...look, titleFont })}
                   language={<MmcPick value={titleLang} options={TITLE_LANGUAGES} onChange={id => pickLanguage({ title: id as TitleLanguage })} label="What the title is written in" />} />
               </MmcPop>
@@ -2013,8 +2085,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       )}
 
       {/* Ask AI (Best moments: removed 2026-11-09 (user), kept commented: it shared this card through a switch at the top, commented below) */}
-      {wide && aiFocus === 'mmc' ? askBar : (
-      <section ref={askRef} className="flex-1 p-3.5 flex flex-col gap-2.5 rounded-2xl" style={{ ...CARD, minHeight: askMin }}>
+      {wide && openPanel === 'mmc' ? askBar : (
+      <section ref={askRef} className="flex-1 p-3.5 flex flex-col gap-2.5 rounded-2xl overflow-y-auto cb-noscroll" style={{ ...CARD, minHeight: 120 }}
+        onClickCapture={openOnClick('ask')}>
         {/* (a click on the title row pops Ask AI up) */}
         <div className="shrink-0 flex items-center gap-2" data-popup={wide || undefined} onClick={popUp('ask')}>
           <h3 className="flex-1 flex items-center gap-2 text-[13px] font-semibold" style={{ color: 'var(--cb-text)' }}>
@@ -2105,6 +2178,25 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             </button>
           ))}
         </div>
+        {/* Earlier searches on this video (newest first): their saved results again, free (user, 2026-11-17) */}
+        {(() => {
+          const recent = Object.keys(askSaved).reverse().slice(0, 5)
+          if (!recent.length) return null
+          return (
+            <div className="shrink-0 flex flex-wrap items-center gap-1.5" aria-label="Recent searches">
+              <span className="text-[10.5px] font-semibold uppercase tracking-wide pr-0.5" style={{ color: 'rgb(var(--cb-fg) / 0.4)' }}>Recent</span>
+              {recent.map(k => (
+                <button key={k} type="button" disabled={loadingAi} onClick={() => { setAiCriteria(k); findByCriteria(k) }}
+                  aria-pressed={askFrom === k}
+                  className="px-2 py-0.5 rounded-full text-[11px] transition-colors hover:bg-white/10 disabled:opacity-40 max-w-[160px] truncate"
+                  style={{ color: askFrom === k ? 'var(--cb-text)' : 'rgb(var(--cb-fg) / 0.6)', border: `1px solid rgb(var(--cb-fg) / ${askFrom === k ? 0.35 : 0.12})` }}
+                  title={`Show the saved results for “${k}”`}>
+                  {k.charAt(0).toUpperCase() + k.slice(1)}
+                </button>
+              ))}
+            </div>
+          )
+        })()}
         {allowance && (
           <p className="shrink-0 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
             {allowance.askAi.usedThisMonth >= allowance.askAi.perMonth
@@ -2285,7 +2377,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     <div className="cb-page h-screen flex flex-col overflow-hidden">
       {/* Opening a clip: covers the page while the clip is created and the editor loads */}
       {confirmDialog}
-      {busy && <BrandLoaderScreen mascot overlay label="Getting your clip ready, please wait…" />}
+      {busy && !busyAdding && <BrandLoaderScreen mascot overlay label="Getting your clip ready, please wait…" />}
       {/* Nav */}
       <nav className="cb-nav app-nav relative z-10 flex items-center gap-3 px-4 shrink-0" style={{ height: 56 }}>
         {/* Where am I: Shortcut | Dashboard › Clip board */}
@@ -2503,7 +2595,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 previewing={viewMode === 'preview' && previewId === clip.id}
                 open={previewId === clip.id}
                 onClose={() => { setPreviewId(null); setViewMode('video') }}
-                onDownload={() => downloadClip(clip.id)}
+                onDownload={() => exportOrDownload([clip.id])}
                 onStopDownload={() => stopDownload(clip.id)}
                 manual={manualOnly}
                 edited={manualOnly && isEdited(clip)}
@@ -2547,12 +2639,19 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" /></svg>
                     Delete{selected.size > 0 ? ` ${selected.size}` : ''}
                   </button>
-                  {/* (each ticked clip as its own Download does it: exported, then saved when ready — their
-                      cards show it, so select mode closes) */}
-                  <button type="button" disabled={selected.size === 0} onClick={downloadSelected} className="cb-bulk" data-tone="primary">
-                    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    Download{selected.size > 0 ? ` ${selected.size}` : ''}
-                  </button>
+                  {/* (Export N while any ticked clip still needs an export — one ask with the total, the exported
+                      ones just download; Download N when all are exported. Their cards show it, so select mode closes) */}
+                  {(() => {
+                    const allFresh = selected.size > 0 && shownClips.filter(c => selected.has(c.id)).every(fresh)
+                    return (
+                      <button type="button" disabled={selected.size === 0} onClick={downloadSelected} className="cb-bulk" data-tone="primary">
+                        {allFresh
+                          ? <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                          : <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 9.5V2M4 5l3-3 3 3M2 8.5v3h10v-3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                        {allFresh ? 'Download' : 'Export'}{selected.size > 0 ? ` ${selected.size}` : ''}
+                      </button>
+                    )
+                  })()}
                 </div>
               </div>
             )
@@ -3420,7 +3519,14 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
   const renameIcon = (size: number) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 4h1a3 3 0 013 3 3 3 0 013-3h1" /><path d="M13 20h-1a3 3 0 01-3-3 3 3 0 01-3 3H5" /><path d="M5 16H4a2 2 0 01-2-2v-4a2 2 0 012-2h1" /><path d="M13 8h7a2 2 0 012 2v4a2 2 0 01-2 2h-7" /><path d="M9 7v10" /></svg>
   // Download's button: Stop while the clip exports
   const exporting = download === 'preparing' || download === 'stopping'
-  const downloadLabel = download === 'preparing' ? 'Stop' : download === 'stopping' ? 'Stopping…' : download === 'failed' ? 'Retry' : 'Download'
+  // (user, 2026-11-17) Export until there's an export with all its edits, then Download; changed again → Export
+  const fresh = status === 'done' && !!outputUrl && !changed
+  const downloadLabel = download === 'preparing' ? 'Stop' : download === 'stopping' ? 'Stopping…' : fresh ? 'Download' : 'Export'
+  const actIcon = (size: number) => exporting ? stopIcon(size) : fresh ? (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  ) : (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 9.5V2M4 5l3-3 3 3M2 8.5v3h10v-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  )
   const tapDownload = (e: React.MouseEvent) => { e.stopPropagation(); if (download === 'preparing') onStopDownload(); else onDownload() }
   const stopIcon = (size: number) => <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
   const sub = useSubEdit(id, onSubEdited)
@@ -3518,10 +3624,8 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
                   Edit
                 </button>
                 <button type="button" onClick={tapDownload} disabled={download === 'stopping'} className="cb-act justify-center"
-                  data-tone={download === 'failed' || exporting ? 'danger' : undefined}>
-                  {exporting ? stopIcon(11) : (
-                    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  )}
+                  data-tone={exporting ? 'danger' : undefined}>
+                  {actIcon(12)}
                   {downloadLabel}
                 </button>
                 {onRename && (
@@ -3631,10 +3735,8 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
           </button>
           <button onClick={tapDownload} disabled={download === 'stopping'}
             className="h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-bold transition-opacity hover:opacity-90 disabled:opacity-70"
-            style={download === 'failed' || exporting ? { color: '#f87171', border: '1px solid rgba(239,68,68,0.45)' } : { background: ACCENT, color: '#000' }}>
-            {exporting ? stopIcon(12) : (
-              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 2v7M4 7l3 3 3-3M2 11.5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            )}
+            style={exporting ? { color: '#f87171', border: '1px solid rgba(239,68,68,0.45)' } : { background: ACCENT, color: '#000' }}>
+            {actIcon(13)}
             {downloadLabel}
           </button>
           {onRename && (

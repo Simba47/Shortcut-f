@@ -16,6 +16,13 @@ function inTx<T>(db: Db, fn: (tx: postgres.TransactionSql) => Promise<T>): Promi
 }
 
 export interface Hold { id: string; amount: number }
+
+/**
+ * Why an export stopped by its person failed (jobs.error, set by export.ts cancelRender). Such a job
+ * keeps its credits (user, 2026-11-17: "if he stops, the credit is used"); one that failed by itself
+ * gives them back.
+ */
+export const RENDER_CANCELLED = 'Cancelled by the user'
 export interface ReserveArgs { amount: number; refType: 'transcribe' | 'caption' | 'render' | 'search' | 'ai_clips' | 'ask_ai' | 'rewrite' | 'subjects' | 'reading'; refId?: string; jobId?: string | null }
 
 type GrantRow = { id: string; remaining: number; expires_at: Date | null; kind: GrantKind; created_at: Date }
@@ -69,6 +76,15 @@ export async function ensureFreeGrant(userId: string): Promise<void> {
   const amount = freeSignupCredits()
   if (creditsMode() === 'off' || amount <= 0) return
   await grant(userId, { kind: 'free', amount, expiresAt: null, sourceRef: `free:${userId}` })
+}
+
+/**
+ * The balance as the header's pill shows it (useCredits' CreditsInfo), or null with credits off — sent back
+ * with whatever just spent or added credits (an upload), so the pill shows the new number at once
+ */
+export async function creditsNow(userId: string): Promise<{ balance: number; held: number; nextExpiry: { amount: number; at: Date } | null } | null> {
+  if (creditsMode() === 'off') return null
+  return balance(userId)
 }
 
 /** Credits the user can spend right now (what is held for running jobs is already taken out) */
@@ -158,14 +174,16 @@ export async function release(holdId: string, db: Db = sql): Promise<void> {
 export async function sweep(userId?: string): Promise<void> {
   if (creditsMode() === 'off') return
   await ensureCreditsSchema()
-  const open = await sql<{ id: string; user_id: string; amount: number; ref_type: string; status: string | null; stale: boolean; run: string | null; run_status: string | null; made: number; very_stale: boolean }[]>`
-    SELECT h.id, h.user_id, h.amount, h.ref_type, j.status, (h.created_at < now() - make_interval(hours => ${HOLD_TTL_HOURS})) AS stale,
+  const open = await sql<{ id: string; user_id: string; amount: number; ref_type: string; status: string | null; job_type: string | null; error: string | null; stale: boolean; run: string | null; run_status: string | null; made: number; very_stale: boolean }[]>`
+    SELECT h.id, h.user_id, h.amount, h.ref_type, j.status, j.type AS job_type, j.error, (h.created_at < now() - make_interval(hours => ${HOLD_TTL_HOURS})) AS stale,
       (h.created_at < now() - interval '7 days') AS very_stale, a.id AS run, a.status AS run_status,
       (SELECT count(*)::int FROM clips c WHERE c.ai_edit_job_id = a.id) AS made
     FROM credit_holds h LEFT JOIN jobs j ON j.id = h.job_id
       LEFT JOIN ai_edit_jobs a ON h.ref_type = 'ai_clips' AND a.id::text = j.payload->>'ai_edit_job_id'
     WHERE h.status = 'held' ${userId ? sql`AND h.user_id = ${userId}` : sql``}`
-  for (const h of open) {
+  // (the holds, and the reading of videos below, are separate tables and separate credits: done side by side,
+  // so the balance comes back sooner — user 2026-11-18)
+  const holds = (async () => { for (const h of open) {
     if (h.run) {
       // A Make my clips run's clips: paid for what it made. It may wait a long time on "found fewer: make these?", with its first job done
       if (h.run_status === 'done' || h.run_status === 'failed') {
@@ -175,15 +193,18 @@ export async function sweep(userId?: string): Promise<void> {
       } else if (h.very_stale) await release(h.id)
       continue
     }
-    if (h.status === 'done') await settle(h.id)
+    // (an export its person stopped is paid for: only one that failed by itself gives its credits back)
+    if (h.status === 'done' || (h.status === 'failed' && h.job_type === 'render' && h.error === RENDER_CANCELLED)) await settle(h.id)
     else if (h.status === 'failed' || h.stale) await release(h.id)
-  }
-  // The reading of videos: lengths the worker has found since are paid for, and a video that failed gives its credits back
-  if (userId) {
-    const { readingUse, refundFailedReadings } = await import('./readingUsage')
+  } })()
+  // The reading of videos: a video that failed gives its credits back, then lengths the worker has found since
+  // are paid for (in this order: one refund and one charge of the same video must never cross)
+  const reading = userId ? (async () => {
+    const { payFoundReadings, refundFailedReadings } = await import('./readingUsage')
     await refundFailedReadings(userId)
-    await readingUse(userId)
-  }
+    await payFoundReadings(userId)
+  })() : Promise.resolve()
+  await Promise.all([holds, reading])
 }
 
 export interface LedgerRow { id: string; delta: number; reason: string; refType: string | null; refId: string | null; shadow: boolean; createdAt: Date }

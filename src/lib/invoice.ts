@@ -51,6 +51,36 @@ export function normalizeGstin(raw: string | null | undefined): string | null {
   return /^[0-9]{2}[A-Z0-9]{13}$/.test(g) ? g : null
 }
 
+const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve',
+  'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen']
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']
+/** 0–99 in words */
+function twoDigits(x: number): string {
+  if (x < 20) return ONES[x]
+  return TENS[Math.floor(x / 10)] + (x % 10 ? `-${ONES[x % 10]}` : '')
+}
+/** A whole number in words, Indian style (crore, lakh, thousand, hundred) */
+function inWords(x: number): string {
+  if (x === 0) return 'Zero'
+  const parts: string[] = []
+  const crore = Math.floor(x / 1e7); x %= 1e7
+  const lakh = Math.floor(x / 1e5); x %= 1e5
+  const thousand = Math.floor(x / 1e3); x %= 1e3
+  const hundred = Math.floor(x / 100); x %= 100
+  if (crore) parts.push(`${inWords(crore)} Crore`)
+  if (lakh) parts.push(`${twoDigits(lakh)} Lakh`)
+  if (thousand) parts.push(`${twoDigits(thousand)} Thousand`)
+  if (hundred) parts.push(`${ONES[hundred]} Hundred`)
+  if (x) parts.push(twoDigits(x))
+  return parts.join(' ')
+}
+/** 259950 → "Rupees Two Thousand Five Hundred Ninety-Nine and Fifty Paise Only" (an invoice's amount in words) */
+export function rupeesInWords(paise: number): string {
+  const p = Math.round(paise)
+  const rupees = Math.floor(p / 100), rest = p % 100
+  return `Rupees ${inWords(rupees)}${rest ? ` and ${twoDigits(rest)} Paise` : ''} Only`
+}
+
 /** 259900 → "2,599.00" (Indian digit grouping) */
 export function amountInRupees(paise: number): string {
   return (paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })

@@ -14,11 +14,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ cl
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { clipId } = await params
   try {
-    const { status, output_storage_path } = await cancelRender(user.id, clipId)
+    const { status, output_storage_path, changed } = await cancelRender(user.id, clipId)
     const output_url = status === 'done' && output_storage_path
       ? await getSignedUrl(r2, new GetObjectCommand({ Bucket: R2_BUCKET, Key: output_storage_path }), { expiresIn: 43200 }).catch(() => null)
       : null
-    return NextResponse.json({ status, output_url })
+    return NextResponse.json({ status, output_url, changed })
   } catch (err: unknown) {
     const e = err as { message?: string; status?: number }
     return NextResponse.json({ error: e.message ?? 'Failed' }, { status: e.status ?? 500 })
