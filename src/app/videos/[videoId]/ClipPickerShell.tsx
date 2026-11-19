@@ -228,10 +228,11 @@ type TitleLanguage = 'roman' | 'english' | 'native'
 // (each choice shows the same word written that way, "e.g. Namaste": an example says it faster than a name)
 const CAPTION_LANGUAGES: Array<{ id: CaptionLanguage; label: string; example: string }> = [
   { id: 'native', label: 'Native letters', example: 'నమస్తే, नमस्ते' },
-  { id: 'roman', label: 'English letters', example: 'Namaste' },
+  // (named Hybrid, user 2026-11-19: the speaker's words in English letters, English words as said)
+  { id: 'roman', label: 'Hybrid', example: 'Namaste' },
 ]
 const TITLE_LANGUAGES: Array<{ id: TitleLanguage; label: string; example: string }> = [
-  { id: 'roman', label: 'English letters', example: 'Namaste' },
+  { id: 'roman', label: 'Hybrid', example: 'Namaste' },
   { id: 'english', label: 'English', example: 'Hello' },
   { id: 'native', label: 'Native letters', example: 'నమస్తే, नमस्ते' },
 ]
@@ -1899,13 +1900,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                   {/* (a brand kit picked that brings its captions / title: "From brand kit", no switch — on, in its look) */}
                   {capFromKit
                     ? opener('captions', AUTO_ICONS.captions, 'Captions', `From brand kit · ${langOf(CAPTION_LANGUAGES, captionLang)}`)
+                    // (only the language on the row, user 2026-11-19: the style is picked inside)
                     : opener('captions', AUTO_ICONS.captions, 'Captions',
-                      `${captionStyleName(look.captionStyle)} · ${langOf(CAPTION_LANGUAGES, captionLang)}`,
+                      langOf(CAPTION_LANGUAGES, captionLang),
                       { on: autoOpts.captions, flip: () => toggleAutoOpt('captions') })}
                   {titleFromKit
                     ? opener('title', AUTO_ICONS.title, 'Title', `From brand kit · ${langOf(TITLE_LANGUAGES, titleLang)}`)
                     : opener('title', AUTO_ICONS.title, 'Title',
-                      `${titleStyleName(look.titleStyle)}${look.titleFont ? ` · ${look.titleFont}` : ''} · ${langOf(TITLE_LANGUAGES, titleLang)}`,
+                      langOf(TITLE_LANGUAGES, titleLang),
                       { on: autoOpts.title, flip: () => toggleAutoOpt('title') })}
                 </div>
               </div>

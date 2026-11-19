@@ -87,6 +87,23 @@ export async function creditsNow(userId: string): Promise<{ balance: number; hel
   return balance(userId)
 }
 
+/**
+ * For "450 / 599 credits" on the Buy credits page (user, 2026-11-19): `total` is what the credits still in
+ * force came as (every grant not yet expired, used up or not), and `expiries` when the credits left run out,
+ * soonest first (by day and kind: a month's plan credits and a top-up show apart).
+ */
+export async function grantsSummary(userId: string, db: Db = sql): Promise<{ total: number; expiries: { amount: number; at: Date; kind: string }[] }> {
+  await ensureCreditsSchema()
+  const [row] = await db<{ total: string }[]>`
+    SELECT COALESCE(SUM(amount), 0)::bigint AS total FROM credit_grants
+    WHERE user_id = ${userId} AND (expires_at IS NULL OR expires_at > now())`
+  const rows = await db<{ amount: string; at: Date; kind: string }[]>`
+    SELECT SUM(remaining)::bigint AS amount, MIN(expires_at) AS at, kind FROM credit_grants
+    WHERE user_id = ${userId} AND remaining > 0 AND expires_at > now()
+    GROUP BY kind, date_trunc('day', expires_at) ORDER BY MIN(expires_at) LIMIT 5`
+  return { total: Number(row.total), expiries: rows.map(r => ({ amount: Number(r.amount), at: r.at, kind: r.kind })) }
+}
+
 /** Credits the user can spend right now (what is held for running jobs is already taken out) */
 export async function balance(userId: string, db: Db = sql): Promise<{ balance: number; held: number; nextExpiry: { amount: number; at: Date } | null }> {
   await ensureCreditsSchema()

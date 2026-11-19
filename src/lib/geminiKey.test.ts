@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { geminiOrder, toInteractionInput, toJsonSchema, thinkingLevel, interactionAnswer, sttOrder, sttAudioInput, STT_INLINE_MAX_BYTES } from './gemini.js'
+import { geminiOrder, toInteractionInput, toJsonSchema, thinkingLevel, interactionAnswer, sttOrder, sttAudioInput, STT_INLINE_MAX_BYTES, isCreditsEmpty, noteKeyRefusal, onKeyCreditsEmpty } from './gemini.js'
 
 test('GEMINI_FIRST=key: the Gemini key first, Vertex as the fallback; otherwise as before', () => {
   const both = { GOOGLE_CLOUD_PROJECT: 'p', GEMINI_API_KEY: 'k' }
@@ -62,8 +62,8 @@ test("the answer's text and tokens are read from the interaction's steps (though
     ],
     usage: { total_input_tokens: 28, total_output_tokens: 14, total_thought_tokens: 5 },
   }
-  assert.deepEqual(interactionAnswer(body), { text: '["a","b"]', inputTokens: 28, outputTokens: 19 })
-  assert.deepEqual(interactionAnswer({}), { text: '', inputTokens: 0, outputTokens: 0 })
+  assert.deepEqual(interactionAnswer(body), { text: '["a","b"]', inputTokens: 28, outputTokens: 19, audioTokens: 0 })
+  assert.deepEqual(interactionAnswer({}), { text: '', inputTokens: 0, outputTokens: 0, audioTokens: 0 })
 })
 
 test('audio goes inside the request up to 5 minutes of it, and by upload only when larger', () => {
@@ -72,4 +72,20 @@ test('audio goes inside the request up to 5 minutes of it, and by upload only wh
   assert.equal(sttAudioInput(Buffer.alloc(STT_INLINE_MAX_BYTES + 1)), null)
   // a 5-minute chunk (16 kHz mono 16-bit wav: 9.6 MB) still fits
   assert.ok(STT_INLINE_MAX_BYTES >= 300 * 16000 * 2 + 1000)
+})
+
+test("the key's prepaid credits ran out: 402, or 429 saying so; busy and other refusals are not that", () => {
+  assert.equal(isCreditsEmpty(402, ''), true)
+  assert.equal(isCreditsEmpty(429, '{"error":{"code":429,"message":"Your prepayment credits are depleted. Please go to AI Studio","status":"RESOURCE_EXHAUSTED"}}'), true)
+  assert.equal(isCreditsEmpty(429, 'Resource has been exhausted (e.g. check quota).'), false)   // only busy
+  assert.equal(isCreditsEmpty(403, 'credits are depleted'), false)
+  assert.equal(isCreditsEmpty(500, ''), false)
+  const heard: string[] = []
+  onKeyCreditsEmpty(m => heard.push(m))
+  noteKeyRefusal(429, 'quota per minute')
+  noteKeyRefusal(402, 'no credit')
+  noteKeyRefusal(429, 'Your prepayment credits are depleted')
+  assert.deepEqual(heard, ['no credit', 'Your prepayment credits are depleted'])
+  onKeyCreditsEmpty(() => { throw new Error('broken listener') })
+  noteKeyRefusal(402, 'never throws')
 })

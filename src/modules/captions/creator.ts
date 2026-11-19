@@ -1,4 +1,5 @@
 import type { CaptionStyle } from '@chai-cut/shared'
+import { noShadow, softShadow } from './depth'
 import { DEFAULT_CAPTION_STYLE } from '@chai-cut/shared'
 import { TEMPLATE_FONTS, templateFontFamily, type CaptionTemplate, type CreatorLook } from './templates'
 
@@ -39,9 +40,15 @@ function load(key: string) {
   const family = templateFontFamily(key)
   if (f && !loaded.has(family) && typeof FontFace !== 'undefined') {
     loaded.add(family)
-    new FontFace(family, `url(/caption-fonts/${f.file})`, { weight: String(f.weight), style: f.italic ? 'italic' : 'normal' }).load()
-      .then(face => document.fonts.add(face))
-      .catch(() => loaded.delete(family))
+    // (a script's Noto font: its Bold and ExtraBold files too, under the same name, for the weights
+    // scriptWeight asks for — the export has the same files)
+    const files: Array<[string, string]> = [[f.file, String(f.weight)]]
+    if (key.startsWith('noto-') && f.file.includes('-Regular.')) files.push([f.file.replace('-Regular.', '-Bold.'), '700'], [f.file.replace('-Regular.', '-ExtraBold.'), '800'])
+    for (const [file, weight] of files) {
+      new FontFace(family, `url(/caption-fonts/${file})`, { weight, style: f.italic ? 'italic' : 'normal' }).load()
+        .then(face => document.fonts.add(face))
+        .catch(() => loaded.delete(family))
+    }
   }
   return family
 }
@@ -55,6 +62,18 @@ const SCRIPTS: Array<[number, number, string]> = [[0x0c00, 0x0c7f, 'noto-telugu'
   [0x0c80, 0x0cff, 'noto-kannada'], [0x0d00, 0x0d7f, 'noto-malayalam'], [0x0980, 0x09ff, 'noto-bengali']]
 /** Display fonts that are one heavy weight though their files say regular (400) */
 const HEAVY = new Set(['anton', 'bangers', 'bebas', 'lilita', 'luckiest'])
+
+/**
+ * How heavy a line in another script is drawn for a style's font `key`: 800 (its Noto font's
+ * ExtraBold) for the heaviest fonts, 700 (Bold) for bold ones, else 400 (creator_captions.script_weight).
+ * Until 2026-11-19 only the Regular files existed and Telugu looked thin beside English (user).
+ */
+export function scriptWeight(key: string): number {
+  const f = TEMPLATE_FONTS[key]
+  const w = f?.weight ?? 400
+  if (w >= 800 || HEAVY.has(key)) return 800
+  return w >= 600 ? 700 : 400
+}
 /** The Noto font for the first non-Latin script in the text, null for Latin text (creator_captions.script_font) */
 export function scriptFont(text: string): string | null {
   for (const ch of text) {
@@ -73,7 +92,7 @@ function font(key: string, script: string | null = null) {
   const s = script ? TEMPLATE_FONTS[script] : undefined
   if (s) {
     const sFamily = load(script!)
-    const weight = f.weight >= 600 || HEAVY.has(own) ? 700 : 400
+    const weight = scriptWeight(own)
     return { css: (n: number) => `${f.italic ? 'italic ' : ''}${weight} ${n * s.em}px "${sFamily}", "${family}", sans-serif`, asc: s.asc ?? 0.7 }
   }
   return { css: (n: number) => `${f.italic ? 'italic ' : ''}${f.weight} ${n * f.em}px "${family}", sans-serif`, asc: f.asc ?? 0.8 }
@@ -176,9 +195,9 @@ export function drawCreatorCaptions(
     g.font = f.css(n)
     g.globalAlpha = alpha
     g.fillStyle = fill
-    if (shad > 0) { g.shadowColor = 'rgba(0,0,0,0.5)'; g.shadowOffsetX = g.shadowOffsetY = shad; g.shadowBlur = 0 }
+    softShadow(g, shad, k)
     g.fillText(text, x, y)
-    g.shadowColor = 'transparent'; g.shadowOffsetX = g.shadowOffsetY = 0
+    noShadow(g)
     g.globalAlpha = 1
   }
   const width = (f: ReturnType<typeof font>, n: number, text: string) => { ctx.font = f.css(n); return ctx.measureText(text).width }

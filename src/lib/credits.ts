@@ -109,6 +109,34 @@ export const TOPUP_PACKS = [
   { key: 'bulk', credits: 3000, price: 2799 },
 ] as const
 
+/** The pack marked "Popular" on the Buy credits page (user, 2026-11-19) */
+export const POPULAR_PACK = 'medium'
+
+/**
+ * The struck-out price beside a pack's price (user, 2026-11-19): the same credits at the plans' rate, 1 credit
+ * = ₹1 (Starter ₹599 gives 599 credits). A real price, so the saving shown is true (a made-up higher price
+ * would be a misleading reference price). Null when the pack saves nothing worth showing (under ₹5).
+ */
+export const PLAN_CREDIT_RUPEES = 1
+export function packSaving(pack: { credits: number; price: number }): { was: number; saved: number; percent: number } | null {
+  const was = Math.round(pack.credits * PLAN_CREDIT_RUPEES)
+  const saved = was - pack.price
+  if (saved < 5) return null
+  return { was, saved, percent: Math.max(1, Math.round((saved / was) * 100)) }
+}
+
+/**
+ * What a pack's credits make, for the pack cards: AI clips (CLIP_CREDITS each, lib/aiLimits.ts, from a video
+ * already read), or one-minute clips you cut yourself exported with captions (captions + export per minute).
+ * One or the other, not both.
+ */
+export function packUses(credits: number, clipCredits: number): { aiClips: number; captionedMinutes: number } {
+  return {
+    aiClips: Math.floor(credits / clipCredits),
+    captionedMinutes: Math.floor(credits / (CAPTION_CREDITS_PER_MINUTE + EXPORT_CREDITS_PER_MINUTE)),
+  }
+}
+
 /**
  * A ₹1 pack of 1 credit, to try a real payment end to end (user, 2026-11-12). It exists only for the
  * emails in TEST_PACK_EMAILS (comma-separated): nobody else sees it or can buy it, and with the

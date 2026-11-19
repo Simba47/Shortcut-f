@@ -9,6 +9,7 @@ import sql from '@/lib/db'
 import { creditsMode } from '@/lib/credits'
 import { balance, ensureFreeGrant, sweep } from '@/server/services/credits'
 import { listBrandKits } from '@/server/services/brandKits'
+import { toolGuides } from '@/server/services/toolGuides'
 import { cleanBrandOn } from '@/lib/shared/brandOn'
 import { brandCaptionWords } from '@/lib/brandWords'
 import { transcriptWindow } from '@/modules/editor/transcriptWindow'
@@ -61,6 +62,8 @@ export default async function EditorPage({
       return { balance: b.balance, held: b.held, nextExpiry: b.nextExpiry ? { amount: b.nextExpiry.amount, at: b.nextExpiry.at.toISOString() } : null }
     })().catch(() => undefined),
     listBrandKits(user.id).catch(() => undefined),
+    // The timeline tools' little loops: until the first finished export, or as the Guide page's switch says
+    toolGuides(user.id).then(g => g.on).catch(() => true),
   ])
 
   // Fire all independent queries in parallel — one round-trip after the clip fetch
@@ -254,7 +257,7 @@ export default async function EditorPage({
     initialOverlays: overlays ?? [],
   }
 
-  const [initialCredits, initialBrandKits] = await headStart
+  const [initialCredits, initialBrandKits, toolGuideLoops] = await headStart
   return isMobile ? <EditorShellMobile {...shellProps} />
-    : <EditorShell {...shellProps} backStart={backStart} aiMade={aiMade} initialCredits={initialCredits} initialBrandKits={initialBrandKits} />
+    : <EditorShell {...shellProps} backStart={backStart} aiMade={aiMade} initialCredits={initialCredits} initialBrandKits={initialBrandKits} toolGuideLoops={toolGuideLoops} />
 }

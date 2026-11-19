@@ -11,7 +11,7 @@ export const AUTH_PAGES = ['/login', '/signup', '/verify-otp', '/forgot-password
 // only. Any other address that isn't a page (/abc, an old link) shows "Page not found", not the
 // sign-in page (F2 bug 9). A new signed-in page needs its first folder here: publicPaths.test.ts
 // fails until every page folder in src/app is in one of these three lists.
-export const SIGNED_IN_AREAS = ['/dashboard', '/upload', '/videos', '/editor', '/brand', '/billing', '/settings']
+export const SIGNED_IN_AREAS = ['/dashboard', '/upload', '/videos', '/editor', '/brand', '/billing', '/settings', '/guide']
 
 const under = (pathname: string, area: string) => pathname === area || pathname.startsWith(`${area}/`)
 

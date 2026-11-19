@@ -84,9 +84,13 @@ export async function recordPayment(userId: string, subscriptionId: string | nul
     }
     const [dup] = await tx`SELECT id FROM payments WHERE razorpay_payment_id = ${p.id}`
     if (dup) return null
-    const [u] = await tx<{ name: string | null; email: string }[]>`SELECT name, email FROM users WHERE id = ${userId}`
-    const [bp] = await tx<{ name: string | null; gstin: string | null; state_code: string | null; address: string | null }[]>`
-      SELECT name, gstin, state_code, address FROM billing_profiles WHERE user_id = ${userId}`
+    const [u] = await tx<{ name: string | null; email: string; plan: string | null }[]>`SELECT name, email, plan FROM users WHERE id = ${userId}`
+    // The saved company details go on the invoice only on Agency (plans.ts gstInvoices, user 2026-11-19): a
+    // payment for the Agency plan, or anything an Agency account buys (a top-up). Kept details of an account
+    // that left Agency stay saved but unused.
+    const details = !!(PLANS[plan as keyof typeof PLANS]?.gstInvoices || PLANS[u?.plan as keyof typeof PLANS]?.gstInvoices)
+    const [bp] = details ? await tx<{ name: string | null; gstin: string | null; state_code: string | null; address: string | null }[]>`
+      SELECT name, gstin, state_code, address FROM billing_profiles WHERE user_id = ${userId}` : []
     // Place of supply: the customer's state; when we do not know it, ours
     const placeOfSupply = bp?.state_code || seller.stateCode
     const tax = splitTax(p.amountPaise, seller.gstRate, placeOfSupply === seller.stateCode)

@@ -56,7 +56,7 @@ const CARDS: LegalCard[] = [
   {
     icon: BadgeCheck,
     title: 'Invoices',
-    body: <>An invoice is made for every payment. You can see and download your payments and invoices on the <Link href="/billing">Payments &amp; invoices</Link> page after signing in.</>,
+    body: <>An invoice is made for every payment. You can see and download your payments and invoices in the <Link href="/pricing#billing">Payments &amp; invoices</Link> tab of Plans &amp; billing after signing in.</>,
   },
   {
     icon: Mail,

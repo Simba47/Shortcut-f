@@ -31,6 +31,8 @@ type Entry = {
   url: string | null
   progress: number | null
   users: number
+  /** Downloads when it isn't saved (an entry that only looks for a saved copy doesn't) */
+  fetching: boolean
   abort: AbortController
   drop: ReturnType<typeof setTimeout> | null
 }
@@ -48,7 +50,7 @@ async function evictOld(c: Cache) {
   await Promise.all(dated.slice(KEEP).map(d => c.delete(d.r)))
 }
 
-async function load(src: string, key: string, e: Entry) {
+async function load(src: string, key: string, e: Entry, fetchIfMissing = true) {
   const done = (url: string | null) => {
     if (e.abort.signal.aborted) { if (url) URL.revokeObjectURL(url); return }
     e.url = url
@@ -60,6 +62,7 @@ async function load(src: string, key: string, e: Entry) {
     const c = await caches.open(CACHE)
     const req = cacheKey(key)
     let hit = await c.match(req)
+    if (!hit && !fetchIfMissing) return done(null)
     if (!hit) {
       const res = await fetch(src, { signal: e.abort.signal })
       if (!res.ok || !res.body) return done(null)
@@ -90,12 +93,18 @@ async function load(src: string, key: string, e: Entry) {
   }
 }
 
-function enter(src: string, key: string) {
+function enter(src: string, key: string, fetchIfMissing = true) {
   let e = entries.get(key)
   if (!e) {
-    e = { url: null, progress: 0, users: 0, abort: new AbortController(), drop: null }
+    e = { url: null, progress: fetchIfMissing ? 0 : null, users: 0, fetching: fetchIfMissing, abort: new AbortController(), drop: null }
     entries.set(key, e)
-    void load(src, key, e)
+    void load(src, key, e, fetchIfMissing)
+    notify()
+  } else if (fetchIfMissing && !e.fetching && !e.url) {
+    // (one that only looked for a saved copy, and the clip board now wants it: it downloads)
+    e.fetching = true
+    e.progress = 0
+    void load(src, key, e, true)
     notify()
   }
   if (e.drop) { clearTimeout(e.drop); e.drop = null }
@@ -129,13 +138,21 @@ function useEntry<T>(k: string, pick: (e: Entry | undefined) => T, server: T): T
  * The URL to play `src` from: the downloaded copy once it is all here, else `src` itself.
  * Starts (or joins) the download. `key` names the file across visits (its storage path).
  */
-export function useLocalVideo(src: string | null | undefined, key?: string | null): string {
+export function useLocalVideo(src: string | null | undefined, key?: string | null, opts?: {
+  /**
+   * false: only a copy already here or coming (the clip board's, saved or still downloading) is used — no
+   * download of its own. Watch as reels (user, 2026-11-19): a whole-video download there took the
+   * connection from the reels being watched; there each reel streams its own part when played
+   */
+  download?: boolean
+}): string {
   const k = key || src || ''
+  const fetchIfMissing = opts?.download !== false
   useEffect(() => {
     if (!src || !k) return
-    enter(src, k)
+    enter(src, k, fetchIfMissing)
     return () => leave(k)
-  }, [src, k])
+  }, [src, k, fetchIfMissing])
   const url = useEntry(k, e => e?.url ?? null, null)
   return url ?? src ?? ''
 }

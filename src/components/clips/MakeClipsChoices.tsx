@@ -316,23 +316,18 @@ export function CaptionChoices({ on, onToggle, style, onStyle, language, kitName
   language?: React.ReactNode
   kitName?: string | null
 }) {
-  const live = !!kitName || on
+  // (user, 2026-11-19: no "Captions on each clip" switch in here — the Captions row's own switch turns them on
+  // or off; picking a style while they're off turns them on)
+  const turnOn = () => { if (!kitName && !on) onToggle() }
   return (
     <div className="flex flex-col gap-3">
-      {kitName ? <KitStyleBar what="Captions" kitName={kitName} hint="Brand → Off to pick your own" /> : (
-      <div className="flex items-center gap-2">
-        <p className="mmc-pop-heading flex-1 min-w-0 truncate">Captions on each clip</p>
-        <button type="button" role="switch" aria-checked={on} aria-label="Captions on the clips" className="mmc-switch" data-on={on || undefined} onClick={onToggle}>
-          <span />
-        </button>
-      </div>
-      )}
-      <div className="mmc-pop-styles flex flex-col gap-4" data-off={!live || undefined} inert={!live || undefined}>
+      {kitName && <KitStyleBar what="Captions" kitName={kitName} hint="Brand → Off to pick your own" />}
+      <div className="mmc-pop-styles flex flex-col gap-5">
         {language && <div className="flex flex-col gap-2"><p className="mmc-pop-heading">Written in</p>{language}</div>}
-        <div className={`flex flex-col gap-2${kitName ? ' kit-held' : ''}`} inert={!!kitName || undefined}>
+        <div className={`mmc-cap flex flex-col gap-2${kitName ? ' kit-held' : ''}`} inert={!!kitName || undefined}>
         <p className="mmc-pop-heading">Style</p>
         <CaptionStyler section="style" style={style ?? {}} textCase="title"
-          onChange={u => onStyle(captionStyleToSend({ ...(style ?? {}), ...u }))}
+          onChange={u => { turnOn(); onStyle(captionStyleToSend({ ...(style ?? {}), ...u })) }}
           onTextCaseChange={() => {}} onEditCaptions={() => {}} onRetranscribe={() => {}} retranscribing={false} />
         </div>
       </div>
@@ -352,12 +347,14 @@ export function TitleChoices({ on, onToggle, styleId, font, onStyle, onFont, lan
   language?: React.ReactNode
   kitName?: string | null
 }) {
-  const live = !!kitName || on
+  // (user, 2026-11-19: no "Title on each clip" switch in here — the Title row's own switch; picking a style or
+  // font while it's off turns it on)
+  const turnOn = () => { if (!kitName && !on) onToggle() }
   const face = font ? { fontFamily: `"${font}", sans-serif` } : {}
   const tile = (id: string | null, name: string, look: React.CSSProperties) => {
     const picked = styleId === id
     return (
-      <button key={id ?? 'usual'} type="button" role="radio" aria-checked={picked} className="mmc-title" data-on={picked || undefined} onClick={() => onStyle(id)}>
+      <button key={id ?? 'usual'} type="button" role="radio" aria-checked={picked} className="mmc-title" data-on={picked || undefined} onClick={() => { turnOn(); onStyle(id) }}>
         <span className="mmc-title-screen">
           <span className="mmc-title-text" style={{ ...look, ...face, fontSize: 15 }}>Your title</span>
           {picked && <Tick />}
@@ -368,21 +365,14 @@ export function TitleChoices({ on, onToggle, styleId, font, onStyle, onFont, lan
   }
   return (
     <div className="flex flex-col gap-4">
-      {kitName ? <KitStyleBar what="Title" kitName={kitName} hint="Brand → Off to pick your own" /> : (
-      <div className="flex items-center gap-2">
-        <p className="mmc-pop-heading flex-1 min-w-0 truncate">Title on each clip</p>
-        <button type="button" role="switch" aria-checked={on} aria-label="A title on the clips" className="mmc-switch" data-on={on || undefined} onClick={onToggle}>
-          <span />
-        </button>
-      </div>
-      )}
-      <div className="mmc-pop-styles flex flex-col gap-4" data-off={!live || undefined} inert={!live || undefined}>
+      {kitName && <KitStyleBar what="Title" kitName={kitName} hint="Brand → Off to pick your own" />}
+      <div className="mmc-pop-styles flex flex-col gap-4">
         {language && <div className="flex flex-col gap-2 relative z-20"><p className="mmc-pop-heading">Written in</p>{language}</div>}
         {/* (the font first: its list opens down over the styles; both the kit's while one is picked) */}
         <div className={`flex flex-col gap-4${kitName ? ' kit-held' : ''}`} inert={!!kitName || undefined}>
         <div className="flex flex-col gap-2 relative z-10">
           <p className="mmc-pop-heading">Font</p>
-          <FontPicker value={font} onChange={family => onFont(family === 'sans-serif' ? null : family)} />
+          <FontPicker value={font} onChange={family => { turnOn(); onFont(family === 'sans-serif' ? null : family) }} />
         </div>
         <div className="flex flex-col gap-2">
           <p className="mmc-pop-heading">Style</p>

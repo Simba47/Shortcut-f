@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { requireUser } from '@/server/auth'
 import { apiError } from '@/lib/api-error'
 import { creditsMode, TOPUP_PACKS } from '@/lib/credits'
-import { balance, ensureFreeGrant, recentLedger, sweep } from '@/server/services/credits'
+import { balance, ensureFreeGrant, grantsSummary, recentLedger, sweep } from '@/server/services/credits'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -23,10 +23,12 @@ export async function GET(req: NextRequest) {
     await ensureFreeGrant(user.id)
     // Jobs that finished since the last look settle or give their credits back first
     await sweep(user.id)
-    const [b, ledger] = await Promise.all([balance(user.id), brief ? null : recentLedger(user.id, 30)])
+    const [b, ledger, grants] = await Promise.all([balance(user.id), brief ? null : recentLedger(user.id, 30), brief ? null : grantsSummary(user.id)])
     if (brief) return NextResponse.json({ mode, balance: b.balance, held: b.held, nextExpiry: b.nextExpiry })
     return NextResponse.json({
       mode, balance: b.balance, held: b.held, nextExpiry: b.nextExpiry, ledger,
+      // "450 / 599 credits" and when they run out (the Buy credits page)
+      total: grants?.total ?? null, expiries: grants?.expiries ?? [],
       topupPacks: TOPUP_PACKS,
     })
   } catch (err) {

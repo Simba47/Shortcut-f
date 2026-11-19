@@ -49,12 +49,16 @@ export default async function AutoClipsPage({ params }: { params: Promise<{ vide
     playKey
       ? getSignedUrl(r2, new GetObjectCommand({ Bucket: R2_BUCKET, Key: playKey }), { expiresIn: 43200 }).catch(() => '')
       : Promise.resolve(''),
+    // (only the words inside the clips: the whole video's — thousands on a long one — made the page
+    // slow to come, and the cards use none of the rest; user, 2026-11-19)
     ids.length ? sql`
       SELECT tw.* FROM transcript_words tw
       WHERE tw.transcript_id = (
         SELECT t.id FROM transcripts t WHERE t.video_id = ${videoId}
           AND EXISTS (SELECT 1 FROM transcript_words WHERE transcript_id = t.id)
         ORDER BY t.created_at DESC LIMIT 1)
+        AND EXISTS (SELECT 1 FROM unnest(${clipRows.map(c => Number(c.start_ms))}::int[], ${clipRows.map(c => Number(c.end_ms))}::int[]) AS r(s, e)
+          WHERE tw.end_ms >= r.s AND tw.start_ms <= r.e)
       ORDER BY tw.start_ms` : Promise.resolve([]),
     ids.length ? sql`
       SELECT s.*, COALESCE(json_agg(jsonb_build_object(
@@ -103,6 +107,8 @@ export default async function AutoClipsPage({ params }: { params: Promise<{ vide
     <ClipsGallery
       video={{ id: video.id, title: video.title ?? null }}
       videoUrl={videoUrl}
+      // (names the file across visits: the clip board's downloaded copy is the same one)
+      videoKey={videoUrl ? playKey : null}
       needsProxy={needsProxy}
       stockUrls={stockUrls}
       job={job ? { status: job.status, error: job.error ?? null } : null}

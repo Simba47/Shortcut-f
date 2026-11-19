@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSession, signOut } from 'next-auth/react'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { AccountMenu } from '@/components/ui/account-menu'
+import { CreditsButton } from '@/components/ui/credits-badge'
 import { BrandLoaderScreen } from '@/components/ui/brand-loader'
 
 type Account = { email: string; name: string | null; image: string | null; emailVerified: string | null; planName: string; hasPassword: boolean }
@@ -35,6 +36,7 @@ export default function SettingsPage() {
         style={{ height: 56, background: 'rgba(14,14,15,0.85)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
         <Breadcrumbs shine items={[{ label: 'Dashboard', href: '/dashboard' }, { label: 'Account settings' }]} />
         <div className="flex-1" />
+        <CreditsButton />
         <AccountMenu />
       </nav>
 
@@ -234,7 +236,8 @@ function ProfileCard({ account, onSaved, onPhoto }: { account: Account; onSaved:
               {/* (user, 2026-11-13: beside the name they ran out of the half-width tile) under it, wrapping */}
               <span className="st-tile-links">
                 <a href="/pricing" className="st-link">Plans &amp; billing →</a>
-                <a href="/billing" className="st-link">Credits, payments &amp; invoices →</a>
+                <a href="/billing" className="st-link">Buy credits →</a>
+                <a href="/pricing#billing" className="st-link">Payments &amp; invoices →</a>
               </span>
             </div>
           </div>

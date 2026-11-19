@@ -248,7 +248,7 @@
    "color": "#FFFFFF",
    "hl": "#FFE600",
    "upper": true,
-   "stroke": 6
+   "stroke": 8
   },
   {
    "id": "tpl:hormozi-green",
@@ -262,7 +262,7 @@
    "hl": "#39FF14",
    "upper": true,
    "scale": 130,
-   "stroke": 4,
+   "stroke": 6,
    "shadow": 4
   },
   {
@@ -302,7 +302,7 @@
    "size": 125,
    "color": "#FFFFFF",
    "hl": "#00E5FF",
-   "stroke": 5
+   "stroke": 7
   },
   {
    "id": "tpl:podcast",
@@ -326,7 +326,7 @@
    "color": "#FFFFFF",
    "hl": "#FF2D2D",
    "upper": true,
-   "stroke": 3
+   "stroke": 5
   },
   {
    "id": "tpl:fade-words",
@@ -352,7 +352,7 @@
    "color": "#FFFFFF",
    "hl": "#39FF14",
    "upper": true,
-   "stroke": 7
+   "stroke": 10
   },
   {
    "id": "tpl:lime-box",
@@ -378,7 +378,7 @@
    "size": 115,
    "color": "#FFFFFF",
    "hl": "#FF4FD8",
-   "stroke": 5
+   "stroke": 7
   },
   {
    "id": "tpl:big-italic",
@@ -405,7 +405,7 @@
    "size": 110,
    "color": "#FFFFFF",
    "hl": "#E4F13A",
-   "stroke": 3
+   "stroke": 5
   },
   {
    "id": "tpl:impact",
@@ -418,7 +418,7 @@
    "color": "#FFFFFF",
    "hl": "#7CFC00",
    "upper": true,
-   "stroke": 3
+   "stroke": 5
   },
   {
    "id": "tpl:sunshine",
@@ -445,7 +445,7 @@
    "color": "#FFFFFF",
    "hl": "#2BFF3A",
    "upper": true,
-   "stroke": 4
+   "stroke": 6
   },
   {
    "id": "tpl:cyan",
@@ -458,7 +458,7 @@
    "color": "#FFFFFF",
    "hl": "#22E3FF",
    "upper": true,
-   "stroke": 3
+   "stroke": 5
   },
   {
    "id": "tpl:alert",
@@ -485,7 +485,7 @@
    "color": "#FFFFFF",
    "hl": "#FFD400",
    "upper": true,
-   "stroke": 5,
+   "stroke": 7,
    "shadow": 5
   },
   {
@@ -498,7 +498,7 @@
    "size": 105,
    "color": "#FFFFFF",
    "hl": "#FFC400",
-   "stroke": 3,
+   "stroke": 5,
    "shadow": 6
   },
   {
@@ -525,7 +525,7 @@
    "color": "#FFFFFF",
    "hl": "#FFD60A",
    "scale": 130,
-   "stroke": 4
+   "stroke": 6
   },
   {
    "id": "tpl:bigword",
@@ -539,7 +539,7 @@
    "hl": "#FFE600",
    "upper": true,
    "scale": 135,
-   "stroke": 5
+   "stroke": 7
   },
   {
    "id": "tpl:headline",
@@ -553,7 +553,7 @@
    "hl": "#FFB020",
    "upper": true,
    "scale": 130,
-   "stroke": 3
+   "stroke": 5
   },
   {
    "id": "tpl:comic",
@@ -566,7 +566,7 @@
    "color": "#FFFFFF",
    "hl": "#3EE6A0",
    "upper": true,
-   "stroke": 6
+   "stroke": 8
   },
   {
    "id": "tpl:punch",
@@ -579,7 +579,7 @@
    "color": "#FFFFFF",
    "hl": "#FFE600",
    "upper": true,
-   "stroke": 6,
+   "stroke": 8,
    "shadow": 5
   },
   {
@@ -593,7 +593,7 @@
    "color": "#2BFF3A",
    "hl": "#FFFFFF",
    "upper": true,
-   "stroke": 5,
+   "stroke": 7,
    "shadow": 4
   },
   {
@@ -823,7 +823,7 @@
    "size": 110,
    "color": "#FFFFFF",
    "hl": "#22B8FF",
-   "stroke": 3
+   "stroke": 5
   },
   {
    "id": "tpl:red-chip",
@@ -835,7 +835,7 @@
    "size": 110,
    "color": "#FFFFFF",
    "hl": "#FF2A1F",
-   "stroke": 3
+   "stroke": 5
   },
   {
    "id": "tpl:royal-chip",
@@ -848,7 +848,7 @@
    "color": "#FFFFFF",
    "hl": "#6B21A8",
    "upper": true,
-   "stroke": 3
+   "stroke": 5
   },
   {
    "id": "tpl:editorial",
@@ -860,7 +860,7 @@
    "size": 105,
    "color": "#FFFFFF",
    "hl": "#4F1DFF",
-   "stroke": 2
+   "stroke": 3
   },
   {
    "id": "tpl:green-chip",
@@ -872,7 +872,7 @@
    "size": 90,
    "color": "#2BE04A",
    "hl": "#1DB954",
-   "stroke": 3
+   "stroke": 5
   },
   {
    "id": "tpl:marker",
@@ -885,7 +885,7 @@
    "color": "#FFFFFF",
    "hl": "#2BE04A",
    "upper": true,
-   "stroke": 5
+   "stroke": 7
   },
   {
    "id": "tpl:soft-glow",
@@ -1088,7 +1088,7 @@
    "hl": "#FF7EB6",
    "upper": true,
    "stack": true,
-   "stroke": 4
+   "stroke": 6
   },
   {
    "id": "tpl:shout",

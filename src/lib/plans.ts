@@ -28,6 +28,9 @@ export const PLANS = {
     watermark: false,
     // Exports go to the front of the worker's line (the top plan's "priority rendering")
     priorityExports: false,
+    // Your company's name, GSTIN, state and address on your invoices (the billing page's "Details on your
+    // invoices"): Agency only (user, 2026-11-19). Other plans get the invoice with their account's name and email.
+    gstInvoices: false,
     retentionDays: 30,
     // AI use (lib/aiLimits.ts): clips per Make my clips run; AI clips a month
     // and a daily safety cap; free moment searches per video (1 on every plan: each one reads the whole
@@ -57,6 +60,7 @@ export const PLANS = {
     autoCaption: true,
     watermark: false,
     priorityExports: false,
+    gstInvoices: false,
     retentionDays: 14,
     ai: { clipsPerRun: 3, clipsPerDay: 3, clipsPerMonth: 3, searchesPerVideo: 1, askAiPerMonth: 2, askAiPerDay: 2, rewritesPerMonth: 20 },
   },
@@ -77,6 +81,7 @@ export const PLANS = {
     autoCaption: true,
     watermark: false,
     priorityExports: false,
+    gstInvoices: false,
     retentionDays: 30,
     ai: { clipsPerRun: 10, clipsPerDay: 30, clipsPerMonth: 20, searchesPerVideo: 1, askAiPerMonth: 10, askAiPerDay: 10, rewritesPerMonth: 30 },
   },
@@ -97,6 +102,7 @@ export const PLANS = {
     autoCaption: true,
     watermark: false,
     priorityExports: false,
+    gstInvoices: false,
     retentionDays: 45,
     ai: { clipsPerRun: 15, clipsPerDay: 60, clipsPerMonth: 40, searchesPerVideo: 1, askAiPerMonth: 20, askAiPerDay: 20, rewritesPerMonth: 60 },
   },
@@ -117,6 +123,7 @@ export const PLANS = {
     autoCaption: true,
     watermark: false,
     priorityExports: true,
+    gstInvoices: true,
     retentionDays: 60,
     ai: { clipsPerRun: 20, clipsPerDay: 150, clipsPerMonth: 90, searchesPerVideo: 1, askAiPerMonth: 40, askAiPerDay: 40, rewritesPerMonth: 130 },
   },

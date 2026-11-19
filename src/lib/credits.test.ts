@@ -1,10 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  creditsMode, ledgerLabel, subjectsCredits, subjectsNewMs, captionCredits, exportCredits, readingCredits, captionSpan, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS, testPackAllowed, findTopupPack, TRIAL_PACK, TRIAL_DAYS,
+  creditsMode, ledgerLabel, subjectsCredits, subjectsNewMs, captionCredits, exportCredits, readingCredits, captionSpan, allocate, TOPUP_PACKS, FREE_SIGNUP_CREDITS, MAX_CLIP_MS, testPackAllowed, findTopupPack, TRIAL_PACK, TRIAL_DAYS, packSaving, packUses, POPULAR_PACK,
   type SpendableGrant,
 } from './credits'
 import { PLANS } from './plans'
+import { CLIP_CREDITS } from './aiLimits'
 
 const MIN = 60_000
 
@@ -174,4 +175,18 @@ test('the ₹1 test pack is only for the emails listed in TEST_PACK_EMAILS (user
   assert.equal(findTopupPack('small', { test: false })?.price, 199)
   // never one of the packs everyone sees
   assert.ok(!TOPUP_PACKS.some(p => (p.key as string) === 'test'))
+})
+
+test('pack cards: the struck price is the plans rate (1 credit = Rs 1), and what the credits make', () => {
+  const by = Object.fromEntries(TOPUP_PACKS.map(p => [p.key, p]))
+  assert.equal(packSaving(by.small), null, 'saving Rs 1 is not shown')
+  assert.deepEqual(packSaving(by.medium), { was: 500, saved: 11, percent: 2 })
+  assert.deepEqual(packSaving(by.large), { was: 1250, saved: 51, percent: 4 })
+  assert.deepEqual(packSaving(by.bulk), { was: 3000, saved: 201, percent: 7 })
+  for (const p of TOPUP_PACKS) { const s = packSaving(p); if (s) assert.ok(s.was > p.price, p.key) }
+  // 6 credits an AI clip; captions 2 + export 1 a minute for a clip you cut yourself
+  assert.deepEqual(packUses(200, CLIP_CREDITS), { aiClips: 33, captionedMinutes: 66 })
+  assert.deepEqual(packUses(500, CLIP_CREDITS), { aiClips: 83, captionedMinutes: 166 })
+  assert.deepEqual(packUses(3000, CLIP_CREDITS), { aiClips: 500, captionedMinutes: 1000 })
+  assert.ok(TOPUP_PACKS.some(p => p.key === POPULAR_PACK))
 })

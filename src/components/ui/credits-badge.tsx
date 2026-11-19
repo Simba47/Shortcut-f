@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useId, useRef, useState, type MouseEvent } from 'react'
-import type { CreditsInfo } from '@/lib/useCredits'
+import { useCredits, type CreditsInfo } from '@/lib/useCredits'
 import { BRAND_TOP, BRAND_BOTTOM } from '@/components/ui/brand-logo'
 
 /**
@@ -90,7 +90,7 @@ function Odometer({ value }: { value: number }) {
 }
 
 /**
- * The balance in a page's header; it opens the credit history on the billing page. When it changes, the
+ * The balance in a page's header; it opens Buy credits (the billing page, only the Purchase credits card). When it changes, the
  * digits roll to the new number (Odometer), the coin turns once, and the change itself ("−15", "+50") shows by the pill:
  * credits taken drop away from it (neutral), credits added rise into it (lime) — then fade.
  */
@@ -108,7 +108,7 @@ export function CreditsBadge({ credits, className = 'credits-badge', onClick }: 
   const soon = credits.nextExpiry ? `${credits.nextExpiry.amount} credits expire ${new Date(credits.nextExpiry.at).toLocaleDateString()}. ` : ''
   const low = credits.balance <= 5
   return (
-    <a href="/billing#credits" onClick={onClick} className={`${className} credits-live${low ? ' is-low' : ''}`} title={`${soon}See your credit history`}>
+    <a href="/billing#credits" onClick={onClick} className={`${className} credits-live${low ? ' is-low' : ''}`} title={`${soon}Buy credits`}>
       <span key={change?.key ?? 0} className={`credit-coin-turn${change ? ' is-turning' : ''}`}><CreditCoin low={low} /></span>
       <span className="credits-num"><strong><span aria-hidden="true"><Odometer value={credits.balance} /></span><span className="sr-only">{credits.balance}</span></strong> <span className="credits-word">credits</span></span>
       {change && (
@@ -119,6 +119,16 @@ export function CreditsBadge({ credits, className = 'credits-badge', onClick }: 
       <span className="sr-only" aria-live="polite">{change ? `${Math.abs(change.n)} credits ${change.n < 0 ? 'used' : 'added'}. ${credits.balance} left.` : ''}</span>
     </a>
   )
+}
+
+/**
+ * The credits button for a page that has no balance of its own to show (user, 2026-11-19: "everywhere we go
+ * show the credit button"): looks the balance up itself (useCredits), beside the account menu. Nothing with
+ * credits off.
+ */
+export function CreditsButton({ className }: { className?: string }) {
+  const { credits } = useCredits()
+  return <CreditsBadge credits={credits} className={className} />
 }
 
 /** Beside an "out of credits" message: the way to get more */

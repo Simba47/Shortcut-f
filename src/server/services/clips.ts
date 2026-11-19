@@ -802,7 +802,7 @@ export async function regenerateClipText(userId: string, clipId: string) {
   const action = await beginAiAction(userId, 'rewrite', clip.video_id)
   const { aiProvider, askGemini } = await import('@/lib/gemini')
   if (!aiProvider()) { await action.fail(); throw Object.assign(new Error('AI text is not configured'), { status: 500 }) }
-  const onUsage = (u: { model: string; inputTokens: number; outputTokens: number }) => {
+  const onUsage = (u: { model: string; inputTokens: number; outputTokens: number; via?: 'key' | 'vertex' }) => {
     recordAiUsage({ userId, videoId: clip.video_id, purpose: 'rewrite', ...u }).catch(e => console.warn('[ai-usage] not recorded:', e instanceof Error ? e.message : e))
   }
 

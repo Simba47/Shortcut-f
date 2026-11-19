@@ -1,0 +1,297 @@
+/* The timeline bar's hover help: a small popup with a drawn loop of what the tool does (ToolHints.tsx).
+   The stage is always dark (like the transitions' preview screen); the card around it follows the theme. */
+
+/* Off tools still get their popup: the pointer goes through them to the bar, which finds the tool */
+.ed-transport [data-hint]:disabled { pointer-events: none; }
+
+.th-pop {
+  position: fixed; z-index: 90; width: 232px; padding: 8px 8px 9px; border-radius: 13px; pointer-events: none;
+  background: var(--ed-popover, #1a1a1a); color: var(--ed-text, #f4f4f5);
+  box-shadow: 0 0 0 1px rgb(var(--ed-fg, 244 244 245) / 0.12), 0 14px 34px -10px rgba(0,0,0,0.7);
+  animation: th-pop-in .14s ease-out both;
+}
+.th-pop::after {   /* the little arrow to the tool */
+  content: ''; position: absolute; left: calc(var(--ax) - 6px); top: 100%; width: 12px; height: 7px;
+  background: inherit; clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+.th-pop[data-below]::after { top: auto; bottom: 100%; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+@keyframes th-pop-in { from { opacity: 0; translate: 0 4px; } }
+.th-pop[data-below] { animation-name: th-pop-in-below; }
+@keyframes th-pop-in-below { from { opacity: 0; translate: 0 -4px; } }
+
+.th-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 0 2px; }
+.th-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 650; letter-spacing: -0.005em; }
+.th-keys { display: flex; gap: 3px; flex-shrink: 0; }
+.th-keys kbd {
+  font: 600 10.5px/1 inherit; font-family: inherit; padding: 4px 6px; border-radius: 5px;
+  color: rgb(var(--ed-fg, 244 244 245) / 0.85); background: rgb(var(--ed-fg, 244 244 245) / 0.08);
+  box-shadow: inset 0 -1px 0 rgb(var(--ed-fg, 244 244 245) / 0.14);
+}
+.th-why, .th-note { margin: 4px 2px 0; font-size: 11.5px; line-height: 1.35; }
+.th-why { color: #fbbf24; }
+.th-why::before { content: ''; display: inline-block; width: 5px; height: 5px; margin: 0 6px 1px 0; border-radius: 50%; background: currentColor; }
+.th-note { color: rgb(var(--ed-fg, 244 244 245) / 0.5); }
+[data-theme="light"] .th-why { color: #b45309; }
+
+/* ── The stage ─────────────────────────────────────────────────────────────────────────────────── */
+.th-stage {
+  --th-d: 3.2s; --at: .5;
+  position: relative; width: 216px; height: 120px; border-radius: 9px; overflow: hidden;
+  background: radial-gradient(120% 90% at 50% 0%, #17171b 0%, #0b0b0d 70%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07);
+}
+.th-stage * {
+  animation-duration: var(--th-d); animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out; animation-fill-mode: both;
+}
+.th-stage i, .th-stage .th-bar, .th-stage .th-screen, .th-stage .th-mini, .th-stage .th-move, .th-stage .th-zoom { position: absolute; display: block; }
+.th-loop { position: absolute; inset: 0; animation-name: th-loop; }
+@keyframes th-loop { 0% { opacity: 0; } 5%, 93% { opacity: 1; } 100% { opacity: 0; } }
+
+/* The tool's own button, pressed at --at */
+.th-btn {
+  position: absolute; left: 50%; top: 86px; width: 28px; height: 28px; margin-left: -14px; border-radius: 8px;
+  display: grid; place-items: center; color: #d4d4d8; background: #1d1d22; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
+  animation-name: th-press; animation-delay: calc(var(--th-d) * (var(--at) - 1.47));
+}
+.th-btn::after {
+  content: ''; position: absolute; inset: -1px; border-radius: 9px; box-shadow: 0 0 0 2px #c8ff00; opacity: 0;
+  animation: th-ring var(--th-d) infinite both ease-out; animation-delay: inherit;
+}
+@keyframes th-press {
+  0%, 43% { transform: none; color: #d4d4d8; background: #1d1d22; }
+  46% { transform: scale(.82); color: #0a0a0a; background: #c8ff00; }
+  52% { transform: none; color: #0a0a0a; background: #c8ff00; }
+  66%, 100% { transform: none; color: #d4d4d8; background: #1d1d22; }
+}
+@keyframes th-ring { 0%, 46% { opacity: 0; transform: scale(.9); } 49% { opacity: .9; } 66%, 100% { opacity: 0; transform: scale(1.55); } }
+/* Two presses a loop (previous / next section) */
+.th-stage[data-two] .th-btn { animation-name: th-press2; animation-delay: 0s; }
+.th-stage[data-two] .th-btn::after { animation-name: th-ring2; }
+@keyframes th-press2 {
+  0%, 25%, 46%, 59%, 80%, 100% { transform: none; color: #d4d4d8; background: #1d1d22; }
+  28%, 62% { transform: scale(.82); color: #0a0a0a; background: #c8ff00; }
+  33%, 67% { transform: none; color: #0a0a0a; background: #c8ff00; }
+}
+@keyframes th-ring2 { 0%, 28%, 46%, 62%, 80%, 100% { opacity: 0; transform: scale(.9); } 30%, 64% { opacity: .9; } 44%, 78% { opacity: 0; transform: scale(1.55); } }
+
+/* ── Timeline parts ── */
+.th-ruler {
+  left: 0; right: 0; top: 11px; height: 7px;
+  background: repeating-linear-gradient(90deg, rgba(255,255,255,0.22) 0 1px, transparent 1px 12px);
+  -webkit-mask-image: linear-gradient(180deg, #000 0 45%, rgba(0,0,0,.5) 45%);
+          mask-image: linear-gradient(180deg, #000 0 45%, rgba(0,0,0,.5) 45%);
+}
+.th-bar { top: 28px; height: 24px; border-radius: 5px; overflow: hidden; }
+.th-bar[data-k="main"] {
+  background:
+    repeating-linear-gradient(90deg, transparent 0 22px, rgba(0,0,0,0.5) 22px 23px),
+    linear-gradient(180deg, #62626e 0%, #44444e 55%, #383840 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.12);
+}
+.th-bar[data-k="music"] { color: #c084fc; background: rgba(192,132,252,0.2); box-shadow: inset 0 0 0 1px rgba(192,132,252,0.65); }
+.th-bar[data-k="video"] { background: linear-gradient(180deg, rgba(249,115,22,0.42), rgba(249,115,22,0.24)); box-shadow: inset 0 0 0 1px rgba(249,115,22,0.8); }
+.th-bar[data-k="text"]  { background: rgba(244,114,182,0.24); box-shadow: inset 0 0 0 1px rgba(244,114,182,0.75); }
+.th-wave { position: absolute; left: 3px; right: 3px; top: 20%; width: calc(100% - 6px); height: 60%; fill: currentColor; }
+.th-sel { inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 2px #c8ff00, 0 0 10px rgba(200,255,0,0.25); opacity: 0; }
+
+.th-ph { top: 18px; height: 64px; width: 2px; margin-left: -1px; border-radius: 1px; background: #c8ff00; box-shadow: 0 0 6px rgba(200,255,0,0.45); z-index: 3; }
+.th-ph::before { content: ''; position: absolute; top: -3px; left: -4px; width: 10px; height: 8px; background: #c8ff00; clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%); }
+.th-ph-short { top: 60px; height: 24px; }
+
+.th-mini {
+  width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; z-index: 4;
+  color: #0a0a0a; background: #c8ff00; box-shadow: 0 2px 8px rgba(0,0,0,0.5); opacity: 0;
+}
+
+/* ── A little picture ── */
+.th-screen { border-radius: 6px; overflow: hidden; box-shadow: 0 0 0 1px rgba(255,255,255,0.14), 0 6px 16px rgba(0,0,0,0.5); }
+.th-pic { position: absolute; inset: 0; background: linear-gradient(180deg, #2b4a78 0%, #5a7fb0 62%, #6f8fb6 100%); }
+.th-pic-sun { right: 12%; top: 14%; width: 18%; aspect-ratio: 1; border-radius: 50%; background: #fcd34d; box-shadow: 0 0 10px rgba(252,211,77,0.6); }
+.th-pic-ground { left: 0; right: 0; bottom: 0; height: 26%; background: linear-gradient(180deg, #2f5d3a, #234a2d); }
+.th-pic-head { left: 17%; bottom: 46%; width: 13%; aspect-ratio: 1; border-radius: 50%; background: #18181b; }
+.th-pic-body { left: 10%; bottom: 0; width: 27%; height: 46%; border-radius: 40% 40% 0 0; background: #18181b; }
+.th-pic-ball { left: 34%; bottom: 26%; width: 9%; aspect-ratio: 1; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.5); animation-timing-function: linear; }
+
+/* ── Split ── */
+.th-split-a { border-radius: 5px 0 0 5px; animation-name: th-split-a; }
+.th-split-b { border-radius: 0 5px 5px 0; animation-name: th-split-b; }
+.th-split-ph { animation-name: th-split-ph; }
+.th-split-sel { animation-name: th-sel-late; }
+@keyframes th-split-ph { 0%, 8% { transform: none; } 36%, 100% { transform: translateX(78px); } }
+@keyframes th-split-a { 0%, 45% { border-radius: 5px 0 0 5px; } 51%, 100% { border-radius: 5px; } }
+@keyframes th-split-b { 0%, 45% { border-radius: 0 5px 5px 0; transform: none; } 54%, 100% { border-radius: 5px; transform: translateX(6px); } }
+@keyframes th-sel-late { 0%, 64% { opacity: 0; } 70%, 100% { opacity: 1; } }
+
+/* ── Duplicate ── */
+.th-dup-sela { animation-name: th-dup-sela; }
+.th-dup-c { animation-name: th-dup-c; }
+.th-dup-copy { animation-name: th-dup-copy; z-index: 2; }
+.th-dup-selc { animation-name: th-dup-selc; }
+@keyframes th-dup-sela { 0%, 10% { opacity: 0; } 16%, 48% { opacity: 1; } 54%, 100% { opacity: 0; } }
+@keyframes th-dup-c { 0%, 46% { transform: none; } 62%, 100% { transform: translateX(76px); } }
+@keyframes th-dup-copy {
+  0%, 45% { opacity: 0; transform: translate(-76px, 0); box-shadow: none; }
+  48% { opacity: 1; transform: translate(-70px, -5px); box-shadow: 0 6px 14px rgba(0,0,0,0.6); }
+  62% { opacity: 1; transform: translate(0, -3px); box-shadow: 0 6px 14px rgba(0,0,0,0.6); }
+  68%, 100% { opacity: 1; transform: none; box-shadow: none; }
+}
+@keyframes th-dup-selc { 0%, 56% { opacity: 0; } 62%, 100% { opacity: 1; } }
+
+/* ── Delete ── */
+.th-del-sel { animation-name: th-sel-early; }
+.th-del-b { animation-name: th-del-b; }
+.th-del-c { animation-name: th-del-c; }
+@keyframes th-sel-early { 0%, 10% { opacity: 0; } 16%, 100% { opacity: 1; } }
+@keyframes th-del-b { 0%, 46% { opacity: 1; transform: none; } 56%, 100% { opacity: 0; transform: scale(.6); } }
+@keyframes th-del-c { 0%, 54% { transform: none; } 70%, 100% { transform: translateX(-60px); } }
+
+/* ── Undo: a part is deleted, Undo brings it back ── */
+.th-undo-sel { animation-name: th-undo-sel; }
+.th-undo-b { animation-name: th-undo-b; }
+.th-undo-c { animation-name: th-undo-c; }
+.th-undo-trash { animation-name: th-undo-trash; }
+@keyframes th-undo-sel { 0%, 6% { opacity: 0; } 10%, 100% { opacity: 1; } }
+@keyframes th-undo-b { 0%, 16% { opacity: 1; transform: none; } 26%, 56% { opacity: 0; transform: scale(.6); } 66%, 100% { opacity: 1; transform: none; } }
+@keyframes th-undo-c { 0%, 22% { transform: none; } 34%, 56% { transform: translateX(-60px); } 64%, 100% { transform: none; } }
+@keyframes th-undo-trash { 0%, 16% { opacity: 0; transform: scale(.5); } 20%, 40% { opacity: 1; transform: none; } 46%, 100% { opacity: 0; transform: scale(.5); } }
+
+/* ── Redo: deleted, undone, then Redo deletes it again ── */
+.th-redo-sel { animation-name: th-undo-sel; }
+.th-redo-b { animation-name: th-redo-b; }
+.th-redo-c { animation-name: th-redo-c; }
+.th-redo-trash { animation-name: th-redo-trash; }
+.th-redo-undo { animation-name: th-redo-undo; background: #e4e4e7; }
+@keyframes th-redo-b {
+  0%, 12% { opacity: 1; transform: none; } 20%, 40% { opacity: 0; transform: scale(.6); }
+  48%, 66% { opacity: 1; transform: none; } 74%, 100% { opacity: 0; transform: scale(.6); }
+}
+@keyframes th-redo-c {
+  0%, 16% { transform: none; } 26%, 40% { transform: translateX(-60px); }
+  46%, 70% { transform: none; } 80%, 100% { transform: translateX(-60px); }
+}
+@keyframes th-redo-trash { 0%, 12% { opacity: 0; transform: scale(.5); } 15%, 30% { opacity: 1; transform: none; } 34%, 100% { opacity: 0; transform: scale(.5); } }
+@keyframes th-redo-undo { 0%, 38% { opacity: 0; transform: scale(.5); } 41%, 56% { opacity: 1; transform: none; } 60%, 100% { opacity: 0; transform: scale(.5); } }
+
+/* ── Previous / next section: two jumps a loop ── */
+.th-next-ph { animation-name: th-next-ph; }
+.th-prev-ph { animation-name: th-prev-ph; }
+.th-sec-sel1 { animation-name: th-sec-sel1; }
+.th-sec-sel2 { animation-name: th-sec-sel2; }
+@keyframes th-next-ph { 0%, 28% { transform: none; } 31%, 62% { transform: translateX(44px); } 65%, 100% { transform: translateX(106px); } }
+@keyframes th-prev-ph { 0%, 28% { transform: none; } 31%, 62% { transform: translateX(-44px); } 65%, 100% { transform: translateX(-106px); } }
+@keyframes th-sec-sel1 { 0%, 29% { opacity: 0; } 32%, 52% { opacity: 1; } 60%, 100% { opacity: 0; } }
+@keyframes th-sec-sel2 { 0%, 63% { opacity: 0; } 66%, 86% { opacity: 1; } 94%, 100% { opacity: 0; } }
+
+/* ── Group: pick two, Group, they move together ── */
+.th-move { inset: 0; }
+.th-grp-sela { animation-name: th-grp-sela; }
+.th-grp-selb { animation-name: th-grp-selb; }
+.th-grp-link { animation-name: th-grp-link; }
+.th-grp-move { animation-name: th-grp-move; }
+@keyframes th-grp-sela { 0%, 8% { opacity: 0; } 13%, 100% { opacity: 1; } }
+@keyframes th-grp-selb { 0%, 22% { opacity: 0; } 27%, 100% { opacity: 1; } }
+@keyframes th-grp-link { 0%, 43% { opacity: 0; transform: scale(.4); } 49% { opacity: 1; transform: scale(1.15); } 54%, 100% { opacity: 1; transform: none; } }
+@keyframes th-grp-move { 0%, 58% { transform: none; } 80%, 100% { transform: translateX(56px); } }
+
+/* ── Ungroup: the link breaks, then each moves on its own ── */
+.th-ugr-sela { animation-name: th-ugr-sela; }
+.th-ugr-selb { animation-name: th-ugr-selb; }
+.th-ugr-link { animation-name: th-ugr-link; }
+.th-ugr-a { animation-name: th-ugr-a; }
+@keyframes th-ugr-sela { 0%, 100% { opacity: 1; } }
+@keyframes th-ugr-selb { 0%, 40% { opacity: 1; } 46%, 100% { opacity: 0; } }
+@keyframes th-ugr-link { 0%, 28% { opacity: 1; transform: none; } 32% { opacity: 1; transform: scale(1.2) rotate(-20deg); } 40%, 100% { opacity: 0; transform: scale(.3) rotate(30deg); } }
+@keyframes th-ugr-a { 0%, 50% { transform: none; } 72%, 100% { transform: translateX(72px); } }
+
+/* ── Detach audio: the sound drops onto its own Music bar ── */
+.th-det-inwave { color: rgba(255,255,255,0.55); top: 46%; height: 46%; animation-name: th-det-inwave; }
+.th-det-music { animation-name: th-det-music; }
+.th-det-mute { animation-name: th-det-mute; background: #e4e4e7; transform-origin: center; }
+.th-det-sel { animation-name: th-det-sel; }
+@keyframes th-det-inwave { 0%, 36% { opacity: 1; transform: none; } 46%, 100% { opacity: 0; transform: translateY(8px); } }
+@keyframes th-det-music { 0%, 37% { opacity: 0; transform: translateY(-22px) scaleY(.5); } 56%, 100% { opacity: 1; transform: none; } }
+@keyframes th-det-mute { 0%, 50% { opacity: 0; transform: scale(.4); } 56%, 100% { opacity: 1; transform: none; } }
+@keyframes th-det-sel { 0%, 68% { opacity: 0; } 74%, 100% { opacity: 1; } }
+
+/* ── Reset all edits: the cut parts and extras go, one plain clip again ── */
+.th-rs-p1 { animation-name: th-rs-p1; }
+.th-rs-p2 { animation-name: th-rs-p2; }
+.th-rs-p3 { animation-name: th-rs-p3; }
+.th-rs-x { animation-name: th-rs-x; }
+.th-rs-full { animation-name: th-rs-full; }
+@keyframes th-rs-p1 { 0%, 45% { opacity: 1; transform: none; } 58%, 100% { opacity: 0; transform: none; } }
+@keyframes th-rs-p2 { 0%, 45% { opacity: 1; transform: none; } 58%, 100% { opacity: 0; transform: translateX(-4px); } }
+@keyframes th-rs-p3 { 0%, 45% { opacity: 1; transform: none; } 58%, 100% { opacity: 0; transform: translateX(-8px); } }
+@keyframes th-rs-x { 0%, 45% { opacity: 1; transform: none; } 55%, 100% { opacity: 0; transform: scale(.7); } }
+@keyframes th-rs-full { 0%, 48% { opacity: 0; clip-path: inset(0 100% 0 0); } 64%, 100% { opacity: 1; clip-path: inset(0 0 0 0); } }
+
+/* ── Zoom: the timeline stretches / shrinks around the playhead ── */
+.th-zoom { inset: 0; transform-origin: 108px 50%; }
+.th-zoomin-z { animation-name: th-zoomin; }
+.th-zoomout-z { animation-name: th-zoomout; }
+.th-fit-z { animation-name: th-fit; }
+@keyframes th-zoomin { 0%, 38% { transform: none; } 60%, 100% { transform: scaleX(2.1); } }
+@keyframes th-zoomout { 0%, 38% { transform: none; } 60%, 100% { transform: scaleX(.5); } }
+@keyframes th-fit { 0%, 38% { transform: scaleX(2.4); } 60%, 100% { transform: none; } }
+.th-fit-edge { top: 24px; height: 58px; width: 4px; border: 2px solid #c8ff00; border-right: 0; border-radius: 3px 0 0 3px; opacity: 0; animation-name: th-fit-edge; }
+.th-fit-edge[data-r] { border-right: 2px solid #c8ff00; border-left: 0; border-radius: 0 3px 3px 0; }
+@keyframes th-fit-edge { 0%, 58% { opacity: 0; } 66%, 86% { opacity: 1; } 94%, 100% { opacity: 0; } }
+
+/* ── Mirror ── */
+.th-mir-pic { animation-name: th-mirror; }
+@keyframes th-mirror { 0%, 40% { transform: perspective(240px) rotateY(0deg); } 58%, 100% { transform: perspective(240px) rotateY(180deg); } }
+.th-axis { width: 0; border-left: 1.5px dashed rgba(200,255,0,0.75); z-index: 2; }
+
+/* ── Rotate ── */
+.th-rot { animation-name: th-rotate; }
+@keyframes th-rotate { 0%, 40% { transform: none; } 60%, 100% { transform: rotate(90deg); } }
+
+/* ── Play: the playhead runs, the picture plays ── */
+.th-play-ph { animation-name: th-play-ph; animation-timing-function: linear; }
+.th-play-ball { animation-name: th-play-ball; }
+@keyframes th-play-ph { 0%, 22% { transform: none; } 92%, 100% { transform: translateX(184px); } }
+@keyframes th-play-ball { 0%, 22% { transform: none; } 92%, 100% { transform: translateX(560%); } }
+
+/* ── Freeze: a blue range on the video; the picture holds still there, then plays on ── */
+.th-frz { top: 63px; height: 18px; border-radius: 4px; z-index: 2; background: rgba(96,165,250,0.35); box-shadow: inset 0 0 0 1.5px #60a5fa; transform-origin: left center; animation-name: th-frz; }
+.th-freeze-ph { animation-name: th-freeze-ph; animation-timing-function: linear; }
+.th-freeze-ball { animation-name: th-freeze-ball; }
+.th-frz-tint { inset: 0; background: rgba(96,165,250,0.18); box-shadow: inset 0 0 0 2px #60a5fa; border-radius: inherit; opacity: 0; animation-name: th-frz-hold; }
+.th-frz-badge { right: 4px; left: auto !important; background: #60a5fa; animation-name: th-frz-hold; }
+@keyframes th-frz { 0%, 20% { opacity: 0; transform: scaleX(.15); } 28%, 100% { opacity: 1; transform: none; } }
+/* the playhead runs 30% → 92% (in the blue range 54.3% → 69.1%); the ball stops there */
+@keyframes th-freeze-ph { 0%, 30% { transform: none; } 92%, 100% { transform: translateX(184px); } }
+@keyframes th-freeze-ball {
+  0%, 30% { transform: none; } 54.3% { transform: translateX(220%); } 69.1% { transform: translateX(220%); } 92%, 100% { transform: translateX(430%); }
+}
+@keyframes th-frz-hold { 0%, 54% { opacity: 0; } 56%, 68% { opacity: 1; } 70%, 100% { opacity: 0; } }
+
+/* ── Hide / show the timeline ── */
+.th-ui { position: absolute; inset: 0; }
+.th-ui-video { animation-name: th-ui-video; }
+.th-ui-tl {
+  position: absolute; left: 8px; top: 58px; width: 200px; height: 24px; border-radius: 6px;
+  background: #151518; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1); animation-name: th-ui-tl;
+}
+.th-ui-tl i { top: 6px; height: 12px; border-radius: 3px; background: linear-gradient(180deg, #62626e, #44444e); }
+@keyframes th-ui-video { 0%, 38% { left: 50px; top: 6px; width: 116px; height: 46px; } 58%, 100% { left: 30px; top: 4px; width: 156px; height: 74px; } }
+@keyframes th-ui-tl { 0%, 36% { opacity: 1; transform: none; } 54%, 100% { opacity: 0; transform: translateY(34px); } }
+.th-ui[data-rev] .th-ui-video, .th-ui[data-rev] .th-ui-tl { animation-direction: reverse; }
+
+/* Less motion: hold one telling moment of each loop */
+@media (prefers-reduced-motion: reduce) {
+  .th-stage *, .th-stage .th-btn::after { animation-play-state: paused !important; animation-delay: calc(var(--th-d) * -0.75) !important; }
+  .th-pop { animation: none; }
+}
+
+/* After the first export (or switched off on the Guide page): a plain label — the name, shortcut, and why it's off */
+.th-pop[data-plain] { width: max-content; max-width: 240px; padding: 6px 9px; border-radius: 9px; translate: -50% 0; }
+.th-pop[data-plain] .th-foot { margin-top: 0; padding: 0; gap: 10px; }
+.th-pop[data-plain] .th-name { font-size: 12px; font-weight: 600; }
+.th-pop[data-plain] .th-keys kbd { padding: 3px 5px; font-size: 10px; }
+.th-pop[data-plain] .th-why, .th-pop[data-plain] .th-note { margin: 3px 0 0; font-size: 11px; }
+.th-pop[data-plain] { animation-name: th-plain-in; }
+.th-pop[data-plain][data-below] { animation-name: th-plain-in-below; }
+@keyframes th-plain-in { from { opacity: 0; translate: -50% 3px; } }
+@keyframes th-plain-in-below { from { opacity: 0; translate: -50% -3px; } }

@@ -3,7 +3,8 @@ import { type Purchase, renewalNote } from '@/lib/purchase'
 import { COMPANY } from '@/lib/company'
 import { amountInRupees, rupeesInWords, stateName } from '@/lib/invoice'
 
-// The Shortcut mark (components/ui/brand-logo.tsx BRAND_TOP / BRAND_BOTTOM; copied: that file is a client module)
+// The Shortcut mark (components/ui/brand-logo.tsx BRAND_TOP / BRAND_BOTTOM; copied: that file is a client module),
+// lime on a black tile like the app icon (public/apple-icon.png) and the PDF (server/services/invoicePdf.ts)
 const MARK_TOP = 'M36 2H92Q98 2 94 6L34 66A32 32 0 0 1 36 2Z'
 const MARK_BOTTOM = 'M66 116H10Q4 116 8 112L68 52A32 32 0 0 1 66 116Z'
 
@@ -27,7 +28,7 @@ export function InvoiceSheet({ inv, purchase }: { inv: InvoiceRow; purchase: Pur
       <header className="iv-head">
         <div>
           <div className="iv-brand">
-            <svg viewBox="0 0 102 118" aria-hidden><path d={MARK_TOP} /><path d={MARK_BOTTOM} /></svg>
+            <span className="iv-mark"><svg viewBox="0 0 102 118" aria-hidden><path d={MARK_TOP} /><path d={MARK_BOTTOM} /></svg></span>
             <span>Shortcut</span>
           </div>
           <div className="iv-seller-line">{s?.legalName ?? COMPANY.legalName}</div>
@@ -107,7 +108,7 @@ export function InvoiceSheet({ inv, purchase }: { inv: InvoiceRow; purchase: Pur
 
       <footer className="iv-foot">
         <span>Thank you for choosing Shortcut.</span>
-        <span>{COMPANY.email} · {COMPANY.phone}</span>
+        <span>{COMPANY.email}</span>
       </footer>
     </article>
   )
@@ -116,7 +117,7 @@ export function InvoiceSheet({ inv, purchase }: { inv: InvoiceRow; purchase: Pur
 /** The sheet's look (a plain style tag: the page has no other styles to share) */
 export const INVOICE_CSS = `
 .iv-page { min-height: 100vh; background: #f4f4f5; color: #18181b; padding: 28px 16px 64px; color-scheme: light;
-  font-family: var(--font-sans, ui-sans-serif), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+  font-family: var(--font-display, 'Inter Tight'), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
 .iv-bar { max-width: 794px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .iv-back { color: #52525b; font-size: 14px; text-decoration: none; }
 .iv-back:hover { color: #18181b; }
@@ -127,7 +128,8 @@ export const INVOICE_CSS = `
 .iv-sheet::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 6px; background: #c8ff00; }
 .iv-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
 .iv-brand { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; color: #0a0a0a; }
-.iv-brand svg { width: 24px; height: 28px; fill: #0a0a0a; }
+.iv-mark { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: #0a0a0a; }
+.iv-mark svg { width: 17px; height: 20px; fill: #c8ff00; }
 .iv-seller-line { margin-top: 8px; font-size: 12px; color: #71717a; letter-spacing: .02em; }
 .iv-title { text-align: right; }
 .iv-title h1 { margin: 0; font-size: 30px; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; color: #0a0a0a; }

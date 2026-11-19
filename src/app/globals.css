@@ -853,6 +853,28 @@ button.mmc-opt-box:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outli
 .mmc-title[data-on] .mmc-title-name { color: var(--cb-text); }
 .mmc-pop-styles { transition: opacity .15s; }
 .mmc-pop-styles[data-off] { opacity: .4; }
+/* The Captions box, cleaned up (user, 2026-11-19): on / off a row of its own; the editor's style tiles
+   (CaptionStyler) lined up under the headings, the kinds in one row that scrolls, more tiles to a row
+   where the box is wide. Only here: the editor's panel stays as it is */
+.mmc-pop-toggle { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px 0 14px; border-radius: 12px;
+  font-size: 13px; font-weight: 600; color: var(--cb-text);
+  background: rgb(var(--cb-fg) / 0.035); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.07); }
+.mmc-cap > div { padding: 0; gap: 0; }
+.mmc-cap [role="tablist"] { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -2px; padding: 2px 2px 4px;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+.mmc-cap [role="tablist"]::-webkit-scrollbar { display: none; }
+.mmc-cap [role="tablist"] > button { flex-shrink: 0; }
+.mmc-cap [role="tablist"] + .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.mmc-cap .cap-tile { background: rgb(var(--cb-fg) / 0.04); box-shadow: inset 0 0 0 1px rgb(var(--cb-fg) / 0.08); }
+.mmc-cap .cap-tile:hover { background: rgb(var(--cb-fg) / 0.07); }
+.mmc-cap .cap-tile[data-on] { background: rgba(200,255,0,0.06); box-shadow: inset 0 0 0 1.5px #c8ff00; }
+.mmc-cap .cap-tile-name { font-size: 12px; }
+/* the headings in the boxes: small capitals, as "Each clip gets" on the card */
+.mmc-pop .mmc-pop-heading { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgb(var(--cb-fg) / 0.5); }
+/* "Written in": its full height in the box (flex: 1 in a column squashed it to a strip) */
+.mmc-pop .mmc-pick-btn:not([data-bare]) { flex: none; height: 40px; padding: 0 12px 0 14px; border-radius: 10px; font-size: 12.5px; }
+.mmc-pop { scrollbar-width: thin; scrollbar-color: rgb(var(--cb-fg) / 0.18) transparent; }
+.mmc-pop-body { scrollbar-width: thin; scrollbar-color: rgb(var(--cb-fg) / 0.18) transparent; }
 
 /* Captions in / Title in: dark dropdowns (the list that opens is dark too) */
 .mmc-row { transition: opacity .15s; }
@@ -1813,6 +1835,12 @@ button.mmc-opt-box:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outli
 }
 .ag-banner-sub { margin: 2px 0 0; font-size: 12.5px; color: rgba(244,244,245,0.55); }
 .ag-banner-lime { color: #c8ff00; background: rgba(200,255,0,0.07); box-shadow: inset 0 0 0 1px rgba(200,255,0,0.25); }
+/* Watch as reels: the video coming down once for all the reels (a quiet line with its bar under it) */
+.ag-copy { position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 14px 13px; border-radius: 12px; overflow: hidden;
+  font-size: 12.5px; color: rgba(244,244,245,0.65); background: rgba(255,255,255,0.03); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07); }
+.ag-copy-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,0.06); }
+.ag-copy-bar > span { display: block; height: 100%; background: #c8ff00; transition: width .4s ease-out; }
+[data-theme="light"] .ag-copy { color: rgba(24,24,27,0.7); background: rgba(0,0,0,0.03); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08); }
 .ag-banner-red { color: #fca5a5; background: rgba(239,68,68,0.08); box-shadow: inset 0 0 0 1px rgba(239,68,68,0.3); }
 .ag-empty {
   display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 56px 20px; text-align: center; border-radius: 22px;
@@ -2174,6 +2202,11 @@ button.mmc-opt-box:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outli
 .am-lg-copy { margin: 10px 0 0; font-size: 11px; color: rgba(244,244,245,0.35); text-align: center; }
 /* Keyboard shortcuts dialog */
 .am-sc-card { width: min(460px, 100%); align-items: stretch; text-align: left; }
+/* The credit history popup (account menu, user 2026-11-19): wider for its table, which scrolls inside */
+.am-ch-card { width: min(560px, 100%); }
+.am-ch-body { display: flex; flex-direction: column; gap: 10px; }
+.am-ch-body .st-scroll { max-height: min(56vh, 480px); margin-top: 4px; }
+.am-ch-body .st-scroll thead th { background: #111113; }
 .am-sc-close { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; color: rgba(244,244,245,0.7); background: rgba(255,255,255,0.06); }
 .am-sc-close:hover { color: #fff; background: rgba(255,255,255,0.1); }
 .am-sc-sub { margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgba(244,244,245,0.4); }
@@ -2310,6 +2343,61 @@ button.mmc-opt-box:focus-visible { outline: 2px solid rgba(200,255,0,0.6); outli
 .st-err { margin: 0; font-size: 12.5px; color: #f87171; }
 .st-alert { padding: 13px 15px; border-radius: 12px; font-size: 13.5px; }
 .st-alert-red { color: #fca5a5; background: rgba(239,68,68,0.08); box-shadow: inset 0 0 0 1px rgba(239,68,68,0.3); }
+/* Billing page (user, 2026-11-19): four cards two by two (Purchase, Credit history, Payment history,
+   invoice details), cards in a row the same height; long tables scroll inside their card; one column on a phone */
+.st-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.st-grid > .st-wide { grid-column: 1 / -1; }
+/* bigger titles and text on this page only (user, 2026-11-19), and a line under each title saying what the card is for */
+.st-billing .st-card { gap: 20px; padding: 26px; }
+.st-billing .st-card-title { font-size: 21px; font-weight: 800; letter-spacing: -0.01em; }
+.st-card-desc { margin: 6px 0 0; font-size: 14.5px; line-height: 1.55; color: rgba(244,244,245,0.55); }
+.st-billing .st-hint { font-size: 13.5px; line-height: 1.5; }
+.st-billing .st-label { font-size: 14px; }
+.st-billing .st-input { height: 46px; font-size: 15px; }
+.st-billing textarea.st-input { height: auto; padding-top: 10px; padding-bottom: 10px; }
+.st-billing .st-link { font-size: inherit; }
+.st-scroll { overflow: auto; max-height: 420px; }
+.st-scroll thead th { position: sticky; top: 0; background: #0a0a0a; }
+@media (max-width: 860px) { .st-grid { grid-template-columns: minmax(0, 1fr); } }
+/* the credit packs to buy in the Purchase card (the billing page): four across, two by two on a phone */
+.st-packs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding-top: 10px; }
+@media (max-width: 640px) { .st-packs { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 22px; } }
+/* Tabs on Account settings (Profile | Credit history) and Plans & billing (Plans | Payments & invoices) */
+.st-tabs { display: inline-flex; gap: 4px; padding: 4px; border-radius: 13px; background: rgba(255,255,255,0.04); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08); align-self: flex-start; max-width: 100%; overflow-x: auto; }
+.st-tab {
+  height: 38px; padding: 0 16px; border: 0; border-radius: 10px; cursor: pointer; white-space: nowrap;
+  font: inherit; font-size: 14px; font-weight: 700; color: rgba(244,244,245,0.6); background: none; transition: color .15s, background-color .15s;
+}
+.st-tab:hover { color: #fff; }
+.st-tab[aria-selected="true"] { color: #0a0a0a; background: #f4f4f5; }
+.st-tab:focus-visible { outline: 2px solid rgba(255,255,255,0.7); outline-offset: 2px; }
+/* Purchase credits (user, 2026-11-19): "450 / 599 credits left", then when they expire */
+.st-balance { margin: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 2px; color: #F4F4F5; }
+.st-balance b { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; }
+.st-balance-of { font-size: 20px; font-weight: 700; color: rgba(244,244,245,0.45); }
+.st-balance-word { margin-left: 6px; font-size: 15px; font-weight: 600; color: rgba(244,244,245,0.55); }
+.st-expiries { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; color: rgba(244,244,245,0.55); }
+/* A pack: Popular on one; the price first and biggest, the plans' price struck beside it, the saving, then the
+   credits and what they make, and Buy */
+.st-pack {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 22px 12px 14px; border-radius: 14px; text-align: center;
+  background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.08); transition: border-color .15s, background-color .15s;
+}
+.st-pack:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.14); }
+.st-pack.is-popular { border-color: rgba(200,255,0,0.5); background: rgba(200,255,0,0.03); }
+.st-pack-badge {
+  position: absolute; top: -10px; left: 50%; transform: translateX(-50%); padding: 2px 10px; border-radius: 999px; white-space: nowrap;
+  font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #0a0a0a; background: #c8ff00;
+}
+.st-pack-price { display: inline-flex; align-items: baseline; gap: 7px; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: #fff; }
+.st-pack-was { font-size: 14px; font-weight: 600; color: rgba(244,244,245,0.4); text-decoration-thickness: 1.5px; }
+.st-pack-save { font-size: 12px; font-weight: 700; color: #4ade80; min-height: 1.2em; }
+.st-pack-credits { margin-top: 6px; padding: 3px 10px; border-radius: 999px; font-size: 13.5px; font-weight: 700; color: rgba(244,244,245,0.9); background: rgba(255,255,255,0.06); }
+.st-pack-uses { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 1px; font-size: 13px; line-height: 1.4; color: rgba(244,244,245,0.6); }
+.st-pack-uses b { color: #F4F4F5; }
+.st-pack-or { font-size: 11.5px; color: rgba(244,244,245,0.35); }
+.st-pack-buy { width: 100%; height: 38px; margin-top: auto; border-radius: 10px; font-size: 13.5px; }
+.st-pack-uses + .st-pack-buy { margin-top: 12px; }
 
 /* ── Brand kits page (app/brand): the kits as cards, a new one set up in a minute ── */
 .bk { background: #0b0b0c; color: var(--ed-text); }

@@ -93,6 +93,23 @@ function requestStore() {
   storeTimer = setTimeout(() => { storeTimer = null; storeNow() }, every - since)
 }
 
+/**
+ * The playhead back at the clip's start, stopped. The store outlives an editor: opened from the clip
+ * board (no page load), the next clip opened with the playhead at the last one's time — the preview
+ * drawing that moment's captions and views over the start's frame — and "playing" if the last one was
+ * left playing, so the first click on Play only paused (user, 2026-11-19). Called
+ * as an editor closes (useVideoSync), so the next one starts clean.
+ */
+export function resetPlayer() {
+  if (storeTimer) { clearTimeout(storeTimer); storeTimer = null }
+  painting = false
+  wantAfterPaint = false
+  lastStoreAt = 0
+  liveMs = 0
+  usePlayerStore.setState({ currentTimeMs: 0, durationMs: 0, playing: false, scrubbing: false })
+  for (const fn of listeners) fn()
+}
+
 export const usePlayerStore = create<PlayerState & PlayerActions>()((set, get) => ({
   currentTimeMs: 0,
   durationMs: 0,

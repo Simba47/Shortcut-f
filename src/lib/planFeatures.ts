@@ -39,6 +39,7 @@ export function planFeatureRows(plan: Plan): FeatureRow[] {
     { label: 'Captions on AI clips included', included: plan.autoCaption },
     { label: 'No watermark', included: !plan.watermark },
     { label: 'Priority exports', included: plan.priorityExports },
+    { label: 'GST invoices with your company details', included: plan.gstInvoices },
   ]
 }
 

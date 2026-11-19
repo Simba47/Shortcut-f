@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useEffect, useCallback } from 'react'
-import { usePlayerStore, liveTime } from './store'
+import { usePlayerStore, liveTime, resetPlayer } from './store'
 
 /**
  * A stretch of the timeline [at, at + ms) (modules/editor/inserts.ts Piece): the main video from
@@ -464,6 +464,15 @@ export function useVideoSync(clipStartMs = 0, clipEndMs?: number, pieces?: Piece
       cancelTick(el)
     }
   }, [tick, clipStartMs, clipEndMs, setDurationMs, setPlaying, setCurrentTimeMs])
+
+  // The editor closing: its clocks stopped, and the playhead back at the start, stopped, for the next
+  // clip opened (store.ts resetPlayer: it opened at this one's time, and "playing" if left playing)
+  useEffect(() => () => {
+    cancelAnimationFrame(rafRef.current)
+    stopGlide()
+    resetPlayer()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // The clip's length follows the kept parts and the pieces when they change (a part removed, a
   // video put in, an undo)

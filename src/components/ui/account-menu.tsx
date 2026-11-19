@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { CreditHistory } from '@/components/billing/BillingCards'
 import { useSession, signOut } from 'next-auth/react'
+import { SHORTCUT_GROUPS } from '@/lib/shortcuts'
 import { privacyCards, PRIVACY_DOC } from '@/components/legal/privacyDoc'
 import { termsCards, TERMS_DOC } from '@/components/legal/termsDoc'
 import { COMPANY } from '@/lib/company'
@@ -52,40 +54,6 @@ function PlanSymbol({ tier }: { tier: Tier }) {
 }
 
 const SUPPORT_WHATSAPP = 'https://wa.me/917702404917'
-
-/**
- * Keys the editor understands, exactly as EditorShell's keydown handler does them (user, 2026-11-12: the list
- * said ←/→ moved a second and S trimmed; ←/→ move one frame and S splits). Grouped as they're used.
- * "Ctrl" shows as ⌘ on a Mac.
- */
-const SHORTCUT_GROUPS: { title: string; items: { keys: string[]; what: string }[] }[] = [
-  { title: 'Play', items: [
-    { keys: ['Space'], what: 'Play or pause' },
-    { keys: ['←', '→'], what: 'One frame back or forward' },
-    { keys: ['Shift', '← / →'], what: '5 seconds back or forward' },
-    { keys: ['Hold ← / →'], what: 'Skip fast (faster the longer you hold)' },
-  ] },
-  { title: 'Edit', items: [
-    { keys: ['S'], what: 'Split at the playhead' },
-    { keys: ['['], what: 'Trim the selected part’s start to the playhead' },
-    { keys: [']'], what: 'Trim the selected part’s end to the playhead' },
-    { keys: ['Delete'], what: 'Delete what’s selected' },
-    { keys: ['Ctrl', 'D'], what: 'Duplicate what’s selected' },
-    { keys: ['Ctrl', 'C'], what: 'Copy what’s selected' },
-    { keys: ['Ctrl', 'X'], what: 'Cut what’s selected' },
-    { keys: ['Ctrl', 'V'], what: 'Paste at the playhead (into any clip)' },
-    { keys: ['Ctrl', 'Alt', 'C'], what: 'Copy the selected text’s style' },
-    { keys: ['Ctrl', 'Alt', 'V'], what: 'Paste that style on the selected texts' },
-    { keys: ['Ctrl', 'G'], what: 'Group what’s selected' },
-    { keys: ['Ctrl', 'Shift', 'G'], what: 'Ungroup' },
-  ] },
-  { title: 'Undo', items: [
-    { keys: ['Ctrl', 'Z'], what: 'Undo' },
-    { keys: ['Ctrl', 'Shift', 'Z'], what: 'Redo (or Ctrl + Y)' },
-    { keys: ['?'], what: 'Show these shortcuts' },
-    { keys: ['Esc'], what: 'Close a menu or dialog' },
-  ] },
-]
 
 /** Opens the keyboard shortcuts from anywhere (the editor's ⌨ button): the account menu shows them */
 const OPEN_SHORTCUTS = 'shortcut:open-shortcuts'
@@ -144,6 +112,7 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
 
   const [open, setOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [teamOpen, setTeamOpen] = useState(false)
   // Privacy or Terms, read in a popup over the page (user, 2026-11-05: not a jump to their pages)
   const [legal, setLegal] = useState<LegalDoc | null>(null)
@@ -232,6 +201,10 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
             <a href="/pricing" onClick={go('/pricing')} className="am-item" role="menuitem">
               <Icon d={<><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /></>} /><span className="flex-1">Plans &amp; billing</span>
             </a>
+            {/* (user, 2026-11-19) the credit history, in a popup over the page (no page change, the editor too) */}
+            <button className="am-item" role="menuitem" onClick={() => { setOpen(false); setHistoryOpen(true) }}>
+              <Icon d={<><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l3 2" /></>} /><span className="flex-1">Credit history</span>
+            </button>
             {/* (the top plan: its brand kits shared with a team — user, 2026-11-10) */}
             {topPlan && (
               <button className="am-item" role="menuitem" onClick={() => { setOpen(false); setTeamOpen(true) }}>
@@ -242,6 +215,9 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
 
           {/* Help */}
           <div className="am-group">
+            <a href="/guide" onClick={go('/guide')} className="am-item" role="menuitem">
+              <Icon d={<><path d="M4 19.5A2.5 2.5 0 016.5 17H20V3H6.5A2.5 2.5 0 004 5.5v14z" /><path d="M4 19.5A2.5 2.5 0 006.5 22H20v-5" /></>} /><span className="flex-1">Guide</span>
+            </a>
             <button className="am-item" role="menuitem" onClick={() => { setOpen(false); setShortcutsOpen(true) }}>
               <Icon d={<><rect x="2" y="6" width="20" height="13" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 15h10" /></>} />
               <span className="flex-1">Keyboard shortcuts</span><kbd className="am-kbd">?</kbd>
@@ -269,6 +245,7 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
       )}
 
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
+      {historyOpen && <CreditHistoryDialog onClose={() => setHistoryOpen(false)} />}
       {teamOpen && <BrandTeamDialog onClose={() => setTeamOpen(false)} />}
       {legal && <LegalDialog doc={legal} onDoc={setLegal} onClose={() => setLegal(null)} />}
     </div>
@@ -312,6 +289,35 @@ function ShortcutsDialog({ onClose }: { onClose: () => void }) {
             </section>
           ))}
         </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+/**
+ * The credit history in a popup over the page (user, 2026-11-19: from the account menu), the frame as Keyboard
+ * shortcuts' (.cfm-*, .am-sc-*), the list inside from components/billing (CreditHistory). Esc, ✕ or a click
+ * outside closes it.
+ */
+function CreditHistoryDialog({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose() } }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [onClose])
+  if (typeof document === 'undefined') return null
+  return createPortal(
+    <div className="cfm-backdrop fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 300 }}
+      onPointerDown={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="ch-title" className="cfm-card am-sc-card am-ch-card" data-tone="warning">
+        <div className="w-full flex items-center justify-between mb-3">
+          <p id="ch-title" className="cfm-title" style={{ margin: 0 }}>Credit history</p>
+          <button onClick={onClose} aria-label="Close" className="am-sc-close">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+        <CreditHistory />
       </div>
     </div>,
     document.body,
