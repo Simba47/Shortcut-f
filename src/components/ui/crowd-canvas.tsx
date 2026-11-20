@@ -39,8 +39,10 @@ function rgb(css: string, fallback: [number, number, number]): [number, number, 
  * fill: how tall a person is, as a share of the canvas height (people scale with the band).
  * react: people near the mouse stop, turn to face it and lean in; the nearest one gets a little
  * heart (desktop pointers only).
+ * stand: a calm audience (user, 2026-11-19: the walking crowd was too busy behind the sign-in form) —
+ * they rise into place once, gently, then stand still; nothing moves after (and nothing is drawn again).
  */
-export function CrowdCanvas({ src, fill = 0.58, tone = 0.16, react = false, className }: { src: string; fill?: number; tone?: number; react?: boolean; className?: string }) {
+export function CrowdCanvas({ src, fill = 0.58, tone = 0.16, react = false, stand = false, className }: { src: string; fill?: number; tone?: number; react?: boolean; stand?: boolean; className?: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -53,6 +55,9 @@ export function CrowdCanvas({ src, fill = 0.58, tone = 0.16, react = false, clas
     let cellW = 0, cellH = 0, W = 0, H = 0
     let crowd: Peep[] = []
     let raf = 0, last = 0, seen = false, alive = true, scale = 0.6, prepared = ''
+    // (stand: how far the one gentle rise into place has got, 0 → 1; with motion turned down, already there)
+    let rise = still ? 1 : 0
+    const RISE_S = 1.6
 
     const img = new Image()
     img.decoding = 'async'
@@ -106,7 +111,7 @@ export function CrowdCanvas({ src, fill = 0.58, tone = 0.16, react = false, clas
       return {
         sx: (cell % COLS) * cellW, sy: Math.floor(cell / COLS) * cellH, w: cellW, h: cellH,
         dir, y, x: along == null ? x0 : x0 + dir * span * along,
-        speed: (span / 10) * (0.5 + Math.random()),            // crosses in ~7–20 s
+        speed: stand ? 0 : (span / 10) * (0.5 + Math.random()),   // crosses in ~7–20 s (standing: not at all)
         phase: Math.random() * 10,
         att: 0, side: dir, turn: 0, seen: 0, delay: 0.1 + Math.random() * 0.4, lean: 0,
       }
@@ -135,6 +140,9 @@ export function CrowdCanvas({ src, fill = 0.58, tone = 0.16, react = false, clas
       ctx.globalCompositeOperation = 'source-over'
       ctx.clearRect(0, 0, W, H)
       const bob = 10 * scale * dpr
+      // (standing: the rise into place — up from a little lower, fading in, slowing as it arrives)
+      const risen = 1 - (1 - Math.min(1, rise)) ** 3
+      const lift = stand ? (1 - risen) * H * 0.18 : 0
       const R = RADIUS * dpr
       let resort = false
       let nearest: Peep | null = null, nearestD = Infinity
@@ -166,7 +174,7 @@ export function CrowdCanvas({ src, fill = 0.58, tone = 0.16, react = false, clas
         }
         p.lean = ease(p.lean, p.att > 0.3 ? p.side * 0.035 * p.att : 0, 4, dt)
         // walking slows to a stop while they watch, and picks up again after
-        const walk = 1 - Math.min(1, p.att * 1.4)
+        const walk = stand ? 0 : 1 - Math.min(1, p.att * 1.4)
         p.x += p.dir * p.speed * dt * walk
         p.phase += dt * (0.25 + 0.75 * walk)
         if ((p.dir === 1 && p.x > W) || (p.dir === -1 && p.x < -p.w)) {
@@ -177,11 +185,12 @@ export function CrowdCanvas({ src, fill = 0.58, tone = 0.16, react = false, clas
         }
         // a step bounce while walking; standing, just a gentle breath
         const stepping = bob * Math.abs(Math.sin(p.phase * Math.PI * 2)) * walk
-        const breath = bob * 0.18 * (1 - walk) * (0.5 + 0.5 * Math.sin(p.phase * Math.PI * 1.3))
-        const y = p.y - stepping - breath
+        const breath = stand ? 0 : bob * 0.18 * (1 - walk) * (0.5 + 0.5 * Math.sin(p.phase * Math.PI * 1.3))
+        const y = p.y - stepping - breath + lift
         // turning round: the body narrows a little as it swings (never paper-thin)
         const sx = p.side * (1 - 0.22 * Math.sin(p.turn * Math.PI))
         ctx.save()
+        if (stand) ctx.globalAlpha = risen
         ctx.translate(p.x + p.w / 2, y + p.h)
         ctx.rotate(p.lean)
         ctx.scale(sx, 1)
@@ -224,12 +233,14 @@ export function CrowdCanvas({ src, fill = 0.58, tone = 0.16, react = false, clas
       raf = 0
       const dt = last ? Math.min((now - last) / 1000, 0.05) : 0
       last = now
+      if (stand) rise += dt / RISE_S
       draw(dt)
       run()
     }
     // Animates only while on screen and the tab is showing
     const run = () => {
-      if (still || !alive) return
+      // (standing: once risen into place nothing moves, so nothing more is drawn)
+      if (still || !alive || (stand && rise >= 1)) return
       if (seen && !document.hidden) { if (!raf) raf = requestAnimationFrame(tick) }
       else { if (raf) cancelAnimationFrame(raf); raf = 0; last = 0 }
     }
@@ -255,7 +266,7 @@ export function CrowdCanvas({ src, fill = 0.58, tone = 0.16, react = false, clas
       window.removeEventListener('resize', onResize)
       document.removeEventListener('visibilitychange', run)
     }
-  }, [src, fill, tone, react])
+  }, [src, fill, tone, react, stand])
 
   return <canvas ref={ref} className={className} aria-hidden="true" />
 }
