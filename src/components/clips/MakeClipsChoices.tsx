@@ -9,6 +9,7 @@
  */
 import { KitStyleBar } from '@/components/brand/KitStyleBar'
 import { useEffect, useRef, useState } from 'react'
+import type { FontTry } from '@/components/editor/CaptionStyler'
 import { createPortal } from 'react-dom'
 import dynamic from 'next/dynamic'
 import type { CaptionStyle, FrameLayout } from '@chai-cut/shared'
@@ -350,7 +351,10 @@ export function TitleChoices({ on, onToggle, styleId, font, onStyle, onFont, lan
   // (user, 2026-11-19: no "Title on each clip" switch in here — the Title row's own switch; picking a style or
   // font while it's off turns it on)
   const turnOn = () => { if (!kitName && !on) onToggle() }
-  const face = font ? { fontFamily: `"${font}", sans-serif` } : {}
+  // A font pointed at in the list, not picked yet (user, 2026-11-20): the style tiles show it
+  const [fontTry, setFontTry] = useState<FontTry>(null)
+  const shownFont = fontTry ? (fontTry.family === 'sans-serif' ? null : fontTry.family) : font
+  const face = shownFont ? { fontFamily: `"${shownFont}", sans-serif` } : {}
   const tile = (id: string | null, name: string, look: React.CSSProperties) => {
     const picked = styleId === id
     return (
@@ -372,7 +376,7 @@ export function TitleChoices({ on, onToggle, styleId, font, onStyle, onFont, lan
         <div className={`flex flex-col gap-4${kitName ? ' kit-held' : ''}`} inert={!!kitName || undefined}>
         <div className="flex flex-col gap-2 relative z-10">
           <p className="mmc-pop-heading">Font</p>
-          <FontPicker value={font} onChange={family => { turnOn(); onFont(family === 'sans-serif' ? null : family) }} />
+          <FontPicker value={font} onChange={family => { turnOn(); onFont(family === 'sans-serif' ? null : family) }} onTry={setFontTry} />
         </div>
         <div className="flex flex-col gap-2">
           <p className="mmc-pop-heading">Style</p>
