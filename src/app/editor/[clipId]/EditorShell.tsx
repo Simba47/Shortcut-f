@@ -31,7 +31,7 @@ import { useFreeWatermark } from '@/components/editor/watermark'
 import { LAYOUT_COLORS, MAX_ZOOM, MIN_ZOOM, zoomStep, zoomLabel, STOCK_DRAG_TYPE, type LaneCtl, type LaneCtlKey } from '@/components/editor/SegmentTimeline'
 import { useVideoUpload } from '@/modules/upload/useVideoUpload'
 import { TranscriptPanel } from '@/components/editor/TranscriptPanel'
-import { CaptionStyler } from '@/components/editor/CaptionStyler'
+import { CaptionStyler, type FontTry } from '@/components/editor/CaptionStyler'
 import { useKeyWordsPick } from '@/components/editor/CaptionKeyWords'
 import { CaptionPreview } from '@/components/editor/CaptionPreview'
 import { TextOverlayPanel, type FrameTextEdit } from '@/components/editor/TextOverlayPanel'
@@ -7057,6 +7057,12 @@ export function EditorShell({
     const rest = Object.fromEntries(Object.entries(updates).filter(([k]) => !(LOOK_KEYS as readonly string[]).includes(k))) as Partial<CaptionStyle>
     if (!isLookChange(updates) || (!selectedLines.length && !st.captionParts.length)) { updateCaptionStyle(updates); return }
     if (Object.keys(rest).length) updateCaptionStyle(rest)
+    const { base, parts } = withCaptionLook(look, st)
+    updateCaptionStyle(lookOf(base))
+    st.setCaptionParts(parts)
+  }
+  /** The clip's caption style and parts with a look change made on the selected lines (none: every caption) */
+  function withCaptionLook(look: Partial<CaptionStyle>, st = useCaptionStore.getState()) {
     // The selected lines in runs of neighbours (each run one stretch, from the pause before its
     // first line to the pause after its last); none selected: the whole clip
     const runs: [number, number][] = []
@@ -7075,9 +7081,52 @@ export function EditorShell({
       base = { ...base, ...next.baseLook }
       parts = next.parts
     }
-    updateCaptionStyle(lookOf(base))
-    st.setCaptionParts(parts)
+    return { base, parts }
   }
+
+  // ── A font pointed at in a Font list, not picked yet (user, 2026-11-20): the preview shows it where the
+  // pick would go — nothing is changed, saved or put in Undo until it's clicked ──
+  // Captions: as changeCaptionStyle would make them (the selected lines, none: all of them)
+  const [captionFontTry, setCaptionFontTry] = useState<FontTry>(null)
+  const captionTried = useMemo(() => {
+    if (!captionFontTry) return null
+    const st = useCaptionStore.getState()
+    const updates: Partial<CaptionStyle> = { font: captionFontTry.family }
+    if (!isLookChange(updates) || (!selectedLines.length && !st.captionParts.length)) {
+      return { style: { ...captionStyle, ...updates }, parts: playedCaptionParts }
+    }
+    const { base, parts } = withCaptionLook(lookOf(updates), st)
+    const style = { ...captionStyle, ...lookOf(base) }
+    return { style, parts: parts.length ? playedParts(style, parts, clipLengthMs) : undefined }
+  }, [captionFontTry, captionStyle, playedCaptionParts, selectedLines, clipLengthMs]) // eslint-disable-line react-hooks/exhaustive-deps
+  const shownCaptionStyle = captionTried?.style ?? captionStyle
+  const shownCaptionParts = captionTried ? captionTried.parts : playedCaptionParts
+  /** The Captions panel's sample: as panelCaptionStyle, with the font being tried */
+  const shownPanelCaptionStyle = !captionTried ? panelCaptionStyle
+    : captionTried.parts && selectedLines.length ? playedPartAt(captionTried.parts, selectedLines[0].start + 1).style : captionTried.style
+  // A text on the clip: that text
+  const [textFontTry, setTextFontTry] = useState<{ id: string; font: string | null } | null>(null)
+  const shownTextOverlays = useMemo(() => (textFontTry
+    ? textOverlays.map(o => (o.id === textFontTry.id && textFontTry.font ? { ...o, font: textFontTry.font } : o))
+    : textOverlays), [textOverlays, textFontTry])
+  // A frame's text: that item, wherever its section is drawn
+  const [frameFontTry, setFrameFontTry] = useState<{ itemId: string; font: string | null } | null>(null)
+  const withFrameFontTry = useMemo(() => {
+    if (!frameFontTry) return null
+    const done = new WeakMap<SegmentLocal, SegmentLocal>()
+    return (seg: SegmentLocal | null): SegmentLocal | null => {
+      const items = seg?.frame?.items
+      if (!seg || !items?.some(it => it.id === frameFontTry.itemId)) return seg
+      let s = done.get(seg)
+      if (!s) {
+        s = { ...seg, frame: { ...seg.frame!, items: items.map(it => (it.id === frameFontTry.itemId ? { ...it, font: frameFontTry.font } : it)) } }
+        done.set(seg, s)
+      }
+      return s
+    }
+  }, [frameFontTry])
+  const canvasAt = useMemo(() => (withFrameFontTry ? (ms: number) => withFrameFontTry(viewAt(ms)) : viewAt), [viewAt, withFrameFontTry])
+  const canvasSegment = withFrameFontTry ? withFrameFontTry(viewSegment) : viewSegment
   /** The lines from the playhead to the end (a quick selection) */
   function selectCaptionsFromHere() {
     const t = liveTime.get()
@@ -7922,7 +7971,7 @@ export function EditorShell({
                   {/* Pinned at the top while the panel scrolls (user, 2026-11-06): the preview and the sub-bar */}
                   <div className="sticky top-0 z-10 shrink-0 px-3 pt-2 pb-2" style={{ background: 'var(--ed-panel)' }}>
                   {/* The captions' style on a sample line, over every sub-tab (the selected lines' style, as the panel shows); dimmed while off */}
-                  <CaptionPreview style={panelCaptionStyle} textCase={captionTextCase} dim={!showCaptions} />
+                  <CaptionPreview style={shownPanelCaptionStyle} textCase={captionTextCase} dim={!showCaptions} />
                   {/* Sub-bar: the Captions tool one kind of setting at a time (user, 2026-11-06; one long
                       scroll before). Captions off: only Captions; Key words only with a style that draws them */}
                   {/* (user, 2026-11-09: as the Text panel's) each tab its icon, a raised pill sliding under the open one, a lime bar under its name */}
@@ -8093,6 +8142,7 @@ export function EditorShell({
                         retranscribeError={retranscribeError} hasWords={words.length > 0}
                         hasRoman={hasRoman} romanize={romanize} romanizeLabel={scriptLabel}
                         onRomanizeChange={setRomanize}
+                        onFontTry={setCaptionFontTry}
                       />
                     </div>
                   )}
@@ -8294,7 +8344,9 @@ export function EditorShell({
               <TextOverlayPanel
                 // (tabbed, as the Captions panel: the picked text's preview and Text · Style · Look · Motion pinned at the top)
                 layout="tabs"
-                overlays={textOverlays}
+                // (with a font being tried on the picked text: its sample shows it)
+                overlays={shownTextOverlays}
+                onFontTry={setTextFontTry}
                 currentTimeMs={currentTimeMs}
                 clipDurationMs={clip.end_ms - clip.start_ms}
                 onAdd={o => setTextOverlays(prev => [...prev, { ...o, id: crypto.randomUUID(), clip_id: clip.id }])}
@@ -8321,6 +8373,7 @@ export function EditorShell({
                     segment: seg,
                     onUpdate: patch => { if (!frameItemBlocked(seg.id, it.id)) updateFrameItem(seg.id, it.id, patch) },
                     onRemove: () => askRemoveFrameItem(seg.id, it.id),
+                    onFontTry: t => setFrameFontTry(t ? { itemId: it.id, font: t.family } : null),
                   }
                 })()}
                 onUpdate={(id, patch) => { if (!blocked({ kind: 'text', id })) updateTextOverlay(id, patch) }}
@@ -8506,17 +8559,17 @@ export function EditorShell({
                       "Exporting · 0:09 ✕" only — always there, whatever panels are open */}
                 </div>
               ) : (
-                <OutputCanvas live segmentAt={viewAt} transitionCuts={transitionCuts} watermark={showWatermark} timelineToVideo={timelineToVideo} clock={hasInserts || hasFreeze ? liveTime.get : undefined}
+                <OutputCanvas live segmentAt={canvasAt} transitionCuts={transitionCuts} watermark={showWatermark} timelineToVideo={timelineToVideo} clock={hasInserts || hasFreeze ? liveTime.get : undefined}
                   videoRef={videoRef} currentTimeMs={currentTimeMs} clipStartMs={clip.start_ms} videoToTimeline={videoToTimeline}
-                  activeSegment={viewSegment} getPositionAt={viewGetPositionAt} sourceFor={brollSource} slotSourceFor={borrowed.slotSourceFor}
+                  activeSegment={canvasSegment} getPositionAt={viewGetPositionAt} sourceFor={brollSource} slotSourceFor={borrowed.slotSourceFor}
                   skipTransitionRef={skipCanvasTransitionRef} words={displayWords}
-                  captionStyle={captionStyle} captionParts={playedCaptionParts} captionTextCase={captionTextCase} showCaptions={showCaptions}
+                  captionStyle={shownCaptionStyle} captionParts={shownCaptionParts} captionTextCase={captionTextCase} showCaptions={showCaptions}
                   // (no captions in a gap left by a deleted part: its words went with it)
                   captionsOffAt={t => gapRanges.some(([a, b]) => t >= a && t < b)}
                   // (a picture-in-picture video plays from its library link)
                   overlays={overlays.filter(o => !o.hidden).map(o => (o.type === 'video' && o.source_video_id ? { ...o, preview_url: videoUrls[o.source_video_id] ?? o.preview_url } : o))} activeOverlayId={activeOverlayId}
                   onOverlayChange={(id, u) => { if (!blocked({ kind: 'photo', id })) updateOverlay(id, u) }} onSelectOverlay={id => { const o = overlays.find(x => x.id === id); if (o?.type === 'image') pickPhoto(id); else { setActiveOverlayId(id); setLastPick('overlay') } }} onDeleteOverlay={askDeleteOverlay}
-                  textOverlays={textOverlays.filter(o => !o.hidden)} activeTextOverlayId={activeTextOverlayId}
+                  textOverlays={shownTextOverlays.filter(o => !o.hidden)} activeTextOverlayId={activeTextOverlayId}
                   onTextOverlayChange={(id, u) => {
                     if (blocked({ kind: 'text', id })) return
                     // (the kit's title look in charge: its size isn't changed here — moving, width and turning are)

@@ -327,11 +327,63 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
     syncStock(t, playing)
     syncBorrowed(t, playing)
   }
+  /** Back or on by `ms` (the arrow keys), kept within the clip */
+  function seekBy(ms: number) {
+    if (lengthMs <= 0) return
+    seekTo(Math.min(lengthMs - 1, Math.max(0, tRef.current + ms)) / lengthMs)
+  }
+
+  // Keys, as the video's own player (ScrubPlayer, user 2026-11-20: forward and back did nothing here):
+  // ← / → 5 s, Space play / pause, F full screen — while the player has focus (a click on it gives it)
+  function onKey(e: React.KeyboardEvent) {
+    if (e.altKey || e.ctrlKey || e.metaKey) return
+    // (a focused button already does its own Space / Enter)
+    const onButton = (e.target as HTMLElement).tagName === 'BUTTON'
+    if (e.key === 'ArrowLeft') { e.preventDefault(); seekBy(-5000) }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); seekBy(5000) }
+    else if ((e.key === ' ' || e.key === 'k') && !onButton) { e.preventDefault(); toggle() }
+    else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFull() }
+  }
+
+  // The bar: click or drag to a place. While dragging the clip waits, then plays on if it was playing
+  const barRef = useRef<HTMLDivElement>(null)
+  const drag = useRef<{ wasPlaying: boolean } | null>(null)
+  const [dragging, setDragging] = useState(false)
+  function seekToPointer(clientX: number) {
+    const r = barRef.current?.getBoundingClientRect()
+    if (!r || !r.width) return
+    seekTo(Math.min(1, Math.max(0, (clientX - r.left) / r.width)))
+  }
+  function onBarDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    drag.current = { wasPlaying: playing }
+    setDragging(true)
+    if (playing) pause()
+    seekToPointer(e.clientX)
+  }
+  function onBarMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (drag.current) seekToPointer(e.clientX)
+  }
+  function onBarUp(e: React.PointerEvent<HTMLDivElement>) {
+    const d = drag.current
+    if (!d) return
+    drag.current = null
+    setDragging(false)
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+    if (d.wasPlaying && src && ready) begin()
+  }
 
   const fmt = (ms: number) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
 
   return (
-    <div ref={boxRef} className={full ? 'flex items-center justify-center bg-black' : 'w-full'}
+    <div ref={boxRef} tabIndex={0} onKeyDown={onKey}
+      // (any press on the player gives it the keys: the bar's drag stops the browser's own focus, and
+      // Safari doesn't focus a clicked button)
+      onPointerDownCapture={() => { const b = boxRef.current; if (b && !b.contains(document.activeElement)) b.focus({ preventScroll: true }) }}
+      aria-label="Clip preview · ← → 5 seconds, Space play, F full screen"
+      className={`outline-none focus-visible:ring-2 focus-visible:ring-[#c8ff00]/60 ${full ? 'flex items-center justify-center bg-black' : 'w-full rounded-xl'}`}
       style={full === 'window' ? { position: 'fixed', inset: 0, zIndex: 300 } : full ? { width: '100%', height: '100%' } : undefined}>
     <div className={`relative overflow-hidden bg-black ${full ? 'h-full' : 'w-full rounded-xl'}`} style={{ aspectRatio: '9 / 16', ...(full ? { maxWidth: '100%' } : {}) }}>
       {/* The source video, drawn onto the 9:16 canvas below (kept in the page so it decodes) */}
@@ -389,12 +441,16 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
           </span>
         )}
       </button>
-      {/* Progress: click to jump */}
+      {/* Progress: click or drag to a place (a taller strip to catch the pointer; the bar thickens on hover) */}
       <div className="absolute left-0 right-0 bottom-0 px-2 pb-2 pt-4 flex items-center gap-2"
         style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.6))' }}>
-        <div className="flex-1 h-1.5 rounded-full cursor-pointer" style={{ background: 'rgba(255,255,255,0.25)' }}
-          onClick={e => { const r = e.currentTarget.getBoundingClientRect(); seekTo(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))) }}>
-          <div className="h-full rounded-full" style={{ width: `${Math.min(100, (tMs / lengthMs) * 100)}%`, background: '#c8ff00' }} />
+        <div ref={barRef} className="group flex-1 py-1.5 -my-1.5 cursor-pointer touch-none"
+          role="slider" aria-label="Clip position" aria-valuemin={0} aria-valuemax={Math.round(lengthMs / 1000)} aria-valuenow={Math.round(tMs / 1000)}
+          aria-valuetext={`${fmt(tMs)} of ${fmt(lengthMs)}`}
+          onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp}>
+          <div className={`rounded-full transition-[height] duration-150 ${dragging ? 'h-2.5' : 'h-1.5 group-hover:h-2.5'}`} style={{ background: 'rgba(255,255,255,0.25)' }}>
+            <div className="h-full rounded-full" style={{ width: `${Math.min(100, (tMs / lengthMs) * 100)}%`, background: '#c8ff00' }} />
+          </div>
         </div>
         <span className={`${full ? 'text-xs' : 'text-[10px]'} tabular-nums text-white/80`}>{fmt(tMs)} / {fmt(lengthMs)}</span>
         <button type="button" onClick={toggleFull} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'}

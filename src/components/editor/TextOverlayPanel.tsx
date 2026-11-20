@@ -4,7 +4,7 @@ import { useBrandPalette, useBrandLock, withBrand } from './brandPalette'
 import { InfoTip } from '@/components/ui/info-tip'
 import { useEffect, useRef, useState } from 'react'
 import type { TextOverlay, FrameItem, SegmentLocal } from '@chai-cut/shared'
-import { FontPicker, loadVideoFonts } from './CaptionStyler'
+import { FontPicker, loadVideoFonts, type FontTry } from './CaptionStyler'
 import { EmptyState } from './EditorTour'
 import { TimeRange, ItemTimeRange } from './ItemTimeRange'
 import { KitStyleBar, KitStyleBack } from '@/components/brand/KitStyleBar'
@@ -50,6 +50,8 @@ interface Props {
    * shows, font, size, colour, background); the Style and Motion tabs are for the clip's own texts
    */
   frameText?: FrameTextEdit | null
+  /** A font pointed at in the picked text's Font list, before it's picked: the preview shows it on that text */
+  onFontTry?: (t: { id: string; font: string | null } | null) => void
   /**
    * The brand kit on the clip brings its title look (user, 2026-11-17): while `fromKit`, the Style and Look tabs
    * are its — said under the preview with "Use my own style" (this clip); `ownBack`: freed, with the way back
@@ -67,6 +69,8 @@ export type FrameTextEdit = {
   segment: SegmentLocal
   onUpdate: (patch: Partial<Omit<FrameItem, 'id'>>) => void
   onRemove: () => void
+  /** A font pointed at in its Font list, before it's picked: the preview shows it (FontPicker onTry) */
+  onFontTry?: (t: FontTry) => void
 }
 
 /** The Text panel's sub-tabs (tabbed layout), as the Captions panel's */
@@ -95,7 +99,7 @@ const SHADOWS: { v: NonNullable<TextOverlay['shadow']>; label: string }[] = [
  * capitals, size, spacing, colour, outline, background box, shadow / glow, opacity, rotation and an
  * entrance animation. One text is open for styling at a time. (styles: .cap-* / .tx-* in globals.css)
  */
-export function TextOverlayPanel({ overlays, currentTimeMs, clipDurationMs, onAdd, onUpdate, onRemove, focusId, onFocused, selectedId = null, onSelect, brand = null, layout = 'stack', styleTools, frameText = null, kitStyle = null }: Props) {
+export function TextOverlayPanel({ overlays, currentTimeMs, clipDurationMs, onAdd, onUpdate, onRemove, focusId, onFocused, selectedId = null, onSelect, brand = null, layout = 'stack', styleTools, frameText = null, kitStyle = null, onFontTry }: Props) {
   const [newText, setNewText] = useState('')
   const [openId, setOpenId] = useState<string | null>(selectedId)
   const tabs = layout === 'tabs'
@@ -343,7 +347,8 @@ export function TextOverlayPanel({ overlays, currentTimeMs, clipDurationMs, onAd
           <div role="tabpanel" aria-label="Look" className="p-4 flex flex-col gap-5">
             <section className="flex flex-col gap-3">
               <span className="cap-heading">Font</span>
-              <FontControls o={picked} onUpdate={u => onUpdate(picked.id, u)} />
+              <FontControls o={picked} onUpdate={u => onUpdate(picked.id, u)}
+                onTry={onFontTry ? t => onFontTry(t ? { id: picked.id, font: t.family } : null) : undefined} />
             </section>
             <section className="flex flex-col gap-3">
               <span className="cap-heading">Colour &amp; effects</span>
@@ -484,10 +489,10 @@ function StyleTiles({ o, onUpdate }: Edit) {
 }
 
 /** Font, weight, italic and capitals, size, letter spacing */
-function FontControls({ o, onUpdate }: Edit) {
+function FontControls({ o, onUpdate, onTry }: Edit & { onTry?: (t: FontTry) => void }) {
   return (
     <>
-      <FontPicker value={o.font ?? null} onChange={family => onUpdate({ font: family })} />
+      <FontPicker value={o.font ?? null} onChange={family => onUpdate({ font: family })} onTry={onTry} />
       <div className="cap-row">
         <span className="cap-label">Weight</span>
         <div className="cap-seg" role="radiogroup" aria-label="Weight">
@@ -728,7 +733,7 @@ function FrameTextLook({ ft }: { ft: FrameTextEdit }) {
     <div role="tabpanel" aria-label="Look" className="p-4 flex flex-col gap-5">
       <section className="flex flex-col gap-3">
         <span className="cap-heading">Font</span>
-        <FontPicker value={ft.look.font} onChange={family => ft.onUpdate({ font: family })} />
+        <FontPicker value={ft.look.font} onChange={family => ft.onUpdate({ font: family })} onTry={ft.onFontTry} />
         <Slider label="Size" value={ft.look.size} min={32} max={120} step={2} onChange={v => ft.onUpdate({ size: v })} />
       </section>
       <section className="flex flex-col gap-3">
