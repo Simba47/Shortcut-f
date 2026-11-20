@@ -9,24 +9,11 @@ import { planFeatureRows, creditUses, readingLabel } from '@/lib/planFeatures'
 import { BrandLogo } from '@/components/ui/brand-logo'
 import { CreditsBadge } from '@/components/ui/credits-badge'
 import { useCredits } from '@/lib/useCredits'
+import { buyCreditPack, loadCheckoutScript, CHECKOUT_SCRIPT } from '@/lib/razorpayCheckout'
+import { PaymentsCards } from '@/components/billing/BillingCards'
 
 // (user, 2026-11-16) No free plan: the Trial pack (paid once) comes first
 const PLAN_ORDER = ['trial', 'starter', 'creator', 'agency'] as const
-
-declare global {
-  interface Window { Razorpay: new (o: Record<string, unknown>) => { open: () => void; on: (e: string, cb: (r: never) => void) => void } }
-}
-
-function loadCheckoutScript(src: string): Promise<void> {
-  if (typeof window !== 'undefined' && window.Razorpay) return Promise.resolve()
-  return new Promise((resolve, reject) => {
-    const el = document.createElement('script')
-    el.src = src
-    el.onload = () => resolve()
-    el.onerror = () => reject(new Error('The payment window could not load. Check your connection and try again.'))
-    document.body.appendChild(el)
-  })
-}
 
 export default function PricingPage() {
   const { credits, refresh: refreshCredits } = useCredits()
@@ -34,6 +21,20 @@ export default function PricingPage() {
   const router = useRouter()
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Signed in, two tabs (user, 2026-11-19): Plans, and Payments & invoices (#billing, so a link can open it):
+  // payment history, and on Agency the company details for invoices
+  const [tab, setTab] = useState<'plans' | 'billing'>('plans')
+  const [paidKey, setPaidKey] = useState(0)
+  useEffect(() => {
+    const read = () => setTab(window.location.hash === '#billing' ? 'billing' : 'plans')
+    read()
+    window.addEventListener('hashchange', read)
+    return () => window.removeEventListener('hashchange', read)
+  }, [])
+  const pickTab = (t: 'plans' | 'billing') => {
+    setTab(t)
+    window.history.replaceState(null, '', t === 'billing' ? '#billing' : window.location.pathname)
+  }
 
   const [mine, setMine] = useState<{ plan: string; testMode: boolean; paymentsMode?: 'off' | 'mock' | 'test' | 'live'; testPack?: boolean; subscription: { status: string; expiresAt: string | null } | null; trial?: { used: boolean; active: boolean; endsAt: string | null } } | null>(null)
   useEffect(() => {
@@ -67,7 +68,7 @@ export default function PricingPage() {
 
   /** Razorpay's payment window; after paying, the server checks the signature and turns the plan on */
   async function openCheckout(d: { subscriptionId: string; keyId: string; planName: string; email?: string; checkoutScript?: string }) {
-    await loadCheckoutScript(d.checkoutScript ?? 'https://checkout.razorpay.com/v1/checkout.js')
+    await loadCheckoutScript(d.checkoutScript ?? CHECKOUT_SCRIPT)
     await new Promise<void>((resolve, reject) => {
       const rz = new window.Razorpay({
         key: d.keyId,
@@ -99,32 +100,14 @@ export default function PricingPage() {
     if (!session) { router.push('/login'); return }
     setTopupBusy(packKey); setError(null); setNotice(null)
     try {
-      const res = await fetch('/api/billing/topup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pack: packKey }) })
-      const d = await res.json()
-      if (!res.ok) throw new Error(d.error ?? 'Failed')
-      await loadCheckoutScript(d.checkoutScript ?? 'https://checkout.razorpay.com/v1/checkout.js')
-      await new Promise<void>((resolve, reject) => {
-        const rz = new window.Razorpay({
-          key: d.keyId, order_id: d.orderId, amount: d.amountPaise, currency: 'INR',
-          name: 'Shortcut', description: `${d.packName}, one time`,
-          prefill: d.email ? { email: d.email } : undefined, theme: { color: '#c8ff00' },
-          handler: async (r: { razorpay_payment_id: string; razorpay_order_id: string; razorpay_signature: string }) => {
-            try {
-              const v = await fetch('/api/billing/topup/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(r) })
-              const out = await v.json()
-              if (!v.ok) throw new Error(out.error ?? 'The payment could not be verified. If money was taken, the credits will show shortly.')
-              setNotice(`${out.credits} credits added. You now have ${out.balance}.`)
-              refreshCredits()
-              resolve()
-              // The Trial is on: straight to uploading
-              if (packKey === 'trial') router.push('/dashboard')
-            } catch (e) { reject(e) }
-          },
-          modal: { ondismiss: () => resolve() },
-        })
-        rz.on('payment.failed', (f: { error?: { description?: string } }) => reject(new Error(f.error?.description ?? 'The payment failed. Please try again.')))
-        rz.open()
-      })
+      const out = await buyCreditPack(packKey)
+      if (out) {
+        setNotice(`${out.credits} credits added. You now have ${out.balance}.`)
+        refreshCredits()
+        setPaidKey(k => k + 1)
+        // The Trial is on: straight to uploading
+        if (packKey === 'trial') router.push('/dashboard')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
@@ -165,6 +148,17 @@ export default function PricingPage() {
       </nav>
 
       <main className="max-w-5xl mx-auto px-6 pt-14 pb-20">
+        {/* (open signed out too, for Razorpay's review: then only the plans, no tabs) */}
+        {session && (
+          <div className="flex justify-center mb-10">
+            <div className="st-tabs" role="tablist" aria-label="Plans and billing">
+              <button type="button" role="tab" className="st-tab" aria-selected={tab === 'plans'} onClick={() => pickTab('plans')}>Plans</button>
+              <button type="button" role="tab" className="st-tab" aria-selected={tab === 'billing'} onClick={() => pickTab('billing')}>Payments &amp; invoices</button>
+            </div>
+          </div>
+        )}
+
+        {session && tab === 'billing' ? <PaymentsCards reloadKey={paidKey} /> : <>
         <h1 className="text-3xl font-bold text-white text-center mb-2">Simple, transparent pricing</h1>
         <p className="text-center mb-3" style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.9rem' }}>
           Your plan gives you credits worth its price, and every action uses them, up to your plan&apos;s monthly limits. Try everything first with the ₹{TRIAL_PACK.price} Trial pack, paid once · Paid plans renew monthly · Cancel anytime
@@ -183,7 +177,7 @@ export default function PricingPage() {
             {mine.subscription.status !== 'cancelled' && (
               <button onClick={cancel} className="underline" style={{ color: 'rgba(255,255,255,0.7)' }}>Cancel subscription</button>
             )}
-            {' '}<a href="/billing" className="underline" style={{ color: 'rgba(255,255,255,0.7)' }}>Payments &amp; invoices</a>
+            {' '}<button type="button" onClick={() => pickTab('billing')} className="underline" style={{ color: 'rgba(255,255,255,0.7)' }}>Payments &amp; invoices</button>
           </p>
         )}
 
@@ -364,6 +358,7 @@ export default function PricingPage() {
           <a href="/terms" className="underline" style={{ color: 'rgba(255,255,255,0.6)' }}>Terms</a> and{' '}
           <a href="/privacy" className="underline" style={{ color: 'rgba(255,255,255,0.6)' }}>Privacy Policy</a>.
         </p>
+        </>}
       </main>
     </div>
   )

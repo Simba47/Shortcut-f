@@ -593,7 +593,9 @@ function makeLookOf(o: AutoClipOptions) {
   const word = (v: unknown, max: number) => (typeof v === 'string' && /^[\w-]+$/.test(v) && v.length <= max ? v : undefined)
   const hex = (v: unknown) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : undefined)
   const caption_style = cs ? Object.fromEntries(Object.entries({
-    template: word(cs.template, 60), animation: word(cs.animation, 30), color: hex(cs.color), highlight_color: hex(cs.highlight_color),
+    // (a ready-made style is "tpl:<id>": the colon kept — user, 2026-11-19: all but the Classic styles were dropped here,
+    // the clips came in a plain animation; the worker checks it again, makeLook.ts pickedCaptionStyle)
+    template: typeof cs.template === 'string' && /^tpl:[\w-]{1,60}$/.test(cs.template) ? cs.template : undefined, animation: word(cs.animation, 30), color: hex(cs.color), highlight_color: hex(cs.highlight_color),
     uppercase: typeof cs.uppercase === 'boolean' ? cs.uppercase : undefined,
   }).filter(([, v]) => v !== undefined)) : null
   return {

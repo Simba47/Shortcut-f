@@ -18,7 +18,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
     <div className="iv-page">
       <style>{INVOICE_CSS}</style>
       <div className="iv-bar">
-        <a href="/billing" className="iv-back">← Payments</a>
+        <a href="/pricing#billing" className="iv-back">← Payments &amp; invoices</a>
         <PrintButton />
       </div>
       <InvoiceSheet inv={inv} purchase={describePurchase(inv.plan, inv.paidAt)} />

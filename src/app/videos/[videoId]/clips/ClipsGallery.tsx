@@ -8,7 +8,9 @@ import type { CaptionStyle, Overlay, SegmentLocal, TextOverlay, TranscriptWord }
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { BrandLoaderScreen } from '@/components/ui/brand-loader'
 import { AccountMenu } from '@/components/ui/account-menu'
+import { CreditsButton } from '@/components/ui/credits-badge'
 import { ClipPlayer } from '@/components/clips/ClipPlayer'
+import { useLocalVideo, useLocalVideoProgress } from '@/modules/clips/localVideo'
 import { PostText } from '@/components/clips/PostText'
 import { FilterChip } from '@/components/ui/filter-chip'
 
@@ -32,9 +34,11 @@ const ACCENT = '#c8ff00'
  * AI edits: every clip "Make my clips" made from the video, a section per run (newest first), each
  * playable in 9:16 here; Edit opens the editor, Export renders one
  */
-export function ClipsGallery({ video, videoUrl, needsProxy, stockUrls, job, clips: initial }: {
+export function ClipsGallery({ video, videoUrl, videoKey = null, needsProxy, stockUrls, job, clips: initial }: {
   video: { id: string; title: string | null }
   videoUrl: string
+  /** Names the video file across visits (its storage path): the clip board's downloaded copy is the same one */
+  videoKey?: string | null
   /** No editing copy yet: ask the worker for one (the cards play it from the next visit) */
   needsProxy?: boolean
   stockUrls: Record<string, string>
@@ -52,8 +56,14 @@ export function ClipsGallery({ video, videoUrl, needsProxy, stockUrls, job, clip
   useEffect(() => {
     if (needsProxy) fetch(`/api/videos/${video.id}/proxy`, { method: 'POST' }).catch(() => {})
   }, [needsProxy, video.id])
+  // The reels took long to load (user, 2026-11-19): each card downloaded the whole video for itself, a
+  // dozen at once sharing the connection. Now a card shows a still of its first moment and streams only
+  // its own part when played; and when the clip board's copy of the video is on this computer (saved, or
+  // still coming down from there), every reel plays from it at once — this page starts no download of its own
+  const playUrl = useLocalVideo(videoUrl, videoKey, { download: false })
+  const copyProgress = useLocalVideoProgress(videoKey || videoUrl)
   const [exportError, setExportError] = useState<string | null>(null)
-  const running = job?.status === 'queued' || job?.status === 'running'
+  const running =job?.status === 'queued' || job?.status === 'running'
   // One section per Make my clips run, newest first (clips arrive in that order)
   const batches = clips.reduce<Array<{ id: string; at: string; clips: GalleryClip[] }>>((acc, c) => {
     const last = acc[acc.length - 1]
@@ -170,6 +180,7 @@ export function ClipsGallery({ video, videoUrl, needsProxy, stockUrls, job, clip
           { label: 'AI edits' },
         ]} />
         <div className="flex-1" />
+        <CreditsButton />
         <AccountMenu />
       </nav>
 
@@ -199,6 +210,15 @@ export function ClipsGallery({ video, videoUrl, needsProxy, stockUrls, job, clip
             Back to clip board
           </a>
         </header>
+
+        {/* The video coming down once for all the reels (they play straight away after) */}
+        {clips.length > 0 && copyProgress !== null && (
+          <div className="ag-copy" role="status" aria-live="polite">
+            <span className="flex-1 min-w-0 truncate">Finishing your video’s download from the clip board · then every reel plays instantly</span>
+            <span className="tabular-nums">{Math.round(copyProgress * 100)}%</span>
+            <span className="ag-copy-bar" aria-hidden="true"><span style={{ width: `${Math.max(2, copyProgress * 100)}%` }} /></span>
+          </div>
+        )}
 
         {/* ── Status ── */}
         {running && (
@@ -282,7 +302,7 @@ export function ClipsGallery({ video, videoUrl, needsProxy, stockUrls, job, clip
               {b.clips.map(c => (
                 <article key={c.id} className="ag-card">
                   <div className="relative">
-                    <ClipPlayer videoUrl={videoUrl} mainVideoId={video.id}
+                    <ClipPlayer videoUrl={playUrl} mainVideoId={video.id} waitForPlay
                       stockUrls={Object.fromEntries(c.segments.flatMap(sg => sg.crop_boxes.map(b => b.source_video_id))
                         .filter((id): id is string => !!id && !!stockUrls[id]).map(id => [id, stockUrls[id]]))}
                       startMs={c.start_ms} endMs={c.end_ms} segments={c.segments}

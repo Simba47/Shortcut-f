@@ -16,12 +16,15 @@ export function invoiceFileName(inv: InvoiceRow): string {
   return `Shortcut-${kind}-${(inv.invoiceNo ?? inv.razorpayPaymentId ?? inv.id).replace(/[^A-Za-z0-9-]+/g, '-')}.pdf`
 }
 
-// Poppins (SIL Open Font License, server/fonts/OFL.txt): it has the ₹ sign, the PDF's built-in fonts don't
-let fonts: Promise<[Uint8Array, Uint8Array]> | null = null
-const fontBytes = () => fonts ??= Promise.all(['Poppins-Regular.ttf', 'Poppins-SemiBold.ttf'].map(f =>
-  fs.readFile(path.join(process.cwd(), 'src/server/fonts', f)).then(b => new Uint8Array(b)))) as Promise<[Uint8Array, Uint8Array]>
+// Inter Tight, the site's own font (app/layout.tsx; SIL Open Font License, server/fonts/OFL.txt): it has the ₹ sign, the PDF's built-in fonts don't.
+// The files are already cut down to Latin + ₹ and punctuation, with no letter-swapping features (fontTools subset
+// --layout-features=''), and are embedded whole: pdf-lib's own subsetting drops most of Inter's letters, and Inter's
+// swaps turned "2026-27" and "(36)" into other shapes. ~24 KB each.
+let fonts: Promise<[Uint8Array, Uint8Array, Uint8Array]> | null = null
+const fontBytes = () => fonts ??= Promise.all(['InterTight-Regular.ttf', 'InterTight-SemiBold.ttf', 'InterTight-Bold.ttf'].map(f =>
+  fs.readFile(path.join(process.cwd(), 'src/server/fonts', f)).then(b => new Uint8Array(b)))) as Promise<[Uint8Array, Uint8Array, Uint8Array]>
 
-// The Shortcut mark (components/ui/brand-logo.tsx), 102 × 118
+// The Shortcut mark (components/ui/brand-logo.tsx), 102 × 118, drawn lime on a black tile like the app icon (public/apple-icon.png)
 const MARK_TOP = 'M36 2H92Q98 2 94 6L34 66A32 32 0 0 1 36 2Z'
 const MARK_BOTTOM = 'M66 116H10Q4 116 8 112L68 52A32 32 0 0 1 66 116Z'
 
@@ -36,9 +39,10 @@ export async function invoicePdf(inv: InvoiceRow, purchase: Purchase): Promise<U
   const title = taxed ? 'Tax invoice' : 'Receipt'
   const pdf = await PDFDocument.create()
   pdf.registerFontkit(fontkit)
-  const [regBytes, boldBytes] = await fontBytes()
-  const reg = await pdf.embedFont(regBytes, { subset: true })
-  const bold = await pdf.embedFont(boldBytes, { subset: true })
+  const [regBytes, semiBytes, heavyBytes] = await fontBytes()
+  const reg = await pdf.embedFont(regBytes, { subset: false })
+  const bold = await pdf.embedFont(semiBytes, { subset: false })
+  const heavy = await pdf.embedFont(heavyBytes, { subset: false })
   pdf.setTitle(`${title} ${inv.invoiceNo ?? ''}`.trim())
   pdf.setAuthor(s?.legalName ?? COMPANY.legalName)
   pdf.setCreator('Shortcut'); pdf.setProducer('Shortcut')
@@ -67,13 +71,15 @@ export async function invoicePdf(inv: InvoiceRow, purchase: Purchase): Promise<U
   page.drawRectangle({ x: 0, y: PH - 6, width: PW, height: 6, color: C.lime })
   let y = PH - M - 4
 
-  // Head: the mark + Shortcut, the seller under it | the title, number, PAID
-  const sc = 20 / 118
-  page.drawSvgPath(MARK_TOP, { x: M, y, scale: sc, color: C.ink })
-  page.drawSvgPath(MARK_BOTTOM, { x: M, y, scale: sc, color: C.ink })
-  text('Shortcut', M + 102 * sc + 7, y - 16, 17, bold, C.ink)
+  // Head: the logo (the app icon: a lime mark on a black tile) + Shortcut, the seller under it | the title, number, PAID
+  const T = 24, sc = 15 / 118
+  box(M, y - T + 2, T, T, 6, { fill: C.ink })
+  const mx = M + (T - 102 * sc) / 2, my = y + 2 - (T - 118 * sc) / 2
+  page.drawSvgPath(MARK_TOP, { x: mx, y: my, scale: sc, color: C.lime })
+  page.drawSvgPath(MARK_BOTTOM, { x: mx, y: my, scale: sc, color: C.lime })
+  text('Shortcut', M + T + 8, y - 16, 17, heavy, C.ink)
   text((s?.legalName ?? COMPANY.legalName).toUpperCase(), M, y - 34, 7.5, reg, C.muted)
-  right(title, M + W, y - 18, 22, bold, C.ink)
+  right(title, M + W, y - 18, 22, heavy, C.ink)
   right(inv.invoiceNo ?? '—', M + W, y - 34, 9, reg, C.muted)
   const pill = 'PAID', pw = bold.widthOfTextAtSize(pill, 7.5) + 16
   box(M + W - pw, y - 58, pw, 15, 7.5, { fill: C.lime })
@@ -144,8 +150,8 @@ export async function invoicePdf(inv: InvoiceRow, purchase: Purchase): Promise<U
   let ty = top + 2
   for (const [k, v] of rows) { text(k, tx, ty - 8, 9.5, reg, C.body); right(v, M + W, ty - 8, 9.5, reg, C.body); ty -= 19 }
   box(tx, ty - 34, 210, 32, 7, { fill: C.ink })
-  text('Total paid', tx + 12, ty - 22, 11, bold, C.white)
-  right(money(inv.amountPaise), M + W - 12, ty - 22, 11, bold, C.lime)
+  text('Total paid', tx + 12, ty - 22, 11, heavy, C.white)
+  right(money(inv.amountPaise), M + W - 12, ty - 22, 11, heavy, C.lime)
   y = Math.min(wy, ty - 34) - 26
 
   // Notes
@@ -160,7 +166,7 @@ export async function invoicePdf(inv: InvoiceRow, purchase: Purchase): Promise<U
   const fy = M - 6
   page.drawLine({ start: { x: M, y: fy + 14 }, end: { x: M + W, y: fy + 14 }, thickness: 0.75, color: C.rule })
   text('Thank you for choosing Shortcut.', M, fy, 8, reg, C.faint)
-  right(`${COMPANY.email} · ${COMPANY.phone}`, M + W, fy, 8, reg, C.faint)
+  right(COMPANY.email, M + W, fy, 8, reg, C.faint)
 
   return pdf.save()
 }

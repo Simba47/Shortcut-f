@@ -17,7 +17,7 @@ import { exportCredits, MAX_CLIP_MS } from '@/lib/credits'
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { AiScan } from '@/components/clips/AiScan'
-import { MmcPop, CaptionChoices, TitleChoices, cleanMakeLook, captionStyleName, titleStyleName, frameName, DEFAULT_MAKE_LOOK, CLIP_LAYOUTS, type MakeLook } from '@/components/clips/MakeClipsChoices'
+import { MmcPop, CaptionChoices, TitleChoices, cleanMakeLook, DEFAULT_MAKE_LOOK, CLIP_LAYOUTS, type MakeLook } from '@/components/clips/MakeClipsChoices'
 import { useRouter } from 'next/navigation'
 import { FilterChip } from '@/components/ui/filter-chip'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -201,38 +201,19 @@ const AUTO_ICONS: Record<AutoOption, React.ReactNode> = {
 }
 const AUTO_OPTIONS_KEY = 'clipboard.makeOptions'
 
-/** Make my clips cards: what was ticked before the run, the ones that were on (user, 2026-11-14) */
-function MadeTags({ made }: { made: MadeWith }) {
-  // (a run that saved its layouts says them under Layout instead of Split screen)
-  const on = AUTO_OPTIONS.filter(o => made[o.id] && o.id !== 'motion' && !(o.id === 'layouts' && made.layoutList))
-  const tag = (key: string, icon: React.ReactNode, label: string, title: string) => (
-    <span key={key} className="cb-made" title={title}>
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{icon}</svg>
-      <span>{label}</span>
-    </span>
-  )
-  const layouts = made.layoutList?.map(id => CLIP_LAYOUTS.find(l => l.id === id)?.label).filter(Boolean).join(', ')
-  return <>
-    {on.map(o => tag(o.id, AUTO_ICONS[o.id], o.id === 'captions' && made.captionStyle ? `Captions · ${captionStyleName(made.captionStyle as never)}`
-      : o.id === 'title' && made.titleStyle ? `Title · ${titleStyleName(made.titleStyle)}` : o.label, `Made with ${o.label}: ${o.tip}`))}
-    {(made.aspect || layouts) && tag('layout', AUTO_ICONS.layouts, [made.aspect, layouts].filter(Boolean).join(' · '), `Made with: ${LAYOUT_TIP}`)}
-    {made.frame && tag('frame', FRAME_ICON, frameName(made.frame as never), `Made with the ${frameName(made.frame as never)} frame`)}
-  </>
-}
 /** A brand kit: a little tag */
 const BRAND_ICON = BRAND_TAG
-/** A frame: a picture inside a border with a title bar */
-const FRAME_ICON = <><rect x="2.5" y="2" width="11" height="12" rx="2" /><path d="M5 4.8h6" /><rect x="5" y="7" width="6" height="4.5" rx="1" /></>
 // What the captions and the title are written in (speech in an Indian language; English speech stays English)
 type CaptionLanguage = 'native' | 'roman'
 type TitleLanguage = 'roman' | 'english' | 'native'
 // (each choice shows the same word written that way, "e.g. Namaste": an example says it faster than a name)
 const CAPTION_LANGUAGES: Array<{ id: CaptionLanguage; label: string; example: string }> = [
   { id: 'native', label: 'Native letters', example: 'నమస్తే, नमस्ते' },
-  { id: 'roman', label: 'English letters', example: 'Namaste' },
+  // (named Hybrid, user 2026-11-19: the speaker's words in English letters, English words as said)
+  { id: 'roman', label: 'Hybrid', example: 'Namaste' },
 ]
 const TITLE_LANGUAGES: Array<{ id: TitleLanguage; label: string; example: string }> = [
-  { id: 'roman', label: 'English letters', example: 'Namaste' },
+  { id: 'roman', label: 'Hybrid', example: 'Namaste' },
   { id: 'english', label: 'English', example: 'Hello' },
   { id: 'native', label: 'Native letters', example: 'నమస్తే, नमस्ते' },
 ]
@@ -902,18 +883,47 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // (the one line under the lock says what is being done; what waits for it runs by itself)
   const [, setWaitingFor] = useState<string | null>(null)
   const readingUrl = `/api/videos/${video.id}/transcript`
+  // (the latest reading, for checkReading: whether the lock's bar was up when it turns ready)
+  const readingNow = useRef(reading)
+  readingNow.current = reading
+  /** The lock's bar was up when the reading turned ready: it runs on to 100 % before the tools unlock */
+  const [readingFinishing, setReadingFinishing] = useState(false)
+  // (a safety net: the lock never stays up for that once it isn't on screen)
+  useEffect(() => {
+    if (!readingFinishing) return
+    const t = setTimeout(() => setReadingFinishing(false), 4000)
+    return () => clearTimeout(t)
+  }, [readingFinishing])
+  /** Checks in a row that got no answer (the lock says it is still trying) */
+  const [readingMisses, setReadingMisses] = useState(0)
+  const readingInFlight = useRef(false)
   const checkReading = useCallback(async (start = false) => {
+    // (one at a time: a slow answer isn't asked for again on top of itself)
+    if (readingInFlight.current) return
+    readingInFlight.current = true
     try {
-      const res = await fetch(readingUrl, start ? { method: 'POST' } : undefined)
-      if (res.ok) setReading(await res.json())
+      // (a request that hangs gives up, so the next round asks again — 2026-11-20: the lock sat at 8 %)
+      const res = await fetch(readingUrl, { ...(start ? { method: 'POST' } : {}), signal: AbortSignal.timeout(20_000) })
+      if (res.ok) {
+        const next: Reading = await res.json()
+        const prev = readingNow.current
+        if (next.status === 'ready' && (prev ? prev.status === 'running' : startWith === 'ai')) setReadingFinishing(true)
+        setReading(next)
+        setReadingMisses(0)
+      }
       // Not enough credits to read the video: say so (with a way to get more), not "failed"
       else if (res.status === 402) {
         const d = await res.json().catch(() => ({}))
         setReading({ status: 'failed', progress: null, error: d.error ?? 'Not enough credits to read this video.', needsCredits: true })
-      }
+        setReadingMisses(0)
+      } else setReadingMisses(n => n + 1)
       if (start) refreshCredits()
-    } catch { /* checked again on the next round */ }
-  }, [readingUrl, refreshCredits])
+    } catch {
+      setReadingMisses(n => n + 1)   // checked again on the next round
+    } finally {
+      readingInFlight.current = false
+    }
+  }, [readingUrl, refreshCredits, startWith])
   // (asked once per visit: the server also keeps it to one reading if two asks meet)
   const readingAsked = useRef(false)
   useEffect(() => {
@@ -921,7 +931,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     readingAsked.current = true
     checkReading(startWith === 'ai')
   }, [isReady]) // eslint-disable-line react-hooks/exhaustive-deps
-  usePolling(() => checkReading(), reading?.status === 'running')
+  // Asked again while it runs — and until the first answer comes, so one failed ask can't leave the
+  // lock waiting forever (AI edit: the start is asked again too; the server keeps it to one reading)
+  usePolling(() => checkReading(!readingNow.current && startWith === 'ai'), isReady && (!reading || reading.status === 'running'))
   /** About how long reading the whole video takes: measured on QA (2026-10-17), 8–17 s a minute of video */
   // The worker's own speech model (reading.source 'reference') reads a long video in a few minutes:
   // about 40 s to start and 1.6 s a minute of video (measured 3-4 Nov: 2 min in 45 s, 70 min in
@@ -1938,13 +1950,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                   {/* (a brand kit picked that brings its captions / title: "From brand kit", no switch — on, in its look) */}
                   {capFromKit
                     ? opener('captions', AUTO_ICONS.captions, 'Captions', `From brand kit · ${langOf(CAPTION_LANGUAGES, captionLang)}`)
+                    // (only the language on the row, user 2026-11-19: the style is picked inside)
                     : opener('captions', AUTO_ICONS.captions, 'Captions',
-                      `${captionStyleName(look.captionStyle)} · ${langOf(CAPTION_LANGUAGES, captionLang)}`,
+                      langOf(CAPTION_LANGUAGES, captionLang),
                       { on: autoOpts.captions, flip: () => toggleAutoOpt('captions') })}
                   {titleFromKit
                     ? opener('title', AUTO_ICONS.title, 'Title', `From brand kit · ${langOf(TITLE_LANGUAGES, titleLang)}`)
                     : opener('title', AUTO_ICONS.title, 'Title',
-                      `${titleStyleName(look.titleStyle)}${look.titleFont ? ` · ${look.titleFont}` : ''} · ${langOf(TITLE_LANGUAGES, titleLang)}`,
+                      langOf(TITLE_LANGUAGES, titleLang),
                       { on: autoOpts.title, flip: () => toggleAutoOpt('title') })}
                 </div>
               </div>
@@ -2336,7 +2349,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // While it reads, the lock shows how far it is and about how long is left, and lifts by itself.
   // Once read, the video stays unlocked. A Make my clips run already going keeps its card (it reads
   // the video itself). Manual clips never wait for any of this: each clip's captions are its own.
-  const aiLocked = isReady && reading?.status !== 'ready' && !autoRunning && !autoAsking
+  // (just read: the lock stays while its bar runs on to 100 %, then lifts)
+  const aiLocked = isReady && (reading?.status !== 'ready' || readingFinishing) && !autoRunning && !autoAsking
   const aiToolsLocked = (
     <div className={`relative ${wide ? 'flex-1 min-h-0 flex flex-col' : 'md:col-span-2 h-full'}`} data-start-target="ai">
       {/* The tools themselves, greyed and out of reach until the transcript is in */}
@@ -2364,10 +2378,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               video) through the reading — the same bar all the way (user, 2026-11-01) */}
           {!reading && startWith !== 'ai' ? (
             <p className="flex items-center gap-2 text-xs" style={{ color: 'rgb(var(--cb-fg) / 0.6)' }}><Spinner /> Checking your video…</p>
-          ) : !reading || reading.status === 'running' ? (
+          ) : !reading || reading.status === 'running' || (readingFinishing && reading.status === 'ready') ? (
             <div className="flex flex-col gap-2">
-              <ReadingProgress reading={reading} expectMs={readTotalMs} />
-              {reading && <button type="button" onClick={stopReading} disabled={stopping}
+              <ReadingProgress reading={reading} expectMs={readTotalMs} retrying={readingMisses >= 2}
+                onDone={() => setReadingFinishing(false)} />
+              {reading?.status === 'running' && <button type="button" onClick={stopReading} disabled={stopping}
                 className="self-start h-8 px-3 rounded-lg text-[12px] font-semibold flex items-center gap-1.5 transition-colors hover:bg-[rgba(239,68,68,0.18)] disabled:opacity-50"
                 style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', boxShadow: 'inset 0 0 0 1px rgba(239,68,68,0.3)' }}>
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
@@ -2667,7 +2682,6 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                 selected={selected.has(clip.id)}
                 onToggle={() => toggleSelected(clip.id)}
                 brandTag={<BrandTag b={brands} clipId={clip.id} />}
-                madeTags={clip.made ? <MadeTags made={clip.made} /> : null}
               />
             ))}
             {/* (the "Tip: tap a clip to open it" box under the list: out, user 2026-11-09) */}
@@ -3091,10 +3105,12 @@ function CancelButton({ onClick }: { onClick: () => void }) {
  */
 type ReadingNow = { status?: string; progress: number | null; place?: number | null; step?: 'audio' | 'reading' | 'saving' | null; done?: number | null; total?: number | null; waitingOn?: 'copy' | 'queue' | 'server' | null }
 type PrepStage = { key: string; text: string; pct: number; next: number; tau: number }
-function prepStage(videoReady: boolean, r: ReadingNow | null, expectMs: number): PrepStage {
+function prepStage(videoReady: boolean, r: ReadingNow | null, expectMs: number, retrying = false): PrepStage {
   const readMs = Math.max(20_000, expectMs - 30_000)
   if (!videoReady) return { key: 'upload', text: 'Taking in your upload', pct: 0, next: 6, tau: 12_000 }
-  if (!r) return { key: 'check', text: 'Checking your video', pct: 6, next: 9, tau: 6_000 }
+  // (from 0 %: the lock's bar starts here — 2026-11-20 it opened at 6 %; the key stays, so the
+  // bar doesn't restart when the words change)
+  if (!r) return { key: 'check', text: retrying ? 'Still checking your video · trying again' : 'Checking your video', pct: 0, next: 9, tau: 6_000 }
   if (r.status === 'ready') return { key: 'done', text: 'Done — your AI tools are ready', pct: 100, next: 100, tau: 1 }
   // Queued, not started yet: what it's waiting for, plainly (user, 2026-11-01: "next in line" said nothing)
   if (r.place) {
@@ -3131,33 +3147,53 @@ function prepStage(videoReady: boolean, r: ReadingNow | null, expectMs: number):
  */
 const CATCH_UP = 0.6
 const LINE_TO = 0.85
+/** Done: the rest of the bar fills in about this many ticks (~1.2 s), however far it had got */
+const FINISH_TICKS = 6
 function prepAlong(ms: number, tau: number): number {
   const t = ms / Math.max(1, tau)
   return t <= 1 ? LINE_TO * t : LINE_TO + (0.97 - LINE_TO) * (1 - Math.exp(-(t - 1) * 1.5))
 }
 function usePrepPct(stage: PrepStage): number {
   const [shown, setShown] = useState(stage.pct)
-  const live = useRef({ stage, key: stage.key, at: Date.now(), from: stage.pct, shown: stage.pct })
+  const live = useRef({ stage, key: stage.key, at: Date.now(), from: stage.pct, shown: stage.pct, leftAtStart: 100 - stage.pct })
   useEffect(() => {
     const l = live.current
     l.stage = stage
     // (a new stage starts from where the bar is, if that's already past the stage's own start)
-    if (l.key !== stage.key) { l.key = stage.key; l.at = Date.now(); l.from = Math.max(stage.pct, Math.min(l.shown, stage.next)) }
+    if (l.key !== stage.key) {
+      l.key = stage.key; l.at = Date.now(); l.from = Math.max(stage.pct, Math.min(l.shown, stage.next)); l.leftAtStart = 100 - l.shown
+    }
   })
   useEffect(() => {
     const t = setInterval(() => {
       const l = live.current, st = l.stage
       const target = st.pct >= 100 ? 100 : l.from + Math.max(0, st.next - l.from) * prepAlong(Date.now() - l.at, st.tau)
-      const next = Math.max(l.shown, Math.min(target, l.shown + CATCH_UP))
+      // (done: it fills the rest steadily but quickly — at the usual catch-up pace 8 % → 100 % took ~30 s)
+      const step = st.pct >= 100 ? Math.max(CATCH_UP, l.leftAtStart / FINISH_TICKS) : CATCH_UP
+      const next = Math.max(l.shown, Math.min(target, l.shown + step))
       if (next !== l.shown) { l.shown = next; setShown(next) }
     }, 200)
     return () => clearInterval(t)
   }, [])
   return shown
 }
-function ReadingProgress({ reading, expectMs, small = false }: { reading: ReadingNow | null; expectMs: number; small?: boolean }) {
-  const stage = prepStage(true, reading, expectMs)
+function ReadingProgress({ reading, expectMs, small = false, retrying = false, onDone }: {
+  reading: ReadingNow | null; expectMs: number; small?: boolean
+  /** No answer from the server for a while: the first line says it's trying again */
+  retrying?: boolean
+  /** The bar reached 100 % (the lock lifts then) */
+  onDone?: () => void
+}) {
+  const stage = prepStage(true, reading, expectMs, retrying)
   const shown = usePrepPct(stage)
+  // (after the bar's own 0.5 s slide, so 100 % is seen before the lock lifts)
+  const doneRef = useRef(onDone)
+  doneRef.current = onDone
+  useEffect(() => {
+    if (shown < 100) return
+    const t = setTimeout(() => doneRef.current?.(), 600)
+    return () => clearTimeout(t)
+  }, [shown])
   return (
     <div className="flex flex-col gap-2">
       <span className={`flex items-center gap-2 font-semibold text-white ${small ? 'text-xs' : 'text-[12.5px]'}`}>
@@ -3476,10 +3512,8 @@ function clipState(status: string, outputUrl: string | null, edited: boolean, ch
   return { key: 'unseen', label: 'Unseen', color: 'rgb(var(--cb-fg) / 0.45)' }
 }
 
-function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, onStopDownload, download, downloadError, onSubEdited, manual, edited, changed, opened, brandTag, madeTags, onRename, defaultTitle }: {
+function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUrl, playing, onSeek, onEdit, onPreview, previewing, open, onClose, disabled, selecting, selected, onToggle, videoUrl, favorite, reason, onFavorite, onDelete, onDownload, onStopDownload, download, downloadError, onSubEdited, manual, edited, changed, opened, brandTag, onRename, defaultTitle }: {
   id: string
-  /** Make my clips: what was ticked before its run, in the row of labels */
-  madeTags?: React.ReactNode
   /** Renamed from its card (✎ or a double-click on the name): the new name, or null for `defaultTitle` again */
   onRename?: (title: string | null) => void
   /** Its name when it has none of its own ("Clip 5") */
@@ -3593,7 +3627,8 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
     return () => document.removeEventListener('click', away, true)
   }, [open, selecting, id, onClose])
   const chip = clipState(status, outputUrl, !!edited, !!changed, !!opened)
-  const stateTag = (
+  // (user, 2026-11-20: never opened says nothing — "Unseen" was on nearly every card; no chip means not opened yet)
+  const stateTag = chip.key === 'unseen' ? null : (
     <span className="cb-state" data-state={chip.key} style={{ '--c': chip.color } as React.CSSProperties} title={chip.key === 'stale' ? 'Changed after its last export: export again for a download with the changes' : `This clip: ${chip.label}`}>
       {chip.key === 'exporting' ? <Spinner /> : <i aria-hidden="true" />}{chip.label}
     </span>
@@ -3647,7 +3682,6 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
               {stateTag}
               {/* Which brand kit is on it, at a glance (user, 2026-11-10: the slim cards didn't say) */}
               {brandTag}
-              {madeTags}
               {sub.busy && <SubEditInline startedAt={sub.startedAt} estimate={sub.estimate} ahead={sub.ahead} onStop={sub.stop} />}
             </span>
             {/* Why the download didn't work (user, 2026-11-12: it only turned into Retry) — out of credits, with
@@ -3765,7 +3799,6 @@ function ClipCard({ id, focused, origin, title, startMs, endMs, status, outputUr
             )}
             {stateTag}
             {!selecting && brandTag}
-            {!selecting && madeTags}
           </div>
         </div>
       </div>

@@ -41,11 +41,50 @@ interface FontPickerProps {
   /** A caption style's own font, offered first and shown while no font is picked (`value` null);
    *  `onPick` goes back to it (user, 2026-11-12: "the default should be the one I picked in Style") */
   styleFont?: { name: string; style: React.CSSProperties; onPick: () => void } | null
+  /**
+   * Trying a font before picking it (user, 2026-11-20): pointed at or moved to with the arrow keys in
+   * the open list, the place it's for shows it at once — `{ family }` (null: the style's own font, the
+   * "Default" row); `null` when the trying stops (the pointer leaves the list, it closes, a font is
+   * picked). Only a click picks (and saves).
+   */
+  onTry?: (t: FontTry) => void
 }
+/** A font being tried in a FontPicker (`family` null: the caption style's own font); null: none */
+export type FontTry = { family: string | null } | null
 
-export function FontPicker({ value, onChange, stayOpen = false, styleFont = null }: FontPickerProps) {
+export function FontPicker({ value, onChange, stayOpen = false, styleFont = null, onTry }: FontPickerProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  // (the latest onTry, so stopping on close or unmount reaches the caller as it is now)
+  const tryRef = useRef(onTry)
+  tryRef.current = onTry
+  const trying = useRef(false)
+  /** Shows `family` where the font is for (null: stop) */
+  function tryFont(t: FontTry) {
+    if (!tryRef.current) return
+    if (t === null) { if (!trying.current) return; trying.current = false; tryRef.current(null); return }
+    // (a brand kit's own font file is loaded first, so the preview doesn't flash another font)
+    if (t.family) ensureBrandFont(t.family)
+    trying.current = true
+    tryRef.current(t)
+  }
+  // Closed (a click outside, Escape, a pick) or gone: the trying stops
+  useEffect(() => { if (!open) tryFont(null) }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => tryFont(null), []) // eslint-disable-line react-hooks/exhaustive-deps
+  /** ↑ / ↓ move between the fonts (each tried as it's reached), Home / End to the first / last */
+  function onListKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    const items = Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>('button[data-font-row]') ?? [])
+    if (!items.length) return
+    const at = items.indexOf(document.activeElement as HTMLButtonElement)
+    const go = e.key === 'ArrowDown' ? Math.min(items.length - 1, at + 1) : e.key === 'ArrowUp' ? Math.max(0, at - 1)
+      : e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : null
+    if (go === null) return
+    e.preventDefault()
+    items[go].focus()
+  }
+  /** What every font row does when pointed at or reached by the keys */
+  const tryProps = (t: { family: string | null }) => ({ onMouseEnter: () => tryFont(t), onFocus: () => tryFont(t) })
   // A brand kit's own fonts first (components/editor/brandFonts.ts)
   const brandFonts = useBrandFonts()
   // (brand lock with fonts named: only those)
@@ -76,7 +115,17 @@ export function FontPicker({ value, onChange, stayOpen = false, styleFont = null
       <div style={{ position: 'relative' }}>
         {/* Trigger button */}
         <button
+          type="button"
           onClick={() => setOpen(o => !o)}
+          // (↓ on the closed box opens the list at the font in use)
+          onKeyDown={e => {
+            if (e.key !== 'ArrowDown' || open) return
+            e.preventDefault()
+            setOpen(true)
+            requestAnimationFrame(() => (listRef.current?.querySelector<HTMLButtonElement>('button[data-font-row][aria-selected="true"]')
+              ?? listRef.current?.querySelector<HTMLButtonElement>('button[data-font-row]'))?.focus())
+          }}
+          aria-haspopup="listbox" aria-expanded={open}
           // (no letters past the box: a font with tall or wide letters is cut at its edge — user, 2026-11-12)
           className="w-full flex items-center justify-between px-3 py-2 rounded-lg overflow-hidden"
           style={{
@@ -104,7 +153,12 @@ export function FontPicker({ value, onChange, stayOpen = false, styleFont = null
         {/* Dropdown list */}
         {open && (
           <div
-            className="absolute w-full overflow-y-auto z-50"
+            ref={listRef}
+            role="listbox" aria-label="Fonts"
+            // (the pointer leaving the list: back to the font in use)
+            onMouseLeave={() => tryFont(null)}
+            onKeyDown={onListKey}
+            className="font-list absolute w-full overflow-y-auto z-50"
             style={{
               top: 'calc(100% + 4px)',
               left: 0,
@@ -117,7 +171,8 @@ export function FontPicker({ value, onChange, stayOpen = false, styleFont = null
             }}
           >
             {styleFont && (
-              <button type="button" onClick={() => { styleFont.onPick(); if (!stayOpen) setOpen(false) }}
+              <button type="button" data-font-row role="option" aria-selected={onStyleFont} {...tryProps({ family: null })}
+                onClick={() => { tryFont(null); styleFont.onPick(); if (!stayOpen) setOpen(false) }}
                 className="w-full text-left px-4 py-2.5 flex items-baseline gap-2 overflow-hidden whitespace-nowrap"
                 style={{ background: onStyleFont ? 'rgba(200,255,0,0.1)' : 'transparent', borderBottom: '1px solid rgb(var(--ed-fg) / 0.08)', cursor: 'pointer' }}>
                 <span style={{ ...styleFont.style, fontSize: 14, color: onStyleFont ? 'var(--ed-accent-text)' : 'rgb(var(--ed-fg) / 0.75)' }}>Default</span>
@@ -132,8 +187,10 @@ export function FontPicker({ value, onChange, stayOpen = false, styleFont = null
               return (
                 <button
                   key={f.family}
+                  type="button" data-font-row role="option" aria-selected={active}
                   data-brand-font={i < brandFonts.length || undefined}
-                  onClick={() => { onChange(f.family); if (!stayOpen) setOpen(false) }}
+                  {...tryProps({ family: f.family })}
+                  onClick={() => { tryFont(null); onChange(f.family); if (!stayOpen) setOpen(false) }}
                   className="w-full text-left px-4 py-2.5 overflow-hidden whitespace-nowrap text-ellipsis"
                   style={{
                     fontFamily: f.family,
@@ -178,6 +235,8 @@ interface Props {
   /** One part of the panel only (the editor's Captions sub-tabs); none: all of it, as on mobile.
    *  'colours' / 'font': Look's two halves on their own (the brand kit: font, size and capitals under Fonts) */
   section?: 'style' | 'look' | 'keywords' | 'colours' | 'font'
+  /** A font pointed at in the Font list, before it's picked: the preview shows it (FontPicker onTry) */
+  onFontTry?: (t: FontTry) => void
 }
 
 const PRESET_COLORS = [
@@ -629,7 +688,7 @@ export function CaptionStyler({
   onChange, onTextCaseChange, onEditCaptions, onRetranscribe, retranscribing,
   retranscribeError = null,
   hasWords = false, hasRoman = false, romanize = false, romanizeLabel = 'Romanize', onRomanizeChange,
-  section,
+  section, onFontTry,
 }: Props) {
   const shows = (s: NonNullable<Props['section']>) => !section || section === s
   const color = style.color ?? DEFAULT_CAPTION_STYLE.color
@@ -733,7 +792,7 @@ export function CaptionStyler({
 
       {/* Font; beside it on a wide page, Size and Capitals (user, 2026-11-10) */}
       {section !== 'colours' && <div className="cap-font-row">
-      <FontPicker value={style.font ?? null} onChange={family => onChange({ font: family })}
+      <FontPicker value={style.font ?? null} onChange={family => onChange({ font: family })} onTry={onFontTry}
         styleFont={tpl && TEMPLATE_FONTS[tpl.font] ? {
           name: TEMPLATE_FONTS[tpl.font].family,
           style: { fontFamily: `"${templateFontFamily(tpl.font)}", sans-serif`, fontWeight: TEMPLATE_FONTS[tpl.font].weight, fontStyle: TEMPLATE_FONTS[tpl.font].italic ? 'italic' : 'normal' },

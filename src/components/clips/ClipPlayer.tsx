@@ -19,6 +19,7 @@ function rateFor(v: HTMLVideoElement, p: Piece | null | undefined) {
 import { isShot } from '@/modules/editor/shots'
 import { cleanTrims, trimMap } from '@/lib/trims'
 import { toTimelineState } from '@/modules/editor/trimState'
+import { useFrameAt } from '@/modules/clips/thumbs'
 
 const NO_TRIMS: [number, number][] = []
 const NO_OVERLAYS: Overlay[] = []
@@ -33,8 +34,14 @@ let playingNow: { stop: () => void } | null = null
  * Videos put in between (modules/editor/inserts.ts): the source video waits where one goes in
  * while a clock plays it, then carries on — the clip is that much longer.
  */
-export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, endMs, segments: savedSegments, words, captionStyle, textOverlays: savedTexts, trims = NO_TRIMS, overlays: savedOverlays = NO_OVERLAYS }: {
+export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, endMs, segments: savedSegments, words, captionStyle, textOverlays: savedTexts, trims = NO_TRIMS, overlays: savedOverlays = NO_OVERLAYS, waitForPlay = false }: {
   videoUrl: string
+  /**
+   * A gallery of many (Watch as reels): until the video is a copy on this computer (a blob: URL), the
+   * card shows a still picture and streams only once played — a dozen cards each downloading the whole
+   * video at once shared the connection until none had its moment (user, 2026-11-19)
+   */
+  waitForPlay?: boolean
   /** The clip's own video: split/trio slots naming it are borrowed reactions from another moment */
   mainVideoId?: string | null
   /** Signed URLs of the B-roll videos the clip shows, by video id */
@@ -103,6 +110,20 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
     io.observe(el)
     return () => io.disconnect()
   }, [near])
+  // What the hidden video loads: near the screen, and in a gallery only a copy on this computer or once
+  // played. A copy that arrives while it plays waits for the pause (switching would stop it)
+  const local = videoUrl.startsWith('blob:')
+  const [asked, setAsked] = useState(false)
+  const loadUrl = near && videoUrl && (!waitForPlay || local || asked) ? videoUrl : undefined
+  const [src, setSrc] = useState<string | undefined>(loadUrl)
+  useEffect(() => {
+    if (loadUrl && loadUrl !== src && (!src || !playing)) { setSrc(loadUrl); setReady(false) }
+  }, [loadUrl, src, playing])
+  /** Play was pressed before the video was loading: it plays once it can */
+  const playWhenReady = useRef(false)
+  // Until the clip has played: a still of its first moment, in its framing (the canvas is black until then)
+  const [started, setStarted] = useState(false)
+  useEffect(() => { if (playing) setStarted(true) }, [playing])
   useEffect(() => {
     const onChange = () => setFull(f => (document.fullscreenElement === boxRef.current ? 'screen' : f === 'screen' ? null : f))
     document.addEventListener('fullscreenchange', onChange)
@@ -268,6 +289,14 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
     const v = videoRef.current
     if (!v) return
     if (playing) { pause(); return }
+    // (not loading yet, or not loaded: it plays as soon as it can — onCanPlay)
+    if (!src || !ready) { playWhenReady.current = true; setAsked(true); return }
+    begin()
+  }
+  /** Play from where the clip is (the video loaded) */
+  function begin() {
+    const v = videoRef.current
+    if (!v) return
     if (tRef.current >= lengthMs - 1) tRef.current = 0
     const t = tRef.current
     const want = startMs + toVideo(t)
@@ -298,21 +327,74 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
     syncStock(t, playing)
     syncBorrowed(t, playing)
   }
+  /** Back or on by `ms` (the arrow keys), kept within the clip */
+  function seekBy(ms: number) {
+    if (lengthMs <= 0) return
+    seekTo(Math.min(lengthMs - 1, Math.max(0, tRef.current + ms)) / lengthMs)
+  }
+
+  // Keys, as the video's own player (ScrubPlayer, user 2026-11-20: forward and back did nothing here):
+  // ← / → 5 s, Space play / pause, F full screen — while the player has focus (a click on it gives it)
+  function onKey(e: React.KeyboardEvent) {
+    if (e.altKey || e.ctrlKey || e.metaKey) return
+    // (a focused button already does its own Space / Enter)
+    const onButton = (e.target as HTMLElement).tagName === 'BUTTON'
+    if (e.key === 'ArrowLeft') { e.preventDefault(); seekBy(-5000) }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); seekBy(5000) }
+    else if ((e.key === ' ' || e.key === 'k') && !onButton) { e.preventDefault(); toggle() }
+    else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFull() }
+  }
+
+  // The bar: click or drag to a place. While dragging the clip waits, then plays on if it was playing
+  const barRef = useRef<HTMLDivElement>(null)
+  const drag = useRef<{ wasPlaying: boolean } | null>(null)
+  const [dragging, setDragging] = useState(false)
+  function seekToPointer(clientX: number) {
+    const r = barRef.current?.getBoundingClientRect()
+    if (!r || !r.width) return
+    seekTo(Math.min(1, Math.max(0, (clientX - r.left) / r.width)))
+  }
+  function onBarDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    drag.current = { wasPlaying: playing }
+    setDragging(true)
+    if (playing) pause()
+    seekToPointer(e.clientX)
+  }
+  function onBarMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (drag.current) seekToPointer(e.clientX)
+  }
+  function onBarUp(e: React.PointerEvent<HTMLDivElement>) {
+    const d = drag.current
+    if (!d) return
+    drag.current = null
+    setDragging(false)
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+    if (d.wasPlaying && src && ready) begin()
+  }
 
   const fmt = (ms: number) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
 
   return (
-    <div ref={boxRef} className={full ? 'flex items-center justify-center bg-black' : 'w-full'}
+    <div ref={boxRef} tabIndex={0} onKeyDown={onKey}
+      // (any press on the player gives it the keys: the bar's drag stops the browser's own focus, and
+      // Safari doesn't focus a clicked button)
+      onPointerDownCapture={() => { const b = boxRef.current; if (b && !b.contains(document.activeElement)) b.focus({ preventScroll: true }) }}
+      aria-label="Clip preview · ← → 5 seconds, Space play, F full screen"
+      className={`outline-none focus-visible:ring-2 focus-visible:ring-[#c8ff00]/60 ${full ? 'flex items-center justify-center bg-black' : 'w-full rounded-xl'}`}
       style={full === 'window' ? { position: 'fixed', inset: 0, zIndex: 300 } : full ? { width: '100%', height: '100%' } : undefined}>
     <div className={`relative overflow-hidden bg-black ${full ? 'h-full' : 'w-full rounded-xl'}`} style={{ aspectRatio: '9 / 16', ...(full ? { maxWidth: '100%' } : {}) }}>
       {/* The source video, drawn onto the 9:16 canvas below (kept in the page so it decodes) */}
       <video
         ref={videoRef}
-        src={near && videoUrl ? `${videoUrl}#t=${startMs / 1000}` : undefined}
-        preload={near ? 'auto' : 'none'}
+        src={src ? `${src}#t=${startMs / 1000}` : undefined}
+        preload={src ? 'auto' : 'none'}
         playsInline
         onLoadedData={() => setReady(true)}
         onSeeked={() => setReady(true)}
+        onCanPlay={() => { if (playWhenReady.current) { playWhenReady.current = false; setReady(true); begin() } }}
         style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
       />
       {/* (B-roll: only its first picture until the clip plays, then all of it) */}
@@ -346,24 +428,29 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
             ...(o.rotation ? { transform: `rotate(${o.rotation}deg)` } : {}),
           }} />
       ))}
+      {waitForPlay && !started && <FirstPicture videoUrl={videoUrl} atMs={startMs + toVideo(0)} box={segments[0]?.crop_boxes[0]?.keyframes[0] ?? null} />}
       {/* Play / pause over the whole picture */}
       <button onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}
         className="absolute inset-0 flex items-center justify-center transition-opacity"
         style={{ background: playing ? 'transparent' : 'rgba(0,0,0,0.25)' }}>
         {!playing && (
           <span className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
-            {ready
+            {ready || (waitForPlay && !playWhenReady.current && !asked && !local)
               ? <svg width="18" height="18" viewBox="0 0 24 24" fill="white" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
               : <Spinner size={16} style={{ color: '#fff' }} />}
           </span>
         )}
       </button>
-      {/* Progress: click to jump */}
+      {/* Progress: click or drag to a place (a taller strip to catch the pointer; the bar thickens on hover) */}
       <div className="absolute left-0 right-0 bottom-0 px-2 pb-2 pt-4 flex items-center gap-2"
         style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.6))' }}>
-        <div className="flex-1 h-1.5 rounded-full cursor-pointer" style={{ background: 'rgba(255,255,255,0.25)' }}
-          onClick={e => { const r = e.currentTarget.getBoundingClientRect(); seekTo(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))) }}>
-          <div className="h-full rounded-full" style={{ width: `${Math.min(100, (tMs / lengthMs) * 100)}%`, background: '#c8ff00' }} />
+        <div ref={barRef} className="group flex-1 py-1.5 -my-1.5 cursor-pointer touch-none"
+          role="slider" aria-label="Clip position" aria-valuemin={0} aria-valuemax={Math.round(lengthMs / 1000)} aria-valuenow={Math.round(tMs / 1000)}
+          aria-valuetext={`${fmt(tMs)} of ${fmt(lengthMs)}`}
+          onPointerDown={onBarDown} onPointerMove={onBarMove} onPointerUp={onBarUp} onPointerCancel={onBarUp}>
+          <div className={`rounded-full transition-[height] duration-150 ${dragging ? 'h-2.5' : 'h-1.5 group-hover:h-2.5'}`} style={{ background: 'rgba(255,255,255,0.25)' }}>
+            <div className="h-full rounded-full" style={{ width: `${Math.min(100, (tMs / lengthMs) * 100)}%`, background: '#c8ff00' }} />
+          </div>
         </div>
         <span className={`${full ? 'text-xs' : 'text-[10px]'} tabular-nums text-white/80`}>{fmt(tMs)} / {fmt(lengthMs)}</span>
         <button type="button" onClick={toggleFull} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'}
@@ -377,5 +464,27 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
       </div>
     </div>
     </div>
+  )
+}
+
+/**
+ * A card's still picture until it plays: the video's frame at the clip's first moment, cut to its first
+ * view (a crop box: fractions of the frame), covering the 9:16 card. The frame is grabbed 16:9.
+ */
+function FirstPicture({ videoUrl, atMs, box }: { videoUrl: string; atMs: number; box: { x: number; y: number; w: number; h: number } | null }) {
+  const src = useFrameAt(videoUrl, atMs, 960)
+  if (!src) return null
+  // (in card widths: the card is 1 wide and 16/9 tall, the frame 16:9)
+  const b = box && box.w > 0 && box.h > 0 ? box : { x: 0, y: 0, w: 1, h: 1 }
+  const H = 16 / 9
+  const byHeight = (b.w * 16) / (b.h * 9) > 9 / 16
+  const imgH = byHeight ? H / b.h : (1 / b.w) * (9 / 16)
+  const imgW = imgH * (16 / 9)
+  const left = byHeight ? 0.5 - (b.x + b.w / 2) * imgW : -b.x * imgW
+  const top = byHeight ? -b.y * imgH : H / 2 - (b.y + b.h / 2) * imgH
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt="" aria-hidden="true" draggable={false}
+      style={{ position: 'absolute', maxWidth: 'none', pointerEvents: 'none', left: `${left * 100}%`, top: `${(top / H) * 100}%`, width: `${imgW * 100}%`, height: `${(imgH / H) * 100}%` }} />
   )
 }

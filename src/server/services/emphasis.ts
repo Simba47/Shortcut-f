@@ -42,7 +42,7 @@ export async function clipEmphasis(userId: string, clipId: string, opts: { fresh
   try {
     // What it cost (admin Costs: "Caption key words"); never slows down or fails the answer
     const { recordAiUsage } = await import('./aiUsage')
-    const onUsage = (u: { model: string; inputTokens: number; outputTokens: number }) => {
+    const onUsage = (u: { model: string; inputTokens: number; outputTokens: number; via?: 'key' | 'vertex' }) => {
       recordAiUsage({ userId, videoId: clip.video_id as string, purpose: 'key_words', ...u }).catch(e => console.warn('[ai-usage] not recorded:', e instanceof Error ? e.message : e))
     }
     picked = await pickKeyWords([...words], (clip.video_title as string | null)?.trim() || null, (prompt, o) => askGemini(prompt, { ...o, onUsage }))

@@ -1,7 +1,8 @@
 'use client'
 
 import { TEMPLATE_FONTS, templateFontFamily, templateOf, isLatinText, PRESET_ANIMATIONS } from '@/modules/captions/templates'
-import { drawCreatorCaptions, CREATOR_DEFAULT_Y } from '@/modules/captions/creator'
+import { drawCreatorCaptions, CREATOR_DEFAULT_Y, scriptWeight } from '@/modules/captions/creator'
+import { noShadow, softShadow } from '@/modules/captions/depth'
 import { personMask } from '@/modules/captions/personMask'
 import { useCaptionStore } from '@/modules/captions/store'
 import type { PlayedPart } from '@/modules/captions/parts'
@@ -1400,6 +1401,21 @@ const HORMOZI_STROKE = 2        // added to the outline
 const LINE_BOX = 'rgba(0,0,0,0.62)'   // box preset (render.py &H60000000)
 const GLOW_BLUR = 6             // px at 1080 wide
 const GLOW_DIM = 0.65           // the words not being spoken
+const BOX_PAD_X = 20            // a box's room either side of its words (px at 1080 wide); above and below: BOX_PAD
+const BOX_ROUND = 0.24          // a box's corner radius, × its height
+const BOX_SHADOW = 3            // the soft shadow under a box (px at 1080 wide)
+const SPOKEN_POP = 1.08         // karaoke and the colour-only caption styles: the spoken word's size
+const SPOKEN_POP_MS = 80        // (grown and shrunk back this fast; render.py _SPOKEN_POP_MS)
+const DEFAULT_STROKE = 5        // the default captions' outline and soft shadow (px at 1080 wide: render.py)
+const DEFAULT_SHADOW = 3
+/** English letters in these captions are drawn in Roboto: written in English letters, or a script's Noto font (none of its own) — render.py _no_latin_font */
+const noLatinFont = (style: Partial<CaptionStyle>) => style.language === 'roman' || (style.font ?? 'noto-sans-telugu').startsWith('noto-sans-')
+/** The spoken word's size at `t` (said from `on` until `off`): grown, and shrinking back once said, as libass \t does */
+function spokenPop(t: number, on: number, off: number): number {
+  if (t >= on && t < off) return 1 + (SPOKEN_POP - 1) * Math.min(1, (t - on) / SPOKEN_POP_MS)
+  if (t >= off && t < off + SPOKEN_POP_MS) return 1 + (SPOKEN_POP - 1) * (1 - (t - off) / SPOKEN_POP_MS)
+  return 1
+}
 
 /** The karaoke colour of the spoken word: the highlight colour, unless it is the text's own */
 export function karaokeLive(color: string, hl: string) {
@@ -1412,7 +1428,7 @@ export function karaokeLive(color: string, hl: string) {
 // winDescent) equals the caption size. The preview loads the same files (public/caption-fonts)
 // and applies the same factor (unitsPerEm / (winAscent + winDescent)), so preset captions come
 // out the size they will be in the download.
-const EXPORT_FONTS: Record<string, { family: string; file: string; em: number }> = {
+const EXPORT_FONTS: Record<string, { family: string; file: string; em: number; weights?: Record<number, { file: string; em: number }> }> = {
   'noto-sans-telugu':     { family: 'CC Noto Sans Telugu', file: 'NotoSansTelugu-Regular.ttf', em: 0.677 },
   'noto-sans-devanagari': { family: 'CC Noto Sans Devanagari', file: 'NotoSansDevanagari-Regular.ttf', em: 0.525 },
   // (the other scripts the export has: em = unitsPerEm / (usWinAscent + usWinDescent), libass's sizing)
@@ -1420,21 +1436,34 @@ const EXPORT_FONTS: Record<string, { family: string; file: string; em: number }>
   'noto-sans-kannada':    { family: 'CC Noto Sans Kannada', file: 'NotoSansKannada-Regular.ttf', em: 0.608 },
   'noto-sans-malayalam':  { family: 'CC Noto Sans Malayalam', file: 'NotoSansMalayalam-Regular.ttf', em: 0.802 },
   'noto-sans-bengali':    { family: 'CC Noto Sans Bengali', file: 'NotoSansBengali-Regular.ttf', em: 0.713 },
-  'roboto':               { family: 'CC Roboto', file: 'Roboto-Regular.ttf', em: 0.758 },
+  'roboto':               { family: 'CC Roboto', file: 'Roboto-Regular.ttf', em: 0.758, weights: { 700: { file: 'Roboto-Bold.ttf', em: 0.833 } } },
   'montserrat-bold':      { family: 'CC Montserrat Bold', file: 'Montserrat-Bold.ttf', em: 0.640 },
 }
 /** The scripts' own fonts, after a caption's font, for the letters it doesn't have (libass does the same with the export's fonts folder) */
 const SCRIPT_FALLBACKS = ['noto-sans-telugu', 'noto-sans-devanagari', 'noto-sans-tamil', 'noto-sans-kannada', 'noto-sans-malayalam', 'noto-sans-bengali']
+// The scripts' Bold and ExtraBold files (2026-11-19): the same size factor as their Regular
+for (const f of Object.values(EXPORT_FONTS)) {
+  if (f.family.startsWith('CC Noto')) f.weights = { 700: { file: f.file.replace('-Regular.', '-Bold.'), em: f.em }, 800: { file: f.file.replace('-Regular.', '-ExtraBold.'), em: f.em } }
+}
 const loadedExportFonts = new Set<string>()
 function exportFont(id?: string | null) {
   const f = EXPORT_FONTS[id ?? ''] ?? EXPORT_FONTS.roboto
   if (!loadedExportFonts.has(f.family) && typeof FontFace !== 'undefined') {
     loadedExportFonts.add(f.family)
-    new FontFace(f.family, `url(/caption-fonts/${f.file})`).load()
-      .then(face => document.fonts.add(face))
-      .catch(() => loadedExportFonts.delete(f.family))
+    // (each weight the export has, under one name: the canvas picks the file by the weight it asks for)
+    const files: Array<[string, string]> = [[f.file, '400'], ...Object.entries(f.weights ?? {}).map(([w, v]): [string, string] => [v.file, w])]
+    for (const [file, weight] of files) {
+      new FontFace(f.family, `url(/caption-fonts/${file})`, { weight }).load()
+        .then(face => document.fonts.add(face))
+        .catch(() => loadedExportFonts.delete(f.family))
+    }
   }
   return f
+}
+/** A bundled font's size factor at a weight (its closest file at or under that weight, as the canvas picks it) */
+function exportEm(f: { em: number; weights?: Record<number, { em: number }> }, weight: number): number {
+  const fit = Object.keys(f.weights ?? {}).map(Number).filter(w => w <= weight).sort((a, b) => b - a)[0]
+  return fit ? f.weights![fit].em : f.em
 }
 
 /** What a family's full height is, in em, once its file is in (libass sizes a caption so its full height is the size) */
@@ -1459,8 +1488,8 @@ function familyEm(family: string): number {
  * font or a brand kit's own by its family. (Roboto stood in for those here while the export drew them, so
  * picking a font changed nothing on the preview — user, 2026-11-10.)
  */
-function captionFont(id?: string | null): { family: string; em: number } {
-  if (!id || EXPORT_FONTS[id] || id === 'sans-serif') return exportFont(id)
+function captionFont(id?: string | null, weight = 400): { family: string; em: number } {
+  if (!id || EXPORT_FONTS[id] || id === 'sans-serif') { const f = exportFont(id); return { family: f.family, em: exportEm(f, weight) } }
   if (isBrandFont(id)) { ensureBrandFont(id); return { family: id, em: familyEm(id) } }
   return VIDEO_FONTS.some(f => f.family === id) ? { family: id, em: familyEm(id) } : exportFont(id)
 }
@@ -1550,7 +1579,7 @@ function drawPresetCaptions(
   const anim: string = tpl ? tpl.base : style.animation!
   const color = style.color ?? '#FFFFFF'
   const hl = style.highlight_color ?? '#FFE700'
-  const stroke = ((tpl?.stroke ?? style.stroke_width ?? 4) + (anim === 'hormozi' && !tpl ? HORMOZI_STROKE : 0)) * k * (anim === 'box' ? 0 : 1)
+  const stroke = ((tpl?.stroke ?? style.stroke_width ?? 6) + (anim === 'hormozi' && !tpl ? HORMOZI_STROKE : 0)) * k * (anim === 'box' ? 0 : 1)
   const shadow = (tpl?.shadow ?? 2) * k
   const upper = style.uppercase || (tpl ? !!tpl.upper : anim === 'hormozi')
   const emphasis = style.emphasis ?? {}
@@ -1560,11 +1589,16 @@ function drawPresetCaptions(
   // Indic fonts have no Latin letters, so Roman-letter captions use Roboto (as render.py), and
   // these are drawn bold (libass thickens them: the style asks for bold)
   const latin = style.language === 'roman' || isLatinText(chunk.map(w => w.word).join(' '))
-  const plain = captionFont(style.language === 'roman' ? 'roboto' : style.font)
+  // (bold — a Noto font's Bold file — or ExtraBold for the heaviest caption styles: render.py _script_face)
+  const scriptW = tpl && scriptWeight(tpl.font) >= 800 ? 800 : 700
+  // (English letters with no font of their own — a script's Noto font, or none picked — in Roboto; any
+  // script otherwise in its Noto font, as the export: until 2026-11-19 a caption style's Telugu with no
+  // font picked fell to the PC's own font here, ~25% bigger than the export's)
+  const plain = captionFont(latin && noLatinFont(style) ? 'roboto' : (style.font ?? 'noto-sans-telugu'), scriptW)
   // A font picked over the caption style's own (user, 2026-11-12) is drawn instead of it.
   // ⚠️ The export (backend) still draws the style's own font: to be matched there
   const ownFont = tpl && latin && !style.font
-  const baseFont: DrawFont = (ownFont ? templateFont(tpl.font) : null) ?? { family: plain.family, em: plain.em, weight: 700, italic: false }
+  const baseFont: DrawFont = (ownFont ? templateFont(tpl.font) : null) ?? { family: plain.family, em: plain.em, weight: scriptW, italic: false }
   const liveFont = ownFont && tpl.liveFont ? templateFont(tpl.liveFont) : null
   // The caption size as libass takes it: every font is sized so its full height is this
   let lineH = (style.size ?? DEFAULT_CAPTION_STYLE.size) * (tpl && latin ? tpl.size / 100 : 1) * k
@@ -1581,7 +1615,7 @@ function drawPresetCaptions(
     ctx.font = fontOf(baseFont, 1)
     const space = ctx.measureText(' ').width
     ctx.restore()
-    const grow = anim === 'hormozi' ? spokenScale - 1 : 0
+    const grow = anim === 'hormozi' ? spokenScale - 1 : anim === 'plain' ? SPOKEN_POP - 1 : 0
     const widest = tpl?.stack ? Math.max(0, ...sizes) * (1 + grow)
       : sizes.reduce((a, b) => a + b, 0) + space * (sizes.length - 1) + Math.max(0, ...sizes) * grow
     if (widest > CAPTION_FIT * W) lineH *= (CAPTION_FIT * W) / widest
@@ -1613,10 +1647,12 @@ function drawPresetCaptions(
     }
     const spoken = tMs >= on && tMs < off
     if (anim === 'hormozi' && spoken) scale *= spokenScale
+    // (a style that only recoloured the spoken word: it grows a little too, render.py the same)
+    if (anim === 'plain') scale *= spokenPop(tMs, on, off)
     // (on a box an emphasised word stays the text colour: only bigger)
     const rest = emph && !tpl?.box ? hl : color
     const fill = anim === 'word' || anim === 'glow' || tpl?.liveText ? rest : spoken ? (anim === 'highlight' ? textOn(hl) : hl) : rest
-    return { text, scale, visible, spoken, fill, font: spoken && liveFont ? liveFont : baseFont }
+    return { text, scale, still: baseScale * (emph ? EMPHASIS_SCALE : 1), visible, spoken, fill, font: spoken && liveFont ? liveFont : baseFont }
   })
 
   ctx.save()
@@ -1648,40 +1684,53 @@ function drawPresetCaptions(
     if (isFinite(x0)) out.rect = { x: x0 / W, y: y0 / H, w: (x1 - x0) / W, h: (y1 - y0) / H }
   }
   if (anim === 'box' || (tpl?.box && !tpl.stack)) {
-    // One box round the whole line (libass BorderStyle 3: the text's full height plus the padding):
+    // One rounded box round the whole line, as the words sit before any pop (render.py _preset_boxes):
     // dark glass, or a template's colour
-    const pad = BOX_PAD * k, x0 = (W - total) / 2
+    const stillW = items.reduce((sum, it) => { ctx.font = fontOf(it.font, it.still); return sum + ctx.measureText(it.text).width }, 0) + space * (items.length - 1)
+    const h = lineH * Math.max(...items.map(it => it.still)) + BOX_PAD * k * 2
+    const w = stillW + BOX_PAD_X * k * 2
     ctx.fillStyle = tpl?.box === 'hl' ? hl : tpl?.box ?? LINE_BOX
-    ctx.fillRect(x0 - pad, y - lineH / 2 - pad, total + pad * 2, lineH + pad * 2)
+    softShadow(ctx, BOX_SHADOW * k, k)
+    ctx.beginPath()
+    ctx.roundRect((W - w) / 2, y - h / 2, w, h, h * BOX_ROUND)
+    ctx.fill()
+    noShadow(ctx)
   }
   items.forEach((it, j) => {
     const w = widths[j], { x, y: wy } = at[j]
     ctx.font = fontOf(it.font, it.scale)
     if (it.visible && anim === 'glow') {
-      // libass blurs the 3 px outline: a soft halo, not a solid ring
+      // Only the spoken word glows: libass blurs its 3 px outline, a soft halo; the others stay sharp,
+      // a little dim (until 2026-11-19 every word was blurred: a smudge — user)
       const a = alpha * (it.spoken ? 1 : GLOW_DIM)
-      ctx.globalAlpha = a * 0.45
-      ctx.shadowColor = hl
-      ctx.shadowBlur = GLOW_BLUR * 2 * k
-      ctx.lineWidth = 3 * 2 * k
-      ctx.strokeStyle = hl
-      ctx.strokeText(it.text, x, wy)
-      ctx.shadowBlur = 0
-      ctx.shadowColor = 'transparent'
+      if (it.spoken) {
+        ctx.globalAlpha = a * 0.45
+        ctx.shadowColor = hl
+        ctx.shadowBlur = GLOW_BLUR * 2 * k
+        ctx.lineWidth = 3 * 2 * k
+        ctx.strokeStyle = hl
+        ctx.strokeText(it.text, x, wy)
+        ctx.shadowBlur = 0
+        ctx.shadowColor = 'transparent'
+      }
       ctx.globalAlpha = a
       ctx.fillStyle = it.fill
       ctx.fillText(it.text, x, wy)
       ctx.globalAlpha = alpha
     } else if (it.visible) {
       if (anim === 'highlight' && it.spoken) {
-        // libass boxes the font's full height (the caption size) plus the padding
-        const pad = BOX_PAD * k, hPx = lineH * it.scale
+        // A rounded box: the font's full height plus the padding, no further out than half the gap to
+        // the next word (render.py _preset_boxes)
+        const padX = Math.min(BOX_PAD_X * k, space / 2), padY = BOX_PAD * k, hPx = lineH * it.scale + padY * 2
         ctx.fillStyle = hl
-        ctx.fillRect(x - pad, wy - hPx / 2 - pad, w + pad * 2, hPx + pad * 2)
+        softShadow(ctx, BOX_SHADOW * k, k)
+        ctx.beginPath()
+        ctx.roundRect(x - padX, wy - hPx / 2, w + padX * 2, hPx, hPx * BOX_ROUND)
+        ctx.fill()
+        noShadow(ctx)
       } else if (anim !== 'box') {
-        // The outline with its drop shadow; with no outline the letters cast the shadow themselves
-        ctx.shadowColor = 'rgba(0,0,0,0.5)'
-        ctx.shadowOffsetX = ctx.shadowOffsetY = shadow
+        // The outline with its soft drop shadow (caption_depth.py); with no outline the letters cast it themselves
+        softShadow(ctx, shadow, k)
         if (stroke > 0) {
           ctx.lineWidth = stroke * 2
           ctx.strokeStyle = '#000000'
@@ -1690,8 +1739,7 @@ function drawPresetCaptions(
           ctx.fillStyle = it.fill
           ctx.fillText(it.text, x, wy)
         }
-        ctx.shadowColor = 'transparent'
-        ctx.shadowOffsetX = ctx.shadowOffsetY = 0
+        noShadow(ctx)
       }
       ctx.fillStyle = it.fill
       ctx.fillText(it.text, x, wy)
@@ -1816,13 +1864,13 @@ function drawCaptionsCentred(
   const animation = style.animation ?? 'karaoke'
 
   // As the export draws these (render.py _write_ass, Default style): the bundled font (Roboto for
-  // Roman letters or any other font), sized the way libass sizes it, regular weight, a 3 px black
-  // outline and a 2 px half-black shadow (px at 1080 wide)
+  // Roman letters or any other font), sized the way libass sizes it, bold, a 5 px black outline and
+  // a soft 3 px shadow (px at 1080 wide; until 2026-11-19 regular, 3 px and a hard 2 px — "plain", user)
   const k          = W / 1080
   // (in its own script with no font picked: Noto Sans Telugu, as the export's default. Roboto has no
   // Telugu or Hindi letters, so the browser drew them in a font of the PC's own, ~1.8× the export's
   // size — user, 2026-11-04; the export's Noto fonts follow any font for letters it doesn't have)
-  const font       = captionFont(style.language === 'roman' ? 'roboto' : (style.font ?? 'noto-sans-telugu'))
+  const font       = captionFont((isLatinText(chunk.map(w => w.word).join(' ')) && noLatinFont(style)) ? 'roboto' : (style.font ?? 'noto-sans-telugu'), 700)
   const scriptFonts = style.language === 'roman' ? '' : SCRIPT_FALLBACKS.map(id => `"${exportFont(id).family}", `).join('')
   const fontSize   = Math.round((style.size ?? DEFAULT_CAPTION_STYLE.size) * k * font.em)
   const lineHeight = Math.round(fontSize * 1.4)
@@ -1831,13 +1879,17 @@ function drawCaptionsCentred(
   const fontFamily = `${captionEmojiFamily(font.em)}, "${font.family}", ${scriptFonts}sans-serif`
 
   ctx.save()
-  ctx.font         = `400 ${fontSize}px ${fontFamily}`
+  ctx.font         = `700 ${fontSize}px ${fontFamily}`
   ctx.textBaseline = 'middle'
   ctx.lineJoin     = 'round'
-  ctx.lineWidth    = 2 * 3 * k
+  ctx.lineWidth    = 2 * DEFAULT_STROKE * k
   ctx.strokeStyle  = '#000000'
-  ctx.shadowColor  = 'rgba(0,0,0,0.5)'
-  ctx.shadowOffsetX = ctx.shadowOffsetY = 2 * k
+  // (the outline casts the soft shadow; the letters are drawn over it without one)
+  const outline = (text: string, x: number, y: number) => {
+    softShadow(ctx, DEFAULT_SHADOW * k, k)
+    ctx.strokeText(text, x, y)
+    noShadow(ctx)
+  }
 
   // Words are already single-token after buildCaptionChunks explodes phrases.
   const wordTexts = chunk.map(w => applyCase(w.word, textCase))
@@ -1887,18 +1939,27 @@ function drawCaptionsCentred(
     if (!activeInLine) {
       ctx.fillStyle = color
       ctx.textAlign = 'center'
-      ctx.strokeText(ln.join(' '), W / 2, y)
+      outline(ln.join(' '), W / 2, y)
       ctx.fillText(ln.join(' '), W / 2, y)
     } else {
+      // (the spoken word a size up, grown and shrunk back in 80 ms: render.py's karaoke the same)
       const spW    = ctx.measureText(' ').width
-      const widths = ln.map(w => ctx.measureText(w).width)
+      const pops   = ln.map((_, i) => {
+        const j = lineStart + i, w = chunk[j]
+        return spokenPop(tMs, w.start_ms, chunk[j + 1]?.start_ms ?? w.end_ms + 1)
+      })
+      const widths = ln.map((w, i) => ctx.measureText(w).width * pops[i])
       const rowW   = widths.reduce((s, w) => s + w, 0) + spW * (ln.length - 1)
       let x        = (W - rowW) / 2
       ln.forEach((word, i) => {
+        ctx.save()
         ctx.textAlign = 'left'
+        ctx.translate(x, y)
+        ctx.scale(pops[i], pops[i])
         ctx.fillStyle = lineStart + i === activeWIdx ? live : color
-        ctx.strokeText(word, x, y)
-        ctx.fillText(word, x, y)
+        outline(word, 0, 0)
+        ctx.fillText(word, 0, 0)
+        ctx.restore()
         x += widths[i] + (i < ln.length - 1 ? spW : 0)
       })
     }
@@ -2241,6 +2302,21 @@ export function OutputCanvas({
   // With the live time, the format here too (what's drawn on the canvas already follows segmentAt every frame)
   const activeSegment = live && segmentAt ? segmentAt(liveMs) : segmentProp
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  // Drawn at the screen's own pixels, up to the export's 1080 wide (everything on it is laid out by
+  // its width): a fixed 540×960 stretched to the panel looked soft on sharp screens (user, 2026-11-19)
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || typeof ResizeObserver === 'undefined') return
+    const fit = () => {
+      const w = Math.min(1080, Math.max(270, Math.round((canvas.clientWidth * (window.devicePixelRatio || 1)) / 2) * 2))
+      const h = Math.round((w * 16) / 9)
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h }
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(canvas)
+    return () => ro.disconnect()
+  }, [])
   // Centre guides shown while something is dragged (see GuideContext)
   const [guides, setGuides] = useState<Guides>(null)
   const frameMediaRef = useRef(frameMedia)

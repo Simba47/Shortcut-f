@@ -21,6 +21,7 @@ test('a paid plan lists every limit the server applies, with the numbers from pl
     'Captions on AI clips included',
     'No watermark',
     'x Priority exports',
+    'x GST invoices with your company details',
   ])
 })
 
@@ -40,14 +41,17 @@ test('the Trial lists its allowances as once only (in total), and how long it la
     'Captions on AI clips included',
     'No watermark',
     'x Priority exports',
+    'x GST invoices with your company details',
   ])
 })
 
-test('no plan claims unlimited AI clips, and only Agency gets priority exports', () => {
+test('no plan claims unlimited AI clips, and only Agency gets priority exports and GST invoice details', () => {
   for (const key of Object.keys(PLANS) as (keyof typeof PLANS)[]) {
     const rows = planFeatureRows(PLANS[key])
     assert.ok(!rows.some(r => r.label === 'Unlimited clips'), key)
     assert.equal(rows.find(r => r.label === 'Priority exports')?.included, key === 'agency', key)
+    // (user, 2026-11-19) invoice details (company name, GSTIN, state, address): Agency only
+    assert.equal(rows.find(r => r.label === 'GST invoices with your company details')?.included, key === 'agency', key)
   }
   assert.ok(labels('agency').includes('90 AI clips a month'))
   assert.ok(labels('agency').includes('14 hours of video read a month'))

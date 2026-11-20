@@ -64,6 +64,17 @@ export function ensureAiUsageSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`
     await sql`CREATE INDEX IF NOT EXISTS ai_usage_user_idx ON ai_usage (user_id, created_at DESC)`
+    // Who bills each call: 'key' = the Gemini key's prepaid credits (AI Studio), 'vertex' = Google
+    // Cloud (the worker adds the same: shortcut-b index.ts)
+    await sql`ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS via TEXT`
+    await sql`
+      CREATE TABLE IF NOT EXISTS gemini_key_events (
+        id BIGSERIAL PRIMARY KEY,
+        kind TEXT NOT NULL,
+        source TEXT,
+        message TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`
   })().catch(e => { ready = null; throw e })
   return ready
 }
@@ -253,11 +264,28 @@ export const AI_PRICES: Record<string, { input: number; output: number }> = {
   'gemini-2.5-flash-lite': { input: 0.10, output: 0.40 },
 }
 
-export async function recordAiUsage(u: { userId?: string | null; videoId?: string | null; purpose: string; model: string; inputTokens: number; outputTokens: number }): Promise<void> {
+export async function recordAiUsage(u: { userId?: string | null; videoId?: string | null; purpose: string; model: string; inputTokens: number; outputTokens: number; via?: 'key' | 'vertex' }): Promise<void> {
   await ensureAiUsageSchema()
   const price = AI_PRICES[u.model]
   const cost = price ? Math.round(u.inputTokens * price.input + u.outputTokens * price.output) : null
   await sql`
-    INSERT INTO ai_usage (user_id, video_id, purpose, model, input_tokens, output_tokens, cost_micro_usd)
-    VALUES (${u.userId ?? null}, ${u.videoId ?? null}, ${u.purpose}, ${u.model}, ${u.inputTokens}, ${u.outputTokens}, ${cost})`
+    INSERT INTO ai_usage (user_id, video_id, purpose, model, input_tokens, output_tokens, cost_micro_usd, via)
+    VALUES (${u.userId ?? null}, ${u.videoId ?? null}, ${u.purpose}, ${u.model}, ${u.inputTokens}, ${u.outputTokens}, ${cost}, ${u.via ?? null})`
+}
+
+/**
+ * The Gemini key said its prepaid credits are gone (lib/gemini.ts onKeyCreditsEmpty, set up in
+ * instrumentation.ts): one row in gemini_key_events, at most every 5 minutes per copy of the site.
+ * The admin's Gemini credits page turns red and emails the admins. (The worker does the same:
+ * shortcut-b lib/aiUsage.ts.)
+ */
+let lastEmptyAt = 0
+export function keyCreditsEmptyRecorder(source: string) {
+  return (message: string) => {
+    if (Date.now() - lastEmptyAt < 5 * 60_000) return
+    lastEmptyAt = Date.now()
+    ensureAiUsageSchema()
+      .then(() => sql`INSERT INTO gemini_key_events (kind, source, message) VALUES ('credits_empty', ${source}, ${message})`)
+      .catch(e => console.warn('[gemini] credits-empty not recorded:', e instanceof Error ? e.message : e))
+  }
 }

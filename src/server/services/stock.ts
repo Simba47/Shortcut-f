@@ -469,7 +469,7 @@ Return ONLY a JSON array of strings.`
   try {
     // (a plain list of search words: no thinking needed — about 5× cheaper, user 2026-10-30)
     // What it cost (admin Costs: "B-roll ideas"); never slows down or fails the answer
-    const onUsage = (u: { model: string; inputTokens: number; outputTokens: number }) => {
+    const onUsage = (u: { model: string; inputTokens: number; outputTokens: number; via?: 'key' | 'vertex' }) => {
       import('./aiUsage').then(m => m.recordAiUsage({ ...who, purpose: 'broll', ...u }))
         .catch(e => console.warn('[ai-usage] not recorded:', e instanceof Error ? e.message : e))
     }

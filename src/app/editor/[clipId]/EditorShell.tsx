@@ -31,7 +31,7 @@ import { useFreeWatermark } from '@/components/editor/watermark'
 import { LAYOUT_COLORS, MAX_ZOOM, MIN_ZOOM, zoomStep, zoomLabel, STOCK_DRAG_TYPE, type LaneCtl, type LaneCtlKey } from '@/components/editor/SegmentTimeline'
 import { useVideoUpload } from '@/modules/upload/useVideoUpload'
 import { TranscriptPanel } from '@/components/editor/TranscriptPanel'
-import { CaptionStyler } from '@/components/editor/CaptionStyler'
+import { CaptionStyler, type FontTry } from '@/components/editor/CaptionStyler'
 import { useKeyWordsPick } from '@/components/editor/CaptionKeyWords'
 import { CaptionPreview } from '@/components/editor/CaptionPreview'
 import { TextOverlayPanel, type FrameTextEdit } from '@/components/editor/TextOverlayPanel'
@@ -107,6 +107,7 @@ import { pictureOrWhole, toPicture, fromPicture, pictureAR } from '@/modules/edi
 import { setFramePicture, framePicture, inFramePicture } from '@/modules/editor/framePicture'
 import type { SegmentLocal, CropBoxLocal, FrameHold, FrameLayout, FrameLane, FrameItem, TransitionType } from '@chai-cut/shared'
 import { SPEED_MIN, SPEED_MAX } from '@chai-cut/shared'
+import { ToolHints } from '@/components/editor/ToolHints'
 import { TransitionsPanel, TRANSITION_DEFAULT_MS, TRANSITION_KINDS, playedTransitionMs, type TransitionJoin } from '@/components/editor/TransitionsPanel'
 import { transcriptWindowQuery } from '@/modules/editor/transcriptWindow'
 
@@ -144,6 +145,9 @@ interface Props {
    *  Brand buttons there in the first frame); absent: read once the editor is open */
   initialCredits?: CreditsInfo | null
   initialBrandKits?: BrandKitsLoad
+  /** The timeline tools show their little loop on hover (true until the account's first finished export, or as
+   *  the Guide page's switch says); false: just their name and shortcut (server/services/toolGuides.ts) */
+  toolGuideLoops?: boolean
   initialTransitions: Transition[]
   initialOverlays: Overlay[]
   /** The clip board it was opened from (the dashboard's AI edit / Manual edit choice), so "Clip board" returns to it */
@@ -268,7 +272,7 @@ type AutoRecord = { mode: AutoMode; places: Array<[number, number, string]>; gro
 export function EditorShell({
   clip: savedClip, aiMade = null, videoUrl, words: initialWords, initialSegments,
   initialCaptionStyles, initialTextOverlays, initialAudioTracks, initialTransitions, initialOverlays,
-  initialMusicUrls, initialOriginalSound, initialBrand, initialCredits, initialBrandKits, backStart,
+  initialMusicUrls, initialOriginalSound, initialBrand, initialCredits, initialBrandKits, backStart, toolGuideLoops = true,
 }: Props) {
   // The picture inside the video's black bars (none: the whole frame): the views the editor makes keep inside it
   setFramePicture(pictureOrWhole((savedClip as { picture_box?: Parameters<typeof pictureOrWhole>[0] }).picture_box))
@@ -577,6 +581,8 @@ export function EditorShell({
   // How tall the timeline is with just its ruler and the clip's strip (Timeline onBaseHeight)
   const [timelineBaseH, setTimelineBaseH] = useState<number | null>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
+  // The timeline's bar (its tools): ToolHints shows each tool's little loop on hover
+  const transportRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     // Sizes an older version remembered in this browser: gone, so every visit opens the usual way
     try { for (const k of ['editor.timelineH', 'editor.optionsW', 'editor.previewW', 'editor.platformPreview']) localStorage.removeItem(k) } catch { /* storage blocked */ }
@@ -7051,6 +7057,12 @@ export function EditorShell({
     const rest = Object.fromEntries(Object.entries(updates).filter(([k]) => !(LOOK_KEYS as readonly string[]).includes(k))) as Partial<CaptionStyle>
     if (!isLookChange(updates) || (!selectedLines.length && !st.captionParts.length)) { updateCaptionStyle(updates); return }
     if (Object.keys(rest).length) updateCaptionStyle(rest)
+    const { base, parts } = withCaptionLook(look, st)
+    updateCaptionStyle(lookOf(base))
+    st.setCaptionParts(parts)
+  }
+  /** The clip's caption style and parts with a look change made on the selected lines (none: every caption) */
+  function withCaptionLook(look: Partial<CaptionStyle>, st = useCaptionStore.getState()) {
     // The selected lines in runs of neighbours (each run one stretch, from the pause before its
     // first line to the pause after its last); none selected: the whole clip
     const runs: [number, number][] = []
@@ -7069,9 +7081,52 @@ export function EditorShell({
       base = { ...base, ...next.baseLook }
       parts = next.parts
     }
-    updateCaptionStyle(lookOf(base))
-    st.setCaptionParts(parts)
+    return { base, parts }
   }
+
+  // ── A font pointed at in a Font list, not picked yet (user, 2026-11-20): the preview shows it where the
+  // pick would go — nothing is changed, saved or put in Undo until it's clicked ──
+  // Captions: as changeCaptionStyle would make them (the selected lines, none: all of them)
+  const [captionFontTry, setCaptionFontTry] = useState<FontTry>(null)
+  const captionTried = useMemo(() => {
+    if (!captionFontTry) return null
+    const st = useCaptionStore.getState()
+    const updates: Partial<CaptionStyle> = { font: captionFontTry.family }
+    if (!isLookChange(updates) || (!selectedLines.length && !st.captionParts.length)) {
+      return { style: { ...captionStyle, ...updates }, parts: playedCaptionParts }
+    }
+    const { base, parts } = withCaptionLook(lookOf(updates), st)
+    const style = { ...captionStyle, ...lookOf(base) }
+    return { style, parts: parts.length ? playedParts(style, parts, clipLengthMs) : undefined }
+  }, [captionFontTry, captionStyle, playedCaptionParts, selectedLines, clipLengthMs]) // eslint-disable-line react-hooks/exhaustive-deps
+  const shownCaptionStyle = captionTried?.style ?? captionStyle
+  const shownCaptionParts = captionTried ? captionTried.parts : playedCaptionParts
+  /** The Captions panel's sample: as panelCaptionStyle, with the font being tried */
+  const shownPanelCaptionStyle = !captionTried ? panelCaptionStyle
+    : captionTried.parts && selectedLines.length ? playedPartAt(captionTried.parts, selectedLines[0].start + 1).style : captionTried.style
+  // A text on the clip: that text
+  const [textFontTry, setTextFontTry] = useState<{ id: string; font: string | null } | null>(null)
+  const shownTextOverlays = useMemo(() => (textFontTry
+    ? textOverlays.map(o => (o.id === textFontTry.id && textFontTry.font ? { ...o, font: textFontTry.font } : o))
+    : textOverlays), [textOverlays, textFontTry])
+  // A frame's text: that item, wherever its section is drawn
+  const [frameFontTry, setFrameFontTry] = useState<{ itemId: string; font: string | null } | null>(null)
+  const withFrameFontTry = useMemo(() => {
+    if (!frameFontTry) return null
+    const done = new WeakMap<SegmentLocal, SegmentLocal>()
+    return (seg: SegmentLocal | null): SegmentLocal | null => {
+      const items = seg?.frame?.items
+      if (!seg || !items?.some(it => it.id === frameFontTry.itemId)) return seg
+      let s = done.get(seg)
+      if (!s) {
+        s = { ...seg, frame: { ...seg.frame!, items: items.map(it => (it.id === frameFontTry.itemId ? { ...it, font: frameFontTry.font } : it)) } }
+        done.set(seg, s)
+      }
+      return s
+    }
+  }, [frameFontTry])
+  const canvasAt = useMemo(() => (withFrameFontTry ? (ms: number) => withFrameFontTry(viewAt(ms)) : viewAt), [viewAt, withFrameFontTry])
+  const canvasSegment = withFrameFontTry ? withFrameFontTry(viewSegment) : viewSegment
   /** The lines from the playhead to the end (a quick selection) */
   function selectCaptionsFromHere() {
     const t = liveTime.get()
@@ -7456,12 +7511,12 @@ export function EditorShell({
     <div className="ed-player" data-playing={playing || undefined}>
       <div />
       <div className="flex items-center gap-1.5">
-        <button onClick={jumpPrevSection} aria-label="Go to the previous section" title="Previous section"
+        <button onClick={jumpPrevSection} aria-label="Go to the previous section" data-hint="prev"
           className="ed-tl-btn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="2.4" height="14" rx="1" /><path d="M19 5.8v12.4a.8.8 0 01-1.2.7L9.5 12.7a.8.8 0 010-1.4l8.3-6.2a.8.8 0 011.2.7z" /></svg>
         </button>
         {/* Film-reel play button (styles: .ed-play in globals.css) */}
-        <button onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'} title={`${playing ? 'Pause' : 'Play'} (Space)`}
+        <button onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'} data-hint="play" data-hint-name={playing ? 'Pause' : undefined}
           data-playing={playing || undefined}
           className="ed-play w-10 h-10 flex items-center justify-center rounded-full shrink-0">
           <PlayRing lengthMs={clipDurationMs} />
@@ -7472,7 +7527,7 @@ export function EditorShell({
             }
           </span>
         </button>
-        <button onClick={jumpNextSection} aria-label="Go to the next section" title="Next section"
+        <button onClick={jumpNextSection} aria-label="Go to the next section" data-hint="next"
           className="ed-tl-btn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="16.6" y="5" width="2.4" height="14" rx="1" /><path d="M5 5.8v12.4a.8.8 0 001.2.7l8.3-6.2a.8.8 0 000-1.4L6.2 5.1A.8.8 0 005 5.8z" /></svg>
         </button>
@@ -7916,7 +7971,7 @@ export function EditorShell({
                   {/* Pinned at the top while the panel scrolls (user, 2026-11-06): the preview and the sub-bar */}
                   <div className="sticky top-0 z-10 shrink-0 px-3 pt-2 pb-2" style={{ background: 'var(--ed-panel)' }}>
                   {/* The captions' style on a sample line, over every sub-tab (the selected lines' style, as the panel shows); dimmed while off */}
-                  <CaptionPreview style={panelCaptionStyle} textCase={captionTextCase} dim={!showCaptions} />
+                  <CaptionPreview style={shownPanelCaptionStyle} textCase={captionTextCase} dim={!showCaptions} />
                   {/* Sub-bar: the Captions tool one kind of setting at a time (user, 2026-11-06; one long
                       scroll before). Captions off: only Captions; Key words only with a style that draws them */}
                   {/* (user, 2026-11-09: as the Text panel's) each tab its icon, a raised pill sliding under the open one, a lime bar under its name */}
@@ -8087,6 +8142,7 @@ export function EditorShell({
                         retranscribeError={retranscribeError} hasWords={words.length > 0}
                         hasRoman={hasRoman} romanize={romanize} romanizeLabel={scriptLabel}
                         onRomanizeChange={setRomanize}
+                        onFontTry={setCaptionFontTry}
                       />
                     </div>
                   )}
@@ -8288,7 +8344,9 @@ export function EditorShell({
               <TextOverlayPanel
                 // (tabbed, as the Captions panel: the picked text's preview and Text · Style · Look · Motion pinned at the top)
                 layout="tabs"
-                overlays={textOverlays}
+                // (with a font being tried on the picked text: its sample shows it)
+                overlays={shownTextOverlays}
+                onFontTry={setTextFontTry}
                 currentTimeMs={currentTimeMs}
                 clipDurationMs={clip.end_ms - clip.start_ms}
                 onAdd={o => setTextOverlays(prev => [...prev, { ...o, id: crypto.randomUUID(), clip_id: clip.id }])}
@@ -8315,6 +8373,7 @@ export function EditorShell({
                     segment: seg,
                     onUpdate: patch => { if (!frameItemBlocked(seg.id, it.id)) updateFrameItem(seg.id, it.id, patch) },
                     onRemove: () => askRemoveFrameItem(seg.id, it.id),
+                    onFontTry: t => setFrameFontTry(t ? { itemId: it.id, font: t.family } : null),
                   }
                 })()}
                 onUpdate={(id, patch) => { if (!blocked({ kind: 'text', id })) updateTextOverlay(id, patch) }}
@@ -8500,17 +8559,17 @@ export function EditorShell({
                       "Exporting · 0:09 ✕" only — always there, whatever panels are open */}
                 </div>
               ) : (
-                <OutputCanvas live segmentAt={viewAt} transitionCuts={transitionCuts} watermark={showWatermark} timelineToVideo={timelineToVideo} clock={hasInserts || hasFreeze ? liveTime.get : undefined}
+                <OutputCanvas live segmentAt={canvasAt} transitionCuts={transitionCuts} watermark={showWatermark} timelineToVideo={timelineToVideo} clock={hasInserts || hasFreeze ? liveTime.get : undefined}
                   videoRef={videoRef} currentTimeMs={currentTimeMs} clipStartMs={clip.start_ms} videoToTimeline={videoToTimeline}
-                  activeSegment={viewSegment} getPositionAt={viewGetPositionAt} sourceFor={brollSource} slotSourceFor={borrowed.slotSourceFor}
+                  activeSegment={canvasSegment} getPositionAt={viewGetPositionAt} sourceFor={brollSource} slotSourceFor={borrowed.slotSourceFor}
                   skipTransitionRef={skipCanvasTransitionRef} words={displayWords}
-                  captionStyle={captionStyle} captionParts={playedCaptionParts} captionTextCase={captionTextCase} showCaptions={showCaptions}
+                  captionStyle={shownCaptionStyle} captionParts={shownCaptionParts} captionTextCase={captionTextCase} showCaptions={showCaptions}
                   // (no captions in a gap left by a deleted part: its words went with it)
                   captionsOffAt={t => gapRanges.some(([a, b]) => t >= a && t < b)}
                   // (a picture-in-picture video plays from its library link)
                   overlays={overlays.filter(o => !o.hidden).map(o => (o.type === 'video' && o.source_video_id ? { ...o, preview_url: videoUrls[o.source_video_id] ?? o.preview_url } : o))} activeOverlayId={activeOverlayId}
                   onOverlayChange={(id, u) => { if (!blocked({ kind: 'photo', id })) updateOverlay(id, u) }} onSelectOverlay={id => { const o = overlays.find(x => x.id === id); if (o?.type === 'image') pickPhoto(id); else { setActiveOverlayId(id); setLastPick('overlay') } }} onDeleteOverlay={askDeleteOverlay}
-                  textOverlays={textOverlays.filter(o => !o.hidden)} activeTextOverlayId={activeTextOverlayId}
+                  textOverlays={shownTextOverlays.filter(o => !o.hidden)} activeTextOverlayId={activeTextOverlayId}
                   onTextOverlayChange={(id, u) => {
                     if (blocked({ kind: 'text', id })) return
                     // (the kit's title look in charge: its size isn't changed here — moving, width and turning are)
@@ -8591,8 +8650,10 @@ export function EditorShell({
           bar and the timeline round their own corners instead */}
       <div className="ed-card ed-dockpanel shrink-0 flex flex-col" style={{ marginTop: 8, overflow: 'visible' }}>
       {/* The timeline's own bar, full width: trim · delete · hide / mute / lock · reset … undo / redo · zoom */}
-      <div className="ed-transport shrink-0 flex items-center gap-2 px-3"
+      <div ref={transportRef} className="ed-transport shrink-0 flex items-center gap-2 px-3"
         style={{ height: 46, background: 'var(--ed-panel)', borderRadius: timelineHidden ? 11 : '11px 11px 0 0' }}>
+        {/* Hover a tool: a small loop of what it does, its name and shortcut (user, 2026-11-19) */}
+        <ToolHints barRef={transportRef} loops={toolGuideLoops} />
         {/* Left: timeline tools */}
         <div className="ed-transport-tools justify-self-start min-w-0 flex items-center gap-1">
           {/* Show / hide the timeline. The icon is the editor with its bottom panel (the timeline)
@@ -8600,8 +8661,8 @@ export function EditorShell({
               label pops up instantly on hover (.ed-tip in globals.css) */}
           <button onClick={() => setTimelineHidden(h => !h)} aria-expanded={!timelineHidden}
             aria-label={timelineHidden ? 'Show the timeline' : 'Hide the timeline'}
-            data-tip={timelineHidden ? 'Show timeline' : 'Hide timeline'}
-            className="ed-tl-btn ed-tip ed-tl-fold" data-active={timelineHidden || undefined}>
+            data-hint={timelineHidden ? 'unfold' : 'fold'}
+            className="ed-tl-btn ed-tl-fold" data-active={timelineHidden || undefined}>
             {/* one chevron: down = put the timeline away, up = bring it back (styles: .ed-tl-fold) */}
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path className="fold-arrow" d={timelineHidden ? 'M6.5 14.5L12 9l5.5 5.5' : 'M6.5 9.5L12 15l5.5-5.5'} stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -8615,16 +8676,15 @@ export function EditorShell({
             const media = !!selTarget && selTarget.kind !== 'section'
             const cutName = pointTarget()?.name ?? (frameItemCut() ? selName.replace('picked ', '') : null)
             const splitOk = media ? !!cutName : canSplitHere
-            const splitTitle = media
-              ? (cutName ? `Split (S): cut ${cutName} in two at the playhead. Split again for three parts, then pick a part and press Delete` : `Move the playhead inside ${selName} to split it`)
-              : (canSplitHere ? 'Split (S): cut the video section under the playhead in two' : 'Move the playhead inside a section to split it')
+            const splitWhy = splitOk ? undefined
+              : media ? `Move the playhead inside ${selName} first` : 'Move the playhead inside a section first'
             return (
               <>
                 <button
                   onClick={() => { setSplitPlay(n => n + 1); splitSelected() }}
                   disabled={!splitOk}
                   aria-label={media && cutName ? `Split: cut ${cutName} at the playhead` : 'Split the video at the playhead'}
-                  title={splitTitle}
+                  data-hint="split" data-hint-why={splitWhy}
                   className="ed-tl-btn"
                 >
                   <svg key={splitPlay} className={splitPlay ? 'ed-snip' : undefined} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -8640,7 +8700,7 @@ export function EditorShell({
                       onClick={duplicateSelected}
                       disabled={!dup || locked}
                       aria-label="Duplicate the picked part"
-                      title={!dup ? 'Pick a part on the timeline to duplicate it' : locked ? "It's locked — unlock it to duplicate it" : 'Duplicate (Ctrl+D)'}
+                      data-hint="duplicate" data-hint-why={!dup ? 'Pick a part on the timeline first' : locked ? "It's locked — unlock it first" : undefined}
                       className="ed-tl-btn"
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -8659,14 +8719,15 @@ export function EditorShell({
                     <>
                       <button onClick={mirrorPicked} disabled={locked} aria-pressed={on} data-active={on || undefined}
                         aria-label={t.kind === 'parts' ? 'Mirror the picked part of the main video' : 'Mirror the picked video or photo'}
-                        title={locked ? "It's locked — unlock it to change it" : on ? 'Mirrored — click to show it as filmed' : 'Mirror: flip it left to right'}
+                        data-hint="mirror" data-hint-why={locked ? "It's locked — unlock it first" : undefined}
+                        data-hint-note={on ? 'On now — click to show it as filmed' : undefined}
                         className="ed-tl-btn">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                           <path d="M12 3v18" strokeDasharray="2 2.5" /><path d="M9 7L3 17h6V7z" /><path d="M15 7l6 10h-6V7z" />
                         </svg>
                       </button>
                       {t.kind !== 'parts' && <button onClick={rotatePicked} disabled={locked} aria-label="Rotate the picked video or photo 90 degrees"
-                        title={locked ? "It's locked — unlock it to change it" : 'Rotate 90° (clockwise)'}
+                        data-hint="rotate" data-hint-why={locked ? "It's locked — unlock it first" : undefined}
                         className="ed-tl-btn">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                           <path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" />
@@ -8677,7 +8738,7 @@ export function EditorShell({
                 })()}
                 {/* Freeze: on a video picked in a frame (the part of it to hold still is dragged on its bar) */}
                 {freezeBar() && (
-                  <button onClick={addFreeze} aria-label="Freeze a part of this video" title="Freeze: add a blue range on this video, then drag it and its ends. It holds still there, then plays on" className="ed-tl-btn">
+                  <button onClick={addFreeze} aria-label="Freeze a part of this video" data-hint="freeze" data-hint-note="Drag the blue range and its ends to choose the part" className="ed-tl-btn">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M12 2v20M4 6.5l16 11M20 6.5l-16 11M12 6L9.5 3.5M12 6l2.5-2.5M12 18l-2.5 2.5M12 18l2.5 2.5" />
                     </svg>
@@ -8691,7 +8752,7 @@ export function EditorShell({
                   onClick={() => del?.run()}
                   disabled={!del}
                   aria-label={del ? `Delete ${del.label}` : 'Delete'}
-                  title={del ? `Delete ${del.label} (Delete key)` : 'Select a video, photo, song, text or section to delete it'}
+                  data-hint="delete" data-hint-why={del ? undefined : 'Pick something on the timeline first'}
                   className="ed-tl-btn ed-tl-danger"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -8710,7 +8771,7 @@ export function EditorShell({
                   return (
                     <button onClick={ungroup ? ungroupPicked : groupPicked} className="ed-tl-btn" data-active={ungroup || undefined}
                       aria-label={ungroup ? 'Ungroup' : `Group the ${groupLive.length} picked items`}
-                      title={ungroup ? 'Ungroup: each one on its own again (Ctrl+Shift+G)' : `Group the ${groupLive.length} picked items: they move together from now on (Ctrl+G)`}>
+                      data-hint={ungroup ? 'ungroup' : 'group'}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7" /><path d="M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.7-1.7" />
                         {ungroup && <path d="M4 4l16 16" />}
@@ -8721,7 +8782,7 @@ export function EditorShell({
                 {/* Detach audio: the main video's sound onto its own Music bar */}
                 <button onClick={detachAudio}
                   aria-label={hasMainAudio ? 'Select the detached original sound' : 'Detach the audio from the main video'}
-                  title={hasMainAudio ? 'The original sound is on the Music lane — click to select it' : 'Detach audio: the main video\u2019s sound becomes its own bar on the Music lane (trim, move or change its volume)'}
+                  data-hint="detach" data-hint-note={hasMainAudio ? 'Done — click to pick its Music bar' : undefined}
                   className="ed-tl-btn" data-active={hasMainAudio || undefined}>
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M9 17V5l10-2v6" /><circle cx="6.5" cy="17" r="2.5" />
@@ -8743,8 +8804,8 @@ export function EditorShell({
         <div className="ml-auto shrink-0 flex items-center gap-1">
           <div className="relative">
             <button onClick={() => setConfirmResetAll(v => !v)} aria-expanded={confirmResetAll}
-              title="Reset all edits" data-tip="Reset all edits"
-              className="ed-tl-btn ed-tip" data-active={confirmResetAll || undefined}>
+              aria-label="Reset all edits" data-hint="reset"
+              className="ed-tl-btn" data-active={confirmResetAll || undefined}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8" /><path d="M3 3v5h5" />
               </svg>
@@ -9334,15 +9395,13 @@ function isTextEntry(el: Element | null | undefined): boolean {
 // Undo / redo, in the play bar next to the zoom (shortcuts: Ctrl/⌘+Z, Ctrl/⌘+Shift+Z)
 function UndoRedo() {
   const { canUndo, canRedo } = useHistory()
-  const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
-  const mod = mac ? '⌘' : 'Ctrl+'
   const btn = 'ed-tl-btn'
   return (
     <div className="flex items-center gap-0.5 shrink-0" role="group" aria-label="Undo and redo">
-      <button onClick={undo} disabled={!canUndo} aria-label="Undo" title={`Undo (${mod}Z)`} className={btn}>
+      <button onClick={undo} disabled={!canUndo} aria-label="Undo" data-hint="undo" data-hint-why={canUndo ? undefined : 'Nothing to undo yet'} className={btn}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 14L4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 010 11H11" /></svg>
       </button>
-      <button onClick={redo} disabled={!canRedo} aria-label="Redo" title={`Redo (${mod}${mac ? '⇧Z' : 'Shift+Z'})`} className={btn}>
+      <button onClick={redo} disabled={!canRedo} aria-label="Redo" data-hint="redo" data-hint-why={canRedo ? undefined : 'Nothing to redo'} className={btn}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 14l5-5-5-5" /><path d="M20 9H9.5a5.5 5.5 0 000 11H13" /></svg>
       </button>
     </div>
@@ -9522,19 +9581,20 @@ function ClipClock({ lengthMs }: { lengthMs: number }) {
 function ZoomSlider({ zoom, onZoom }: { zoom: number; onZoom: (z: number) => void }) {
   const i = Math.abs(zoom - 1) > 0.001 ? 1 : 0   // zoomed in or out (not at 1x)
   return (
-    <div className="flex items-center gap-1" role="group" aria-label="Timeline zoom"
-      title="Pinch on the trackpad, or hold ⌘ / Ctrl and scroll, to zoom">
-      <button onClick={() => onZoom(zoomStep(zoom, -1))} disabled={zoom <= MIN_ZOOM} aria-label="Zoom out" title="Zoom out" className="ed-tl-btn">
+    <div className="flex items-center gap-1" role="group" aria-label="Timeline zoom">
+      <button onClick={() => onZoom(zoomStep(zoom, -1))} disabled={zoom <= MIN_ZOOM} aria-label="Zoom out" data-hint="zoomout"
+        data-hint-why={zoom <= MIN_ZOOM ? 'Already as far out as it goes' : undefined} className="ed-tl-btn">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M8 11h6M20 20l-4-4" /></svg>
       </button>
       <button onClick={() => onZoom(1)} disabled={i === 0} aria-live="polite" aria-label={`Zoom ${zoomLabel(zoom)}x${i ? ', back to 1x' : ''}`}
-        title={i ? 'Back to the whole clip (1x)' : 'Whole clip'}
+        data-hint="fit" data-hint-why={i ? undefined : 'The whole clip is already in view'}
         className="h-7 min-w-[46px] px-2 rounded-md text-xs font-semibold tabular-nums transition-colors disabled:cursor-default"
         style={i ? { background: 'rgb(var(--ed-fg) / 0.12)', color: 'var(--ed-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.22)' }
           : { color: 'rgb(var(--ed-fg) / 0.7)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.12)' }}>
         {zoomLabel(zoom)}x
       </button>
-      <button onClick={() => onZoom(zoomStep(zoom, 1))} disabled={zoom >= MAX_ZOOM} aria-label="Zoom in" title="Zoom in" className="ed-tl-btn">
+      <button onClick={() => onZoom(zoomStep(zoom, 1))} disabled={zoom >= MAX_ZOOM} aria-label="Zoom in" data-hint="zoomin"
+        data-hint-why={zoom >= MAX_ZOOM ? 'Already as far in as it goes' : undefined} className="ed-tl-btn">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M8 11h6M11 8v6M20 20l-4-4" /></svg>
       </button>
     </div>

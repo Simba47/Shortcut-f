@@ -477,7 +477,8 @@ a.auth-back, a.auth-submit { text-decoration: none; }
      the nav, card and footer sit in front */
   .auth-root { position: relative; }
   .auth-root > :not(.auth-crowd):not(.as-stage) { position: relative; z-index: 1; }
-  .auth-crowd { display: block; position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: clamp(300px, 55vh, 600px); z-index: 0; pointer-events: none; }
+  /* (shorter: well clear of the card — user, 2026-11-19, calmer) */
+  .auth-crowd { display: block; position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: clamp(240px, 42vh, 460px); z-index: 0; pointer-events: none; }
 
   /* ── the show (components/auth/AuthStage.tsx): stage lights from the top, reactions up the sides ── */
   .as-stage { display: block; position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
@@ -505,11 +506,11 @@ a.auth-back, a.auth-submit { text-decoration: none; }
   .as-rx { animation: as-rise var(--dur) cubic-bezier(.25,.6,.4,1) var(--d) infinite; scale: var(--s, 1); }
   @keyframes as-rise {
     0%   { opacity: 0; transform: translateY(0) scale(.6); }
-    10%  { opacity: .85; transform: translateY(-6vh) scale(1); }
-    70%  { opacity: .55; }
+    10%  { opacity: .45; transform: translateY(-6vh) scale(1); }
+    70%  { opacity: .3; }
     100% { opacity: 0; transform: translateY(-62vh) scale(.9); }
   }
-  .as-sway { display: block; animation: as-sideways 3.2s ease-in-out infinite alternate; }
+  .as-sway { display: block; animation: as-sideways 6s ease-in-out infinite alternate; }
   @keyframes as-sideways { from { transform: translateX(calc(var(--sw) * -10px)) rotate(calc(var(--sw) * -8deg)); } to { transform: translateX(calc(var(--sw) * 10px)) rotate(calc(var(--sw) * 8deg)); } }
   .as-stage svg { display: block; width: 26px; height: 26px; fill: none; stroke: rgb(244 244 245 / 0.7); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
   .as-lime svg { stroke: var(--auth-lime); fill: color-mix(in srgb, var(--auth-lime) 22%, transparent); }

@@ -30,6 +30,8 @@ export type GeminiPart = { text: string } | { inlineData: { mimeType: string; da
 export interface AskOptions {
   /** Default gemini-2.5-flash */
   model?: string
+  /** The model on the Gemini key (GEMINI_FIRST=key) instead of GEMINI_KEY_MODEL; Vertex keeps `model` */
+  keyModel?: string
   /** System instruction */
   system?: string
   /** Answer as JSON (responseMimeType application/json) */
@@ -45,8 +47,12 @@ export interface AskOptions {
   onUsage?: (u: GeminiUsage) => void
 }
 
-/** Tokens one answer used: thinking is billed as output, so it is counted there */
-export interface GeminiUsage { model: string; inputTokens: number; outputTokens: number }
+/**
+ * Tokens one answer used: thinking is billed as output, so it is counted there. audioTokens: the
+ * part of inputTokens that was audio (priced apart: speech reading sends ~25 a second). via: who
+ * bills it: 'key' = the Gemini API key's prepaid credits (AI Studio), 'vertex' = Google Cloud
+ */
+export interface GeminiUsage { model: string; inputTokens: number; outputTokens: number; audioTokens?: number; via?: 'key' | 'vertex' }
 
 const usageScope = new AsyncLocalStorage<(u: GeminiUsage) => void>()
 /**
@@ -55,6 +61,17 @@ const usageScope = new AsyncLocalStorage<(u: GeminiUsage) => void>()
  */
 export function withGeminiUsage<T>(onUsage: (u: GeminiUsage) => void, fn: () => Promise<T>): Promise<T> {
   return usageScope.run(onUsage, fn)
+}
+
+/** For a call made without askGemini (speech reading): its tokens to the job's recorder, if any */
+export function reportGeminiUsage(u: GeminiUsage): void {
+  const report = usageScope.getStore()
+  if (report) try { report(u) } catch { /* recording never fails the answer */ }
+}
+
+/** Audio tokens in a generateContent usageMetadata (Vertex) */
+export function audioTokensOf(details: { modality?: string; tokenCount?: number }[] | undefined): number {
+  return (details ?? []).filter(d => /audio/i.test(d.modality ?? '')).reduce((n, d) => n + (d.tokenCount ?? 0), 0)
 }
 
 export const GEMINI_MODEL = 'gemini-2.5-flash'
@@ -131,18 +148,45 @@ export function thinkingLevel(budget: number | undefined, minimalOk = true): 'mi
 let minimalRefused = false
 
 /** The answer's text (its model_output steps) and tokens (thoughts counted as output) */
-export function interactionAnswer(body: unknown): { text: string; inputTokens: number; outputTokens: number } {
-  const b = (body ?? {}) as { steps?: { type?: string; content?: { type?: string; text?: string }[] }[]; usage?: Record<string, number | undefined> }
+export function interactionAnswer(body: unknown): { text: string; inputTokens: number; outputTokens: number; audioTokens: number } {
+  const b = (body ?? {}) as { steps?: { type?: string; content?: { type?: string; text?: string }[] }[]; usage?: InteractionUsage }
   const text = (b.steps ?? []).filter(st => st.type === 'model_output')
     .flatMap(st => st.content ?? []).filter(c => c.type === 'text').map(c => c.text ?? '').join('')
-  const u = b.usage ?? {}
-  return { text, inputTokens: u.total_input_tokens ?? 0, outputTokens: (u.total_output_tokens ?? 0) + (u.total_thought_tokens ?? 0) }
+  return { text, ...interactionTokens(b.usage) }
+}
+
+/** The usage an Interactions answer reports (Gemini key) */
+export interface InteractionUsage {
+  total_input_tokens?: number; total_output_tokens?: number; total_thought_tokens?: number
+  input_tokens_by_modality?: { modality?: string; tokens?: number }[]
+}
+export function interactionTokens(u: InteractionUsage | undefined): { inputTokens: number; outputTokens: number; audioTokens: number } {
+  return {
+    inputTokens: u?.total_input_tokens ?? 0,
+    outputTokens: (u?.total_output_tokens ?? 0) + (u?.total_thought_tokens ?? 0),
+    audioTokens: (u?.input_tokens_by_modality ?? []).filter(m => /audio/i.test(m.modality ?? '')).reduce((n, m) => n + (m.tokens ?? 0), 0),
+  }
 }
 
 /** The Gemini key rests (Vertex only) until then: 10 minutes with no credit, a minute when refused or busy */
 let keyRestUntil = 0
 const KEY_REST_MS = 10 * 60_000
 const KEY_PAUSE_MS = 60_000
+
+/**
+ * The Gemini key's prepaid credits ran out: Google answers 402, or 429 saying "prepayment credits
+ * are depleted" (AI Studio's balance can't be read by any API, so this is how we know)
+ */
+export function isCreditsEmpty(status: number, body: string): boolean {
+  return status === 402 || (status === 429 && /prepay|credits?\s+(are\s+|is\s+)?(depleted|exhausted)|out of credits?/i.test(body))
+}
+let creditsEmptyListener: ((message: string) => void) | null = null
+/** Told when the key answers "no credit left" (lib/aiUsage.ts records it for the admin's Gemini credits page) */
+export function onKeyCreditsEmpty(fn: (message: string) => void): void { creditsEmptyListener = fn }
+/** Every refusal from the key goes through here: "no credit left" is passed on (never throws) */
+export function noteKeyRefusal(status: number, body: string): void {
+  if (creditsEmptyListener && isCreditsEmpty(status, body)) try { creditsEmptyListener(body.slice(0, 300)) } catch { /* never fails the call */ }
+}
 
 /** An error from Gemini that carries the HTTP status (429 / 5xx are worth retrying) */
 export class GeminiError extends Error {
@@ -183,7 +227,8 @@ export async function askGemini(input: string | GeminiPart[], opts: AskOptions =
         if (name === 'AbortError') throw e
         const status = e instanceof GeminiError ? e.status : 0
         // (only an empty balance rests it long: under load Google also refuses for a moment)
-        if ([401, 402, 403].includes(status) || status === 429 || status >= 500) keyRestUntil = Date.now() + (status === 402 ? KEY_REST_MS : KEY_PAUSE_MS)
+        const empty = isCreditsEmpty(status, e instanceof Error ? e.message : '')
+        if ([401, 402, 403].includes(status) || status === 429 || status >= 500) keyRestUntil = Date.now() + (empty ? KEY_REST_MS : KEY_PAUSE_MS)
         console.warn(`[gemini] the Gemini key failed (${e instanceof Error ? e.message.slice(0, 160) : e}): asking Vertex`)
       }
     }
@@ -199,8 +244,9 @@ async function askKey(input: string | GeminiPart[], opts: AskOptions): Promise<s
   if (opts.temperature !== undefined) generation_config.temperature = opts.temperature
   const level = thinkingLevel(opts.thinkingBudget, !minimalRefused)
   if (level) generation_config.thinking_level = level
+  const model = opts.keyModel ?? KEY_MODEL
   const body = JSON.stringify({
-    model: KEY_MODEL,
+    model,
     input: toInteractionInput(input),
     ...(opts.system ? { system_instruction: opts.system } : {}),
     ...(Object.keys(generation_config).length ? { generation_config } : {}),
@@ -223,7 +269,7 @@ async function askKey(input: string | GeminiPart[], opts: AskOptions): Promise<s
       const answer = interactionAnswer(await res.json())
       const report = opts.onUsage ?? usageScope.getStore()
       if (report) {
-        try { report({ model: KEY_MODEL, inputTokens: answer.inputTokens, outputTokens: answer.outputTokens }) } catch { /* recording never fails the answer */ }
+        try { report({ model, inputTokens: answer.inputTokens, outputTokens: answer.outputTokens, audioTokens: answer.audioTokens, via: 'key' }) } catch { /* recording never fails the answer */ }
       }
       return answer.text
     }
@@ -237,6 +283,7 @@ async function askKey(input: string | GeminiPart[], opts: AskOptions): Promise<s
       minimalRefused = true
       return askKey(input, opts)
     }
+    noteKeyRefusal(res.status, text)
     throw new GeminiError(`Gemini ${res.status} (key): ${text.slice(0, 300)}`, res.status)
   }
 }
@@ -285,12 +332,12 @@ async function askGenerate(input: string | GeminiPart[], opts: AskOptions, provi
     if (res.ok) {
       const data = await res.json() as {
         candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[]
-        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
+        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number; promptTokensDetails?: { modality?: string; tokenCount?: number }[] }
       }
       const report = opts.onUsage ?? usageScope.getStore()
       if (report) {
         const u = data.usageMetadata ?? {}
-        try { report({ model, inputTokens: u.promptTokenCount ?? 0, outputTokens: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0) }) } catch { /* recording never fails the answer */ }
+        try { report({ model, inputTokens: u.promptTokenCount ?? 0, outputTokens: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0), audioTokens: audioTokensOf(u.promptTokensDetails), via: provider === 'vertex' ? 'vertex' : 'key' }) } catch { /* recording never fails the answer */ }
       }
       return (data.candidates?.[0]?.content?.parts ?? []).filter(p => !p.thought).map(p => p.text ?? '').join('')
     }
@@ -299,6 +346,7 @@ async function askGenerate(input: string | GeminiPart[], opts: AskOptions, provi
       await new Promise(r => setTimeout(r, retryDelayMs(attempt, retryAfterMs(res.headers.get('retry-after')))))
       continue
     }
+    if (provider === 'gemini-api') noteKeyRefusal(res.status, text)
     throw new GeminiError(`Gemini ${res.status} (${provider}): ${text.slice(0, 300)}`, res.status)
   }
 }
