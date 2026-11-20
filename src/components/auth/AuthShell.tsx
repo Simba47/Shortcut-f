@@ -44,8 +44,9 @@ export function AuthShell({ brand = DEFAULT_BRAND, navAction, children }: {
   )
   return (
     <div className="auth-root">
-      {/* a crowd walking past along the bottom, behind the card (wide windows; decorative) */}
-      <CrowdCanvas src="/landing/crowd.png" className="auth-crowd" tone={0.42} fill={0.5} react />
+      {/* the audience along the bottom, behind the card (wide windows; decorative): it rises into place once
+          and stands still, low and dim — calm behind the form (user, 2026-11-19: it walked, bobbed and reacted) */}
+      <CrowdCanvas src="/landing/crowd.png" className="auth-crowd" tone={0.26} fill={0.42} stand />
       {/* the show above the audience: stage lights from the top, live reactions up the sides */}
       <AuthStage />
       {/* (wide windows: a slim bar above the card, a line below it — phones keep the card alone) */}
