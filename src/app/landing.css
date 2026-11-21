@@ -364,8 +364,8 @@ a:hover > .brand .brand-bottom { translate: 12px 12px; }
    The stack wrapper limits how long the hero stays pinned. */
 .lp-root .hero-stack { position: relative; }
 .lp-root .hero {
-  position: sticky;
-  top: 0;
+  /* (scrolls away plainly: no longer pinned under the Problem section, user 2026-11-20) */
+  position: relative;
   z-index: 0;
   overflow: hidden;
   min-height: 100vh;
@@ -471,8 +471,7 @@ a:hover > .brand .brand-bottom { translate: 12px 12px; }
   position: relative;
   z-index: 1;
   background: var(--sheet);
-  transform-origin: 50% 0;
-  box-shadow: 0 -30px 80px -20px rgba(0,0,0,0.6), inset 0 1px 0 var(--border-strong);
+  box-shadow: inset 0 1px 0 var(--border-strong);
   overflow: hidden;
 }
 [data-theme="light"] .lp-root .sheet {
@@ -1495,6 +1494,8 @@ a:hover > .brand .brand-bottom { translate: 12px 12px; }
   .lp-root .hero-sub { margin-bottom: clamp(22px, 4.8vh, 52px); }
   .lp-root .hero-earn { margin-top: 0; }
   .lp-root .hl-fit { margin-top: clamp(22px, 5vh, 56px); }
+  /* the bar: Get Started only (user's website copy, 2026-11-20); phones keep Log in */
+  .lp-root .lp-nav .nav-login { display: none; }
 }
 
 /* Hero layout: one centred column (headline, sub-line, buttons, free line, then the lens),
@@ -2690,3 +2691,1437 @@ html.lenis, html.lenis body { height: auto; }
   .lp-root .lx-pa-steer * { animation: none !important; }
   .lp-root .lx-steer-tag-good, .lp-root .lx-steer-cap-good { opacity: 1; }
 }
+
+/* ── HERO (user's website copy, 2026-11-20) ──────────────────────────────────────────────────────────
+   The words: headline, the subheadline with "Faster." on its own line, two short lines, the buttons.
+   The visual: desktop shows the real editor (HeroEditor, components/landing/hero-editor.tsx); phones keep
+   their animation (HeroSplit). */
+/* Three levels under the headline (user, 2026-11-20: four styles in a row looked clumsy): the subheadline
+   bright, "Faster." the same size in bold white; the body calm grey; the last line a touch brighter, not bold */
+.lp-root .hero-lead { font-size: 21px; line-height: 1.45; font-weight: 500; color: color-mix(in srgb, var(--text) 80%, transparent); margin-bottom: 20px; }
+.lp-root .hero-lead strong { color: var(--text); font-weight: 800; }
+.lp-root .hero-body { font-size: 16.5px; line-height: 1.65; color: var(--muted); max-width: 540px; margin: 0 auto 12px; text-wrap: pretty; }
+.lp-root .hero-note { font-size: 16.5px; line-height: 1.5; font-weight: 500; color: color-mix(in srgb, var(--text) 88%, transparent); max-width: 540px; margin: 0 auto 34px; }
+.lp-root .hero-visual-desk { display: none; }
+/* Desktop: the hero in ONE screen, nothing below the fold (user, 2026-11-20). Text on the left, the editor on the
+   right (its preview inside it: nothing overlaps or repeats), both centred in the screen's height. Every size
+   follows the screen's height as well as its width, so it fits a 1536 × 730 laptop at 125% as well as a big
+   monitor. Between 961 and 1099px the two stack, centred, the editor kept small enough to fit. */
+@media (min-width: 961px) {
+  .lp-root .hero-visual-desk { display: block; }
+  .lp-root .hero-visual-phone { display: none; }
+  .lp-root .hero-stack .hero {
+    min-height: 100vh; align-items: center;
+    padding: calc(60px + clamp(10px, 2.5vh, 32px)) clamp(28px, 4.5vw, 96px) clamp(10px, 2.5vh, 32px);
+  }
+  .lp-root .hero-grid { display: flex; flex-direction: column; align-items: center; text-align: center; gap: clamp(18px, 3vh, 36px); max-width: 1600px; margin: 0 auto; }
+  .lp-root .hero-headline { font-size: clamp(42px, min(4.6vw, 8.6vh), 88px); line-height: .98; margin: 0 0 clamp(14px, 2.6vh, 28px); }
+  .lp-root .hero-headline .line { white-space: nowrap; }
+  /* the headline's first line solid white (its grey fade made "to" the hardest word to read) */
+  .lp-root .hero-headline .line-inner { background: none; color: var(--text); -webkit-text-fill-color: var(--text); }
+  .lp-root .hero-lead { font-size: clamp(16.5px, 2.6vh, 22px); margin: 0 auto clamp(10px, 1.8vh, 18px); max-width: none; }
+  .lp-root .hero-body { font-size: clamp(14px, 2.05vh, 16.5px); max-width: 32em; margin: 0 auto clamp(6px, 1.1vh, 12px); text-wrap: pretty; }
+  .lp-root .hero-note { font-size: clamp(14px, 2.05vh, 16.5px); max-width: 36em; margin: 0 auto clamp(16px, 3.4vh, 34px); }
+  .lp-root .hero-ctas { justify-content: center; margin: 0; }
+  .lp-root .hero-cta-main, .lp-root .hero-cta-ghost { padding: clamp(10px, 1.6vh, 13px) clamp(20px, 2vw, 26px); font-size: clamp(14px, 1.9vh, 15px); }
+  /* the editor stays put as the hero is left (no fade or shrink); its size follows the screen's height */
+  .lp-root .hero-visual { width: 100%; opacity: 1 !important; transform: none !important; }
+  .lp-root .hero-visual .hl-fit.he-fit { max-width: min(100%, 760px, calc((100vh - 470px) * 1.41)); margin: 0 auto; }
+}
+@media (min-width: 1100px) {
+  /* The words fill their side (user, 2026-11-20: "there's space in between — are you building a house there?"):
+     the editor keeps its size on the right, the text column takes everything else, and every text size follows
+     that column's width (cqi) as well as the screen's height — so the headline runs right up to the editor and
+     never past it, on any screen */
+  .lp-root .hero-grid {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+    gap: clamp(32px, 3.4vw, 72px); text-align: left;
+    /* (step 1, user 2026-11-21: one grid — the hero's edges are the bar's edges, the logo's left and Get Started's right) */
+    max-width: none;
+  }
+  .lp-root .hero-stack .hero { padding-left: 52px; padding-right: 52px; }
+  /* (the optical centre: the group sits a little above the true middle — more room below than above; user 2026-11-21) */
+  .lp-root .hero-stack .hero { padding-bottom: calc(clamp(10px, 2.5vh, 32px) + 7vh); }
+  /* (the headline's letters on the same left edge as the logo: its lines carry a little side padding) */
+  .lp-root .hero-text .hero-headline { margin-left: -.065em; }
+  /* (top-aligned with the editor: a little higher than centred, user 2026-11-20) */
+  .lp-root .hero-text { max-width: none; min-width: 0; container-type: inline-size; align-self: start; margin-top: -.06em; }
+  /* (step 2, user 2026-11-21: ~20% smaller, capped on big screens — the product is the hero now) */
+  .lp-root .hero-headline { font-size: clamp(46px, min(12.6cqi, 11.4vh), 120px); margin-bottom: clamp(16px, 3vh, 30px); }
+  .lp-root .hero-lead { font-size: clamp(17px, min(3.45cqi, 3.2vh), 30px); margin: 0 0 clamp(12px, 2vh, 22px); }
+  .lp-root .hero-ctas { justify-content: flex-start; gap: clamp(12px, 1.6cqi, 18px); }
+  /* (a standard button size, user 2026-11-20: they were a little big) */
+  .lp-root .hero-cta-main, .lp-root .hero-cta-ghost {
+    padding: clamp(10px, 1.65vh, 13px) clamp(20px, 2.8cqi, 28px); font-size: clamp(14px, min(2.3cqi, 2.1vh), 16.5px);
+  }
+  /* (room on the right for the ghost button's arrow, which sits at a fixed place inside it) */
+  .lp-root .hero-cta-ghost { padding-right: calc(clamp(20px, 2.8cqi, 28px) + 18px); }
+  /* the line closing the hero: across both sides, centred, under them (user, 2026-11-20) */
+  .lp-root .hero-grid { row-gap: clamp(18px, 4vh, 44px); }
+  .lp-root .hero-grid .hero-after { grid-column: 1 / -1; justify-self: center; text-align: center; margin: 0; }
+  .lp-root .hero-grid .hero-after-line { margin: 0; font-size: clamp(15px, min(1.3vw, 2.6vh), 21px); }
+  .lp-root .hero-lead, .lp-root .hero-after { margin-left: 0; margin-right: 0; }
+  /* the soft lime light behind "short form" (the second line, from its start) */
+  .lp-root .hero-headline::after { left: -4%; width: 70%; top: 48%; }
+  /* a softer light behind the editor */
+  .lp-root .hero-visual::before { width: 100%; aspect-ratio: 1.6; top: 50%; opacity: .55; }
+  /* the editor: a fixed share of the screen, never taller than the screen leaves room for */
+  .lp-root .hero-visual { width: auto; }
+  /* (the size it had before: user, 2026-11-20 — only the words were to grow) */
+  /* (step 2: ~35% bigger — half the width, never taller than the screen leaves room for) */
+  /* (on a shorter screen it gives way to the height more: ~15% smaller on a laptop, as before on a big screen —
+     user 2026-11-21: it filled the laptop screen top to bottom) */
+  .lp-root .hero-visual .hl-fit.he-fit { width: min(50vw, 980px, calc((100vh - 270px) * 1.42)); max-width: none; margin: 0; }
+}
+
+/* The subheadline (HeroLead in LandingPage.tsx): it types itself with a blinking cursor, then "Faster." becomes
+   the moment — lime with a glow, the count 1× → 10× opening in front of it, a pop, a lime underline sweeping in */
+.lp-root .lead-caret {
+  display: inline-block; width: 2px; height: 1.05em; margin-left: 3px; vertical-align: -.16em; border-radius: 1px;
+  background: currentColor; animation: lead-caret 1s steps(1) infinite;
+}
+@keyframes lead-caret { 50% { opacity: 0; } }
+.lp-root .faster { position: relative; display: inline-block; transition: color .35s ease, text-shadow .35s ease; transform-origin: left center; }
+.lp-root .faster[data-hi] {
+  color: var(--logo, #c8ff00);
+  text-shadow: 0 0 22px color-mix(in srgb, var(--logo, #c8ff00) 45%, transparent);
+}
+[data-theme="light"] .lp-root .faster[data-hi] { color: var(--accent); text-shadow: none; }
+.lp-root .faster-num {
+  display: inline-block; overflow: hidden; vertical-align: bottom; white-space: nowrap; max-width: 0;
+  font-variant-numeric: tabular-nums; transition: max-width .45s cubic-bezier(.2,.8,.2,1), margin .45s ease;
+}
+.lp-root .faster[data-hi] .faster-num { max-width: 3.4ch; margin-right: .26em; }
+.lp-root .faster[data-done] { animation: faster-pop .55s cubic-bezier(.2,1.7,.4,1); }
+@keyframes faster-pop { 0% { transform: scale(1); } 40% { transform: scale(1.14); } 100% { transform: scale(1); } }
+.lp-root .faster::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -.12em; height: .11em; border-radius: 999px;
+  background: var(--logo, #c8ff00); box-shadow: 0 0 14px color-mix(in srgb, var(--logo, #c8ff00) 60%, transparent);
+  transform: scaleX(0); transform-origin: left center; transition: transform .6s cubic-bezier(.2,.8,.2,1) .1s;
+}
+[data-theme="light"] .lp-root .faster::after { background: var(--accent); box-shadow: none; }
+.lp-root .faster[data-done]::after { transform: scaleX(1); }
+@media (prefers-reduced-motion: reduce) {
+  .lp-root .faster, .lp-root .faster-num, .lp-root .faster::after { transition: none; animation: none; }
+}
+
+/* The bar, once the page has scrolled (desktop): a soft blurred background, so what scrolls under it stays clear
+   of the logo and the buttons (the hero is no longer pinned — user, 2026-11-20) */
+@media (min-width: 961px) {
+  .lp-nav { transition: background .3s ease, box-shadow .3s ease, backdrop-filter .3s ease; }
+  .lp-nav[data-scrolled] {
+    background: color-mix(in srgb, var(--bg, #0a0a0a) 72%, transparent);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2);
+    box-shadow: 0 1px 0 var(--border);
+  }
+}
+
+/* Under the buttons (desktop; user, 2026-11-20): the two lines that sat above them, shortened — the kind of video
+   rolls by (RollingWord in LandingPage.tsx). Phones keep the two lines above the buttons. */
+.lp-root .hero-after { display: none; }
+@media (min-width: 961px) {
+  .lp-root .hero-copy-phone { display: none; }
+  .lp-root .hero-after { display: block; margin-top: clamp(18px, 3.4vh, 34px); text-align: center; }
+  .lp-root .hero-lead { margin-bottom: clamp(20px, 3.8vh, 38px) !important; }
+}
+/* (sized to sit with the headline and the subheadline: a step below the subheadline, user 2026-11-20) */
+.lp-root .hero-after-line { margin: 0 0 clamp(6px, 1.2vh, 10px); font-size: clamp(17px, 2.75vh, 22px); line-height: 1.45; font-weight: 400; color: color-mix(in srgb, var(--text) 50%, transparent); }
+.lp-root .hero-after-note {
+  display: inline-flex; align-items: center; gap: 9px; margin: 0;
+  font-size: clamp(15px, 2.3vh, 18px); font-weight: 400; color: color-mix(in srgb, var(--text) 50%, transparent);
+}
+.lp-root .hero-after-note svg { flex: 0 0 auto; width: 1.05em; height: 1.05em; color: color-mix(in srgb, var(--text) 45%, transparent); }
+/* the rolling word: the old one slides up and out as the new one slides up in; the box eases to the new width */
+.lp-root .roll {
+  position: relative; display: inline-block; vertical-align: bottom; height: 1.45em; overflow: hidden;
+  text-align: left; transition: width .5s cubic-bezier(.2,.8,.2,1);
+}
+.lp-root .roll-measure { position: absolute; visibility: hidden; white-space: nowrap; font-weight: 600; }
+.lp-root .roll-word {
+  position: absolute; left: 0; top: 0; white-space: nowrap; font-weight: 600; color: color-mix(in srgb, var(--text) 82%, transparent);
+}
+.lp-root .roll-in { animation: roll-in .6s cubic-bezier(.2,.8,.2,1) both; }
+.lp-root .roll-out { animation: roll-out .6s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes roll-in { from { transform: translateY(100%); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes roll-out { from { transform: none; opacity: 1; } to { transform: translateY(-100%); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .lp-root .roll-word { animation: none; } .lp-root .roll { transition: none; } }
+
+/* The editor, drawn (always dark: it is the app's own screen; laid out as the real one) */
+.lp-root .he {
+  position: relative; display: flex; flex-direction: column; overflow: hidden; text-align: left;
+  border-radius: 18px; background: #0b0b0c; color: rgba(255,255,255,.88);
+  border: 1px solid rgba(255,255,255,.1);
+  box-shadow: 0 40px 90px -40px rgba(0,0,0,.85), 0 0 0 1px rgba(0,0,0,.4);
+  font-size: 11px; line-height: 1.3; letter-spacing: 0;
+}
+[data-theme="light"] .lp-root .he { box-shadow: 0 40px 90px -40px rgba(0,0,0,.45); }
+.lp-root .he svg { display: block; }
+.lp-root .he-sp { flex: 1; }
+/* top bar */
+.lp-root .he-top {
+  flex: 0 0 36px; display: flex; align-items: center; gap: 12px; padding: 0 10px 0 12px;
+  border-bottom: 1px solid rgba(255,255,255,.07); font-size: 10px; color: rgba(255,255,255,.45);
+}
+.lp-root .he-logo { display: flex; align-items: center; zoom: .62; }
+.lp-root .he-crumbs { padding-left: 12px; border-left: 1px solid rgba(255,255,255,.1); }
+.lp-root .he-crumbs i { font-style: normal; margin: 0 3px; opacity: .6; }
+.lp-root .he-crumbs b { color: #fff; font-weight: 700; }
+.lp-root .he-saved { font-size: 9px; color: rgba(255,255,255,.4); }
+.lp-root .he-export {
+  display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 7px;
+  /* (dark with a lime outline: "short form" is the screen's one lime highlight) */
+  background: rgba(200,255,0,.06); border: 1px solid rgba(200,255,0,.45); color: #fff; font-size: 9.5px; font-weight: 800;
+}
+.lp-root .he-export svg { width: 10px; height: 10px; }
+/* body: rail · stage · phone */
+.lp-root .he-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 50px minmax(0, 1fr) 190px; }
+.lp-root .he-rail {
+  display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 9px 0;
+  border-right: 1px solid rgba(255,255,255,.07);
+}
+.lp-root .he-tool { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 6.8px; font-weight: 600; color: rgba(255,255,255,.42); }
+.lp-root .he-tool svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.lp-root .he-tool[data-on] { color: #fff; }
+.lp-root .he-stage { display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 8px; padding: 8px 12px; min-width: 0; }
+.lp-root .he-tabbar { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.lp-root .he-tabs { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: rgba(255,255,255,.05); }
+.lp-root .he-tabs span { padding: 4px 10px; border-radius: 6px; font-size: 9.5px; font-weight: 600; color: rgba(255,255,255,.45); }
+.lp-root .he-tabs span[data-on] { background: rgba(255,255,255,.12); color: #fff; }
+.lp-root .he-motion {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.12); font-size: 9.5px; font-weight: 600; color: rgba(255,255,255,.55);
+}
+.lp-root .he-motion i { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.5); }
+.lp-root .he-video { position: relative; isolation: isolate; width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; background: #000; }
+.lp-root .he-video video { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+/* the frame box: green, full height, as in the editor; everything outside it dimmed (.he-dim, either side) */
+/* the frame: white, like a camera's crop frame (user, 2026-11-20: the green looked odd) — a fine border, corner
+   handles, a white label */
+.lp-root .he-box {
+  position: absolute; z-index: 2; border: 1.5px solid rgba(255,255,255,.85); border-radius: 2px; transition: opacity .3s ease;
+  background: linear-gradient(rgba(255,255,255,.95),rgba(255,255,255,.95)) left top / 10px 3px, linear-gradient(rgba(255,255,255,.95),rgba(255,255,255,.95)) left top / 3px 10px, linear-gradient(rgba(255,255,255,.95),rgba(255,255,255,.95)) right top / 10px 3px, linear-gradient(rgba(255,255,255,.95),rgba(255,255,255,.95)) right top / 3px 10px, linear-gradient(rgba(255,255,255,.95),rgba(255,255,255,.95)) left bottom / 10px 3px, linear-gradient(rgba(255,255,255,.95),rgba(255,255,255,.95)) left bottom / 3px 10px, linear-gradient(rgba(255,255,255,.95),rgba(255,255,255,.95)) right bottom / 10px 3px, linear-gradient(rgba(255,255,255,.95),rgba(255,255,255,.95)) right bottom / 3px 10px; background-repeat: no-repeat;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.25);
+}
+.lp-root .he-dim { position: absolute; z-index: 1; top: 0; bottom: 0; background: rgba(0,0,0,.7); pointer-events: none; }
+.lp-root .he-box-label {
+  position: absolute; left: 6px; top: 6px; padding: 1px 6px; border-radius: 4px;
+  background: rgba(255,255,255,.95); color: #0a0a0a; font-size: 8px; font-weight: 800; white-space: nowrap;
+}
+.lp-root .he-tag {
+  /* (bottom left: the phone sits over the video's right edge) */
+  position: absolute; z-index: 4; bottom: 8px; left: 8px; padding: 2px 7px; border-radius: 6px;
+  background: rgba(0,0,0,.65); font-size: 8.5px; font-weight: 700; color: rgba(255,255,255,.85);
+}
+/* the editor's hint while the box is steered */
+.lp-root .he-hint {
+  position: absolute; z-index: 4; left: 50%; bottom: 10px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  padding: 4px 11px; border-radius: 999px; background: rgba(10,10,10,.82); border: 1px solid rgba(255,255,255,.12);
+  font-size: 9px; font-weight: 600; color: #fff;
+  opacity: 0; transform: translate(-50%, 6px); transition: opacity .3s ease, transform .3s ease;
+}
+.lp-root .he-hint i { width: 6px; height: 6px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+.lp-root .he-hint[data-on] { opacity: 1; transform: translate(-50%, 0); }
+.lp-root .he-cursor {
+  position: absolute; z-index: 3; top: 46%; width: 20px; height: 20px; pointer-events: none;
+  opacity: 0; transform: translate(-30%, -20%) scale(.8); transition: opacity .25s ease, transform .25s ease;
+}
+.lp-root .he-cursor svg { width: 20px; height: 20px; fill: #fff; stroke: #0a0a0a; stroke-width: 1.4; stroke-linejoin: round; filter: drop-shadow(0 2px 4px rgba(0,0,0,.6)); }
+.lp-root .he-cursor[data-on] { opacity: 1; transform: translate(-30%, -20%) scale(1); }
+/* the preview: the vertical short, live (the editor's own preview column) */
+.lp-root .he-phone-col {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  border-left: 1px solid rgba(255,255,255,.07); padding: 10px 14px;
+}
+.lp-root .he-views { display: inline-flex; gap: 2px; padding: 2px; border-radius: 7px; background: rgba(255,255,255,.05); }
+.lp-root .he-views span { display: grid; place-items: center; width: 24px; height: 18px; border-radius: 5px; color: rgba(255,255,255,.45); }
+.lp-root .he-views span[data-on] { background: rgba(255,255,255,.12); color: #fff; }
+.lp-root .he-views svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 1.2; }
+.lp-root .he-phone {
+  position: relative; width: 158px; aspect-ratio: 9 / 16; border-radius: 22px; overflow: hidden; background: #000;
+  border: 4px solid #1a1a1c; box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 20px 44px -20px rgba(0,0,0,.9);
+}
+.lp-root .he-phone canvas { width: 100%; height: 100%; display: block; }
+.lp-root .he-island { position: absolute; top: 6px; left: 50%; width: 40px; height: 10px; margin-left: -20px; border-radius: 999px; background: #000; }
+.lp-root .he-title {
+  /* (below the brand logo's place) */
+  position: absolute; left: 10px; right: 10px; top: 17%; margin: 0; text-align: center;
+  font-size: 13.5px; font-weight: 900; line-height: 1.15; letter-spacing: -.01em; color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,.8), 0 2px 12px rgba(0,0,0,.6);
+  opacity: 0; transform: translateY(-6px); transition: opacity .35s ease, transform .4s cubic-bezier(.2,1.3,.4,1);
+}
+.lp-root .he-title[data-on] { opacity: 1; transform: none; }
+.lp-root .he-cap {
+  position: absolute; left: 8px; right: 8px; bottom: 22%; margin: 0; text-align: center;
+  font-size: 13.5px; font-weight: 800; line-height: 1.2; letter-spacing: -.01em; color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,.8), 0 2px 10px rgba(0,0,0,.55);
+}
+.lp-root .he-cap span { display: inline-block; margin: 0 2px; opacity: 0; transform: translateY(4px) scale(.9); transition: opacity .2s ease, transform .3s cubic-bezier(.2,1.5,.4,1), color .2s ease; }
+.lp-root .he-cap span[data-shown] { opacity: 1; transform: none; }
+.lp-root .he-cap span[data-now] { color: #c8ff00; transform: scale(1.08); }
+.lp-root .he-ready {
+  position: absolute; bottom: 7%; left: 50%; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+  padding: 3px 10px; border-radius: 999px; background: rgba(10,10,10,.82); border: 1px solid rgba(255,255,255,.16);
+  font-size: 10px; font-weight: 700; color: #fff;
+  opacity: 0; transform: translate(-50%, 6px) scale(.9); transition: opacity .3s ease, transform .4s cubic-bezier(.2,1.4,.4,1);
+}
+.lp-root .he-ready svg { width: 11px; height: 11px; color: #4ade80; }
+.lp-root .he-ready[data-on] { opacity: 1; transform: translate(-50%, 0) scale(1); }
+/* the timeline: controls, the ruler, the Title · Captions · Video tracks, the picked moment and the playhead */
+.lp-root .he-tl { flex: 0 0 140px; display: flex; flex-direction: column; gap: 6px; padding: 7px 12px 10px; border-top: 1px solid rgba(255,255,255,.07); }
+.lp-root .he-ctrl { display: flex; align-items: center; gap: 8px; font-size: 10px; color: rgba(255,255,255,.55); }
+.lp-root .he-ep { flex: 1; font-size: 9px; color: rgba(255,255,255,.4); }
+.lp-root .he-ctrl .he-sp { display: none; }
+.lp-root .he-play { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: rgba(255,255,255,.1); color: #fff; }
+.lp-root .he-play svg { width: 9px; height: 9px; }
+.lp-root .he-time { font-variant-numeric: tabular-nums; }
+.lp-root .he-time span { color: #fff; }
+.lp-root .he-speed { flex: 1; text-align: right; font-size: 9px; font-weight: 700; color: rgba(255,255,255,.55); }
+.lp-root .he-rows { flex: 1; display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 6px; min-height: 0; }
+.lp-root .he-gutter { display: grid; grid-template-rows: 14px 16px 16px 1fr; gap: 4px; }
+.lp-root .he-gutter span { display: grid; place-items: center; font-size: 8.5px; font-weight: 900; color: rgba(255,255,255,.4); }
+.lp-root .he-gutter svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.2; }
+.lp-root .he-lanes { position: relative; overflow: hidden; display: grid; grid-template-rows: 14px 16px 16px 1fr; gap: 4px; min-height: 0; }
+.lp-root .he-ruler { position: relative; z-index: 4; border-bottom: 1px solid rgba(255,255,255,.08); }
+.lp-root .he-ruler span { position: absolute; top: 0; transform: translateX(-50%); font-size: 7.5px; color: rgba(255,255,255,.35); font-variant-numeric: tabular-nums; }
+.lp-root .he-ruler span:first-child { transform: none; }
+.lp-root .he-ruler span:last-child { transform: translateX(-100%); }
+.lp-root .he-lane { position: relative; border-radius: 4px; background: rgba(255,255,255,.025); }
+.lp-root .he-chip {
+  position: absolute; top: 0; bottom: 0; display: flex; align-items: center; gap: 4px; padding: 0 6px; overflow: hidden; white-space: nowrap;
+  border-radius: 4px; font-size: 7.5px; font-weight: 700;
+  opacity: 0; transform: scaleX(.6); transform-origin: left center; transition: opacity .3s ease, transform .45s cubic-bezier(.2,1,.3,1);
+}
+.lp-root .he-chip[data-on] { opacity: 1; transform: none; }
+.lp-root .he-chip-title { background: rgba(167,139,250,.22); border: 1px solid rgba(167,139,250,.5); color: #ddd6fe; }
+.lp-root .he-chip-title b { font-weight: 900; color: #c4b5fd; }
+.lp-root .he-chip-cap { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); color: rgba(255,255,255,.75); transition-delay: .12s; }
+.lp-root .he-lane-video { background: none; }
+.lp-root .he-strip {
+  position: absolute; inset: 0; border-radius: 5px;
+  background: url(/landing/hero-podcast-strip.jpg) left center / auto 100% repeat-x; opacity: .28;
+}
+/* the picked moment: across the three tracks */
+.lp-root .he-sel {
+  /* the moment, as a trim on the Video track (user, 2026-11-20): white edges top and bottom, a grab handle at each
+     end, the filmstrip bright inside it and dimmed outside; its tag up in the ruler */
+  position: absolute; z-index: 3; top: 58px; bottom: 0; pointer-events: none;
+  border-top: 2px solid #fff; border-bottom: 2px solid #fff;
+}
+.lp-root .he-sel::before, .lp-root .he-sel::after {
+  content: ""; position: absolute; z-index: 1; top: -2px; bottom: -2px; width: 8px; background: #fff;
+  /* (a grip line down the middle of each handle) */
+  background-image: linear-gradient(#0b0b0c, #0b0b0c); background-size: 1.5px 45%; background-position: center; background-repeat: no-repeat;
+}
+.lp-root .he-sel::before { left: -8px; border-radius: 4px 0 0 4px; }
+.lp-root .he-sel::after { right: -8px; border-radius: 0 4px 4px 0; }
+.lp-root .he-sel-win { position: absolute; inset: 0; overflow: hidden; }
+.lp-root .he-sel-img { position: absolute; top: 0; bottom: 0; background: url(/landing/hero-podcast-strip.jpg) left center / auto 100% repeat-x; }
+.lp-root .he-sel-label {
+  position: absolute; z-index: 3; left: 50%; top: -59px; transform: translateX(-50%); white-space: nowrap;
+  padding: 1px 7px; border-radius: 999px; background: #fff; font-size: 8px; font-weight: 800; color: #0a0a0a;
+}
+.lp-root .he-head { position: absolute; z-index: 5; top: 16px; bottom: 0; width: 2px; margin-left: -1px; border-radius: 2px; background: #fff; }
+.lp-root .he-head::before { content: ""; position: absolute; top: -3px; left: -3px; width: 8px; height: 8px; border-radius: 50%; background: #fff; }
+.lp-root .he[data-step="select"] .he-head { opacity: .5; }
+
+/* ── The feature tour (hero-editor.tsx, user 2026-11-20: show the main features) ── */
+.lp-root .he-tour { display: flex; flex-direction: column; text-align: left; }
+.lp-root .he-tour .he { flex: 0 0 auto; }
+/* Export, top right: pressed → rendering (fills with its progress) → exported */
+.lp-root .he-export { position: relative; overflow: hidden; transition: transform .15s ease, background .25s ease, border-color .25s ease; }
+.lp-root .he-export[data-state="pressed"] { transform: scale(.94); background: rgba(200,255,0,.18); }
+.lp-root .he-export[data-state="rendering"] {
+  background: linear-gradient(90deg, rgba(200,255,0,.28) calc(var(--p, 0) * 100%), rgba(200,255,0,.06) 0);
+  font-variant-numeric: tabular-nums;
+}
+.lp-root .he-export[data-state="done"] { border-color: rgba(74,222,128,.7); color: #bbf7d0; }
+.lp-root .he-export[data-state="done"] svg { color: #4ade80; }
+/* captions: three of the app's styles */
+.lp-root .he-cap[data-style="box"] span[data-now] { color: #0a0a0a; background: #c8ff00; border-radius: 4px; padding: 0 3px; text-shadow: none; }
+.lp-root .he-cap[data-style="highlight"] { text-transform: uppercase; font-size: 12.5px; letter-spacing: .01em; }
+.lp-root .he-cap[data-style="highlight"] span[data-now] { color: #fde047; transform: scale(1.14); }
+/* the brand kit on: its colour on the spoken word, its logo in the corner (an example brand) */
+.lp-root .he-phone[data-brand] .he-cap span[data-now] { color: #fff; background: #7c3aed; }
+.lp-root .he-phone[data-brand] .he-title { color: #ddd6fe; }
+.lp-root .he-brandlogo {
+  position: absolute; top: 22px; right: 8px; display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px 2px 4px; border-radius: 999px; background: rgba(255,255,255,.92); color: #1e1b4b;
+  font-size: 8.5px; font-weight: 900; letter-spacing: -.01em;
+  opacity: 0; transform: scale(.7); transition: opacity .35s ease, transform .45s cubic-bezier(.2,1.5,.4,1);
+}
+.lp-root .he-brandlogo i { width: 9px; height: 9px; border-radius: 3px; background: linear-gradient(135deg, #7c3aed, #a78bfa); }
+.lp-root .he-brandlogo[data-on] { opacity: 1; transform: none; }
+/* the caption style's name while the styles change */
+.lp-root .he-style-tag {
+  position: absolute; left: 50%; bottom: 8%; transform: translateX(-50%); white-space: nowrap;
+  padding: 2px 8px; border-radius: 999px; background: rgba(10,10,10,.8); border: 1px solid rgba(255,255,255,.14);
+  font-size: 9px; font-weight: 700; color: rgba(255,255,255,.85);
+}
+/* under the editor: what the step shows, one short line that fades in with each step */
+.lp-root .he-say {
+  margin: 14px 0 0; text-align: center; font-size: 13px; line-height: 1.4; color: var(--muted);
+  animation: he-say-in .45s cubic-bezier(.2,.8,.2,1) both;
+}
+.lp-root .he-say b { color: var(--text); font-weight: 700; }
+.lp-root .he-say b::after { content: "·"; margin: 0 8px; color: var(--dim, rgba(255,255,255,.35)); font-weight: 400; }
+@keyframes he-say-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .lp-root .he-say { animation: none; } }
+
+/* the grind: a dark card, the chores ticking in with their time, the total adding up (warm red: the pain;
+   lime stays for the solution) */
+.lp-root .lx-grind {
+  position: relative; padding: clamp(20px, 2.4vw, 30px); border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.01)), #0c0c0d;
+  border: 1px solid rgba(255,255,255,.09); box-shadow: 0 40px 80px -40px rgba(0,0,0,.9);
+  color: rgba(255,255,255,.9); text-align: left;
+}
+[data-theme="light"] .lp-root .lx-grind { box-shadow: 0 30px 70px -40px rgba(0,0,0,.45); }
+.lp-root .lx-grind-head { display: flex; align-items: center; gap: 9px; margin-bottom: 20px; font-size: 14px; font-weight: 700; }
+.lp-root .lx-grind-head em { margin-left: auto; font-style: normal; font-size: 12px; font-weight: 600; color: rgba(255,255,255,.45); padding: 3px 9px; border-radius: 999px; border: 1px solid rgba(255,255,255,.12); }
+.lp-root .lx-grind-rec { width: 8px; height: 8px; border-radius: 50%; background: #f87171; animation: lx-rec 1.4s ease-in-out infinite; }
+@keyframes lx-rec { 50% { opacity: .3; } }
+.lp-root .lx-grind-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.lp-root .lx-grind-rows li {
+  display: grid; grid-template-columns: 9.5em minmax(0, 1fr) 4.2em; align-items: center; gap: 14px; font-size: 14.5px;
+  opacity: 0; transform: translateY(8px); transition: opacity .45s ease, transform .45s cubic-bezier(.2,.8,.2,1);
+  transition-delay: calc(var(--i) * .32s + .1s);
+}
+.lp-root .lx-grind[data-on] .lx-grind-rows li { opacity: 1; transform: none; }
+.lp-root .lx-grind-task { font-weight: 600; color: rgba(255,255,255,.82); white-space: nowrap; }
+.lp-root .lx-grind-bar { height: 8px; border-radius: 999px; background: rgba(255,255,255,.06); overflow: hidden; }
+.lp-root .lx-grind-bar i {
+  display: block; height: 100%; width: var(--w); border-radius: inherit;
+  /* (white, user 2026-11-20) */
+  background: linear-gradient(90deg, rgba(255,255,255,.35), #fff);
+  transform: scaleX(0); transform-origin: left center; transition: transform .7s cubic-bezier(.2,.8,.2,1);
+  transition-delay: calc(var(--i) * .32s + .25s);
+}
+.lp-root .lx-grind[data-on] .lx-grind-bar i { transform: scaleX(1); }
+.lp-root .lx-grind-time { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; color: rgba(255,255,255,.6); }
+.lp-root .lx-grind-total {
+  display: flex; align-items: baseline; justify-content: space-between; margin-top: 22px; padding-top: 18px;
+  border-top: 1px dashed rgba(255,255,255,.14);
+}
+.lp-root .lx-grind-total span { font-size: 14px; font-weight: 700; color: rgba(255,255,255,.6); text-transform: uppercase; letter-spacing: .08em; }
+.lp-root .lx-grind-total b {
+  font-size: clamp(34px, 3.4vw, 48px); font-weight: 800; letter-spacing: -.03em; font-variant-numeric: tabular-nums;
+  color: #fca5a5; text-shadow: 0 0 30px rgba(248,113,113,.35);
+}
+.lp-root .lx-grind-note { margin: 10px 0 0; font-size: 12px; color: rgba(255,255,255,.38); }
+@media (prefers-reduced-motion: reduce) {
+  .lp-root .lx-grind-rows li, .lp-root .lx-grind-bar i { transition: none; opacity: 1; transform: none; }
+  .lp-root .lx-grind-rec { animation: none; }
+}
+
+/* ── The Problem, premium (user, 2026-11-20): the headline centred; the numbered path beside the grind card; the
+   closing question on one line. Each piece enters once, from its own side, as it scrolls in. ── */
+.lp-root #problem .lx-pb { display: flex; flex-direction: column; justify-content: center; gap: clamp(40px, 7vh, 84px); max-width: 1180px; }
+.lp-root .lx-pb-head { text-align: center; }
+.lp-root .lx-pb-eyebrow {
+  display: inline-flex; align-items: center; gap: 8px; margin: 0 0 18px; padding: 6px 14px 6px 12px; border-radius: 999px;
+  font-size: 13.5px; font-weight: 650; letter-spacing: .02em; color: color-mix(in srgb, var(--text) 82%, transparent);
+  background: rgba(248,113,113,.08); border: 1px solid rgba(248,113,113,.28);
+}
+.lp-root .lx-pb-eyebrow i { width: 7px; height: 7px; border-radius: 50%; background: #f87171; box-shadow: 0 0 10px rgba(248,113,113,.8); }
+.lp-root .lx-pb-title {
+  margin: 0; font-size: clamp(36px, min(4.6vw, 8.4vh), 68px); font-weight: 900; line-height: 1.04; letter-spacing: -.03em; color: var(--text);
+}
+.lp-root .lx-pb-mask { display: block; overflow: hidden; padding: 0 .06em .1em; margin-bottom: -.1em; }
+.lp-root .lx-pb-mask > span { display: inline-block; }
+@media (min-width: 961px) { .lp-root .lx-pb-mask { white-space: nowrap; } }
+.lp-root .lx-pb-title-2 { color: color-mix(in srgb, var(--text) 52%, transparent); }
+.lp-root .lx-pb-title-2 em { font-style: normal; color: #f87171; text-shadow: 0 0 34px rgba(248,113,113,.35); }
+
+/* the middle: the numbered path (left), the grind card (right) */
+.lp-root .lx-pb-body {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: clamp(36px, 5vw, 96px);
+  width: 100%;
+}
+@media (max-width: 960px) { .lp-root .lx-pb-body { grid-template-columns: 1fr; } }
+.lp-root .lx-pb-steps { position: relative; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: clamp(22px, 3.4vh, 34px); }
+/* the line joining the three numbers */
+.lp-root .lx-pb-steps::before {
+  content: ""; position: absolute; left: 19px; top: 22px; bottom: 22px; width: 1px;
+  background: linear-gradient(180deg, rgba(255,255,255,.18), rgba(248,113,113,.45) 55%, rgba(255,255,255,.08));
+}
+.lp-root .lx-pb-steps li { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 20px; align-items: start; }
+.lp-root .lx-pb-num {
+  position: relative; z-index: 1; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%;
+  font-size: 12.5px; font-weight: 800; letter-spacing: .02em; font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--text) 70%, transparent); background: var(--bg, #0a0a0a); border: 1px solid var(--border-strong);
+}
+.lp-root .lx-pb-steps p { margin: 0; padding-top: 7px; font-size: clamp(16.5px, 1.32vw, 19.5px); line-height: 1.62; color: var(--muted); text-wrap: pretty; }
+.lp-root .lx-pb-steps mark {
+  background: none; color: color-mix(in srgb, var(--text) 90%, transparent);
+  text-decoration: underline; text-decoration-color: rgba(248,113,113,.6); text-decoration-thickness: 1.5px; text-underline-offset: 4px;
+}
+.lp-root .lx-pb-point .lx-pb-num { color: #fca5a5; border-color: rgba(248,113,113,.5); box-shadow: 0 0 18px -4px rgba(248,113,113,.6); }
+.lp-root .lx-pb-point p { color: var(--text); font-weight: 650; }
+/* the grind card, a size smaller (user, 2026-11-20) */
+.lp-root .lx-pb-card { min-width: 0; width: 100%; max-width: 430px; justify-self: center; }
+.lp-root .lx-pb-card .lx-grind { padding: 22px 24px; border-radius: 18px; }
+.lp-root .lx-pb-card .lx-grind-head { margin-bottom: 16px; font-size: 13px; }
+.lp-root .lx-pb-card .lx-grind-head em { font-size: 11px; padding: 2px 8px; }
+.lp-root .lx-pb-card .lx-grind-rows { gap: 11px; }
+.lp-root .lx-pb-card .lx-grind-rows li { grid-template-columns: 8.6em minmax(0, 1fr) 3.9em; gap: 12px; font-size: 13px; }
+.lp-root .lx-pb-card .lx-grind-bar { height: 6px; }
+.lp-root .lx-pb-card .lx-grind-total { margin-top: 16px; padding-top: 14px; }
+.lp-root .lx-pb-card .lx-grind-total span { font-size: 12px; }
+.lp-root .lx-pb-card .lx-grind-total b { font-size: clamp(28px, 2.5vw, 36px); }
+.lp-root .lx-pb-card .lx-grind-note { font-size: 11px; margin-top: 6px; }
+
+/* the turn: a fine rule, then the closing question on one line */
+.lp-root .lx-pb-turn { display: flex; flex-direction: column; align-items: center; gap: clamp(28px, 5vh, 48px); }
+.lp-root .lx-pb-rule { display: block; width: min(560px, 70%); height: 1px; background: linear-gradient(90deg, transparent, var(--border-strong), transparent); }
+.lp-root .lx-pb-close {
+  margin: 0; text-align: center; font-size: clamp(24px, min(2.75vw, 5vh), 46px); font-weight: 850; line-height: 1.2;
+  letter-spacing: -.025em; color: var(--text);
+}
+@media (min-width: 961px) { .lp-root .lx-pb-close { white-space: nowrap; } }
+.lp-root .lx-pb-close span { display: inline-block; margin-right: .26em; }
+.lp-root .lx-pb-close span:last-child { margin-right: 0; }
+.lp-root .lx-pb-mute { color: color-mix(in srgb, var(--text) 45%, transparent); }
+
+/* the entrances: once, each from its own side */
+.lp-root .lx-pb [data-anim] {
+  opacity: 0; transition-property: opacity, transform, filter; transition-duration: .9s, 1s, .9s;
+  transition-timing-function: ease, cubic-bezier(.16,1,.3,1), ease; transition-delay: var(--d, 0s);
+}
+.lp-root .lx-pb [data-anim="down"] { transform: translateY(-16px); }
+.lp-root .lx-pb [data-anim="rise"] { opacity: 1; }
+.lp-root .lx-pb [data-anim="rise"] > span { transform: translateY(108%); transition: transform 1.05s cubic-bezier(.16,1,.3,1) var(--d, 0s); }
+.lp-root .lx-pb [data-anim="rise"].in > span { transform: none; }
+.lp-root .lx-pb [data-anim="left"] { transform: translateX(-32px); filter: blur(6px); }
+.lp-root .lx-pb [data-anim="right"] { transform: translateX(56px) scale(.97); filter: blur(8px); }
+.lp-root .lx-pb [data-anim="fade"] { transform: scaleX(.3); }
+.lp-root .lx-pb [data-anim="word"] { transform: translateY(.45em); filter: blur(8px); transition-duration: .6s, .8s, .6s; }
+.lp-root .lx-pb [data-anim].in { opacity: 1; transform: none; filter: none; }
+@media (prefers-reduced-motion: reduce) {
+  .lp-root .lx-pb [data-anim], .lp-root .lx-pb [data-anim] > span { opacity: 1; transform: none; filter: none; transition: none; }
+}
+
+/* the grind: every chore runs over its time (user, 2026-11-20) — a dashed limit on each bar, the fill white up to
+   it and red past it (the overtime), the times red and pulsing once they've run over */
+.lp-root .lx-grind-bar { position: relative; overflow: visible; }
+.lp-root .lx-grind-bar i {
+  background: linear-gradient(90deg, rgba(255,255,255,.4), #fff var(--lim-in), #f87171 var(--lim-in), #ef4444) !important;
+  box-shadow: 0 0 12px -2px rgba(239,68,68,.55);
+}
+.lp-root .lx-grind-bar::after {
+  content: ""; position: absolute; z-index: 1; left: var(--lim); top: -5px; bottom: -5px; width: 0;
+  border-left: 1.5px dashed rgba(255,255,255,.75);
+}
+.lp-root .lx-grind-time { color: #f87171 !important; font-weight: 750 !important; }
+.lp-root .lx-grind[data-on] .lx-grind-time { animation: lx-over 1.6s ease-in-out infinite; animation-delay: calc(var(--i) * .32s + 1s); }
+@keyframes lx-over { 0%, 100% { opacity: 1; text-shadow: 0 0 0 transparent; } 50% { opacity: .75; text-shadow: 0 0 14px rgba(239,68,68,.75); } }
+.lp-root .lx-grind-key { display: inline-block; width: 0; height: 10px; margin-right: 7px; vertical-align: -1px; border-left: 1.5px dashed rgba(255,255,255,.6); }
+@media (prefers-reduced-motion: reduce) { .lp-root .lx-grind[data-on] .lx-grind-time { animation: none; } }
+
+/* the total, as overtime: white while within the plan, red once past it; its bar runs past the planned line;
+   the overtime badge pops in with a shake at the crossing, counts, then keeps a soft pulse */
+.lp-root .lx-grind .lx-grind-total { display: block; }
+.lp-root .lx-grind-total-row { display: flex; align-items: baseline; justify-content: space-between; }
+.lp-root .lx-grind .lx-grind-total b { color: #fff !important; text-shadow: none !important; transition: color .35s ease, text-shadow .35s ease; }
+.lp-root .lx-grind-total[data-over] b { color: #f87171 !important; text-shadow: 0 0 26px rgba(239,68,68,.45) !important; }
+.lp-root .lx-grind-total-bar { position: relative; height: 8px; margin: 12px 0 8px; border-radius: 999px; background: rgba(255,255,255,.07); }
+/* the fill: the colours drawn across the whole track (white to the plan, red past it), clipped to how far it's got */
+.lp-root .lx-grind-total-bar::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(90deg, rgba(255,255,255,.45), #fff var(--plan), #f87171 var(--plan), #ef4444);
+  clip-path: inset(0 calc(100% - var(--fill)) 0 0 round 999px);
+}
+.lp-root .lx-grind-total-bar i { display: none; }
+.lp-root .lx-grind-total[data-over] .lx-grind-total-bar::before { box-shadow: 0 0 16px -2px rgba(239,68,68,.6); }
+.lp-root .lx-grind-plan-mark { position: absolute; left: var(--plan); top: -6px; bottom: -6px; border-left: 1.5px dashed rgba(255,255,255,.8); }
+.lp-root .lx-grind-total-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 11.5px; }
+.lp-root .lx-grind .lx-grind-total-foot span { text-transform: none; letter-spacing: 0; font-size: 11.5px; }
+.lp-root .lx-grind-plan { color: rgba(255,255,255,.5); font-weight: 600; }
+.lp-root .lx-grind-over {
+  padding: 2px 9px; border-radius: 999px; font-weight: 800; font-variant-numeric: tabular-nums;
+  color: #fff; background: #dc2626; box-shadow: 0 0 16px -2px rgba(239,68,68,.7);
+  opacity: 0; transform: scale(.6);
+}
+.lp-root .lx-grind-total[data-over] .lx-grind-over {
+  opacity: 1; transform: none;
+  animation: lx-over-pop .5s cubic-bezier(.2,1.6,.4,1), lx-over-shake .45s ease .45s, lx-over-pulse 1.8s ease-in-out 1.2s infinite;
+}
+@keyframes lx-over-pop { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: none; } }
+@keyframes lx-over-shake { 20% { transform: translateX(-3px) rotate(-2deg); } 40% { transform: translateX(3px) rotate(2deg); } 60% { transform: translateX(-2px); } 80% { transform: translateX(2px); } }
+@keyframes lx-over-pulse { 50% { box-shadow: 0 0 26px 2px rgba(239,68,68,.75); } }
+@media (prefers-reduced-motion: reduce) { .lp-root .lx-grind-total[data-over] .lx-grind-over { animation: none; } }
+
+/* ── Pricing: the Trial as a special pass (user, 2026-11-21: creative, then "premium, not loud") — champagne gold,
+   used with restraint: a hairline gold edge with a light slowly travelling round it, a quiet outlined badge, the price
+   in a soft metal tone with "Paid once" in spaced small caps, a fine dotted tear line with clean notches, and one
+   solid gold button. (Gold, not lime: lime stays Creator's "Most popular".) ── */
+@property --ps-a { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+.lp-root .price-special {
+  border-color: transparent !important;
+  background: linear-gradient(180deg, rgba(232,199,128,.07), transparent 42%), var(--card);
+  box-shadow: 0 30px 70px -38px rgba(232,199,128,.35);
+}
+/* the edge: a gradient hairline (bright at the corners) plus a travelling point of light */
+.lp-root .ps-edge {
+  position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none;
+  background:
+    conic-gradient(from var(--ps-a), transparent 0deg, rgba(255,236,190,.95) 18deg, transparent 46deg, transparent 360deg),
+    linear-gradient(155deg, rgba(240,212,150,.85), rgba(240,212,150,.18) 35%, rgba(240,212,150,.1) 65%, rgba(240,212,150,.6));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: ps-orbit 7s linear infinite;
+}
+@keyframes ps-orbit { to { --ps-a: 360deg; } }
+.lp-root .price-special .ps-badge {
+  background: rgba(232,199,128,.06); color: #f0d496; box-shadow: inset 0 0 0 1px rgba(240,212,150,.55);
+  letter-spacing: .16em; font-weight: 700;
+}
+/* the price in a soft champagne tone (a solid colour: the animated number can't take a clipped gradient) */
+.lp-root .price-special .text-4xl { color: #f4dfaa; text-shadow: 0 0 28px rgba(232,199,128,.25); }
+.lp-root .price-special .ps-paid {
+  color: #e9c987; font-size: 11px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase;
+}
+/* the tear line: fine and dotted, with two clean notches the colour of the page */
+.lp-root .ps-perf { position: relative; margin: 20px -24px 0; height: 0; border-top: 1px dashed rgba(240,212,150,.4); }
+.lp-root .ps-perf::before, .lp-root .ps-perf::after {
+  content: ""; position: absolute; top: -8px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg, #0a0a0a);
+  box-shadow: inset 0 0 0 1px rgba(240,212,150,.45);
+}
+.lp-root .ps-perf::before { left: -9px; clip-path: inset(0 0 0 50%); }
+.lp-root .ps-perf::after { right: -9px; clip-path: inset(0 50% 0 0); }
+/* the one solid gold thing: the button */
+.lp-root .ps-btn {
+  color: #241a06; font-weight: 700;
+  background: linear-gradient(180deg, #f6e2b0, #ddb768);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 10px 26px -12px rgba(221,183,104,.7);
+}
+.lp-root .ps-btn:hover { filter: brightness(1.06); }
+@media (prefers-reduced-motion: reduce) { .lp-root .ps-edge { animation: none; } }
+
+/* Pricing: each plan's own symbol (the profile menu's: Trial a sprout, Starter a bolt, Creator sparkles, Agency a
+   crown), in a small tile tinted to its card — gold on the Trial, lime on Creator, white on the others */
+.lp-root .price-sym {
+  display: grid; place-items: center; flex: 0 0 auto; width: 30px; height: 30px; border-radius: 9px;
+  color: var(--text); background: rgba(255,255,255,.06); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1);
+}
+.lp-root .price-sym-gold { color: #f0d496; background: rgba(232,199,128,.1); box-shadow: inset 0 0 0 1px rgba(240,212,150,.4); }
+.lp-root .price-sym-lime { color: var(--logo, #c8ff00); background: color-mix(in srgb, var(--logo, #c8ff00) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--logo, #c8ff00) 35%, transparent); }
+.lp-root .price-sym-svg { display: block; }
+
+/* ── Pricing: Creator, the popular plan (user, 2026-11-21: no lime background — animate it instead). The same dark
+   card as the others; a bright lime arc travelling round its edge (faster and brighter than the Trial's slow gold
+   light), a soft lime glow breathing behind it, lifted a little forward on a wide screen, a shimmer across its badge ── */
+@property --pc-a { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+.lp-root .price-popular {
+  border-color: rgba(255,255,255,.1) !important; background: var(--card);
+  animation: pc-breathe 3.6s ease-in-out infinite;
+}
+@keyframes pc-breathe {
+  0%, 100% { box-shadow: 0 26px 70px -36px color-mix(in srgb, var(--logo, #c8ff00) 35%, transparent); }
+  50% { box-shadow: 0 30px 90px -30px color-mix(in srgb, var(--logo, #c8ff00) 55%, transparent); }
+}
+@media (min-width: 1280px) { .lp-root .price-popular { top: -10px; } }
+.lp-root .pc-edge {
+  position: absolute; inset: -1px; border-radius: inherit; padding: 1.5px; pointer-events: none;
+  background:
+    conic-gradient(from var(--pc-a), transparent 0deg, color-mix(in srgb, var(--logo, #c8ff00) 15%, transparent) 40deg,
+      var(--logo, #c8ff00) 88deg, transparent 96deg, transparent 360deg),
+    linear-gradient(160deg, color-mix(in srgb, var(--logo, #c8ff00) 45%, transparent), rgba(255,255,255,.06) 40%, rgba(255,255,255,.06) 70%, color-mix(in srgb, var(--logo, #c8ff00) 30%, transparent));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--logo, #c8ff00) 70%, transparent));
+  animation: pc-orbit 4s linear infinite;
+}
+@keyframes pc-orbit { to { --pc-a: 360deg; } }
+.lp-root .price-popular .pc-badge {
+  position: relative; overflow: hidden; color: #0a0a0a; background: var(--logo, #c8ff00);
+  box-shadow: 0 0 18px -4px color-mix(in srgb, var(--logo, #c8ff00) 80%, transparent);
+}
+.lp-root .price-popular .pc-badge::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: -60%; width: 45%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,.75), transparent); transform: skewX(-15deg);
+  animation: pc-shimmer 3.2s ease-in-out 1s infinite;
+}
+@keyframes pc-shimmer { 0% { left: -60%; } 40%, 100% { left: 130%; } }
+@media (prefers-reduced-motion: reduce) {
+  .lp-root .price-popular, .lp-root .pc-edge, .lp-root .price-popular .pc-badge::after { animation: none; }
+}
+
+/* "10× faster.": only the 10× is the highlight (lime, underlined); "faster." reads like the rest of the line
+   (user, 2026-11-21) */
+.lp-root .faster[data-hi] { color: inherit; text-shadow: none; font-weight: inherit; }
+.lp-root .faster[data-hi] .faster-word { font-weight: inherit; color: inherit; }
+.lp-root .faster[data-hi] .faster-num { font-weight: 800; }
+.lp-root .faster[data-hi] .faster-num {
+  position: relative; overflow: visible; color: var(--logo, #c8ff00);
+  text-shadow: 0 0 22px color-mix(in srgb, var(--logo, #c8ff00) 45%, transparent);
+}
+[data-theme="light"] .lp-root .faster[data-hi] .faster-num { color: var(--accent); text-shadow: none; }
+/* (the lime underline runs under the whole "10× faster." — user, 2026-11-21) */
+
+/* No jump on load (user, 2026-11-21: the text sat high, then slid down): the editor's box has its final size from the
+   first paint — its shape is fixed (830 × 582, the editor and the step line under it) and its contents don't size it —
+   and the editor stays hidden until it has been scaled to fit (ZoomFit sets its zoom) */
+.lp-root .hl-fit.he-fit { aspect-ratio: 830 / 582; contain: size; }
+.lp-root .hl-fit.he-fit > div:not([style*="zoom"]) { visibility: hidden; }
+
+/* ── Hero step 3 (user, 2026-11-21): the editor as a premium product shot — turned a little toward the words (its far
+   edge receding), a soft light behind it, a floor shadow under it, a fine light edge on the window; it eases flatter
+   when pointed at. Desktop, wide screens. ── */
+@media (min-width: 1100px) {
+  .lp-root .hero-visual .hl-fit.he-fit {
+    /* (its near, left edge toward the words; the right edge, on the page's grid line, stays put) */
+    transform: perspective(2000px) rotateY(11deg) rotateX(3deg); transform-origin: right center;
+    transition: transform 1.1s cubic-bezier(.16,1,.3,1);
+  }
+  .lp-root .hero-visual:hover .hl-fit.he-fit { transform: perspective(2000px) rotateY(4deg) rotateX(1.5deg); }
+  /* the light behind it: soft, cool white with a breath of lime */
+  .lp-root .hero-visual::before {
+    width: 120%; aspect-ratio: 1.5; top: 46%; left: 52%; opacity: 1;
+    background: radial-gradient(closest-side, color-mix(in srgb, var(--logo, #c8ff00) 10%, transparent), rgba(255,255,255,.045) 48%, transparent 72%);
+    filter: blur(10px);
+  }
+  /* the floor shadow (and a faint line of reflected light) under it */
+  .lp-root .hero-visual::after {
+    content: ""; position: absolute; z-index: -1; left: 8%; right: 4%; bottom: -26px; height: 54px; border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(0,0,0,.75), transparent),
+                radial-gradient(closest-side, rgba(255,255,255,.05), transparent 70%) center top / 100% 2px no-repeat;
+    filter: blur(14px); pointer-events: none;
+  }
+  /* the window's fine light edge: a thin top highlight, a hairline all round, a deep soft shadow */
+  .lp-root .he {
+    border-color: rgba(255,255,255,.12);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 0 0 1px rgba(0,0,0,.6), 0 60px 120px -50px rgba(0,0,0,.95), 0 30px 60px -40px rgba(0,0,0,.8);
+  }
+}
+@media (prefers-reduced-motion: reduce) { .lp-root .hero-visual .hl-fit.he-fit { transition: none; } }
+
+/* ── Hero steps 4–6 (user, 2026-11-21) ── */
+@media (min-width: 1100px) {
+  /* 4. the headline: a little more air between the big letters; "short form" runs from lime into a pale lime-white */
+  .lp-root .hero-headline { letter-spacing: -.02em; }
+  .lp-root .hero-headline .warm {
+    display: inline-block; padding-right: .08em; margin-right: -.08em;
+    background: linear-gradient(100deg, var(--logo, #c8ff00) 0%, var(--logo, #c8ff00) 34%, #f3ffd2 82%, #ffffff 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
+  }
+  /* (the light behind it, softer now the words carry less lime) */
+  .lp-root .hero-headline::after { opacity: .7; }
+}
+
+/* 5. one accent: lime only on "short form" and the "10×"; everything else in the hero white or grey */
+.lp-root .faster[data-hi] .faster-num { text-shadow: none; }
+/* (the underline under "10× faster." stays lime — user 2026-11-21) */
+.lp-root .he-export { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.28); }
+.lp-root .he-export[data-state="pressed"] { background: rgba(255,255,255,.16); }
+.lp-root .he-export[data-state="rendering"] {
+  background: linear-gradient(90deg, rgba(255,255,255,.2) calc(var(--p, 0) * 100%), rgba(255,255,255,.05) 0);
+}
+@media (min-width: 1100px) {
+  .lp-root .hero-visual::before {
+    background: radial-gradient(closest-side, rgba(255,255,255,.07), rgba(255,255,255,.035) 48%, transparent 72%);
+  }
+}
+
+/* 6. the trust row under the buttons: three short promises, quiet grey with a fine check (desktop only) */
+.lp-root .hero-trust { display: none; }
+@media (min-width: 961px) {
+  .lp-root .hero-trust {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 0; list-style: none; padding: 0;
+    margin: clamp(16px, 2.8vh, 26px) 0 0;
+    font-size: clamp(13px, min(2.3cqi, 1.95vh), 16px); font-weight: 500; letter-spacing: .005em;
+    color: color-mix(in srgb, var(--text) 58%, transparent);
+  }
+  .lp-root .hero-trust li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .lp-root .hero-trust li + li::before {
+    content: ""; width: 3px; height: 3px; margin: 0 14px; border-radius: 50%;
+    background: color-mix(in srgb, var(--text) 30%, transparent);
+  }
+  .lp-root .hero-trust svg { width: 15px; height: 15px; flex: none; color: color-mix(in srgb, var(--text) 85%, transparent); }
+  .lp-root .hero-trust li { gap: 7px; }
+}
+@media (min-width: 961px) and (max-width: 1099px) { .lp-root .hero-trust { justify-content: center; } }
+
+/* ── Hero step 9 (user, 2026-11-21): the tour's step line moved into the editor's top bar, as a chip — part of the
+   product, and the hero a line shorter. The editor's box is the editor alone now. ── */
+.lp-root .hl-fit.he-fit { aspect-ratio: 830 / 542; }
+.lp-root .he-top .he-sp { display: flex; justify-content: center; min-width: 0; }
+.lp-root .he-step {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 22px; padding: 0 11px 0 9px;
+  border-radius: 999px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.1);
+  font-size: 10.5px; line-height: 1; white-space: nowrap; overflow: hidden; color: rgba(255,255,255,.6);
+  animation: he-say-in .45s cubic-bezier(.2,.8,.2,1) both;
+}
+.lp-root .he-step i { width: 5px; height: 5px; flex: none; border-radius: 50%; background: #fff; box-shadow: 0 0 6px rgba(255,255,255,.7); animation: he-step-dot 1.6s ease-in-out infinite; }
+@keyframes he-step-dot { 50% { opacity: .35; } }
+.lp-root .he-step b { color: #fff; font-weight: 700; }
+.lp-root .he-step b::after { content: "·"; margin-left: 7px; color: rgba(255,255,255,.35); font-weight: 400; }
+.lp-root .he-step span { overflow: hidden; text-overflow: ellipsis; }
+@media (prefers-reduced-motion: reduce) { .lp-root .he-step, .lp-root .he-step i { animation: none; } }
+
+/* ── Hero step 8 (user, 2026-11-21): the top bar lighter — the heavy black tab becomes a floating glass pill, level
+   with the logo and the button; it stays glass past the hero. Desktop. ── */
+@media (min-width: 1100px) {
+  .lp-root .nav-links,
+  .lp-root .nav-past-hero .nav-links {
+    top: 10px; height: 40px; padding: 0 24px; gap: 28px; border-radius: 999px;
+    background: color-mix(in srgb, var(--bg, #0a0a0a) 40%, rgba(255,255,255,.045));
+    border: 1px solid rgba(255,255,255,.09);
+    -webkit-backdrop-filter: blur(16px) saturate(1.3); backdrop-filter: blur(16px) saturate(1.3);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 10px 30px -18px rgba(0,0,0,.8);
+  }
+  .lp-root .nav-links::before, .lp-root .nav-links::after { display: none; }
+  .lp-root .nav-links a, .lp-root .nav-past-hero .nav-links a { font-size: 14.5px; color: color-mix(in srgb, var(--text) 72%, transparent); }
+  .lp-root .nav-links a:hover, .lp-root .nav-past-hero .nav-links a:hover { color: var(--text); }
+}
+
+/* ── Hero polish 1–6 (user, 2026-11-21, from the screen recording) ── */
+@media (min-width: 961px) {
+/* 1a. Get Started: the words stay; a small arrow slides in just after them (it used to replace them; the hand-drawn
+   one read as a smudge at this size) */
+.lp-root .hero-ctas .arrow-btn .arrow-btn-arrow { display: none; }
+.lp-root .hero-ctas .arrow-btn .arrow-btn-label { position: relative; }
+.lp-root .hero-ctas .arrow-btn .arrow-btn-label::after {
+  content: "→"; position: absolute; left: 100%; margin-left: 6px; font-weight: 600;
+  opacity: 0; transform: translateX(-8px); transition: opacity .25s ease, transform .35s cubic-bezier(.2,.8,.2,1);
+}
+.lp-root .hero-ctas .arrow-btn:hover .arrow-btn-label,
+.lp-root .hero-ctas .arrow-btn:focus-visible .arrow-btn-label { opacity: 1; translate: -12px 0; }
+.lp-root .hero-ctas .arrow-btn:hover .arrow-btn-label::after,
+.lp-root .hero-ctas .arrow-btn:focus-visible .arrow-btn-label::after { opacity: 1; transform: none; }
+/* 1b. See How It Works: a quiet white wash fills it, the words stay white and readable all the way */
+.lp-root .hero-ctas .fill-btn-circle { background: color-mix(in srgb, var(--text) 11%, transparent); }
+.lp-root .hero-ctas .fill-btn:hover,
+.lp-root .hero-ctas .fill-btn:focus-visible { color: var(--text); border-radius: var(--fill-r); border-color: color-mix(in srgb, var(--text) 34%, transparent); }
+/* (its arrow stays on the right and nudges forward; the words stay put — the swap made it touch "See") */
+.lp-root .hero-ctas .fill-btn:hover .fill-btn-text,
+.lp-root .hero-ctas .fill-btn:focus-visible .fill-btn-text { translate: calc(var(--fill-shift) * -1) 0; }
+.lp-root .hero-ctas .fill-btn:hover .fill-btn-arr-out,
+.lp-root .hero-ctas .fill-btn:focus-visible .fill-btn-arr-out { right: calc(var(--fill-inset) - 4px); }
+.lp-root .hero-ctas .fill-btn:hover .fill-btn-arr-in,
+.lp-root .hero-ctas .fill-btn:focus-visible .fill-btn-arr-in { left: -25%; }
+/* (keyboard focus: a clear ring on both buttons) */
+.lp-root .hero-ctas a:focus-visible { outline: 2px solid var(--logo, #c8ff00); outline-offset: 3px; }
+}
+
+/* 2. the dot field: quiet white (DotField mono), and fainter still behind the words */
+@media (min-width: 1100px) {
+  .lp-root .hero-field {
+    -webkit-mask-image: linear-gradient(90deg, rgba(0,0,0,.3) 0, rgba(0,0,0,.3) 40%, #000 62%);
+            mask-image: linear-gradient(90deg, rgba(0,0,0,.3) 0, rgba(0,0,0,.3) 40%, #000 62%);
+  }
+}
+
+/* 5. the footage brighter and clearer, and less dimmed outside the frame (the phone shows the same lift) */
+.lp-root .he-video video, .lp-root .he-phone canvas { filter: brightness(1.18) contrast(1.06) saturate(1.08); }
+.lp-root .he-dim { background: rgba(0,0,0,.52); }
+/* 3. the balance: the group a little lower (less of the optical lift) — no scroll cue (user 2026-11-21: removed) */
+@media (min-width: 1100px) {
+  .lp-root .hero-stack .hero { padding-bottom: calc(clamp(10px, 2.5vh, 32px) + 3vh); }
+}
+
+/* "Captions in ___": the language rolls in from below, in its own script (user, 2026-11-21) */
+.lp-root .hero-lang { display: inline-block; vertical-align: bottom; overflow: hidden; padding: .1em 0; margin: -.1em 0; }
+.lp-root .hero-lang-word {
+  display: inline-block; color: var(--text); font-weight: 600;
+  animation: hero-lang-in .5s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes hero-lang-in { from { opacity: 0; transform: translateY(70%); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .lp-root .hero-lang-word { animation: none; } }
+/* (the word before it leaves upward at the same time, layered in the same place: no blank moment) */
+.lp-root .hero-lang { display: inline-grid; vertical-align: bottom; }
+.lp-root .hero-lang > .hero-lang-word { grid-area: 1 / 1; }
+.lp-root .hero-lang-out { animation: hero-lang-out .5s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes hero-lang-out { to { opacity: 0; transform: translateY(-70%); } }
+@media (prefers-reduced-motion: reduce) { .lp-root .hero-lang-out { display: none; } }
+
+/* ── Hero positions (user, 2026-11-21): the text column spans the editor's height — the headline level with the
+   editor's top, the buttons and the feature row down at its bottom, the space between them open. Wide screens. ── */
+@media (min-width: 1100px) {
+  .lp-root .hero-text { align-self: stretch; display: flex; flex-direction: column; }
+  .lp-root .hero-text > div { flex: 1 1 auto; display: flex; flex-direction: column; }
+  .lp-root .hero-visual { align-self: center; }
+  .lp-root .hero-text .hero-ctas { margin-top: auto; margin-bottom: 0; }
+  .lp-root .hero-text .hero-trust { margin-bottom: 0; }
+}
+
+/* ── Hero headline (user, 2026-11-21): ~10% bigger, and the whole group higher on the screen (closer under the bar;
+   the text and the editor stay lined up top and bottom) ── */
+@media (min-width: 1100px) {
+  .lp-root .hero-headline { font-size: clamp(50px, min(13.9cqi, 12.5vh), 132px); }
+  .lp-root .hero-stack .hero { padding-bottom: calc(clamp(10px, 2.5vh, 32px) + 10vh); }
+}
+
+
+/* (the buttons and the feature row lower — user 2026-11-21: past the editor's bottom edge, toward the screen's foot;
+   the blur on the rolling language word is gone: clipped, it showed as a grey box) */
+@media (min-width: 1100px) {
+  .lp-root .hero-text > div { margin-bottom: calc(-1 * clamp(36px, 7vh, 80px)); }
+}
+
+/* the feature row's first two icons, alive (user 2026-11-21): the flame flickers from its base; a fine line scans
+   down and up through the face frame */
+.lp-root .hero-trust .ht-icon { position: relative; display: inline-grid; place-items: center; width: 15px; height: 15px; flex: none; }
+.lp-root .ht-flame svg { transform-origin: 50% 90%; animation: ht-flicker 1.6s ease-in-out infinite; }
+@keyframes ht-flicker {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  25% { transform: scale(1.1, 1.16) rotate(-5deg); }
+  50% { transform: scale(.96, .94) rotate(2deg); }
+  75% { transform: scale(1.06, 1.1) rotate(4deg); }
+}
+.lp-root .ht-scan::after {
+  content: ""; position: absolute; left: 3px; right: 3px; top: 30%; height: 1.5px; border-radius: 2px;
+  background: currentColor; color: var(--text); box-shadow: 0 0 6px color-mix(in srgb, var(--text) 70%, transparent);
+  animation: ht-scan 2.2s cubic-bezier(.45,0,.55,1) infinite;
+}
+@keyframes ht-scan { 0%, 100% { top: 26%; opacity: .25; } 50% { top: 68%; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .lp-root .ht-flame svg, .lp-root .ht-scan::after { animation: none; } }
+
+/* ── The Problem, polish (user, 2026-11-21: "design and place them perfectly") ── */
+
+/* 1. "Forever." — its glow no longer cut into a box: each headline line's mask is padded out (margins give the room
+   back, so the layout is unchanged), and the line starts further down so it is still hidden before it rises */
+.lp-root .lx-pb-mask { padding: .32em .5em; margin: -.32em -.5em; }
+.lp-root .lx-pb-mask + .lx-pb-mask { margin-top: calc(-.32em - .1em); }
+.lp-root .lx-pb [data-anim="rise"] > span { display: inline-block; }
+.lp-root .lx-pb [data-anim="rise"]:not(.in) > span { transform: translateY(150%); }
+.lp-root .lx-pb [data-anim="rise"] { transform: none !important; }
+.lp-root .lx-pb [data-anim="rise"] > span { transition: transform 1.05s cubic-bezier(.16,1,.3,1) var(--d, 0s); }
+.lp-root .lx-pb-title-2 em { text-shadow: 0 0 22px rgba(248,113,113,.3); }
+
+/* 2. one screen on a laptop: the label, headline, steps and card fit under the bar together; the question follows */
+@media (min-width: 961px) {
+  .lp-root #problem .section-inner { min-height: 0; justify-content: flex-start; padding-block: clamp(76px, 11vh, 120px) clamp(36px, 6vh, 72px); }
+  .lp-root #problem .lx-pb { gap: clamp(26px, 4.6vh, 60px); }
+  .lp-root .lx-pb-eyebrow { margin-bottom: clamp(12px, 2vh, 18px); }
+  .lp-root .lx-pb-title { font-size: clamp(34px, min(4.4vw, 7.4vh), 68px); }
+  .lp-root .lx-pb-steps { gap: clamp(18px, 3vh, 30px); }
+  .lp-root .lx-pb-card .lx-grind { padding: clamp(16px, 2.6vh, 22px) 22px; }
+  .lp-root .lx-pb-card .lx-grind-rows { gap: clamp(8px, 1.4vh, 11px); }
+}
+
+/* 3. the question: "wasn't" is the word — the brightest, with a lime line drawn under it (the bridge to Shortcut,
+   introduced next); the rest a step quieter */
+.lp-root .lx-pb-close { color: color-mix(in srgb, var(--text) 62%, transparent); }
+.lp-root .lx-pb-close .lx-pb-key { position: relative; color: var(--text); }
+.lp-root .lx-pb-close .lx-pb-key::after {
+  content: ""; position: absolute; left: 0; right: .1em; bottom: -.06em; height: .08em; border-radius: 999px;
+  background: var(--logo, #c8ff00); box-shadow: 0 0 12px color-mix(in srgb, var(--logo, #c8ff00) 55%, transparent);
+  transform: scaleX(0); transform-origin: left center; transition: transform .7s cubic-bezier(.65,0,.35,1) calc(var(--d, 0s) + .5s);
+}
+.lp-root .lx-pb-close .lx-pb-key.in::after { transform: scaleX(1); }
+
+/* 4. one flow into "Meet Shortcut": no rule above the question, no line between the two sections */
+.lp-root #intro.section-wrap { border-top: 0; }
+@media (min-width: 961px) {
+  .lp-root #intro .lx-in { padding-top: clamp(24px, 5vh, 64px); }
+}
+
+/* 5. the card reads at a glance: a legend under its title (planned · overtime), "Actually took" over the total,
+   "Planned: 1h 00m" under it; the tiny note is gone */
+.lp-root .lx-grind-legend { display: flex; gap: 16px; margin: -6px 0 14px; font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,.55); }
+.lp-root .lx-grind-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.lp-root .lx-grind-legend i { width: 14px; height: 5px; border-radius: 999px; }
+.lp-root .lx-grind-sw-plan { background: linear-gradient(90deg, rgba(255,255,255,.35), #fff); }
+.lp-root .lx-grind-sw-over { background: rgba(248,113,113,.7); }
+.lp-root .lx-grind .lx-grind-total span { text-transform: none; letter-spacing: 0; font-size: 13px; color: rgba(255,255,255,.7); }
+
+/* 6. less red: the bars' overtime a softer red without the glow, the times white; red stays on "Forever.", the total
+   and the "over" badge (and the little record dot) */
+.lp-root .lx-grind-bar i {
+  background: linear-gradient(90deg, rgba(255,255,255,.35), #fff var(--lim-in), rgba(248,113,113,.7) var(--lim-in), rgba(248,113,113,.7)) !important;
+  box-shadow: none;
+}
+.lp-root .lx-grind-time { color: rgba(255,255,255,.78) !important; font-weight: 650 !important; }
+.lp-root .lx-grind[data-on] .lx-grind-time { animation: none; }
+.lp-root .lx-pb-steps mark { text-decoration-color: rgba(255,255,255,.28); }
+
+/* 7. the steps a touch brighter; 03 stays the boldest */
+.lp-root .lx-pb-steps p { color: color-mix(in srgb, var(--text) 72%, transparent); }
+.lp-root .lx-pb-steps mark { color: var(--text); }
+.lp-root .lx-pb-point p { color: var(--text); }
+/* (the same ground as The Problem above it, so the question flows straight into "Meet Shortcut" with no band) */
+.lp-root #intro.section-wrap { background: var(--sheet); }
+
+/* ── The Problem, paced (user, 2026-11-21): the first screen is the problem alone (label, headline, steps, card,
+   centred under the bar); the question comes only after it, in its own space; "Meet Shortcut" starts lower still ── */
+.lp-root .lx-pb-main { display: flex; flex-direction: column; justify-content: center; gap: clamp(26px, 4.6vh, 60px); }
+@media (min-width: 961px) {
+  .lp-root #problem .section-inner { padding-top: 0; }
+  .lp-root .lx-pb-main { min-height: 100svh; box-sizing: border-box; padding-top: 60px; }
+  .lp-root #problem .lx-pb { gap: 0; }
+  .lp-root .lx-pb-turn { padding-block: clamp(60px, 14vh, 160px) clamp(40px, 8vh, 100px); }
+  .lp-root #intro .lx-in { padding-top: clamp(80px, 18vh, 220px); }
+}
+/* the three steps, one by one and slowly (user 2026-11-21): ~0.9 s apart (delays in ProblemSection), each a slower,
+   softer slide in */
+.lp-root .lx-pb .lx-pb-steps li[data-anim] { transition-duration: 1.1s, 1.3s, 1.1s; }
+/* (the line joining the numbers grows down with them, reaching 03 as it arrives) */
+.lp-root .lx-pb .lx-pb-steps[data-anim="line"] { opacity: 1; transform: none; filter: none; }
+.lp-root .lx-pb-steps[data-anim="line"]::before { transform: scaleY(0); transform-origin: top center; transition: transform 2.1s cubic-bezier(.45,0,.25,1) .5s; }
+.lp-root .lx-pb-steps[data-anim="line"].in::before { transform: none; }
+@media (prefers-reduced-motion: reduce) { .lp-root .lx-pb-steps[data-anim="line"]::before { transform: none; transition: none; } }
+/* (the question a size bigger, user 2026-11-21; still one line on a desktop screen) */
+.lp-root .lx-pb-close { font-size: clamp(28px, min(3.3vw, 6vh), 54px); }
+
+/* ── "Introducing Shortcut", the label (user, 2026-11-21) ── */
+.lp-root .lx-in-eyebrow {
+  position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 0; margin: 0 0 22px;
+  padding: 7px 16px 7px 8px; border-radius: 999px; font-size: 14px; letter-spacing: -.005em;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(180deg, #1b1b1b, #141414) padding-box,
+    linear-gradient(100deg, color-mix(in srgb, var(--logo, #c8ff00) 60%, transparent), rgba(255,255,255,.12) 38%, rgba(255,255,255,.07)) border-box;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 12px 32px -18px color-mix(in srgb, var(--logo, #c8ff00) 35%, transparent);
+}
+.lp-root .lx-in-eyebrow-mark {
+  display: grid; place-items: center; width: 24px; height: 24px; margin-right: 10px; border-radius: 50%;
+  background: color-mix(in srgb, var(--logo, #c8ff00) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--logo, #c8ff00) 28%, transparent);
+}
+.lp-root .lx-in-eyebrow-mark .brand { gap: 0; }
+.lp-root .lx-in-eyebrow-mark .brand-word { display: none; }
+.lp-root .lx-in-eyebrow-mark .brand-mark { height: 12px; }
+.lp-root .lx-in-eyebrow-a { font-weight: 500; color: color-mix(in srgb, var(--text) 58%, transparent); margin-right: 5px; }
+.lp-root .lx-in-eyebrow b { font-weight: 700; color: var(--text); }
+/* one light sweep across it as it comes in */
+.lp-root .lx-in-eyebrow::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: -40%; width: 30%; pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,.16), transparent); transform: skewX(-18deg);
+  opacity: 0;
+}
+.lp-root .lx-in-eyebrow.in::after { animation: lx-in-sweep 1.3s cubic-bezier(.45,0,.25,1) .5s; }
+@keyframes lx-in-sweep { 0% { left: -40%; opacity: 1; } 100% { left: 120%; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .lp-root .lx-in-eyebrow.in::after { animation: none; } }
+
+/* ── The three steps, as one sequence (user, 2026-11-21: "the animation is not proper"): each number pops in, its
+   words slide in after it, then a line draws down to the next number — 01 → 02 → 03, the last one pulsing red.
+   The line runs only between the numbers (it used to run past 03), and nothing blurs the numbers any more. ── */
+.lp-root .lx-pb-steps { --gap: clamp(18px, 3vh, 30px); gap: var(--gap); }
+.lp-root .lx-pb-steps::before { display: none; }
+.lp-root .lx-pb .lx-pb-steps li[data-anim="step"] { opacity: 1; transform: none; filter: none; transition: none; }
+/* the line from this number down to the next */
+.lp-root .lx-pb-steps li:not(:last-child)::after {
+  content: ""; position: absolute; left: 19.5px; top: 46px; width: 1px; height: calc(100% + var(--gap) - 52px);
+  background: linear-gradient(180deg, rgba(255,255,255,.25), rgba(248,113,113,.5));
+  transform: scaleY(0); transform-origin: top center;
+  transition: transform .6s cubic-bezier(.45,0,.25,1) calc(var(--d, 0s) + .45s);
+}
+.lp-root .lx-pb-steps li.in:not(:last-child)::after { transform: none; }
+/* the number pops */
+.lp-root .lx-pb-steps li[data-anim="step"] .lx-pb-num {
+  opacity: 0; transform: scale(.45);
+  transition: opacity .35s ease var(--d, 0s), transform .55s cubic-bezier(.2,1.5,.4,1) var(--d, 0s);
+}
+.lp-root .lx-pb-steps li.in .lx-pb-num { opacity: 1; transform: none; }
+/* its words slide in just after */
+.lp-root .lx-pb-steps li[data-anim="step"] p {
+  opacity: 0; transform: translateX(-14px);
+  transition: opacity .7s ease calc(var(--d, 0s) + .15s), transform .8s cubic-bezier(.16,1,.3,1) calc(var(--d, 0s) + .15s);
+}
+.lp-root .lx-pb-steps li.in p { opacity: 1; transform: none; }
+/* 03, the point: one red pulse as it lands */
+.lp-root .lx-pb-point.in .lx-pb-num { animation: lx-pb-ring 1.1s ease-out calc(var(--d, 0s) + .35s); }
+@keyframes lx-pb-ring {
+  0% { box-shadow: 0 0 0 0 rgba(248,113,113,.55), 0 0 18px -4px rgba(248,113,113,.6); }
+  100% { box-shadow: 0 0 0 14px rgba(248,113,113,0), 0 0 18px -4px rgba(248,113,113,.6); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-root .lx-pb-steps li:not(:last-child)::after, .lp-root .lx-pb-steps li[data-anim="step"] .lx-pb-num,
+  .lp-root .lx-pb-steps li[data-anim="step"] p { opacity: 1; transform: none; transition: none; animation: none; }
+}
+
+
+/* ── Introducing Shortcut (user's copy; redesigned 2026-11-21): the name, one even paragraph, then the payoff as two
+   cards — "You decide what matters." · "Shortcut does the rest." — and what goes away under them. Lime: the label's
+   edge, the headline's second line, and the Shortcut card (its edge and its ticks). ── */
+.lp-root .lx-in {
+  position: relative; display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: clamp(22px, 3.8vh, 44px); max-width: 1040px; margin: 0 auto;
+}
+/* a soft light behind the headline */
+.lp-root .lx-in::before {
+  content: ""; position: absolute; z-index: -1; left: 50%; top: 0; width: min(900px, 90%); aspect-ratio: 2.4; translate: -50% -10%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--logo, #c8ff00) 7%, transparent), transparent 75%);
+  pointer-events: none;
+}
+.lp-root .lx-in-title { margin: 0; font-size: clamp(36px, min(4.6vw, 7.6vh), 72px); font-weight: 900; line-height: 1.04; letter-spacing: -.03em; color: var(--text); }
+.lp-root .lx-in-mask { display: block; overflow: hidden; padding: 0 .08em .1em; margin-bottom: -.1em; }
+.lp-root .lx-in-mask > span { display: inline-block; }
+@media (min-width: 961px) { .lp-root .lx-in-mask { white-space: nowrap; } }
+.lp-root .lx-in-title-2 {
+  padding-right: .06em;
+  background: linear-gradient(100deg, var(--logo, #c8ff00) 0%, var(--logo, #c8ff00) 30%, #f3ffd2 78%, #ffffff 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
+}
+
+/* the two sentences, one even paragraph */
+.lp-root .lx-in-lede {
+  margin: 0; max-width: 680px; font-size: clamp(16.5px, 1.3vw, 19.5px); line-height: 1.6; text-wrap: balance;
+  color: color-mix(in srgb, var(--text) 60%, transparent);
+}
+.lp-root .lx-in-lede b { font-weight: 600; color: color-mix(in srgb, var(--text) 92%, transparent); }
+
+/* the two cards */
+.lp-root .lx-in-split {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: stretch; gap: 18px;
+  width: 100%; max-width: 900px; text-align: left;
+}
+@media (max-width: 960px) { .lp-root .lx-in-split { grid-template-columns: 1fr; } .lp-root .lx-in-arrow { transform: rotate(90deg); justify-self: center; } }
+.lp-root .lx-in-card {
+  position: relative; display: flex; flex-direction: column; gap: 14px; padding: clamp(18px, 2.8vh, 26px) 26px;
+  border-radius: 20px; background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015));
+  border: 1px solid rgba(255,255,255,.09); box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 30px 60px -40px rgba(0,0,0,.9);
+}
+.lp-root .lx-in-sc {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(180deg, #181a14, #121310) padding-box,
+    linear-gradient(140deg, color-mix(in srgb, var(--logo, #c8ff00) 55%, transparent), rgba(255,255,255,.1) 45%, rgba(255,255,255,.06)) border-box;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 30px 70px -36px color-mix(in srgb, var(--logo, #c8ff00) 30%, transparent);
+}
+.lp-root .lx-in-card h3 { margin: 0; font-size: clamp(19px, 1.6vw, 24px); font-weight: 800; letter-spacing: -.02em; line-height: 1.2; color: var(--text); }
+.lp-root .lx-in-you h3 { color: color-mix(in srgb, var(--text) 86%, transparent); }
+.lp-root .lx-in-tag {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; letter-spacing: .02em; color: color-mix(in srgb, var(--text) 70%, transparent);
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+}
+.lp-root .lx-in-tag-sc { padding-left: 6px; color: var(--text); background: color-mix(in srgb, var(--logo, #c8ff00) 9%, transparent); border-color: color-mix(in srgb, var(--logo, #c8ff00) 30%, transparent); }
+.lp-root .lx-in-tag-mark { display: grid; place-items: center; width: 16px; height: 16px; }
+.lp-root .lx-in-tag-mark .brand-word { display: none; }
+.lp-root .lx-in-tag-mark .brand-mark { height: 11px; }
+.lp-root .lx-in-card ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: clamp(8px, 1.3vh, 11px); }
+.lp-root .lx-in-card li { display: flex; align-items: center; gap: 11px; font-size: clamp(14.5px, 1.1vw, 16px); font-weight: 550; color: color-mix(in srgb, var(--text) 80%, transparent); }
+/* you: three small icon tiles */
+.lp-root .lx-in-ico {
+  display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09); color: color-mix(in srgb, var(--text) 85%, transparent);
+}
+.lp-root .lx-in-ico svg { width: 15px; height: 15px; }
+/* shortcut: a tick for each chore */
+.lp-root .lx-in-tick {
+  display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--logo, #c8ff00); color: #0a0a0a; box-shadow: 0 0 12px -2px color-mix(in srgb, var(--logo, #c8ff00) 60%, transparent);
+}
+.lp-root .lx-in-tick svg { width: 12px; height: 12px; }
+.lp-root .lx-in-sc li { color: var(--text); }
+/* the arrow between them */
+.lp-root .lx-in-arrow {
+  align-self: center; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%;
+  background: #141414; border: 1px solid rgba(255,255,255,.12); color: color-mix(in srgb, var(--text) 80%, transparent);
+}
+.lp-root .lx-in-arrow svg { width: 17px; height: 17px; }
+
+/* what goes away: one quiet row */
+.lp-root .lx-in-gone {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 28px; list-style: none; margin: 0; padding: 0;
+  font-size: clamp(14.5px, 1.1vw, 16px); font-weight: 550; color: color-mix(in srgb, var(--text) 62%, transparent);
+}
+.lp-root .lx-in-gone li { display: inline-flex; align-items: center; gap: 9px; padding: 0; border: 0; background: none; border-radius: 0; }
+.lp-root .lx-in-x {
+  display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  color: #f87171; background: rgba(248,113,113,.12);
+}
+.lp-root .lx-in-x svg { width: 11px; height: 11px; }
+
+/* entrances (each visit) */
+.lp-root .lx-in [data-anim] {
+  opacity: 0; transition-property: opacity, transform, filter; transition-duration: .9s, 1s, .9s;
+  transition-timing-function: ease, cubic-bezier(.16,1,.3,1), ease; transition-delay: var(--d, 0s);
+}
+.lp-root .lx-in [data-anim="down"] { transform: translateY(-14px); }
+.lp-root .lx-in [data-anim="rise"] { opacity: 1; transform: none; }
+.lp-root .lx-in [data-anim="rise"] > span { transform: translateY(108%); transition: transform 1.05s cubic-bezier(.16,1,.3,1) var(--d, 0s); }
+.lp-root .lx-in [data-anim="rise"].in > span { transform: none; }
+.lp-root .lx-in [data-anim="up"] { transform: translateY(16px); filter: blur(5px); }
+.lp-root .lx-in [data-anim="left"] { transform: translateX(-36px); }
+.lp-root .lx-in [data-anim="right"] { transform: translateX(36px); }
+.lp-root .lx-in [data-anim="fade"] { transform: scale(.6); }
+.lp-root .lx-in [data-anim].in { opacity: 1; transform: none; filter: none; }
+/* the rows inside each card come in after it, one by one; Shortcut's ticks pop as their chore lands */
+.lp-root .lx-in-card li { opacity: 0; transform: translateY(8px); transition: opacity .5s ease, transform .6s cubic-bezier(.16,1,.3,1); transition-delay: calc(var(--d, 0s) + .45s + var(--i) * .16s); }
+.lp-root .lx-in-sc li { transition-delay: calc(var(--d, 0s) + .7s + var(--i) * .26s); }
+.lp-root .lx-in-card.in li { opacity: 1; transform: none; }
+.lp-root .lx-in-tick { transform: scale(0); transition: transform .45s cubic-bezier(.2,1.6,.4,1) calc(var(--d, 0s) + .85s + var(--i) * .26s); }
+.lp-root .lx-in-sc.in .lx-in-tick { transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .lp-root .lx-in [data-anim], .lp-root .lx-in [data-anim] > span, .lp-root .lx-in-card li, .lp-root .lx-in-tick { opacity: 1; transform: none; filter: none; transition: none; }
+}
+/* (fits one laptop screen: label to the "No …" row — user's screen ~1530 × 724) */
+.lp-root .lx-in { gap: clamp(16px, 3vh, 44px); }
+.lp-root .lx-in-title { font-size: clamp(34px, min(4.6vw, 7vh), 72px); }
+.lp-root .lx-in-card { gap: clamp(9px, 1.5vh, 14px); padding: clamp(14px, 2.2vh, 26px) 26px; }
+.lp-root .lx-in-card ul { gap: clamp(6px, 1.05vh, 11px); }
+.lp-root .lx-in-sc .lx-in-tick { width: 19px; height: 19px; }
+/* (the three "You" rows spread over the card's height, level with Shortcut's five) */
+.lp-root .lx-in-you ul { flex: 1; justify-content: space-around; }
+
+/* "No complicated editing. · No unnecessary waiting." (user 2026-11-21): each line appears, a red line strikes
+   through it, the words dim and its ✕ pops — the first, then the second (about 1.1 s apart); replays each visit */
+.lp-root .lx-in .lx-in-gone[data-anim="seq"] { opacity: 1; transform: none; filter: none; transition: none; }
+.lp-root .lx-in-gone li { --t: calc(var(--d, 0s) + var(--i) * 1.1s); }
+.lp-root .lx-in-gone-t {
+  position: relative; display: inline-block; color: color-mix(in srgb, var(--text) 85%, transparent);
+  opacity: 0; transform: translateY(8px);
+  transition: opacity .5s ease var(--t), transform .6s cubic-bezier(.16,1,.3,1) var(--t), color .5s ease calc(var(--t) + 1s);
+}
+.lp-root .lx-in-gone-t::after {
+  content: ""; position: absolute; left: -4px; right: -4px; top: 55%; height: 2px; border-radius: 2px;
+  background: #f87171; box-shadow: 0 0 8px rgba(248,113,113,.5);
+  transform: scaleX(0); transform-origin: left center; transition: transform .5s cubic-bezier(.65,0,.35,1) calc(var(--t) + .55s);
+}
+.lp-root .lx-in-gone .lx-in-x { opacity: 0; transform: scale(.3) rotate(-90deg); transition: opacity .3s ease calc(var(--t) + 1s), transform .5s cubic-bezier(.2,1.6,.4,1) calc(var(--t) + 1s); }
+.lp-root .lx-in-gone.in .lx-in-gone-t { opacity: 1; transform: none; color: color-mix(in srgb, var(--text) 48%, transparent); }
+.lp-root .lx-in-gone.in .lx-in-gone-t::after { transform: none; }
+.lp-root .lx-in-gone.in .lx-in-x { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .lp-root .lx-in-gone-t, .lp-root .lx-in-gone-t::after, .lp-root .lx-in-gone .lx-in-x { opacity: 1; transform: none; transition: none; }
+}
+
+/* the two cards, set right (user 2026-11-21): no green glow leaking under the Shortcut card (just its fine lime edge
+   and a faint inner light); the You card in full white like its partner, not greyed; the rows level — You's first
+   row with "Cropping", its last with "Exporting"; both tags the same, each with its own mark */
+.lp-root .lx-in-sc { box-shadow: inset 0 1px 0 rgba(255,255,255,.06), inset 0 0 40px -20px color-mix(in srgb, var(--logo, #c8ff00) 35%, transparent), 0 30px 60px -40px rgba(0,0,0,.9); }
+.lp-root .lx-in-you h3 { color: var(--text); }
+.lp-root .lx-in-you li { color: color-mix(in srgb, var(--text) 92%, transparent); }
+.lp-root .lx-in-ico { color: var(--text); background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.12); }
+.lp-root .lx-in-you ul { justify-content: space-between; }
+.lp-root .lx-in-tag { padding: 4px 11px 4px 6px; color: var(--text); background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.14); }
+.lp-root .lx-in-tag .lx-in-tag-mark svg { width: 11px; height: 11px; }
+
+/* the cards, made plain (user 2026-11-21: "I'm not getting the cards"): "Your part" — three numbered steps, then
+   "That's all you do."; "Shortcut's part" — the five chores ticked off, then "The repetitive editing work, handled
+   for you." Rows at the same rhythm on both sides; the ✕ marks are gone from the "No …" row */
+.lp-root .lx-in-you ul { flex: 0 0 auto; justify-content: flex-start; gap: clamp(8px, 1.3vh, 12px); }
+.lp-root .lx-in-num {
+  display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%;
+  font-size: 11.5px; font-weight: 800; color: #0a0a0a; background: var(--text);
+}
+.lp-root .lx-in-you .lx-in-ico { width: 28px; height: 28px; }
+.lp-root .lx-in-foot {
+  margin: auto 0 0; padding-top: clamp(10px, 1.6vh, 14px); border-top: 1px solid rgba(255,255,255,.08);
+  font-size: 13.5px; font-weight: 600; color: color-mix(in srgb, var(--text) 60%, transparent);
+}
+.lp-root .lx-in-foot-sc { color: color-mix(in srgb, var(--logo, #c8ff00) 85%, white); border-top-color: color-mix(in srgb, var(--logo, #c8ff00) 18%, transparent); }
+.lp-root .lx-in-foot { opacity: 0; transition: opacity .6s ease calc(var(--d, 0s) + 1.9s); }
+.lp-root .lx-in-card.in .lx-in-foot { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .lp-root .lx-in-foot { opacity: 1; transition: none; } }
+/* the two sentences: the first on one line, bright; the second under it, soft grey, in two even lines */
+.lp-root .lx-in-lede { display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 820px; }
+.lp-root .lx-in-lede p { margin: 0; text-wrap: balance; }
+.lp-root .lx-in-lede-1 { font-size: clamp(17px, 1.42vw, 21px); font-weight: 600; line-height: 1.45; color: color-mix(in srgb, var(--text) 92%, transparent); }
+.lp-root .lx-in-lede-2 { max-width: 640px; font-size: clamp(15.5px, 1.2vw, 18px); font-weight: 450; line-height: 1.6; color: color-mix(in srgb, var(--text) 58%, transparent); }
+@media (min-width: 961px) { .lp-root .lx-in-lede-1 { white-space: nowrap; } }
+
+/* ── "Meet Shortcut. / Your Shortcut to Short-Form." — its own entrance (user, 2026-11-21) ── */
+.lp-root .lx-in-line { display: block; padding: 0 .08em .1em; margin-bottom: -.1em; }
+@media (min-width: 961px) { .lp-root .lx-in-line { white-space: nowrap; } }
+/* line 1: each word comes into focus — from a soft blur, a little low and wide-spaced, settling into place */
+.lp-root .lx-in .lx-in-line[data-anim="focus"] { opacity: 1; transform: none; filter: none; transition: none; }
+.lp-root .lx-in-w {
+  display: inline-block; margin-right: .22em; opacity: 0; filter: blur(14px); transform: translateY(.28em) scale(1.06);
+  letter-spacing: .04em;
+  transition: opacity .8s ease, filter .9s ease, transform 1s cubic-bezier(.16,1,.3,1), letter-spacing 1.1s cubic-bezier(.16,1,.3,1);
+  transition-delay: calc(var(--d, 0s) + var(--i) * .16s);
+}
+.lp-root .lx-in-w:last-child { margin-right: 0; }
+.lp-root .lx-in-line.in .lx-in-w { opacity: 1; filter: none; transform: none; letter-spacing: inherit; }
+/* line 2: a lime light sweeps across and the words are painted in behind it */
+.lp-root .lx-in .lx-in-line[data-anim="wipe"] { position: relative; opacity: 1; transform: none; filter: none; transition: none; }
+.lp-root .lx-in-line-2 .lx-in-title-2 {
+  display: inline-block; clip-path: inset(-.2em 100% -.2em 0);
+  transition: clip-path 1.15s cubic-bezier(.65,0,.35,1) var(--d, 0s);
+}
+.lp-root .lx-in-line-2.in .lx-in-title-2 { clip-path: inset(-.2em -.1em -.2em 0); }
+.lp-root .lx-in-beam {
+  position: absolute; top: 6%; bottom: 10%; width: 3px; border-radius: 3px; left: var(--beam-from, 6%);
+  background: linear-gradient(180deg, transparent, var(--logo, #c8ff00) 20%, #fff 50%, var(--logo, #c8ff00) 80%, transparent);
+  box-shadow: 0 0 18px 4px color-mix(in srgb, var(--logo, #c8ff00) 55%, transparent);
+  opacity: 0; pointer-events: none;
+}
+.lp-root .lx-in-line-2.in .lx-in-beam { animation: lx-in-beam 1.15s cubic-bezier(.65,0,.35,1) var(--d, 0s) both; }
+@keyframes lx-in-beam {
+  0% { left: 4%; opacity: 0; }
+  10% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { left: 96%; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-root .lx-in-w { opacity: 1; filter: none; transform: none; letter-spacing: inherit; transition: none; }
+  .lp-root .lx-in-line-2 .lx-in-title-2 { clip-path: none; transition: none; }
+  .lp-root .lx-in-beam { display: none; }
+}
+.lp-root .lx-in-paint { position: relative; display: inline-block; }
+/* (the question a little lower, user 2026-11-21: more room after the problem screen) */
+@media (min-width: 961px) { .lp-root .lx-pb-turn { padding-top: clamp(90px, 20vh, 230px); } }
+/* (the headline bigger, user 2026-11-21: ~20%) */
+.lp-root .lx-in-title { font-size: clamp(40px, min(5.5vw, 8.4vh), 88px); }
+
+/* The Problem, lighter to run (user 2026-11-21: "optimise it"): no blur filters in its entrances (the card and the
+   question's words only move and fade — blur on a large card is costly every frame); the card is promoted while it
+   moves */
+.lp-root .lx-pb [data-anim="right"] { filter: none; transform: translateX(48px); will-change: transform, opacity; }
+.lp-root .lx-pb [data-anim="right"].in { will-change: auto; }
+.lp-root .lx-pb [data-anim="word"] { filter: none; transform: translateY(.4em); }
+.lp-root .lx-pb [data-anim].in { transform: none; }
+
+/* the two parts, open — no card boxes (user 2026-11-21: "remove the cards, keep them outside"): the content stands
+   on the page in two columns, divided by a fine vertical line through the arrow */
+.lp-root .lx-in-card, .lp-root .lx-in-sc {
+  background: none; border: 0; box-shadow: none; border-radius: 0; padding: 6px clamp(8px, 2vw, 32px);
+}
+.lp-root .lx-in-foot, .lp-root .lx-in-foot-sc { border-top: 0; padding-top: clamp(6px, 1vh, 10px); }
+.lp-root .lx-in-split { gap: 0; align-items: stretch; }
+.lp-root .lx-in-arrow { position: relative; z-index: 1; }
+.lp-root .lx-in-split > .lx-in-arrow::before {
+  content: ""; position: absolute; z-index: -1; left: 50%; top: calc(-1 * clamp(70px, 13vh, 140px)); bottom: calc(-1 * clamp(70px, 13vh, 140px));
+  width: 1px; translate: -50% 0; background: linear-gradient(180deg, transparent, rgba(255,255,255,.12) 25%, rgba(255,255,255,.12) 75%, transparent);
+}
+/* (both parts hug the line from either side, the same distance away, so the pair is balanced) */
+@media (min-width: 961px) { .lp-root .lx-in-you { justify-self: end; width: max-content; padding: 6px 48px 6px 0; } .lp-root .lx-in-sc { justify-self: start; width: max-content; padding: 6px 0 6px 48px; } }
+
+/* instant reset of the scroll entrances while off screen (resetInstant in sections.tsx): one frame with no motion */
+.lp-root .lx-reset, .lp-root .lx-reset *, .lp-root .lx-reset *::before, .lp-root .lx-reset *::after { transition: none !important; animation: none !important; }
+/* the line between "Your part" and "Shortcut's part" (no arrow button) */
+.lp-root .lx-in-divider {
+  align-self: stretch; width: 1px; margin: -10px 0;
+  background: linear-gradient(180deg, transparent, rgba(255,255,255,.14) 22%, rgba(255,255,255,.14) 78%, transparent);
+}
+.lp-root .lx-in [data-anim="fade"].lx-in-divider { transform: scaleY(.4); }
+.lp-root .lx-in [data-anim="fade"].lx-in-divider.in { transform: none; }
+/* How It Works: five steps in one row on a desktop (user copy 2026-11-21; was four) */
+@media (min-width: 1100px) { .lp-root .process-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; } }
+/* (the headline breaks between its two sentences, never inside "Ready-to-Post") */
+.lp-root .hiw-title > span { display: inline-block; white-space: nowrap; }
+/* (two-sentence headlines break between the sentences only) */
+.lp-root .two-line-title > span { display: block; white-space: nowrap; }
+/* (wide enough for "Without the Editing Hassle." on one line; same size as before) */
+.lp-root .ft-h { max-width: none; }
+
+/* ── Why Shortcut? (user, 2026-11-21; replaces "Inside Shortcut"): label, headline, three columns compared on Control
+   and Speed — Shortcut's highlighted — and the closing line. Lime: Shortcut's column and the closing words. ── */
+.lp-root .lx-why { display: flex; flex-direction: column; align-items: center; gap: clamp(26px, 4.6vh, 56px); max-width: 1120px; margin: 0 auto; text-align: center; }
+.lp-root .lx-why-eyebrow {
+  display: inline-flex; margin: 0 0 18px; padding: 6px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 650; letter-spacing: .02em;
+  color: color-mix(in srgb, var(--text) 82%, transparent); background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.12);
+}
+.lp-root .lx-why-title { margin: 0; font-size: clamp(36px, min(4.8vw, 8vh), 76px); font-weight: 900; line-height: 1.05; letter-spacing: -.03em; color: var(--text); text-wrap: balance; }
+.lp-root .lx-why-em { color: color-mix(in srgb, var(--text) 50%, transparent); }
+
+.lp-root .lx-why-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; width: 100%; text-align: left; }
+@media (max-width: 960px) { .lp-root .lx-why-cols { grid-template-columns: 1fr; } }
+.lp-root .lx-why-col {
+  display: flex; flex-direction: column; gap: 18px; padding: clamp(20px, 3vh, 28px) 26px; border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012)); border: 1px solid rgba(255,255,255,.08);
+}
+.lp-root .lx-why-sc {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(180deg, #181a14, #111210) padding-box,
+    linear-gradient(150deg, color-mix(in srgb, var(--logo, #c8ff00) 60%, transparent), rgba(255,255,255,.1) 50%, rgba(255,255,255,.06)) border-box;
+  box-shadow: inset 0 0 50px -28px color-mix(in srgb, var(--logo, #c8ff00) 45%, transparent);
+}
+.lp-root .lx-why-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 28px; }
+.lp-root .lx-why-tag { font-size: 15px; font-weight: 800; letter-spacing: -.01em; color: color-mix(in srgb, var(--text) 78%, transparent); }
+.lp-root .lx-why-tag-sc { display: inline-flex; align-items: center; gap: 8px; color: var(--text); }
+.lp-root .lx-why-best {
+  padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 800; letter-spacing: .03em; color: #0a0a0a; background: var(--logo, #c8ff00);
+}
+.lp-root .lx-why-line { margin: 0; flex: 1; font-size: clamp(15.5px, 1.2vw, 17.5px); line-height: 1.55; color: color-mix(in srgb, var(--text) 66%, transparent); }
+.lp-root .lx-why-sc .lx-why-line { color: var(--text); font-weight: 550; }
+
+/* the two meters */
+.lp-root .lx-why-meters { display: flex; flex-direction: column; gap: 10px; margin: 0; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.07); }
+.lp-root .lx-why-meter { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 12px; }
+.lp-root .lx-why-meter dt { font-size: 12.5px; font-weight: 650; color: color-mix(in srgb, var(--text) 55%, transparent); }
+.lp-root .lx-why-meter dd { margin: 0; height: 6px; border-radius: 999px; background: rgba(255,255,255,.07); overflow: hidden; }
+.lp-root .lx-why-meter dd i {
+  display: block; height: 100%; width: calc(var(--v) * 100%); border-radius: inherit; background: rgba(255,255,255,.55);
+  transform: scaleX(0); transform-origin: left center;
+  transition: transform 1s cubic-bezier(.65,0,.35,1) calc(var(--d, 0s) + .45s + var(--j) * .18s);
+}
+.lp-root .lx-why-sc .lx-why-meter dd i { background: var(--logo, #c8ff00); box-shadow: 0 0 10px -2px color-mix(in srgb, var(--logo, #c8ff00) 70%, transparent); }
+.lp-root .lx-why-col.in .lx-why-meter dd i { transform: none; }
+
+.lp-root .lx-why-close { margin: 0; font-size: clamp(26px, min(3.2vw, 5.6vh), 50px); font-weight: 850; letter-spacing: -.025em; line-height: 1.15; color: color-mix(in srgb, var(--text) 74%, transparent); }
+.lp-root .lx-why-close b { font-weight: 900; color: var(--logo, #c8ff00); }
+
+/* entrances (each visit) */
+.lp-root .lx-why [data-anim] {
+  opacity: 0; transition-property: opacity, transform; transition-duration: .9s, 1s;
+  transition-timing-function: ease, cubic-bezier(.16,1,.3,1); transition-delay: var(--d, 0s);
+}
+.lp-root .lx-why [data-anim="down"] { transform: translateY(-12px); }
+.lp-root .lx-why [data-anim="up"] { transform: translateY(22px); }
+.lp-root .lx-why [data-anim].in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .lp-root .lx-why [data-anim], .lp-root .lx-why-meter dd i { opacity: 1; transform: none; transition: none; }
+}
+
+/* ── Who Is It For? (user, 2026-11-21; replaces "Clippers"): label, headline, six audience cards (3 × 2) ── */
+.lp-root .lx-who { display: flex; flex-direction: column; align-items: center; gap: clamp(26px, 4.6vh, 56px); max-width: 1120px; margin: 0 auto; text-align: center; }
+.lp-root .lx-who-title { margin: 0; font-size: clamp(36px, min(4.8vw, 8vh), 76px); font-weight: 900; line-height: 1.05; letter-spacing: -.03em; color: var(--text); }
+.lp-root .lx-who-title > span { display: block; white-space: nowrap; }
+.lp-root .lx-who-em { color: color-mix(in srgb, var(--text) 50%, transparent); }
+.lp-root .lx-who-grid { list-style: none; margin: 0; padding: 0; width: 100%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; text-align: left; }
+@media (max-width: 960px) { .lp-root .lx-who-grid { grid-template-columns: 1fr; } .lp-root .lx-who-title > span { white-space: normal; } }
+.lp-root .lx-who-card {
+  position: relative; display: flex; flex-direction: column; gap: 10px; padding: clamp(20px, 3vh, 26px) 24px; border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012)); border: 1px solid rgba(255,255,255,.08);
+  transition: border-color .3s ease, background .3s ease, opacity .9s ease var(--d, 0s), transform 1s cubic-bezier(.16,1,.3,1) var(--d, 0s);
+}
+.lp-root .lx-who-card:hover { border-color: color-mix(in srgb, var(--logo, #c8ff00) 35%, transparent); background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015)); }
+.lp-root .lx-who-ico {
+  display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 4px; border-radius: 12px;
+  color: var(--text); background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+  transition: color .3s ease, background .3s ease, border-color .3s ease;
+}
+.lp-root .lx-who-ico svg { width: 19px; height: 19px; }
+.lp-root .lx-who-card:hover .lx-who-ico { color: #0a0a0a; background: var(--logo, #c8ff00); border-color: transparent; }
+.lp-root .lx-who-card h3 { margin: 0; font-size: clamp(18px, 1.45vw, 21px); font-weight: 800; letter-spacing: -.015em; color: var(--text); }
+.lp-root .lx-who-card p { margin: 0; font-size: clamp(15px, 1.15vw, 16.5px); line-height: 1.55; color: color-mix(in srgb, var(--text) 64%, transparent); }
+
+/* entrances (each visit) */
+.lp-root .lx-who [data-anim] { opacity: 0; transition-property: opacity, transform; transition-duration: .9s, 1s; transition-timing-function: ease, cubic-bezier(.16,1,.3,1); transition-delay: var(--d, 0s); }
+.lp-root .lx-who [data-anim="down"] { transform: translateY(-12px); }
+.lp-root .lx-who [data-anim="up"] { transform: translateY(22px); }
+.lp-root .lx-who [data-anim].in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .lp-root .lx-who [data-anim] { opacity: 1; transform: none; transition: none; } }
+/* (all six fit one laptop screen: tighter top, headline and cards on short screens) */
+@media (min-width: 961px) {
+  .lp-root #proof .section-inner { padding-top: clamp(40px, 8vh, 120px); padding-bottom: clamp(40px, 8vh, 120px); }
+  .lp-root .lx-who { gap: clamp(18px, 3.4vh, 56px); }
+  .lp-root .lx-why-eyebrow { margin-bottom: clamp(10px, 1.8vh, 18px); }
+  .lp-root .lx-who-title { font-size: clamp(32px, min(4.8vw, 6.6vh), 76px); }
+  .lp-root .lx-who-card { gap: clamp(5px, 1vh, 10px); padding: clamp(14px, 2.3vh, 26px) 22px; }
+  .lp-root .lx-who-ico { width: clamp(32px, 5vh, 40px); height: clamp(32px, 5vh, 40px); margin-bottom: 2px; }
+}
+/* final CTA: its two lines, one under the other */
+.lp-root .cta-lines > span { display: block; }
+/* the footer wordmark ~20% smaller, still centred (user 2026-11-21) */
+@media (min-width: 961px) { .lp-root .fc { width: 72%; } }
+/* the CTA's two lines, small and quiet under the headline (user 2026-11-21); always shown */
+.lp-root .cta-section p.cta-lines {
+  max-width: none; margin: clamp(14px, 2.4vh, 22px) auto clamp(26px, 4.4vh, 40px);
+  font-size: clamp(14px, 1.05vw, 16px); line-height: 1.7; letter-spacing: .005em; color: color-mix(in srgb, var(--text) 58%, transparent);
+}
+
+/* ── The final CTA's button, made for its longer label (user, 2026-11-21) ── */
+.lp-root .cta-section .cta-btn {
+  position: relative; display: inline-flex; align-items: center; gap: 14px;
+  padding: 8px 8px 8px 28px; border-radius: 999px; font-size: clamp(15.5px, 1.15vw, 17px); font-weight: 650; letter-spacing: -.01em;
+  text-decoration: none; box-shadow: 0 18px 44px -18px rgba(255,255,255,.4), inset 0 -1px 0 rgba(0,0,0,.08);
+  transition: transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .3s ease, opacity .2s ease;
+}
+.lp-root .cta-section .cta-btn:hover { opacity: 1; transform: translateY(-2px); box-shadow: 0 24px 54px -18px rgba(255,255,255,.5), inset 0 -1px 0 rgba(0,0,0,.08); }
+.lp-root .cta-section .cta-btn:active { transform: translateY(0) scale(.98); }
+.lp-root .cta-section .cta-btn:focus-visible { outline: 2px solid var(--logo, #c8ff00); outline-offset: 3px; }
+.lp-root .cta-btn-ico {
+  position: relative; overflow: hidden; display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 999px;
+  color: var(--logo, #c8ff00); background: #0a0a0a;
+  transition: width .35s cubic-bezier(.2,.8,.2,1);
+}
+.lp-root .cta-btn-ico svg { width: 18px; height: 18px; transition: transform .35s cubic-bezier(.2,.8,.2,1); }
+.lp-root .cta-section .cta-btn:hover .cta-btn-ico { width: 52px; }
+.lp-root .cta-section .cta-btn:hover .cta-btn-ico svg { transform: translateX(3px); }
+@media (prefers-reduced-motion: reduce) { .lp-root .cta-section .cta-btn, .lp-root .cta-btn-ico, .lp-root .cta-btn-ico svg { transition: none; } }
