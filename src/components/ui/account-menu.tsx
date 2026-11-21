@@ -27,7 +27,7 @@ import { isTopPlan } from '@/lib/plans'
 
 type PlanSummary = { plan?: string; planName: string; storageGb: number; storageBytes: number; usage: { videos: number; storageBytes: number } }
 
-type Tier = 'none' | 'trial' | 'starter' | 'creator' | 'agency'
+export type Tier = 'none' | 'trial' | 'starter' | 'creator' | 'agency'
 /**
  * A plan's tier from its key (lib/plans.ts: free = "No plan" since 2026-11-16, trial, starter, creator, agency),
  * else its name; an unknown paid one counts as the top
@@ -40,9 +40,10 @@ function tierOf(key: string | undefined, name: string): Tier {
 /**
  * Each plan's own symbol beside its name (user, 2026-11-16: "a special symbol for every plan"):
  * No plan an empty dashed ring, Trial a sprout (trying it out), Starter a bolt (getting going), Creator
- * sparkles (making things), Agency a crown (the top). Grey with no plan, lime on the paid ones (.am-plan-sym)
+ * sparkles (making things), Agency a crown (the top). Grey with no plan, lime on the paid ones (.am-plan-sym).
+ * The landing page's pricing cards show the same symbols (components/ui/pricing.tsx).
  */
-function PlanSymbol({ tier }: { tier: Tier }) {
+export function PlanSymbol({ tier, size = 12, className = 'am-plan-sym' }: { tier: Tier; size?: number; className?: string }) {
   const d = {
     none: <circle cx="12" cy="12" r="7.5" strokeDasharray="3.2 3" />,
     trial: <><path d="M12 21v-8" /><path d="M12 13c0-4 2.6-6.5 7-6.5 0 4.2-2.7 6.5-7 6.5z" fill="currentColor" fillOpacity=".25" /><path d="M12 15.5c0-3.2-2-5.2-5.6-5.2 0 3.3 2.1 5.2 5.6 5.2z" fill="currentColor" fillOpacity=".25" /></>,
@@ -51,7 +52,7 @@ function PlanSymbol({ tier }: { tier: Tier }) {
     agency: <><path d="M3.5 8.5 8 12l4-6.5 4 6.5 4.5-3.5-1.8 9.5H5.3z" fill="currentColor" stroke="none" /><path d="M5.6 20.5h12.8" /></>,
   }[tier]
   return (
-    <svg className="am-plan-sym" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>
   )
 }
 

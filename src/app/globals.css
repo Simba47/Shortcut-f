@@ -2682,6 +2682,11 @@ html[data-theme="light"] .kit-name-btn[data-danger]:hover { color: #dc2626; back
 .kit-text-sample { aspect-ratio: 6 / 1; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .kit-text-sample > span { max-width: 92%; padding: 2px 10px; border-radius: 8px; font-weight: 700; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cap-font-row, .cap-font-rest { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* The font list (CaptionStyler FontPicker): the row pointed at or reached by the keys is marked — it's the one
+   the preview is showing (user, 2026-11-20); the font in use keeps its lime */
+.font-list [data-font-row]:not([aria-selected="true"]):hover,
+.font-list [data-font-row]:not([aria-selected="true"]):focus-visible { background: rgb(var(--ed-fg) / 0.08) !important; color: var(--ed-text) !important; }
+.font-list [data-font-row]:focus-visible { outline: none; box-shadow: inset 2px 0 0 #c8ff00; }
 .kit-cc .cap-font-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 @container kit (max-width: 560px) { .kit-cc .cap-font-row { grid-template-columns: 1fr; } }
 .kit-cc .grid-cols-2 { grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
@@ -3668,12 +3673,6 @@ div:has(> .vscan[data-on][data-mode="find"]) > .sp .sp-controls { opacity: 0; vi
 .cb-state[data-state="draft"] { background: transparent; }
 /* Unseen: never opened — an open ring, not a dot */
 .cb-state[data-state="unseen"] { background: transparent; border-style: dashed; }
-.cb-state[data-state="unseen"] > i { background: transparent; box-shadow: inset 0 0 0 1px var(--c); }
-/* Make my clips cards: what was ticked before the run (Captions, Title…), quiet grey tags */
-.cb-made { display: inline-flex; align-items: center; gap: 4px; max-width: 120px; padding: 1px 6px; border-radius: 6px;
-  font-size: 10px; font-weight: 600; color: rgb(var(--cb-fg) / 0.6); border: 1px solid rgb(var(--cb-fg) / 0.12); }
-.cb-made > svg { flex-shrink: 0; }
-.cb-made > span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cbb-tag[data-add]:hover { color: rgb(var(--cb-fg) / 0.9); border-color: rgba(200,255,0,0.5); }
 .cb-tab { border: 1px solid rgba(255, 255, 255, 0.08); background: rgba(255, 255, 255, 0.02); transition: background-color .15s, border-color .15s, color .15s; }
 .cb-tab:hover { background: rgba(255, 255, 255, 0.06); }

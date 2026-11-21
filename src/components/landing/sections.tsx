@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { VelocityMarquee } from '@/components/ui/velocity-marquee'
+import { BrandLogo } from '@/components/ui/brand-logo'
+import { Check, GraduationCap, Megaphone, Mic, MonitorPlay, MousePointerClick, Move, Scissors, Sparkles, Upload, User } from 'lucide-react'
 import { LayoutGroup, motion } from 'framer-motion'
 
 /**
@@ -12,136 +14,247 @@ import { LayoutGroup, motion } from 'framer-motion'
  */
 
 // ── Problem ─────────────────────────────────────────────────────────────────────
-type PainArt = 'hours' | 'crop' | 'blind'
-const PAINS: { art: PainArt; title: string; desc: string; miss: string; fix: string; href: string }[] = [
-  { art: 'hours', title: 'Hours per video', desc: 'Finding, cropping, captioning, exporting. One video eats your afternoon.', miss: 'A whole afternoon', fix: 'One upload, a week of clips', href: '#process' },
-  { art: 'crop', title: 'AI that gets it wrong', desc: 'The crop drifts off the speaker. Fixing it means opening a timeline.', miss: 'Fix it on a timeline', fix: 'Steer it right while it plays', href: '#process' },
-  { art: 'blind', title: 'Posting blind', desc: 'No idea which topics are hot or which clips earned.', miss: 'Guessing', fix: 'See what’s trending and earning', href: '#trends' },
+// (user's website copy, 2026-11-20: the headline, three lines and a closing question.) Laid out as a story
+// (user: "make the user know what that section is"): the words on the left; on the right "the grind" — the
+// chores the copy names, each with its time, ticking in and adding up to an afternoon (an example, labelled so);
+// then the closing question as the turn to what comes next.
+const GRIND: { task: string; min: number }[] = [
+  { task: 'Cropping', min: 45 },
+  { task: 'Resizing', min: 25 },
+  { task: 'Adjusting frames', min: 60 },
+  { task: 'Adding captions', min: 55 },
+  { task: 'Exporting', min: 35 },
 ]
-const CHORES = ['Find', 'Crop', 'Caption', 'Export']
-
-/** The editing clock running away: hours pile up while the chores tick by one at a time */
-function HoursArt() {
-  const [secs, setSecs] = useState(0)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setSecs(3 * 3600 + 47 * 60 + 12); return }
-    // Ticks only while it can be seen (on screen, the tab showing): off screen it used to redraw 12×
-    // a second for as long as the page was open
-    // It starts only once the cards have risen in (about 1s after it first shows), so it doesn't
-    // redraw while they're moving
-    let id: ReturnType<typeof setInterval> | null = null
-    let seen = false, ready = false, wait: ReturnType<typeof setTimeout> | null = null
-    const run = () => {
-      if (seen && !ready && !wait) wait = setTimeout(() => { ready = true; run() }, 1000)
-      const want = seen && ready && !document.hidden
-      if (want && !id) id = setInterval(() => setSecs(s => (s + 97) % (4 * 3600)), 80)
-      else if (!want && id) { clearInterval(id); id = null }
-    }
-    const io = new IntersectionObserver(([e]) => { seen = e.isIntersecting; run() })
-    if (ref.current) io.observe(ref.current)
-    document.addEventListener('visibilitychange', run)
-    return () => { io.disconnect(); document.removeEventListener('visibilitychange', run); if (id) clearInterval(id); if (wait) clearTimeout(wait) }
-  }, [])
-  const hh = Math.floor(secs / 3600), mm = Math.floor(secs / 60) % 60, ss = secs % 60
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return (
-    <div ref={ref} className="lx-pa lx-pa-hours" aria-hidden="true">
-      <div className="lx-pa-timer"><span className="lx-pa-rec" />{hh}:{pad(mm)}:{pad(ss)}</div>
-      <div className="lx-pa-chores">{CHORES.map((c, i) => <span key={c} style={{ '--k': i } as React.CSSProperties}>{c}</span>)}</div>
-      <div className="lx-pa-track"><span /></div>
-    </div>
-  )
-}
+const GRIND_TOTAL = GRIND.reduce((n, g) => n + g.min, 0)
+const GRIND_MAX = Math.max(...GRIND.map(g => g.min))
+// The time each should take (the dashed line on every bar): each one runs past it, the overtime in red
+const GRIND_LIMIT = 12
+// The whole job as planned (each chore's limit, added up): the total runs well past it
+const GRIND_PLANNED = GRIND_LIMIT * GRIND.length
+const hm = (min: number) => (min >= 60 ? `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, '0')}m` : `${min}m`)
 
 /**
- * The mistake, then the fix, in a 9:16 phone (styles: .lx-steer-* in app/landing.css; one 6 s loop):
- * the frame drifts and the speaker slides half out of shot, a red "Off the speaker" tag pops up and the
- * caption cuts off; a cursor drags the frame back, the speaker snaps to centre, the tag turns into
- * "Steered" and the caption finishes.
+ * Takes entrances back to their start instantly (no reverse animation): while off screen, `.lx-reset` switches every
+ * transition and animation off for one frame, the pieces lose `.in`, and the next entrance plays from the very start —
+ * even when the visitor comes back before a slow reverse would have finished (user 2026-11-21: "the animation works
+ * only the first time").
  */
-function CropArt() {
-  return (
-    <div className="lx-pa lx-pa-steer" aria-hidden="true">
-      <div className="lx-steer-phone">
-        <div className="lx-steer-scene">
-          <span className="lx-steer-light" />
-          {/* the speaker: hair, face, shoulders, a mic in front */}
-          <svg className="lx-steer-person" viewBox="0 0 90 110" aria-hidden="true">
-            <defs>
-              <linearGradient id="lx-st-skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#ecc6a6" /><stop offset="1" stopColor="#b07a5d" /></linearGradient>
-              <linearGradient id="lx-st-top" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#4a4f57" /><stop offset="1" stopColor="#24272c" /></linearGradient>
-            </defs>
-            <path d="M8 110 C10 84 26 74 45 74 C64 74 80 84 82 110 Z" fill="url(#lx-st-top)" />
-            <path d="M38 66 h14 v12 c0 4 -14 4 -14 0 z" fill="#a8735a" />
-            <ellipse cx="45" cy="50" rx="17" ry="20" fill="url(#lx-st-skin)" />
-            <path d="M27 48 C25 30 34 24 46 24 C58 24 66 31 63 47 C61 40 56 36 49 36 C40 36 33 40 27 48 Z" fill="#1d1a19" />
-            <circle cx="39" cy="52" r="1.6" fill="#2b1d16" /><circle cx="51" cy="52" r="1.6" fill="#2b1d16" />
-            <path d="M40 60 Q45 64 50 60" stroke="#7a4434" strokeWidth="1.6" fill="none" strokeLinecap="round" />
-            <rect x="58" y="70" width="7" height="16" rx="3.5" fill="#2f3237" stroke="#5b6068" strokeWidth="1" />
-            <rect x="60.5" y="86" width="2" height="24" fill="#3a3d43" />
-          </svg>
-        </div>
-        <div className="lx-steer-cap">
-          <span className="lx-steer-cap-bad">this changed every—</span>
-          <span className="lx-steer-cap-good">this changed <u>everything</u></span>
-        </div>
-      </div>
-      <span className="lx-steer-tag lx-steer-tag-bad">✕ Off the speaker</span>
-      <span className="lx-steer-tag lx-steer-tag-good">✓ Steered</span>
-      <svg className="lx-steer-cursor" viewBox="0 0 24 24"><path d="M5 3l14 7.5-6.2 1.6L10 18.5z" /></svg>
-    </div>
-  )
+function resetInstant(root: HTMLElement, els: HTMLElement[]) {
+  root.classList.add('lx-reset')
+  els.forEach(e => e.classList.remove('in'))
+  void root.offsetWidth
+  root.classList.remove('lx-reset')
 }
 
-/** Analytics you can't read: bars keep guessing, values are question marks */
-function BlindArt() {
-  return (
-    <div className="lx-pa lx-pa-blind" aria-hidden="true">
-      <div className="lx-pa-bars">
-        {[0, 1, 2, 3, 4, 5].map(i => <span key={i} style={{ '--k': i } as React.CSSProperties}><em>?</em></span>)}
-      </div>
-      <div className="lx-pa-legend"><span>Views ?</span><span>Earned ?</span><span>Hot topic ?</span></div>
-    </div>
-  )
+/**
+ * Scroll entrances that play every time (user 2026-11-21: "like the first visit, each time I come back"): an element
+ * gets .in as it comes into view and loses it once it is fully off screen, so it is ready to run in again.
+ * Reduced motion: everything shown, still.
+ */
+function useReplayReveal(ref: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const root = ref.current
+    if (!root) return
+    const els = Array.from(root.querySelectorAll<HTMLElement>('[data-anim]'))
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { els.forEach(e => e.classList.add('in')); return }
+    const io = new IntersectionObserver(entries => entries.forEach(e => {
+      if (e.isIntersecting && e.intersectionRatio >= 0.2) e.target.classList.add('in')
+      else if (!e.isIntersecting && e.target.classList.contains('in')) resetInstant(e.target as HTMLElement, [e.target as HTMLElement])
+    }), { threshold: [0, 0.2], rootMargin: '0px 0px -6% 0px' })
+    els.forEach(e => io.observe(e))
+    return () => io.disconnect()
+  }, [ref])
 }
 
-const FIX_ARROW = <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
-
-function PainCard({ p, i }: { p: (typeof PAINS)[number]; i: number }) {
+/** The chores, ticking in one by one, and the clock adding them up (once, when it comes into view) */
+function GrindCard() {
+  const ref = useRef<HTMLDivElement>(null)
+  const [on, setOn] = useState(false)
+  const [total, setTotal] = useState(0)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setOn(true); setTotal(GRIND_TOTAL); return }
+    let raf = 0, wait: ReturnType<typeof setTimeout> | null = null
+    let shown = false
+    const io = new IntersectionObserver(([e]) => {
+      // (fully off screen: back to the start, ready to run again on the next visit)
+      if (!e.isIntersecting) {
+        if (shown) {
+          shown = false; cancelAnimationFrame(raf); if (wait) clearTimeout(wait)
+          // (back to the start at once, not by a slow reverse — see resetInstant)
+          el.classList.add('lx-reset'); setOn(false); setTotal(0)
+          setTimeout(() => el.classList.remove('lx-reset'), 80)
+        }
+        return
+      }
+      if (shown || e.intersectionRatio < 0.35) return
+      shown = true
+      setOn(true)
+      // the clock starts as the rows land, and finishes with the last one
+      wait = setTimeout(() => {
+        const start = performance.now(), ms = 2800
+        const tick = (now: number) => {
+          const k = Math.min(1, (now - start) / ms)
+          setTotal(Math.round(GRIND_TOTAL * (1 - Math.pow(1 - k, 2))))
+          if (k < 1) raf = requestAnimationFrame(tick)
+        }
+        raf = requestAnimationFrame(tick)
+      }, 350)
+    }, { threshold: [0, 0.35] })
+    io.observe(el)
+    return () => { io.disconnect(); cancelAnimationFrame(raf); if (wait) clearTimeout(wait) }
+  }, [])
   return (
-    <article className={`lx-pain lx-pain-${p.art}`} style={{ '--i': i } as React.CSSProperties}>
-      {p.art === 'hours' ? <HoursArt /> : p.art === 'crop' ? <CropArt /> : <BlindArt />}
-      {/* the number, big and faint behind the picture */}
-      <span className="lx-pain-num" aria-hidden="true">0{i + 1}</span>
-      <h3>{p.title}</h3>
-      <p>{p.desc}</p>
-      {/* the problem, then how Shortcut fixes it (hover: the ✕ turns into the ✓) */}
-      <div className="lx-pain-row">
-        <span className="lx-pain-miss"><i aria-hidden="true">✕</i>{p.miss}</span>
-        <a className="lx-pain-fix" href={p.href}>
-          <i aria-hidden="true">✓</i><span>{p.fix}</span>
-          {FIX_ARROW}
-        </a>
+    <div ref={ref} className="lx-grind" data-on={on || undefined} role="img"
+      aria-label={`Example: turning one video into five clips by hand — ${GRIND.map(g => `${g.task} ${hm(g.min)}`).join(', ')}; about ${hm(GRIND_TOTAL)} in total`}>
+      <div className="lx-grind-head" aria-hidden="true">
+        <span className="lx-grind-rec" />
+        <span>Turning 1 video into 5 clips</span>
+        <em>by hand</em>
       </div>
-    </article>
+      {/* what the bars mean (user 2026-11-21: the card should read at a glance) */}
+      <div className="lx-grind-legend" aria-hidden="true">
+        <span><i className="lx-grind-sw-plan" />Planned</span>
+        <span><i className="lx-grind-sw-over" />Overtime</span>
+      </div>
+      <ul className="lx-grind-rows" aria-hidden="true">
+        {GRIND.map((g, i) => (
+          <li key={g.task} style={{
+            '--i': i, '--w': `${(g.min / GRIND_MAX) * 100}%`,
+            '--lim': `${(GRIND_LIMIT / GRIND_MAX) * 100}%`, '--lim-in': `${(GRIND_LIMIT / g.min) * 100}%`,
+          } as React.CSSProperties}>
+            <span className="lx-grind-task">{g.task}</span>
+            <span className="lx-grind-bar"><i /></span>
+            <span className="lx-grind-time">{hm(g.min)}</span>
+          </li>
+        ))}
+      </ul>
+      {/* the total, as overtime (user, 2026-11-20): the clock counts up white; past the planned time it turns
+          red, its bar runs past the planned line, and the overtime pops in and counts with it */}
+      <div className="lx-grind-total" data-over={total > GRIND_PLANNED || undefined} aria-hidden="true">
+        <div className="lx-grind-total-row">
+          <span>Actually took</span>
+          <b>{hm(total)}</b>
+        </div>
+        <div className="lx-grind-total-bar" style={{ '--plan': `${(GRIND_PLANNED / GRIND_TOTAL) * 100}%`, '--fill': `${(total / GRIND_TOTAL) * 100}%` } as React.CSSProperties}>
+          <i />
+          <span className="lx-grind-plan-mark" />
+        </div>
+        <div className="lx-grind-total-foot">
+          <span className="lx-grind-plan">Planned: {hm(GRIND_PLANNED)}</span>
+          <span className="lx-grind-over" key={total > GRIND_PLANNED ? 'over' : 'not'}>+{hm(Math.max(0, total - GRIND_PLANNED))} over</span>
+        </div>
+      </div>
+    </div>
   )
 }
 
 /**
- * The Problem. Scrolls normally: the heading fades up, then the three cards rise in one after
- * another (.reveal → .visible, styles in app/landing.css). No pinning, no 3D.
+ * The Problem's timeline (user 2026-11-21: "the points are not coming properly … the last text should appear only
+ * after the problem section has appeared"). One trigger for the whole first screen — once a third of it is in view,
+ * every piece in it starts together and runs on its own delay (label, headline, card, then 01 → 02 → 03), so nothing
+ * waits on its own scroll position. The closing question is held back until that sequence has finished (or the screen
+ * was scrolled past), and only then writes in once it is on screen. Leaving fully resets both, to replay next time.
+ */
+const PB_SEQUENCE_MS = 3400
+function useProblemTimeline(ref: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const root = ref.current
+    const main = root?.querySelector<HTMLElement>('.lx-pb-main')
+    const turn = root?.querySelector<HTMLElement>('.lx-pb-turn')
+    if (!root || !main || !turn) return
+    const mainEls = Array.from(main.querySelectorAll<HTMLElement>('[data-anim]'))
+    const turnEls = Array.from(turn.querySelectorAll<HTMLElement>('[data-anim]'))
+    const show = (els: HTMLElement[], on: boolean) => els.forEach(e => e.classList.toggle('in', on))
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { show(mainEls, true); show(turnEls, true); return }
+
+    let mainIn = false, mainDone = false, turnSeen = false, timer: ReturnType<typeof setTimeout> | null = null
+    const maybeShowTurn = () => {
+      // (the problem screen has played, or it is already above the screen: the question may come)
+      const passed = main.getBoundingClientRect().bottom < 0
+      if (turnSeen && (mainDone || passed)) show(turnEls, true)
+    }
+    const io = new IntersectionObserver(entries => entries.forEach(e => {
+      if (e.target === main) {
+        if (e.isIntersecting && e.intersectionRatio >= 0.15 && !mainIn) {
+          mainIn = true
+          show(mainEls, true)
+          // (arriving from below, or by a fast scroll that stopped with most of it already above the screen: the
+          // sequence still plays, and the question follows sooner)
+          const mostlyAbove = e.boundingClientRect.top < -0.5 * window.innerHeight
+          timer = setTimeout(() => { mainDone = true; maybeShowTurn() }, mostlyAbove ? 1200 : PB_SEQUENCE_MS)
+        } else if (!e.isIntersecting && mainIn) {
+          mainIn = false; mainDone = false
+          if (timer) clearTimeout(timer)
+          resetInstant(main, mainEls)
+          maybeShowTurn()
+        }
+      } else {
+        if (e.isIntersecting && e.intersectionRatio >= 0.6) { turnSeen = true; maybeShowTurn() }
+        else if (!e.isIntersecting) { turnSeen = false; resetInstant(turn, turnEls) }
+      }
+    }), { threshold: [0, 0.15, 0.3, 0.6] })
+    io.observe(main); io.observe(turn)
+    return () => { io.disconnect(); if (timer) clearTimeout(timer) }
+  }, [ref])
+}
+
+/** The chores named in the copy, marked in the line (not links, just emphasis) */
+const CHORE_WORDS = /(cropping|resizing|adjusting frames|adding captions|exporting)/g
+const PROBLEM_LONG = 'But turning that one video into multiple short clips means hours of cropping, resizing, adjusting frames, adding captions and exporting.'
+const PROBLEM_CLOSE = 'What if editing wasn’t the thing slowing you down?'
+
+/**
+ * The Problem (user, 2026-11-20: "full freedom — a premium section a new visitor understands at once"). Read
+ * top to bottom like a short story: the headline; then the three lines as a numbered path (01 recording →
+ * 02 the grind → 03 the point) beside "the grind" card; then the closing question on one line.
+ * Scroll entrances, once each, every piece from its own side (styles .lx-pb-* in app/landing.css): the label
+ * drops in, the headline lines rise from behind a mask, the steps slide in from the left, the card glides in
+ * from the right (then its rows tick in), the question writes in word by word. Reduced motion: all shown.
  */
 export function ProblemSection() {
+  const ref = useRef<HTMLElement>(null)
+  useProblemTimeline(ref)
+  const d = (s: number) => ({ '--d': `${s}s` } as React.CSSProperties)
   return (
-    <section className="section-inner">
-      <div className="section-head reveal">
-        <p className="section-eyebrow">The problem</p>
-        <h2 className="section-title">More clips means more money.<br /> Editing slows you down.</h2>
-        <p className="section-sub">Hours of scrubbing and cropping for every video, and AI clippers still get the framing wrong.</p>
+    <section ref={ref} className="section-inner lx-pb">
+      {/* (the problem alone fills the first screen; the question comes after it, user 2026-11-21) */}
+      <div className="lx-pb-main">
+      <header className="lx-pb-head">
+        <p className="lx-pb-eyebrow" data-anim="down"><i aria-hidden="true" />The problem</p>
+        <h2 className="lx-pb-title">
+          {/* (the mask is what's watched: the line itself starts hidden below it) */}
+          <span className="lx-pb-mask" data-anim="rise" style={d(0.08)}><span>Creating Content Is Easy.</span></span>
+          <span className="lx-pb-mask" data-anim="rise" style={d(0.2)}><span className="lx-pb-title-2">Editing It Takes <em>Forever.</em></span></span>
+        </h2>
+      </header>
+
+      <div className="lx-pb-body">
+        <ol className="lx-pb-steps">
+          <li data-anim="step" style={d(0.3)}>
+            <span className="lx-pb-num" aria-hidden="true">01</span>
+            <p>You spend hours recording a podcast, interview or video.</p>
+          </li>
+          <li data-anim="step" style={d(1.3)}>
+            <span className="lx-pb-num" aria-hidden="true">02</span>
+            <p>{PROBLEM_LONG.split(CHORE_WORDS).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part))}</p>
+          </li>
+          <li data-anim="step" className="lx-pb-point" style={d(2.3)}>
+            <span className="lx-pb-num" aria-hidden="true">03</span>
+            <p>You have the content. You just don’t have the time to edit it all.</p>
+          </li>
+        </ol>
+        <div className="lx-pb-card" data-anim="right" style={d(0.1)}><GrindCard /></div>
       </div>
-      <div className="lx-pains reveal">
-        {PAINS.map((p, i) => <PainCard key={p.title} p={p} i={i} />)}
+      </div>
+
+      <div className="lx-pb-turn">
+        <p className="lx-pb-close" aria-label={PROBLEM_CLOSE}>
+          {PROBLEM_CLOSE.split(' ').map((w, i) => (
+            <span key={i} aria-hidden="true" data-anim="word" className={w === 'wasn’t' ? 'lx-pb-key' : undefined} style={d(0.15 + i * 0.07)}>{w}</span>
+          ))}
+        </p>
       </div>
     </section>
   )
@@ -509,5 +622,193 @@ export function SteerIntro() {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
       </Link>
     </div>
+  )
+}
+
+/**
+ * Introducing Shortcut (user's website copy; redesigned 2026-11-21: "design this section perfectly"). After The
+ * Problem — its answer. The name; the two sentences as one paragraph; then the payoff line made into a picture: two
+ * cards, "You decide what matters." (the three things the copy says you do) and "Shortcut does the rest." (the very
+ * chores The Problem's card timed at 3h 40m, ticked off one by one); under them, what goes away. Every entrance
+ * replays each visit (useReplayReveal).
+ */
+const YOU_DO = [
+  { Icon: Upload, text: 'Upload your video' },
+  { Icon: MousePointerClick, text: 'Select the moment' },
+  { Icon: Move, text: 'Guide the frame' },
+]
+const SHORTCUT_DOES = ['Cropping', 'Resizing', 'Adjusting frames', 'Adding captions', 'Exporting']
+export function IntroSection() {
+  const ref = useRef<HTMLElement>(null)
+  useReplayReveal(ref)
+  const d = (s: number) => ({ '--d': `${s}s` } as React.CSSProperties)
+  return (
+    <section ref={ref} className="section-inner lx-in" aria-labelledby="intro-title">
+      <header className="lx-in-head">
+        {/* (the label, refined — user 2026-11-21: the plain pill looked odd): the brand mark, "Introducing" quiet,
+            "Shortcut" bright, a fine lime-to-clear edge and one light sweep as it comes in */}
+        <p className="lx-in-eyebrow" data-anim="down">
+          <span className="lx-in-eyebrow-mark" aria-hidden="true"><BrandLogo size="sm" /></span>
+          <span className="lx-in-eyebrow-a">Introducing</span>
+          <b>Shortcut</b>
+        </p>
+        <h2 className="lx-in-title" id="intro-title">
+          {/* (its own entrance, user 2026-11-21): "Meet Shortcut." comes into focus word by word; then a lime light
+              sweeps left to right and paints "Your Shortcut to Short-Form." in behind it */}
+          <span className="lx-in-line" data-anim="focus" style={d(0.1)}>
+            {['Meet', 'Shortcut.'].map((w, i) => <span key={w} className="lx-in-w" style={{ '--i': i } as React.CSSProperties}>{w}</span>)}
+          </span>
+          <span className="lx-in-line lx-in-line-2" data-anim="wipe" style={d(0.55)}>
+            <span className="lx-in-paint">
+              <span className="lx-in-title-2">Your Shortcut to Short-Form.</span>
+              <i className="lx-in-beam" aria-hidden="true" />
+            </span>
+          </span>
+        </h2>
+      </header>
+
+      {/* (two sentences, two lines of their own — user 2026-11-21: the bold one broke mid-line into the next) */}
+      <div className="lx-in-lede" data-anim="up" style={d(0.3)}>
+        <p className="lx-in-lede-1">Shortcut makes turning long videos into short-form content incredibly simple.</p>
+        <p className="lx-in-lede-2">Upload your video, select the moment you want, guide the frame and let Shortcut handle the repetitive editing work.</p>
+      </div>
+
+      {/* what goes away (in the copy's order: after the two sentences, before the payoff) */}
+      {/* (each line appears, then a red line strikes through it, it dims and its ✕ pops — one after the other;
+          user 2026-11-21) */}
+      <ul className="lx-in-gone" data-anim="seq" style={d(0.5)}>
+        {['No complicated editing.', 'No unnecessary waiting.'].map((t, i) => (
+          <li key={t} style={{ '--i': i } as React.CSSProperties}>
+            <span className="lx-in-gone-t">{t}</span>
+          </li>
+        ))}
+      </ul>
+
+      {/* the payoff line, as a picture: what you do · what Shortcut does */}
+      <div className="lx-in-split">
+        <div className="lx-in-card lx-in-you" data-anim="left" style={d(0.15)}>
+          <span className="lx-in-tag"><span className="lx-in-tag-mark" aria-hidden="true"><User strokeWidth={2.2} /></span>Your part</span>
+          <h3>You decide what matters.</h3>
+          <ul>
+            {YOU_DO.map(({ Icon, text }, i) => (
+              <li key={text} style={{ '--i': i } as React.CSSProperties}>
+                <span className="lx-in-num" aria-hidden="true">{i + 1}</span>
+                <span className="lx-in-ico" aria-hidden="true"><Icon strokeWidth={1.9} /></span>{text}
+              </li>
+            ))}
+          </ul>
+          <p className="lx-in-foot">That’s all you do.</p>
+        </div>
+
+        {/* (just the fine line between the two parts — the arrow button is gone, user 2026-11-21) */}
+        <span className="lx-in-divider" data-anim="fade" style={d(0.5)} aria-hidden="true" />
+
+        <div className="lx-in-card lx-in-sc" data-anim="right" style={d(0.3)}>
+          <span className="lx-in-tag lx-in-tag-sc"><span className="lx-in-tag-mark" aria-hidden="true"><BrandLogo size="sm" /></span>Shortcut’s part</span>
+          <h3>Shortcut does the rest.</h3>
+          <ul>
+            {SHORTCUT_DOES.map((text, i) => (
+              <li key={text} style={{ '--i': i } as React.CSSProperties}>
+                <span className="lx-in-tick" aria-hidden="true"><Check strokeWidth={3} /></span>{text}
+              </li>
+            ))}
+          </ul>
+          <p className="lx-in-foot lx-in-foot-sc">The repetitive editing work, handled for you.</p>
+        </div>
+      </div>
+
+    </section>
+  )
+}
+
+/**
+ * Why Shortcut? (user's website copy, 2026-11-21; replaces the "Inside Shortcut" board). The three ways to make a
+ * short, side by side — Traditional editing · AI clipping tools · Shortcut — each with its line from the copy and two
+ * plain meters, Control and Speed (how the copy itself compares them: control but slow · fast but no control · both).
+ * Shortcut's column is the highlighted one. The closing line, "Built for speed. Made for control.", lands last.
+ * Entrances replay on every visit (useReplayReveal).
+ */
+const WHY = [
+  { id: 'trad', label: 'Traditional Editing', line: 'You have complete control, but every crop, caption and export takes time.', control: 0.95, speed: 0.22 },
+  { id: 'ai', label: 'AI Clipping Tools', line: 'They’re fast, but AI chooses the moments and framing. You often end up fixing the results.', control: 0.25, speed: 0.92 },
+  { id: 'sc', label: 'Shortcut', line: 'You choose the moments. You guide the frame. Shortcut handles the repetitive editing.', control: 0.95, speed: 0.92 },
+]
+export function WhySection() {
+  const ref = useRef<HTMLElement>(null)
+  useReplayReveal(ref)
+  const d = (s: number) => ({ '--d': `${s}s` } as React.CSSProperties)
+  return (
+    <section ref={ref} className="section-inner lx-why" aria-labelledby="why-title">
+      <header className="lx-why-head">
+        <p className="lx-why-eyebrow" data-anim="down">Why Shortcut?</p>
+        <h2 className="lx-why-title" id="why-title" data-anim="up" style={d(0.1)}>
+          Not Another AI That <span className="lx-why-em">Decides for You.</span>
+        </h2>
+      </header>
+
+      <div className="lx-why-cols">
+        {WHY.map((w, i) => (
+          <article key={w.id} className={`lx-why-col lx-why-${w.id}`} data-anim="up" style={d(0.25 + i * 0.18)}>
+            <div className="lx-why-top">
+              {w.id === 'sc'
+                ? <span className="lx-why-tag lx-why-tag-sc"><span className="lx-in-tag-mark" aria-hidden="true"><BrandLogo size="sm" /></span>Shortcut</span>
+                : <span className="lx-why-tag">{w.label}</span>}
+              {w.id === 'sc' && <span className="lx-why-best">Both</span>}
+            </div>
+            <p className="lx-why-line">{w.line}</p>
+            <dl className="lx-why-meters">
+              {([['Control', w.control], ['Speed', w.speed]] as const).map(([k, v], j) => (
+                <div key={k} className="lx-why-meter" style={{ '--v': v, '--j': j } as React.CSSProperties}>
+                  <dt>{k}</dt>
+                  <dd><i /></dd>
+                </div>
+              ))}
+            </dl>
+          </article>
+        ))}
+      </div>
+
+      <p className="lx-why-close" data-anim="up" style={d(0.4)}>
+        Built for <b>speed</b>. Made for <b>control</b>.
+      </p>
+    </section>
+  )
+}
+
+/**
+ * Who Is It For? (user's website copy, 2026-11-21; replaces the "Clippers" placeholder quotes). Six audiences, each a
+ * card with its icon, name and the copy's line. Same family as Why Shortcut (label, headline, cards); entrances replay
+ * on every visit (useReplayReveal).
+ */
+const WHO = [
+  { Icon: Mic, name: 'Podcasters', line: 'Turn every episode into multiple short-form videos.' },
+  { Icon: MonitorPlay, name: 'YouTubers', line: 'Get more Reels and Shorts from your existing videos.' },
+  { Icon: Sparkles, name: 'Content Creators', line: 'Create more content without spending hours editing.' },
+  { Icon: Scissors, name: 'Editors & Agencies', line: 'Produce more clips without repetitive editing work.' },
+  { Icon: GraduationCap, name: 'Educators & Coaches', line: 'Turn lessons, lectures and webinars into bite-sized content.' },
+  { Icon: Megaphone, name: 'Brands & Marketers', line: 'Repurpose interviews, events and product videos.' },
+]
+export function WhoSection() {
+  const ref = useRef<HTMLElement>(null)
+  useReplayReveal(ref)
+  const d = (s: number) => ({ '--d': `${s}s` } as React.CSSProperties)
+  return (
+    <section ref={ref} className="section-inner lx-who" aria-labelledby="who-title">
+      <header className="lx-who-head">
+        <p className="lx-why-eyebrow" data-anim="down">Who is it for?</p>
+        <h2 className="lx-who-title" id="who-title" data-anim="up" style={d(0.1)}>
+          <span>Made for Everyone</span> <span className="lx-who-em">Creating Long-Form Content.</span>
+        </h2>
+      </header>
+      <ul className="lx-who-grid">
+        {WHO.map(({ Icon, name, line }, i) => (
+          <li key={name} className="lx-who-card" data-anim="up" style={d(0.25 + (i % 3) * 0.12 + Math.floor(i / 3) * 0.22)}>
+            <span className="lx-who-ico" aria-hidden="true"><Icon strokeWidth={1.8} /></span>
+            <h3>{name}</h3>
+            <p>{line}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }

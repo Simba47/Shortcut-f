@@ -579,6 +579,12 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
     brand.update(kit.id, { data, ...extra })
   }
   const now = () => (latest.current?.id === kit.id ? withNewFields(latest.current.data) : d)
+  // A font pointed at in a Font list, not picked yet (user, 2026-11-20): the sample and "On your clip" show it;
+  // nothing is saved until it's clicked
+  const [fontTry, setFontTry] = useState<FontTryOf | null>(null)
+  useEffect(() => { setFontTry(null) }, [kit.id])
+  const shownData = withFontTry(d, fontTry)
+  const shownKit = shownData === d ? kit : { ...kit, data: shownData }
   // A kit someone shared with this user: shown, not changed — unless they can edit it (Phase 6: then all
   // but its team, brand lock, default mark and intro / outro, which are the owner's)
   const shared = !!kit.shared_by
@@ -697,7 +703,7 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
                  requests, user 2026-11-21. Back later: start={<BrandStart kit={kit} brand={brand} now={now} set={set} onFound={setFound} />}) */
               <BrandCard kit={kit} brand={brand} now={now} set={set} found={found} readOnly={readOnly} />
             )}
-            {cur.id === 'style' && <TextAndCaptions d={d} now={now} set={set} />}
+            {cur.id === 'style' && <TextAndCaptions d={d} shown={shownData} onFontTry={setFontTry} now={now} set={set} />}
             </div>
             {/* Back / Save & next: right under the boxes (user, 2026-11-10) */}
             <div className="kit-step-bar flex items-center justify-between gap-3">
@@ -727,7 +733,7 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
         <aside aria-label="How it looks" className="shrink-0 w-[244px] p-4 overflow-y-auto flex flex-col items-center gap-2 max-[860px]:hidden" style={{ borderLeft: '1px solid rgb(var(--ed-fg) / 0.06)' }}>
             <>
               <Mock label="On your clip">
-                <ClipMock kit={kit} platform={platform} onPlace={readOnly ? undefined : (x, y) => set({ ...now(), logo: { ...now().logo, x, y } })} />
+                <ClipMock kit={shownKit} platform={platform} onPlace={readOnly ? undefined : (x, y) => set({ ...now(), logo: { ...now().logo, x, y } })} />
               </Mock>
               <PlatformSwitch value={platform} onChange={setPlatform} />
               {platform !== 'off' && d.logo.path && logoCovered(d, platform) && (
@@ -844,6 +850,14 @@ function PlatformSwitch({ value, onChange }: { value: Platform; onChange: (p: Pl
 }
 
 /** A caption style change from the Captions panel, as the kit keeps it */
+/** A font being tried in the Fonts tab: the captions' or the title's (`font` null: the style's own / the usual) */
+type FontTryOf = { of: 'caption' | 'title'; font: string | null }
+/** The kit as the previews show it while a font is tried (the same object when none is) */
+function withFontTry(d: BrandKitData, t: FontTryOf | null): BrandKitData {
+  if (!t) return d
+  return t.of === 'caption' ? { ...d, captions: { ...d.captions, font: t.font } } : { ...d, title: { ...d.title, font: t.font } }
+}
+
 export function captionPatch(u: Partial<import('@/lib/shared/types').CaptionStyle>): Partial<BrandCaptions> {
   const out: Partial<BrandCaptions> = {}
   if ('template' in u) out.template = u.template ?? null
@@ -974,7 +988,12 @@ const KIT_TABS: Array<{ id: KitTab; label: string; tip: string }> = [
  * a sample pinned over a bar of tabs, one kind of setting at a time. The kit's Primary and Secondary are
  * the colours offered first.
  */
-function TextAndCaptions({ d, now, set }: { d: BrandKitData; now: () => BrandKitData; set: (data: BrandKitData) => void }) {
+function TextAndCaptions({ d, shown = d, onFontTry, now, set }: {
+  d: BrandKitData; now: () => BrandKitData; set: (data: BrandKitData) => void
+  /** The kit as the previews show it: `d` with a font being tried in a Font list (withFontTry) */
+  shown?: BrandKitData
+  onFontTry?: (t: FontTryOf | null) => void
+}) {
   const [picked, setPicked] = useState<KitTab>('style')
   // Fonts: the sample on top shows the card last touched — the captions', or the title's (user, 2026-11-12)
   const [sampleOf, setSampleOf] = useState<'caption' | 'title'>('caption')
@@ -991,14 +1010,17 @@ function TextAndCaptions({ d, now, set }: { d: BrandKitData; now: () => BrandKit
     { name: 'Primary', hex: d.colors.main }, { name: 'Secondary', hex: d.colors.accent },
     ...d.colors.extra.map((hex, i) => ({ name: `Colour ${i + 3}`, hex })),
   ]
-  const sample = brandTextStyle(d, 'title')
+  // (the samples show a font being tried; the settings show what's saved)
+  const sample = brandTextStyle(shown, 'title')
+  const shownStyle = shown === d ? style : brandCaptionStyle(shown.captions)
   const styler = (section: 'style' | 'colours' | 'font') => (
     // (the font part sits inside the Fonts tab's own panel)
     <div role={section === 'font' ? undefined : 'tabpanel'} aria-label={section === 'style' ? 'Style' : section === 'font' ? undefined : 'Look'} className="kit-cc -mx-4">
       <CaptionStyler section={section} style={style} textCase={textCase}
         onChange={u => setCaptions(captionPatch(u))}
         onTextCaseChange={(c: TextCase) => setCaptions({ uppercase: c === 'upper', lowercase: c === 'lower' })}
-        onEditCaptions={() => {}} onRetranscribe={() => {}} retranscribing={false} hasWords={false} />
+        onEditCaptions={() => {}} onRetranscribe={() => {}} retranscribing={false} hasWords={false}
+        onFontTry={onFontTry && section === 'font' ? t => onFontTry(t ? { of: 'caption', font: t.family } : null) : undefined} />
     </div>
   )
   return (
@@ -1016,7 +1038,7 @@ function TextAndCaptions({ d, now, set }: { d: BrandKitData; now: () => BrandKit
             </div>
           ) : (
             <Suspense fallback={<div className="cap-preview kit-text-sample" />}>
-              <CaptionPreview style={style} textCase={textCase} dim={!d.captions.on} />
+              <CaptionPreview style={shownStyle} textCase={textCase} dim={!d.captions.on} />
             </Suspense>
           )}
         </div>
@@ -1094,7 +1116,8 @@ function TextAndCaptions({ d, now, set }: { d: BrandKitData; now: () => BrandKit
                 Brand title is off (Captions &amp; title tab): clips keep their own title look. This style is still used by &ldquo;+ Title&rdquo; in the Text tool.
               </p>
             )}
-            <FontPicker stayOpen value={d.title.font} onChange={font => set({ ...now(), title: { ...now().title, font: font === 'sans-serif' ? null : font } })} />
+            <FontPicker stayOpen value={d.title.font} onChange={font => set({ ...now(), title: { ...now().title, font: font === 'sans-serif' ? null : font } })}
+              onTry={onFontTry ? t => onFontTry(t ? { of: 'title', font: t.family === 'sans-serif' ? null : t.family } : null) : undefined} />
             <ColorRow label="Colour" value={d.title.color} onChange={color => set({ ...now(), title: { ...now().title, color } })} suggest={suggest} />
             <RangeRow label="Size" min={24} max={160} step={2} value={d.title.size} text={`${d.title.size}`}
               onChange={size => set({ ...now(), title: { ...now().title, size } })} />

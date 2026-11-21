@@ -6,8 +6,7 @@ import { useEffect, useRef } from 'react'
  * The sign-in pages as a live show (styles: .as-* in app/auth.css; desktop only). The crowd along the
  * bottom (CrowdCanvas) is the audience; the card is the stage:
  *   - two soft white stage spotlights sway down from the top corners
- *   - live reactions float up the left and right sides, like a stream's: hearts, likes, play icons,
- *     comments, sparkles and view counters (line icons, lime only on a couple of hearts)
+ *   - a few reactions drift slowly up the sides (three grey line icons; user 2026-11-19: calmer)
  *   - sending the form (sign in, create account, a code) sets off a short burst of them
  * Transforms and opacity only; nothing behind the card. Reduced motion: the lights stand still and
  * no reactions float.
@@ -15,11 +14,9 @@ import { useEffect, useRef } from 'react'
 
 type Kind = 'heart' | 'like' | 'play' | 'chat' | 'spark' | 'views' | 'plays'
 // side, distance from the page edge (vw), kind, delay (s), duration (s), size, lime
+// (user, 2026-11-19: calmer — three slow grey ones, well apart, no lime and no view counters; was fourteen)
 const R: [('l' | 'r'), number, Kind, number, number, number, boolean?][] = [
-  ['l', 6, 'heart', 0, 9, 1, true], ['l', 17, 'views', 2.4, 11, 1], ['l', 10, 'play', 4.6, 10, .9], ['l', 22, 'spark', 1.2, 8, .8],
-  ['l', 4, 'chat', 6.8, 10.5, .9], ['l', 15, 'like', 8.4, 9.5, 1], ['l', 25, 'heart', 3.6, 10, .8],
-  ['r', 7, 'like', 1.8, 10, 1], ['r', 18, 'heart', 0.6, 9, .9], ['r', 11, 'plays', 3.9, 11.5, 1], ['r', 23, 'spark', 5.6, 8, .8],
-  ['r', 5, 'heart', 7.2, 9.5, 1, true], ['r', 15, 'chat', 9, 10.5, .9], ['r', 26, 'play', 2.8, 10, .8],
+  ['l', 12, 'heart', 1.5, 18, .9], ['r', 10, 'play', 7.5, 20, .85], ['l', 22, 'like', 13.5, 19, .8],
 ]
 // the burst when the form is sent
 const BURST: [('l' | 'r'), number, Kind, number][] = [
@@ -67,7 +64,7 @@ export function AuthStage() {
         </span>
       ))}
       {BURST.map(([side, x, kind, d], i) => (
-        <span key={`b${i}`} className={`as-b as-s${side}${kind === 'heart' && i % 3 === 0 ? ' as-lime' : ''}`}
+        <span key={`b${i}`} className={`as-b as-s${side}`}
           style={{ '--x': `${x}vw`, '--d': `${d}s` } as React.CSSProperties}>
           <Icon kind={kind} />
         </span>

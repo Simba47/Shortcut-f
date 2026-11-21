@@ -2,9 +2,8 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import Link from 'next/link'
-import NumberFlow from '@number-flow/react'
-import { Mail, MapPin, Menu, Phone, X } from 'lucide-react'
-import { motion, useReducedMotion, useScroll, useSpring, useTransform, type MotionStyle } from 'framer-motion'
+import { Flame, Languages, Mail, MapPin, Menu, Phone, ScanFace, X } from 'lucide-react'
+import { motion, useReducedMotion, useScroll } from 'framer-motion'
 import { PricingSection, type PricingPlan } from '@/components/ui/pricing'
 import { DotField } from '@/components/ui/dot-field'
 import { ClipForge } from '@/components/landing/clip-forge'
@@ -17,12 +16,13 @@ import { CircularCarousel, type CarouselItem } from '@/components/ui/circular-ca
 import { SectionTransition } from '@/components/ui/section-transition'
 import { FaqSection, type FaqItem } from '@/components/ui/faq-section'
 import { HeroSplit } from '@/components/landing/hero-split'
+import { HeroEditor } from '@/components/landing/hero-editor'
 import { FeatureTunnel } from '@/components/landing/feature-tunnel'
 import { FlyIn } from '@/components/landing/fly-in'
 import { FooterWordmark } from '@/components/landing/footer-wordmark'
 import type Lenis from 'lenis'
-import { InsightsSection, ProblemSection, ProofSection } from '@/components/landing/sections'
-import { neutralStyle, useLiteMotion } from '@/components/ui/use-lite-motion'
+import { IntroSection, ProblemSection, WhoSection, WhySection } from '@/components/landing/sections'
+import { useLiteMotion } from '@/components/ui/use-lite-motion'
 import { PLANS } from '@/lib/plans'
 import { brandKitLimit } from '@/lib/shared/brandKit'
 import { teamSeats } from '@/lib/shared/brandTeam'
@@ -30,9 +30,6 @@ import { canKeep } from '@/lib/expiry'
 import { TRIAL_PACK, TRIAL_DAYS } from '@/lib/credits'
 import { COMPANY } from '@/lib/company'
 import { GMAIL_COMPOSE, openMailAppOnPhones } from '@/components/ui/email-link'
-
-// (user, 2026-11-16) No free plan: a Trial pack, paid once, to try everything (₹49 for 7 days since 2026-11-21)
-const trial = PLANS.trial
 
 // (user, 2026-11-14) The landing page shows the real plans, read from lib/plans.ts — the same source as the
 // Pricing page and the app — so its names, prices and limits can't drift apart again. (It used to have its own
@@ -69,43 +66,47 @@ const PRICING_PLANS: PricingPlan[] = LANDING_PLANS.map(key => {
     // Billing is monthly only — the buttons still lead to the monthly plans.
     yearlyPrice: Math.round(plan.price * 0.8),
     once,
-    headline: once ? `${TRIAL_PACK.credits} credits to try everything` : `${plan.monthlyCredits.toLocaleString('en-IN')} credits every month`,
-    subline: once ? `Lasts ${TRIAL_DAYS} days · no subscription` : 'Unused credits roll over one month',
+    // (user's website copy, 2026-11-21)
+    headline: once ? `${TRIAL_PACK.credits} credits to try everything.` : `${plan.monthlyCredits.toLocaleString('en-IN')} credits every month.`,
+    subline: once ? `Lasts ${TRIAL_DAYS} days. No subscription.` : 'Unused credits roll over one month.',
     features: planFeatures(plan),
     buttonText: once ? `Start for ₹${plan.price}` : `Choose ${plan.name}`,
     // Sign up first (landing visitors are signed out), then straight to the Pricing page to pay
     // (lib/nextPath.ts keeps ?callbackUrl through the email code and Google)
     href: '/signup?callbackUrl=%2Fpricing',
+    tier: key,
     ...(key === 'creator' ? { badge: 'Most popular', isPopular: true } : {}),
+    // (user, 2026-11-21: the Trial is a special pack — a ticket, in gold)
+    ...(key === 'trial' ? { badge: '✦ Try it first', special: true } : {}),
   }
 })
 
 // FAQ between Pricing and the closing section. Plan-by-plan differences live in Pricing, not here.
 const FAQS: FaqItem[] = [
+  // (user's website copy, 2026-11-21: six questions, word for word)
   {
-    question: 'How fast can I make a clip?',
-    // TODO(content): the client's page leaves the minutes as [X]
-    answer: 'Most clips are ready to post in [X] minutes from upload, including captions and branding.',
+    question: 'What is Shortcut?',
+    answer: 'Shortcut is a video editing tool that helps you turn long-form videos into short vertical clips for Instagram Reels, YouTube Shorts and TikTok.',
   },
   {
-    question: 'What if the AI picks the wrong moment or framing?',
-    answer: 'Edit any clip in the timeline, or hit play and steer the frame to fix it in one pass.',
+    question: 'Does Shortcut automatically choose the best moments?',
+    answer: 'No. You choose the moments you want. Shortcut helps you edit them faster.',
   },
   {
-    question: 'Which platforms can I post to?',
-    answer: 'Instagram Reels and YouTube Shorts. Connect your channels once and post in one tap.',
+    question: 'What type of videos can I upload?',
+    answer: 'Podcasts, interviews, lectures, streams, vlogs and other long-form videos.',
   },
   {
-    question: 'How do trending topics work?',
-    answer: 'We show which topics, hooks and clip lengths are getting views in your niche, then highlight matching moments in your uploads.',
+    question: 'Do I need editing experience?',
+    answer: 'No. Shortcut simplifies framing, cropping, captions and layouts.',
   },
   {
-    question: 'Can I use any video?',
-    answer: 'Use videos you own or have permission to use. Clips from content you don’t have rights to can get your channel struck or demonetized. Paid campaigns, coming soon, give you approved sources to clip.',
+    question: 'Can I add captions and text?',
+    answer: 'Yes. You can generate captions automatically and add your own hooks, titles and callouts.',
   },
   {
-    question: 'Is there a free plan?',
-    answer: `No. Instead there's a ₹${trial.price} Trial pack, paid once: ${TRIAL_PACK.credits} credits for ${TRIAL_DAYS} days to try everything, from AI clips and captions to exports with no watermark. No subscription, and if you pick a plan, your unused credits move into it.`,
+    question: 'Can I create clips without using AI clips?',
+    answer: 'Yes. You can cut your own clips, and this feature is unlimited across all plans.',
   },
 ]
 
@@ -131,11 +132,13 @@ const LANE_SIZES = ['lg', 'sm', 'md', 'sm', 'lg', 'md'] as const
 const LANE_DURATIONS = [22, 30, 26, 34, 24, 28]
 
 // "How it works" steps
+// How It Works (user's website copy, 2026-11-21): five steps, word for word
 const STEPS = [
-  { title: 'See what’s working', desc: 'Check trending topics in your niche, plus the hooks and clip lengths getting the most views this week.' },
-  { title: 'Upload and let AI clip', desc: 'Paste a link or upload a long video. AI cuts ready-to-post shorts with captions, headlines and your brand kit.' },
-  { title: 'Fix in one pass, then post', desc: 'Framing off? Hit play and steer the frame live. No keyframes. Then post straight to your channels.' },
-  { title: 'Track and earn more', desc: 'See views and earnings for every clip. Shortcut learns what works for you and picks better moments next time.' },
+  { title: 'Upload Your Video', desc: 'Upload your podcast, interview, stream or any long-form video.' },
+  { title: 'Select Your Moment', desc: 'Choose the exact portion of the video you want to turn into a short.' },
+  { title: 'Guide Your Frame', desc: 'Play your video and move the vertical frame to follow the person or action you want to highlight.' },
+  { title: 'Make It Yours', desc: 'Add automatic captions, custom text and ready-made layouts.' },
+  { title: 'Finish and Post', desc: 'Your video renders while you edit. Finish your work and get your clip ready to post.' },
 ]
 
 // Features: the fly-through on desktop, the circular carousel on smaller screens / reduced motion
@@ -145,24 +148,33 @@ const useTunnel = () => useSyncExternalStore(tunnelSub, () => window.matchMedia(
 
 const featureIcon = (glyph: string, tone: string) => <span className={`feature-icon ${tone}`} aria-hidden>{glyph}</span>
 
+// Features (user's website copy, 2026-11-21): five, word for word, in the copy's order. Each keeps the card art of the
+// feature it names (feature-tunnel.tsx: steer, export, captions, hooks, layouts); the design is unchanged
 const FEATURES: CarouselItem[] = [
-  { id: 'moments', tag: 'AI', icon: featureIcon('✦', 'fi-cyan'), title: 'Your best moments, found for you', description: 'Upload one video and get a batch of ready-to-post clips in minutes, not hours.' },
-  { id: 'steer', tag: 'Framing', icon: featureIcon('◎', 'fi-warm'), title: 'Fix any frame in one pass', description: 'Hit play and guide the frame live. No keyframes, no frame-by-frame dragging.' },
-  { id: 'captions', tag: 'Captions', icon: featureIcon('≋', 'fi-yellow'), title: 'Captions that keep them watching', description: 'Accurate captions in seconds, styled to stop the scroll even on mute.' },
-  { id: 'hooks', tag: 'Hooks', icon: featureIcon('⚡', 'fi-green'), title: 'Win the first second', description: 'Add hooks and titles that grab attention before viewers swipe away.' },
-  { id: 'brand', tag: 'Brand', icon: featureIcon('◈', 'fi-purple'), title: 'Every clip looks like yours', description: 'Your fonts, colors and logo applied to every clip automatically.' },
-  { id: 'layouts', tag: 'Layouts', icon: featureIcon('▤', 'fi-blue'), title: 'Ready-made layouts', description: 'Video with text on top, split screen, video with photo, and more.' },
-  { id: 'export', tag: 'Speed', icon: featureIcon('⬆', 'fi-green'), title: 'No waiting to export', description: 'Clips render while you edit, so they’re ready the moment you finish.' },
-  { id: 'post', tag: 'Publish', icon: featureIcon('➚', 'fi-cyan'), title: 'Post everywhere at once', description: 'Send clips straight to Instagram Reels and YouTube Shorts from one place.' },
+  { id: 'steer', tag: 'Framing', icon: featureIcon('◎', 'fi-warm'), title: 'Play-and-Steer Framing', description: 'Move your vertical frame while your video plays. Follow what matters in real time.' },
+  { id: 'export', tag: 'Speed', icon: featureIcon('⬆', 'fi-green'), title: 'Parallel Rendering', description: 'Your clip renders while you edit. No waiting for a separate export.' },
+  { id: 'captions', tag: 'Captions', icon: featureIcon('≋', 'fi-yellow'), title: 'Automatic Captions', description: 'Generate captions automatically for your AI-generated clips.' },
+  { id: 'hooks', tag: 'Text', icon: featureIcon('⚡', 'fi-green'), title: 'Custom Text', description: 'Add hooks, titles and callouts to make your videos stand out.' },
+  { id: 'layouts', tag: 'Layouts', icon: featureIcon('▤', 'fi-blue'), title: 'Ready-Made Layouts', description: 'Choose from different video and text combinations to create the look you want.' },
 ]
 
 const CONTACT = COMPANY
 
+// The phone menu's links (and the sections kept within one screen); unchanged — phones aren't part of the
+// 2026-11-20 desktop rework
 const EXPLORE = [
   { label: 'How it works', href: '#process' },
   { label: 'Features', href: '#features' },
   { label: 'Trends', href: '#trends' },
   { label: 'Pricing', href: '#pricing' },
+]
+// The desktop bar's links, after Home (user's website copy, 2026-11-20: Home · How It Works · Features ·
+// Pricing · FAQ, and Get Started)
+const NAV_LINKS = [
+  { label: 'How It Works', href: '#process' },
+  { label: 'Features', href: '#features' },
+  { label: 'Pricing', href: '#pricing' },
+  { label: 'FAQ', href: '#faq' },
 ]
 // Footer "Explore" column (the client's footer links)
 const FOOTER_LINKS = [
@@ -307,6 +319,94 @@ function PlainSection({ id, className, children }: { id?: string; className?: st
   return <div id={id} className={`section-transition ${className ?? ''}`}>{children}</div>
 }
 
+/**
+ * "Captions in ___" (hero feature row; user 2026-11-21): the word changes through the caption languages, each in its
+ * own script, starting with Telugu. Reduced motion: "multiple languages", still. Screen readers hear one sentence.
+ */
+const ROLL_LANGS = ['Telugu', 'Hindi', 'Tamil', 'Kannada', 'Malayalam', 'Bengali', 'Marathi', 'Gujarati', 'Punjabi', 'Odia', 'English', 'Tenglish']
+  .map(n => LANGUAGES.find(l => l.name === n)!)
+function HeroLangs() {
+  const [i, setI] = useState(-1)                         // -1: still ("multiple languages")
+  const rolled = useRef(false)                           // past the first word (from then on, 0 has a word before it)
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    setI(0)
+    const id = setInterval(() => setI(n => (n + 1) % ROLL_LANGS.length), 1800)
+    return () => clearInterval(id)
+  }, [])
+  const l = i < 0 ? null : ROLL_LANGS[i]
+  const prev = i > 0 || (i === 0 && rolled.current) ? ROLL_LANGS[(i + ROLL_LANGS.length - 1) % ROLL_LANGS.length] : null
+  if (i > 0) rolled.current = true
+  return (
+    <>
+      <span className="sr-only">Captions in {LANGUAGES.length} languages</span>
+      <span aria-hidden="true">
+        Captions in{' '}
+        {/* (the new word rolls in as the old one rolls out, so there is never a gap) */}
+        <span className="hero-lang">
+          {prev && <span className="hero-lang-word hero-lang-out" key={`o${i}`}>{prev.native}</span>}
+          <span className="hero-lang-word" key={i}>{l ? l.native : 'multiple languages'}</span>
+        </span>
+      </span>
+    </>
+  )
+}
+
+/**
+ * The subheadline as a moment (user, 2026-11-20): it types itself, "Turn long videos into short-form content.
+ * Faster.", with a blinking cursor; a beat on "Faster."; then the payoff — the word lights up lime, a count opens
+ * in front of it and runs 1× → 10×, and "10× faster." pops with a lime underline sweeping under it. Once; reduced
+ * motion: the end state straight away. Screen readers hear the final sentence.
+ */
+const LEAD_BASE = 'Turn long videos into short-form content. '
+const LEAD_WORD = 'Faster.'
+function HeroLead() {
+  const full = LEAD_BASE.length + LEAD_WORD.length
+  const [typed, setTyped] = useState(0)
+  const [n, setN] = useState(0)                        // the count (0: not started)
+  const [done, setDone] = useState(false)
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setTyped(full); setN(10); setDone(true); return }
+    const timers: ReturnType<typeof setTimeout>[] = []
+    let raf = 0
+    // type: a letter every ~16 ms (a little longer after the full stop), as the headline rises in
+    // (quicker, user 2026-11-21: "10× faster." reads at ~2.7 s, not ~4.4 s)
+    let at = 450
+    for (let i = 1; i <= full; i++) {
+      at += LEAD_BASE[i - 2] === '.' ? 120 : 16
+      timers.push(setTimeout(() => setTyped(i), at))
+    }
+    // a beat on "Faster.", then the count
+    timers.push(setTimeout(() => {
+      const start = performance.now(), ms = 900
+      const step = (now: number) => {
+        const k = Math.min(1, (now - start) / ms)
+        setN(Math.max(1, Math.round(1 + 9 * (1 - Math.pow(1 - k, 3)))))
+        if (k < 1) raf = requestAnimationFrame(step)
+        else setDone(true)
+      }
+      raf = requestAnimationFrame(step)
+    }, at + 450))
+    return () => { timers.forEach(clearTimeout); cancelAnimationFrame(raf) }
+  }, [full])
+  const base = LEAD_BASE.slice(0, typed)
+  const word = typed > LEAD_BASE.length ? LEAD_WORD.slice(0, typed - LEAD_BASE.length) : ''
+  return (
+    <>
+      <span className="sr-only">{LEAD_BASE}10× faster.</span>
+      <span aria-hidden="true">
+        {base}
+        {word && (
+          <strong className="faster" data-hi={n > 0 || undefined} data-done={done || undefined}>
+            <span className="faster-num">{n > 0 ? `${n}×` : ''}</span><span className="faster-word">{n > 0 ? 'faster.' : word}</span>
+          </strong>
+        )}
+        {!done && <span className="lead-caret" />}
+      </span>
+    </>
+  )
+}
+
 // Hand-drawn arrow that swaps in for the label on .arrow-btn hover
 function SquiggleArrow() {
   return (
@@ -321,11 +421,19 @@ export function LandingPage() {
   // 0 when the features sheet enters the bottom of the screen, 1 when it reaches the top.
   const sheetRef = useRef<HTMLDivElement>(null)
   const { scrollYProgress: raw } = useScroll({ target: sheetRef, offset: ['start end', 'start start'] })
-  const p = useSpring(raw, { stiffness: 120, damping: 24, mass: 0.3 })
   // Once the sheet fully covers the hero, the hero stops drawing (hidden; its animation pauses) —
   // it stays pinned behind the Problem section for a while, and nobody can see it
   const [heroCovered, setHeroCovered] = useState(false)
   useEffect(() => raw.on('change', v => setHeroCovered(v >= 0.999)), [raw])
+  // (user 2026-11-21: the entrances play again each time the hero comes back, not only on the first visit) once the
+  // hero has been scrolled fully away, coming back remounts its words, so the headline, the typing and the buttons
+  // run in again; the editor keeps playing
+  const [heroVisit, setHeroVisit] = useState(0)
+  const heroWasCovered = useRef(false)
+  useEffect(() => {
+    if (heroCovered) heroWasCovered.current = true
+    else if (heroWasCovered.current) { heroWasCovered.current = false; setHeroVisit(n => n + 1) }
+  }, [heroCovered])
   // As soon as the Problem section starts sliding up, the hero's looping animation pauses, so the
   // two never draw at the same time (that overlap made the hand-off stutter)
   const [heroPaused, setHeroPaused] = useState(false)
@@ -333,21 +441,9 @@ export function LandingPage() {
   const reduceMotion = useReducedMotion()
   // Phones/touch screens scroll plainly: per-frame blur/scale effects stutter there
   const lite = useLiteMotion()
-  const fx = (style: MotionStyle) => (reduceMotion || lite ? neutralStyle(style) : style)
 
-  // Hero breaks apart: lines drift in opposite directions, text blurs and recedes
-  const line1X = useTransform(p, [0, 1], ['0%', '-22%'])
-  const line2X = useTransform(p, [0, 1], ['0%', '22%'])
-  const textOpacity = useTransform(p, [0, 0.75], [1, 0])
-  const textScale = useTransform(p, [0, 1], [1, 0.9])
-  const textBlur = useTransform(p, [0, 0.75], ['blur(0px)', 'blur(12px)'])
-  const detailsOpacity = useTransform(p, [0, 0.35], [1, 0])
-  const detailsY = useTransform(p, [0, 0.35], [0, -40])
-  // Background dot field fades out as the hero recedes
-  const fieldOpacity = useTransform(p, [0, 0.8], [1, 0])
-  // Features rises as a card and flattens to full width
-  const sheetScale = useTransform(p, [0, 1], [0.9, 1])
-  const sheetRadius = useTransform(p, [0, 1], [48, 0])
+  // (user, 2026-11-20: no scroll effect between the hero and the Problem section — the page scrolls plainly; the
+  // Problem section's content fades up as it comes in, like the other sections)
 
   const heroRef = useRef<HTMLElement>(null)
   const tunnel = useTunnel()
@@ -365,15 +461,6 @@ export function LandingPage() {
   }, [tunnel])
   // Desktop: sections fly in (FlyIn) instead of the tilt / zoom entrances
   const Sec = tunnel ? PlainSection : SectionTransition
-
-  // "Try everything for ₹N": N counts up from 0 once the line has faded in, like earnings
-  // adding up (N is the Trial pack's price, so it always matches Pricing)
-  const [trialPrice, setTrialPrice] = useState(0)
-  useEffect(() => {
-    if (reduceMotion) { setTrialPrice(trial.price); return }
-    const t = setTimeout(() => setTrialPrice(trial.price), 1300)
-    return () => clearTimeout(t)
-  }, [reduceMotion])
 
   // Keep every nav section within one screen, so a nav click shows all of it
   useEffect(() => {
@@ -397,10 +484,13 @@ export function LandingPage() {
   // Once the footer is fully open (scrolled to the bottom, or it fills the screen up to the bar),
   // the bar's logo steps aside: the footer has its own, and the two would sit on top of each other
   const [footerOpen, setFooterOpen] = useState(false)
+  // Scrolled at all: the bar gets its own blurred background (the hero now scrolls under it — user, 2026-11-20)
+  const [scrolled, setScrolled] = useState(false)
   useEffect(() => {
     let raf = 0
     const check = () => {
       raf = 0
+      setScrolled(window.scrollY > 8)
       const sheet = sheetRef.current
       if (sheet) setPastHero(sheet.getBoundingClientRect().top <= NAV_H)
       const foot = document.querySelector('.lp-footer')
@@ -456,20 +546,22 @@ export function LandingPage() {
     <div className="lp-root">
 
       {/* ── NAV ── */}
-      <nav className={`lp-nav${pastHero ? ' nav-past-hero' : ''}`}>
+      <nav className={`lp-nav${pastHero ? ' nav-past-hero' : ''}`} data-scrolled={scrolled || undefined}>
         <a href="#" className="logo" aria-label="Shortcut home" data-away={footerOpen || undefined} tabIndex={footerOpen ? -1 : undefined}><BrandLogo shine /></a>
         <ul className="nav-links">
           <li>
             <a href="#" onClick={goHome}>Home</a>
           </li>
-          {EXPLORE.map(l => (
+          {NAV_LINKS.map(l => (
             <li key={l.href}><a href={l.href} onClick={e => goToSection(e, l.href)}>{l.label}</a></li>
           ))}
         </ul>
         <div className="nav-right">
-          <Link href="/login" className="btn-nav-ghost fill-btn fill-btn-sm"><FillButtonContent>Log in</FillButtonContent></Link>
+          {/* (desktop: no Log in in the bar — the user's copy has Get Started only; the sign-up page's own bar
+              has "Sign in". Phones keep it: nav-login in landing.css) */}
+          <Link href="/login" className="btn-nav-ghost fill-btn fill-btn-sm nav-login"><FillButtonContent>Log in</FillButtonContent></Link>
           <Link href="/signup" className="btn-nav-primary arrow-btn">
-            <span className="arrow-btn-label">Get started</span>
+            <span className="arrow-btn-label">Get Started</span>
             <SquiggleArrow />
           </Link>
           <button
@@ -498,70 +590,80 @@ export function LandingPage() {
         {/* Soft light shade, same as the closing CTA section */}
         <div className="hero-shade" aria-hidden />
         {/* Interactive dot field: lights up around the cursor, ripples on click */}
-        <motion.div className="hero-field" aria-hidden style={fx({ opacity: fieldOpacity })}>
-          {!lite && <DotField hostRef={heroRef} />}
-        </motion.div>
+        <div className="hero-field" aria-hidden>
+          {!lite && <DotField hostRef={heroRef} mono />}
+        </div>
 
         {/* Desktop: text and buttons on the left, the lens animation on the right.
             Below 1100px the two stack, centred. */}
         <div className="hero-grid">
-        <motion.div className="hero-text" style={fx({ opacity: textOpacity, scale: textScale, filter: textBlur })}>
+        <div className="hero-text" key={heroVisit}>
+          {/* (user's website copy, 2026-11-20: the headline, "short form" the one lime highlight) */}
           <h1 className="hero-headline">
-            <motion.span className="line" style={fx({ x: line1X })}><span className="line-inner">Turn every video</span></motion.span>
-            <motion.span className="line" style={fx({ x: line2X })}><span className="line-inner">into <span className="warm">income.</span></span></motion.span>
+            <span className="line"><span className="line-inner">The shortcut to</span></span>
+            <span className="line"><span className="line-inner"><span className="warm">short form</span></span></span>
           </h1>
-          <motion.div style={fx({ opacity: detailsOpacity, y: detailsY })}>
-          <p className="hero-sub intro" style={{ '--d': '.55s' } as React.CSSProperties}>
-            AI finds the best moments, cuts them into <span className="whitespace-nowrap">ready-to-post</span> shorts, and shows you what&rsquo;s trending.
+          <div>
+          {/* the subheadline, one centred line ending in "Faster." */}
+          <p className="hero-sub hero-lead intro" style={{ '--d': '.5s' } as React.CSSProperties}>
+            <HeroLead />
           </p>
-          <div className="hero-ctas intro" style={{ '--d': '.7s' } as React.CSSProperties}>
+          {/* (phones keep the two lines here; desktop has them, shorter and animated, under the buttons) */}
+          <p className="hero-body hero-copy-phone intro" style={{ '--d': '.6s' } as React.CSSProperties}>
+            Got a podcast, interview, stream or long video? Turn it into <span className="whitespace-nowrap">ready-to-post</span> Instagram Reels, YouTube Shorts and TikToks in minutes.
+          </p>
+          <p className="hero-note hero-copy-phone intro" style={{ '--d': '.68s' } as React.CSSProperties}>
+            You choose the moments. Shortcut takes care of the editing.
+          </p>
+          <div className="hero-ctas intro" style={{ '--d': '.78s' } as React.CSSProperties}>
             <Link href="/signup" className="btn-nav-primary arrow-btn hero-cta-main">
-              <span className="arrow-btn-label">Start clipping</span>
+              <span className="arrow-btn-label">Get Started</span>
               <SquiggleArrow />
             </Link>
             <a href="#process" onClick={e => goToSection(e, '#process')} className="btn-nav-ghost fill-btn hero-cta-ghost">
-              <FillButtonContent>See how it works</FillButtonContent>
+              <FillButtonContent>See How It Works</FillButtonContent>
             </a>
           </div>
-          {/* Earnings line: a growth chart draws itself, and the free-clip number (lime, no badge)
-              flips in while it counts up, then flips again now and then (styles: .hero-earn in landing.css) */}
-          <div className="hero-earn intro" style={{ '--d': '.85s' } as React.CSSProperties}>
-            <svg className="earn-chart" width="26" height="20" viewBox="0 0 26 20" fill="none" aria-hidden="true">
-              <path className="earn-line" d="M2 16l6-6 4.5 4L22 4" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-              <path className="earn-head" d="M16 4h6v6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <p className="earn-text">
-              Try everything for{' '}
-              <span className="earn-num">
-                <span className="earn-coin">
-                  ₹<NumberFlow value={trialPrice} className="tabular-nums" />
-                </span>
-              </span>{' '}
-              once. No subscription.
-            </p>
+          {/* the feature row (hero step 6; user 2026-11-21: three premium features, not price points). Desktop only. */}
+          <ul className="hero-trust intro" style={{ '--d': '.95s' } as React.CSSProperties}>
+            {/* (a little life in the first two, user 2026-11-21: the flame flickers, a line scans the face frame) */}
+            {([[Flame, 'Viral tracking', 'ht-flame'], [ScanFace, 'Auto detection', 'ht-scan']] as const).map(([Icon, t, c]) => (
+              <li key={t}>
+                <span className={`ht-icon ${c}`} aria-hidden="true"><Icon strokeWidth={1.9} /></span>
+                {t}
+              </li>
+            ))}
+            <li><Languages aria-hidden="true" strokeWidth={1.9} /><HeroLangs /></li>
+          </ul>
           </div>
-          </motion.div>
-        </motion.div>
+        </div>
 
-        {/* recedes with the headline as the next section slides over */}
-        <motion.div className="hero-visual" style={fx({ opacity: textOpacity, scale: textScale })}>
-          <div className="intro" style={{ '--d': '.9s' } as React.CSSProperties}>
+        {/* recedes with the headline as the next section slides over. Desktop: the real editor turning the
+            wide video into a vertical short (HeroEditor); phones keep their animation (HeroSplit) */}
+        <div className="hero-visual">
+          {/* (in with the headline, not after it — user 2026-11-21: the editor's place sat empty for a second) */}
+          <div className="intro hero-visual-desk" style={{ '--d': '.3s' } as React.CSSProperties}>
+            <HeroEditor />
+          </div>
+          <div className="intro hero-visual-phone" style={{ '--d': '.9s' } as React.CSSProperties}>
             <HeroSplit />
           </div>
-        </motion.div>
         </div>
+
+        </div>
+
 
       </section>
 
-      {/* ── PROBLEM (slides up over the pinned hero) ── */}
-      <motion.div
-        id="problem"
-        ref={sheetRef}
-        className="section-wrap sheet"
-        style={fx({ scale: sheetScale, borderTopLeftRadius: sheetRadius, borderTopRightRadius: sheetRadius })}
-      >
+      {/* ── PROBLEM (after the hero, plainly: its heading and cards fade up as they come in) ── */}
+      <div id="problem" ref={sheetRef} className="section-wrap sheet">
         <ProblemSection />
-      </motion.div>
+      </div>
+      </div>
+
+      {/* ── INTRODUCING SHORTCUT (user's website copy, 2026-11-21): the answer to The Problem ── */}
+      <div id="intro" className="section-wrap">
+        <IntroSection />
       </div>
 
       {/* ── HOW IT WORKS ── */}
@@ -570,7 +672,7 @@ export function LandingPage() {
         <section className="section-inner">
           <div className="section-head reveal">
             <p className="section-eyebrow">How it works</p>
-            <h2 className="section-title">From long video to earning clips in four steps.</h2>
+            <h2 className="section-title hiw-title"><span>Five Simple Steps.</span> <span>One Ready-to-Post Short.</span></h2>
           </div>
           {/* The process in motion: on the left, the clip forge (long video in, clips out) and the
               editing board (steer the frame live); the right column is kept for cards */}
@@ -617,14 +719,14 @@ export function LandingPage() {
       {/* ── FEATURES: desktop flies through the cards; smaller screens get the carousel ── */}
       {tunnel ? (
         <section id="features" className="section-wrap ft-wrap">
-          <FeatureTunnel eyebrow="Features" title="Everything you need to post more and earn more." items={FEATURES} />
+          <FeatureTunnel eyebrow="Features" title={<span className="two-line-title"><span>Everything You Need.</span> <span>Without the Editing Hassle.</span></span>} items={FEATURES} />
         </section>
       ) : (
       <SectionTransition id="features" variant="zoom" className="section-wrap">
         <section className="section-inner">
           <div className="section-head reveal">
             <p className="section-eyebrow">Features</p>
-            <h2 className="section-title">Everything you need to post more and earn more.</h2>
+            <h2 className="section-title two-line-title"><span>Everything You Need.</span> <span>Without the Editing Hassle.</span></h2>
           </div>
           <div data-fit className="reveal">
             <CircularCarousel items={FEATURES} />
@@ -633,16 +735,16 @@ export function LandingPage() {
       </SectionTransition>
       )}
 
-      {/* ── INSIDE SHORTCUT: trends, earnings and output on one board (keeps the #trends anchor for the nav) ── */}
+      {/* ── WHY SHORTCUT? (user's website copy, 2026-11-21: replaces the "Inside Shortcut" board; keeps the #trends
+          anchor the phone menu links to) ── */}
       <Sec id="trends" variant="tilt" className="section-wrap">
-        {/* plain reveal: heading, hint, then the board cards one by one (no pin, no fly-in) */}
-        <InsightsSection />
+        <WhySection />
       </Sec>
 
       {/* ── SOCIAL PROOF ── */}
       <Sec id="proof" variant="tilt" className="section-wrap">
-        {/* plain reveal: heading, the quote cards one by one, then the word rows (no pin, no fly-in) */}
-        <ProofSection />
+        {/* Who Is It For? (user's website copy, 2026-11-21: replaces the "Clippers" placeholder quotes) */}
+        <WhoSection />
       </Sec>
 
       {/* ── PRICING ── */}
@@ -650,8 +752,8 @@ export function LandingPage() {
         <PricingSection
           plans={PRICING_PLANS}
           eyebrow="Pricing"
-          title="Simple pricing. Serious reels."
-          description={`Try it all for ₹${trial.price}, paid once. Upgrade when your content takes off. Cancel anytime.`}
+          title="Simple Plans. More Content. Less Editing."
+          description="Choose a plan that matches how much content you create."
         />
       </SectionTransition>
 
@@ -683,12 +785,20 @@ export function LandingPage() {
             </div>
           ))}
         </div>
-        <h2 className="reveal">Your next video could be your <span className="accent">best week</span> yet.</h2>
-        <p className="reveal">Upload one video. Leave with a week of clips.</p>
+        {/* (user's website copy, 2026-11-21: the final CTA, word for word; same design) */}
+        <h2 className="reveal">Your Next <span className="accent">10 Shorts</span> Are Hiding Inside Your Last Video.</h2>
+        <p className="cta-lines">
+          <span>Stop spending hours editing. Start creating more.</span>
+          <span>Upload one video. Create more content. Get back to what you do best.</span>
+        </p>
         <div className="reveal">
-          <Link href="/signup" className="btn-nav-primary arrow-btn hero-cta-main">
-            <span className="arrow-btn-label">Start clipping</span>
-            <SquiggleArrow />
+          {/* (a button made for the longer label, user 2026-11-21): the words, then a round arrow that moves forward on
+              hover — the words never swap out */}
+          <Link href="/signup" className="btn-nav-primary cta-btn">
+            <span className="cta-btn-label">Get Started with Shortcut</span>
+            <span className="cta-btn-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </span>
           </Link>
         </div>
       </section>
