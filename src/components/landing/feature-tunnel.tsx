@@ -161,7 +161,7 @@ function Card({ f, i, total, progress, pan, stage }: {
   )
 }
 
-export function FeatureTunnel({ eyebrow, title, items }: { eyebrow: string; title: string; items: TunnelFeature[] }) {
+export function FeatureTunnel({ eyebrow, title, items }: { eyebrow: string; title: ReactNode; items: TunnelFeature[] }) {
   const ref = useRef<HTMLDivElement>(null)
   const [stage, setStage] = useState({ w: 1440, h: 900 })
   useEffect(() => {
