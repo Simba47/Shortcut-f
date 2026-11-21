@@ -7,6 +7,8 @@ type Props = {
   hostRef: React.RefObject<HTMLElement | null>
   spacing?: number
   radius?: number
+  /** Quiet white instead of the brand colour, and fainter (the hero: lime is kept for its words) */
+  mono?: boolean
 }
 
 type Ripple = { x: number; y: number; t0: number }
@@ -23,7 +25,7 @@ const RIPPLE_PUSH = 14
  * bend away like a lens; clicking sends a shockwave through the field.
  * Draws on a single canvas and stops its animation loop whenever everything is at rest.
  */
-export function DotField({ hostRef, spacing = 28, radius = 160 }: Props) {
+export function DotField({ hostRef, spacing = 28, radius = 160, mono = false }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -46,7 +48,7 @@ export function DotField({ hostRef, spacing = 28, radius = 160 }: Props) {
     const readColors = () => {
       const s = getComputedStyle(host)
       dotColor = s.getPropertyValue('--text').trim() || dotColor
-      accent = s.getPropertyValue('--logo').trim() || accent
+      accent = mono ? dotColor : s.getPropertyValue('--logo').trim() || accent
     }
 
     const resize = () => {
@@ -88,7 +90,7 @@ export function DotField({ hostRef, spacing = 28, radius = 160 }: Props) {
         const g = ctx.createRadialGradient(pointer.sx, pointer.sy, 0, pointer.sx, pointer.sy, radius * 1.6)
         g.addColorStop(0, accent)
         g.addColorStop(1, 'transparent')
-        ctx.globalAlpha = 0.09 * pointer.glow
+        ctx.globalAlpha = (mono ? 0.035 : 0.09) * pointer.glow
         ctx.fillStyle = g
         ctx.fillRect(pointer.sx - radius * 1.6, pointer.sy - radius * 1.6, radius * 3.2, radius * 3.2)
       }
@@ -148,7 +150,7 @@ export function DotField({ hostRef, spacing = 28, radius = 160 }: Props) {
       ctx.fillStyle = accent
       for (let j = 0; j < lit.length; j++) {
         const i = lit[j], f = litF[j]
-        ctx.globalAlpha = Math.min(1, 0.15 + f * 0.95)
+        ctx.globalAlpha = mono ? Math.min(0.42, 0.1 + f * 0.4) : Math.min(1, 0.15 + f * 0.95)
         ctx.beginPath()
         ctx.arc(bx[i] + ox[i], by[i] + oy[i], 0.8 + f * 1.9, 0, Math.PI * 2)
         ctx.fill()
@@ -203,7 +205,7 @@ export function DotField({ hostRef, spacing = 28, radius = 160 }: Props) {
       host.removeEventListener('pointerleave', onLeave)
       host.removeEventListener('pointerdown', onDown)
     }
-  }, [hostRef, spacing, radius])
+  }, [hostRef, spacing, radius, mono])
 
   return <canvas ref={canvasRef} className="block" aria-hidden />
 }

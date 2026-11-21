@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { Check, X } from 'lucide-react'
 import NumberFlow from '@number-flow/react'
 import { cn } from '@/lib/utils'
+import { PlanSymbol, type Tier } from '@/components/ui/account-menu'
 
 // Styled with the landing page tokens (--card, --text, --muted, --btn-bg, ...)
 // so it follows the page theme instead of shadcn's colour variables.
@@ -130,6 +131,10 @@ export interface PricingPlan {
   href: string
   badge?: string
   isPopular?: boolean
+  /** A special pack (the Trial): drawn as a ticket — gold, a tear line with notches, a "Paid once" stamp, a shine */
+  special?: boolean
+  /** Which plan (trial · starter · creator · agency): its symbol beside the name, the same as in the profile menu */
+  tier?: Tier
 }
 
 interface PricingSectionProps {
@@ -198,7 +203,8 @@ export function PricingSection({
             <p className="mt-4 whitespace-pre-line text-lg text-[var(--muted)]">{description}</p>
           </div>
           <PricingToggle />
-          <div className={cn('mx-auto mt-8 grid grid-cols-1 items-stretch gap-5', cols)}>
+          {/* (a size smaller, user 2026-11-21: narrower row, tighter cards) */}
+          <div className={cn('mx-auto mt-8 grid max-w-6xl grid-cols-1 items-stretch gap-4', cols)}>
             {plans.map((plan, index) => (
               <PricingCard key={plan.name} plan={plan} index={index} />
             ))}
@@ -317,20 +323,36 @@ function PricingCard({ plan, index }: { plan: PricingPlan; index: number }) {
       viewport={{ once: true }}
       transition={{ duration: 0.6, type: 'spring', stiffness: 100, damping: 20, delay: index * 0.12 }}
       className={cn(
-        'relative flex flex-col rounded-2xl border p-7 text-left transition-colors',
-        plan.isPopular
-          ? 'border-[color-mix(in_srgb,var(--logo)_45%,transparent)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--logo)_7%,var(--card))_0%,var(--card)_60%)] shadow-[0_24px_80px_-24px_color-mix(in_srgb,var(--logo)_30%,transparent)]'
+        'relative flex flex-col rounded-2xl border p-6 text-left transition-colors',
+        plan.special
+          ? 'price-special'
+          : plan.isPopular
+          ? 'price-popular'
           : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--border-strong)]',
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="text-2xl font-bold tracking-[-0.02em] text-[var(--text)]">{plan.name}</h3>
+      {/* the popular plan: a lime light travelling round its edge, a breathing glow (styles .price-popular in app/landing.css) */}
+      {plan.isPopular && <span className="pc-edge" aria-hidden="true" />}
+      {/* the special pack's fine gold edge, a light slowly travelling round it (styles .price-special in app/landing.css) */}
+      {plan.special && <span className="ps-edge" aria-hidden="true" />}
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2.5 text-xl font-bold tracking-[-0.02em] text-[var(--text)]">
+          {/* the plan's own symbol (the profile menu's), in a small tile tinted to the card */}
+          {plan.tier && (
+            <span className={cn('price-sym', plan.special && 'price-sym-gold', plan.isPopular && 'price-sym-lime')} aria-hidden="true">
+              <PlanSymbol tier={plan.tier} size={15} className="price-sym-svg" />
+            </span>
+          )}
+          {plan.name}
+        </h3>
         {plan.badge && (
           <span
             className={cn(
-              'whitespace-nowrap rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.08em]',
-              plan.isPopular
-                ? 'bg-[color-mix(in_srgb,var(--logo)_15%,transparent)] text-[var(--accent)]'
+              'whitespace-nowrap rounded-full px-2.5 py-[5px] text-[10px] font-bold uppercase leading-none tracking-[0.07em]',
+              plan.special
+                ? 'ps-badge'
+                : plan.isPopular
+                ? 'pc-badge'
                 : 'bg-[var(--hover)] text-[var(--muted)]',
             )}
           >
@@ -339,18 +361,20 @@ function PricingCard({ plan, index }: { plan: PricingPlan; index: number }) {
         )}
       </div>
 
-      <div className="mt-5 flex items-baseline gap-2">
-        <span className="text-lg font-semibold text-[var(--muted)]">{symbol}</span>
-        <span className="text-5xl font-extrabold tracking-[-0.045em] text-[var(--text)]">
+      <div className="mt-4 flex items-baseline gap-1.5">
+        <span className="text-base font-semibold text-[var(--muted)]">{symbol}</span>
+        <span className="text-4xl font-extrabold tracking-[-0.045em] text-[var(--text)]">
           <NumberFlow value={showAnnual ? annualTotal : plan.price} locales={locale} format={{ maximumFractionDigits: 0 }} className="tabular-nums" />
         </span>
+        {/* (the month, after a subscription's price — user, 2026-11-21: "₹599/month") */}
+        {!plan.once && !isFree && !showAnnual && <span className="text-base font-semibold text-[var(--muted)]">/month</span>}
         {showAnnual && (
           <span className="text-xl font-bold text-[var(--dim)] line-through decoration-2">
             {new Intl.NumberFormat(locale).format(fullYear)}
           </span>
         )}
       </div>
-      <p className="mt-2 text-[15px] text-[var(--muted)]">
+      <p className={cn('mt-1.5 text-sm text-[var(--muted)]', plan.special && 'ps-paid')}>
         {isFree ? (
           "It's free"
         ) : plan.once ? (
@@ -364,31 +388,36 @@ function PricingCard({ plan, index }: { plan: PricingPlan; index: number }) {
         )}
       </p>
 
-      <div className="mt-7">
-        <p className="text-[17px] font-bold leading-snug text-[var(--text)]">{plan.headline}</p>
-        <p className="mt-1 text-[15px] text-[var(--muted)]">{plan.subline}</p>
+      <div className="mt-5">
+        <p className="text-[15.5px] font-bold leading-snug text-[var(--text)]">{plan.headline}</p>
+        <p className="mt-1 text-sm text-[var(--muted)]">{plan.subline}</p>
       </div>
+      {/* the special pack: the ticket's tear line, notched at both edges */}
+      {plan.special && <div className="ps-perf" aria-hidden="true" />}
 
-      <ul role="list" className="mt-6 space-y-3.5 text-[15px] leading-snug">
+      <ul role="list" className="mt-5 space-y-2.5 text-sm leading-snug">
         {plan.features.map(f => (
           <li key={f.text} className={cn('flex gap-3', f.included ? 'text-[var(--muted)]' : 'text-[var(--dim)]')}>
             {f.included ? (
-              <Check className="mt-0.5 h-[18px] w-[18px] flex-none text-[var(--accent)]" aria-label="Included" />
+              // (green ticks for what's included, grey crosses for what isn't — user, 2026-11-21)
+              <Check className="mt-px h-4 w-4 flex-none text-[#22c55e]" strokeWidth={2.6} aria-label="Included" />
             ) : (
-              <X className="mt-0.5 h-[18px] w-[18px] flex-none opacity-70" aria-label="Not included" />
+              <X className="mt-px h-4 w-4 flex-none opacity-70" aria-label="Not included" />
             )}
             {f.text}
           </li>
         ))}
       </ul>
 
-      <div className="mt-auto pt-8">
+      <div className="mt-auto pt-6"> 
         <Link
           href={plan.href}
           onPointerDown={addClickRipple}
           className={cn(
-            'relative inline-flex h-12 w-full items-center justify-center overflow-hidden rounded-full text-[15px] font-semibold transition active:scale-[0.96]',
-            plan.isPopular
+            'relative inline-flex h-11 w-full items-center justify-center overflow-hidden rounded-full text-sm font-semibold transition active:scale-[0.96]',
+            plan.special
+              ? 'ps-btn'
+              : plan.isPopular
               ? 'bg-[var(--btn-bg)] text-[var(--btn-text)] hover:opacity-90'
               : 'border border-[var(--border-strong)] text-[var(--text)] hover:bg-[var(--hover)]',
           )}
