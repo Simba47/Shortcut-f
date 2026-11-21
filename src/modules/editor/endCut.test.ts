@@ -67,3 +67,65 @@ test('an empty space before it that does not touch it stops the run', () => {
 test('a part that is not in the main row: nothing to cut', () => {
   assert.equal(cut([part('a', 0, 30_000)], 'nope'), null)
 })
+
+// ── 2026-11-21: the brand kit's logo, the first part, things held to an edge ──
+import { startCut, pinToEdges } from './endCut'
+const pin = (segments: SegmentLocal[], partId: string, pinnable: { start_ms: number; end_ms: number }[], onTop: { start_ms: number; end_ms: number }[] = []) =>
+  endCut({ segments, mainVideoId: MAIN, onTop, pinnable, isShot: s => shots.has(s.id), isTail: () => false, partId })
+const first = (segments: SegmentLocal[], partId: string, pinnable: { start_ms: number; end_ms: number }[] = [], onTop: { start_ms: number; end_ms: number }[] = []) =>
+  startCut({ segments, mainVideoId: MAIN, onTop, pinnable, isShot: s => shots.has(s.id), partId })
+const three = () => [part('a', 0, 10_000), part('b', 10_000, 20_000), part('c', 20_000, 30_000)]
+
+test('the brand kit\'s logo over the whole clip no longer keeps the end: the last part is cut', () => {
+  assert.deepEqual(pin(three(), 'c', [{ start_ms: 0, end_ms: 30_000 }]), { start: 20_000, end: 30_000 })
+})
+test('a logo or closing line over the last seconds goes with the end too', () => {
+  assert.deepEqual(pin(three(), 'c', [{ start_ms: 27_000, end_ms: 30_000 }]), { start: 20_000, end: 30_000 })
+})
+test('a text in the middle of the deleted part (not held to the end) still keeps an empty space', () => {
+  assert.equal(pin(three(), 'c', [{ start_ms: 22_000, end_ms: 25_000 }]), null)
+})
+test('a video in a window there still keeps an empty space', () => {
+  assert.equal(pin(three(), 'c', [], [{ start_ms: 25_000, end_ms: 30_000 }]), null)
+})
+test('the first part deleted: the clip starts after it', () => {
+  assert.deepEqual(first(three(), 'a'), { start: 0, end: 10_000 })
+})
+test('the first part with the hook title (held to the start) and the logo over the clip: cut', () => {
+  assert.deepEqual(first(three(), 'a', [{ start_ms: 0, end_ms: 3_000 }, { start_ms: 0, end_ms: 30_000 }]), { start: 0, end: 10_000 })
+})
+test('the first part with a text in its middle: an empty space as before', () => {
+  assert.equal(first(three(), 'a', [{ start_ms: 4_000, end_ms: 6_000 }]), null)
+})
+test('a part after an empty space at the start is the first with video: it and that space go, and empty space after it too', () => {
+  const segs = [part('g', 0, 5_000, true), part('a', 5_000, 10_000), part('h', 10_000, 15_000, true), part('b', 15_000, 30_000)]
+  assert.deepEqual(first(segs, 'a'), { start: 0, end: 15_000 })
+})
+test('a part in the middle is not the first: nothing to cut at the start', () => {
+  assert.equal(first(three(), 'b'), null)
+})
+test('an empty space at the end (what was over it deleted since) is cut', () => {
+  const segs = [part('a', 0, 10_000), part('b', 10_000, 20_000), part('g', 20_000, 30_000, true)]
+  assert.deepEqual(pin(segs, 'g', []), { start: 20_000, end: 30_000 })
+})
+
+const o = (id: string, start_ms: number, end_ms: number) => ({ id, start_ms, end_ms })
+test('pinToEdges: the end cut — a logo over the last 3 s comes back at the new end, the whole-clip one covers the clip', () => {
+  const before = [o('end', 27_000, 30_000), o('all', 0, 30_000), o('mid', 5_000, 8_000)]
+  const after = [o('all', 0, 20_000), o('mid', 5_000, 8_000)]          // (rippleDelete dropped 'end')
+  const out = pinToEdges(before, after, 20_000, 30_000, 30_000, 20_000)
+  assert.deepEqual(out.find(x => x.id === 'end'), o('end', 17_000, 20_000))
+  assert.deepEqual(out.find(x => x.id === 'all'), o('all', 0, 20_000))
+  assert.deepEqual(out.find(x => x.id === 'mid'), o('mid', 5_000, 8_000))
+})
+test('pinToEdges: the start cut — the hook title stays at 0 for as long as it was', () => {
+  const out = pinToEdges([o('hook', 0, 3_000)], [], 0, 10_000, 30_000, 20_000)
+  assert.deepEqual(out, [o('hook', 0, 3_000)])
+})
+test('pinToEdges: a cut in the middle changes nothing', () => {
+  const after = [o('end', 17_000, 20_000)]
+  assert.equal(pinToEdges([o('end', 27_000, 30_000)], after, 10_000, 20_000, 30_000, 20_000), after)
+})
+test('pinToEdges: never longer than the clip left', () => {
+  assert.deepEqual(pinToEdges([o('t', 20_000, 30_000)], [], 2_000, 30_000, 30_000, 2_000), [o('t', 0, 2_000)])
+})

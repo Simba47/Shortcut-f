@@ -29,6 +29,12 @@ export function formatInvoiceNo(fy: string, n: number): string {
   return `SC/${fy}/${String(n).padStart(6, '0')}`
 }
 
+/** A receipt's number: its own series per financial year (user, 2026-11-21), kept in billing_counters as "R<fy>" */
+export function formatReceiptNo(fy: string, n: number): string {
+  return `SC-R/${fy}/${String(n).padStart(6, '0')}`
+}
+export const receiptCounterKey = (fy: string) => `R${fy}`
+
 /** GST state codes (the first two digits of a GSTIN) */
 export const GST_STATES: Record<string, string> = {
   '01': 'Jammu and Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh', '05': 'Uttarakhand',

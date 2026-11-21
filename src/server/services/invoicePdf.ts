@@ -159,6 +159,9 @@ export async function invoicePdf(inv: InvoiceRow, purchase: Purchase): Promise<U
   y -= 18
   const note = renewalNote(purchase)
   const notes = [...(note ? [note] : []), `Payment ID ${inv.razorpayPaymentId}${taxed ? ' · The price includes GST.' : ''}`,
+    // (an invoice made after the payment, for one paid before we had a GSTIN: when it was made; and the other paper)
+    ...(taxed && inv.invoiceIssuedAt ? [`Issued on ${day(new Date(inv.invoiceIssuedAt))}.`] : []),
+    ...(inv.seeAlso ? [`For this payment there is also: ${inv.seeAlso}`] : []),
     `This is a computer-generated ${taxed ? 'invoice' : 'receipt'} and needs no signature.`]
   for (const n of notes) for (const l of wrap(n, 8.5, W)) { text(l, M, y, 8.5, reg, C.muted); y -= 13 }
 

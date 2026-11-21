@@ -80,12 +80,12 @@ import { usePlayerStore, liveTime, useLiveTimeMs } from '@/modules/player/store'
 import { trackPresentedFrame } from '@/modules/player/presentedFrame'
 import { useVideoSync } from '@/modules/player/useSync'
 import { useCaptionStore } from '@/modules/captions/store'
-import { cleanParts, playedParts, playedPartAt, applyLook, lookOf, isLookChange, LOOK_KEYS, type CaptionPart } from '@/modules/captions/parts'
+import { cleanParts, playedParts, playedPartAt, applyLook, lookOf, isLookChange, LOOK_KEYS, partsAfterCut, partsAfterInsert, type CaptionPart } from '@/modules/captions/parts'
 import { CAPTION_TEMPLATES, usesKeyWords } from '@/modules/captions/templates'
 import { useMediaStore } from '@/modules/media/store'
 import { rowsToLocal, normalizeCoverage, uncoveredRanges, defaultCropForSlot, msToLabel } from '@/modules/editor/utils'
 import { isShot, flattenShots, toSaved, asMainPart } from '@/modules/editor/shots'
-import { endCut } from '@/modules/editor/endCut'
+import { endCut, startCut, pinToEdges } from '@/modules/editor/endCut'
 import { stateFromRows, type SegmentRow } from '@/modules/editor/loadRows'
 import { applyGroupShots, applyFormatSpans } from '@/modules/editor/groupShots'
 import { LAYOUT_SLOT_COUNT } from '@chai-cut/shared'
@@ -148,6 +148,8 @@ interface Props {
   /** The timeline tools show their little loop on hover (true until the account's first finished export, or as
    *  the Guide page's switch says); false: just their name and shortcut (server/services/toolGuides.ts) */
   toolGuideLoops?: boolean
+  /** A Make my clips clip never exported: its export is in its price (user, 2026-11-21), so no credits shown or charged */
+  exportIncluded?: boolean
   initialTransitions: Transition[]
   initialOverlays: Overlay[]
   /** The clip board it was opened from (the dashboard's AI edit / Manual edit choice), so "Clip board" returns to it */
@@ -272,7 +274,7 @@ type AutoRecord = { mode: AutoMode; places: Array<[number, number, string]>; gro
 export function EditorShell({
   clip: savedClip, aiMade = null, videoUrl, words: initialWords, initialSegments,
   initialCaptionStyles, initialTextOverlays, initialAudioTracks, initialTransitions, initialOverlays,
-  initialMusicUrls, initialOriginalSound, initialBrand, initialCredits, initialBrandKits, backStart, toolGuideLoops = true,
+  initialMusicUrls, initialOriginalSound, initialBrand, initialCredits, initialBrandKits, backStart, toolGuideLoops = true, exportIncluded = false,
 }: Props) {
   // The picture inside the video's black bars (none: the whole frame): the views the editor makes keep inside it
   setFramePicture(pictureOrWhole((savedClip as { picture_box?: Parameters<typeof pictureOrWhole>[0] }).picture_box))
@@ -857,6 +859,8 @@ export function EditorShell({
   const [pendingBrollMs, setPendingBrollMs] = useState<number | null>(null)
   const [clipStatus, setClipStatus] = useState<string>(clip.status)
   const [outputUrl, setOutputUrl] = useState<string | null>(clip.output_url)
+  // Its included export (Make my clips) is used once an export has finished: the next one is paid, like any clip's
+  const exportFree = exportIncluded && !outputUrl
   // Edited since the last export (user, 2026-11-12: Download gave the old file, without the latest edits, and
   // nothing said so). Any edit sets it; an export that starts clears it (back if that export fails or is
   // cancelled). Kept with the clip (clips.layers.editedSinceExport), so it's still true when the clip is opened again
@@ -1801,10 +1805,10 @@ export function EditorShell({
   function askRender() {
     if (!needsCaptions() || !credits) { requestExport(needsCaptions()); return }
     const clipMs = trim.kept.length ? trim.kept[trim.kept.length - 1][1] - trim.kept[0][0] : clip.end_ms - clip.start_ms
-    const price = captionCredits(clipMs), render = exportCredits(clipLengthMs)
+    const price = captionCredits(clipMs), render = exportFree ? 0 : exportCredits(clipLengthMs)
     confirm({
       title: `Render with captions for ${price + render} credits?`,
-      body: `Part of this clip has no captions, so all of it is read first (${price} credits), then exported (${render}). You have ${credits.balance} credits.`,
+      body: `Part of this clip has no captions, so all of it is read first (${price} credits), then exported (${render || 'already paid with the clip'}). You have ${credits.balance} credits.`,
       confirmLabel: 'Render', cancelLabel: 'Not now', tone: 'warning',
     }, () => requestExport(true))
   }
@@ -3948,6 +3952,29 @@ export function EditorShell({
    * of the video is removed, what was only in it goes with it, what comes after moves up. One
    * undo step. Saved as a removed part of the source video; the export cuts it out.
    */
+  /**
+   * What a cut of [a, b) of the timeline does besides the ripple (user, 2026-11-21): texts and photos
+   * held to the clip's start or end stay there (endCut.ts pinToEdges: the brand kit's logo, the hook
+   * title, a closing line — they used to be cut out with the stretch), and the caption parts move up with
+   * what they're on. `lenBefore` / `lenAfter`: the clip's length either side of the cut.
+   */
+  function afterCut(before: TimedState, next: TimedState, a: number, b: number, lenBefore: number, lenAfter: number): TimedState {
+    const overlays = pinToEdges(before.overlays.filter(o => o.type === 'image'), next.overlays, a, b, lenBefore, lenAfter)
+    const textOverlays = pinToEdges(before.textOverlays, next.textOverlays, a, b, lenBefore, lenAfter)
+    partsCut(a, b, lenAfter)
+    return { ...next, overlays, textOverlays }
+  }
+  /** The caption parts (captions/parts.ts: timeline time) moved along with a cut of [a, b) */
+  function partsCut(a: number, b: number, lenAfter: number) {
+    const c = useCaptionStore.getState()
+    if (c.captionParts.length) c.setCaptionParts(partsAfterCut(c.captionParts, a, b, lenAfter))
+  }
+  /** The caption parts moved along with `d` ms put in at `at` (a video put in, a part pasted, cut video given back) */
+  function partsIn(at: number, d: number, lenAfter: number) {
+    const c = useCaptionStore.getState()
+    if (c.captionParts.length) c.setCaptionParts(partsAfterInsert(c.captionParts, at, d, lenAfter))
+  }
+
   function removePart(a: number, b: number, pieces = piecesOn) {
     pause()
     const editor = useEditorStore.getState(), media = useMediaStore.getState()
@@ -3962,7 +3989,9 @@ export function EditorShell({
       if (editor.segments.some(s => isInsert(s, mainVideoId) && s.start_ms < b && s.end_ms > a && !(s.start_ms >= a && s.end_ms <= b))) {
         notifyLocked('Part of an inserted video is in the way: delete the inserted video itself instead'); return
       }
-      const next = rippleCut(state, Math.round(a), Math.round(b), rippleDelete)
+      // (the clip's length as the stores have it now: several parts can be cut in one go — Cleanup's Delete all)
+      const lenNow = piecesLength(piecesOf(mainRowOf(editor.segments), mainVideoId, s => isShot(s, mainVideoId), true))
+      const next = afterCut(state, rippleCut(state, Math.round(a), Math.round(b), rippleDelete), Math.round(a), Math.round(b), lenNow, lenNow - (Math.round(b) - Math.round(a)))
       skipCanvasTransitionRef.current = true
       seekAfterInsertRef.current = a
       editor.applyTrim(next.segments, next.keyframes, editor.trims, rangeAfterPieces(next.segments))
@@ -3977,7 +4006,7 @@ export function EditorShell({
     if (gone <= 0 || !added.length) return
     // What went, in the timeline as it was (a sliver left beside an earlier cut goes with it)
     const from = map.toTimeline(added[0][0])
-    const next = rippleDelete(state, from, from + gone)
+    const next = afterCut(state, rippleDelete(state, from, from + gone), from, from + gone, map.lengthMs, map.lengthMs - gone)
     skipCanvasTransitionRef.current = true
     seekAfterTrimRef.current = from
     editor.applyTrim(next.segments, next.keyframes, nextTrims)
@@ -4067,6 +4096,7 @@ export function EditorShell({
     if (state.segments.some(s => s.locked && s.start_ms < at && s.end_ms > at)) { notifyLocked('The part of the clip here is locked \u2014 unlock it first'); return }
     const hold = Math.round(videoAtPieces(allPieces, at))
     const next = rippleInsert(state, at, len)
+    partsIn(at, len, clipLengthMs + len)
     const id = crypto.randomUUID(), boxId = crypto.randomUUID()
     const view = { x: 0, y: 0, w: 1, h: 1 }
     const box = {
@@ -4327,6 +4357,7 @@ export function EditorShell({
       overlays: media.overlays, textOverlays: media.textOverlays, audioTracks: media.audioTracks, transitions: media.transitions,
     }
     const next = rippleCut(state, ins.start_ms, ins.end_ms, rippleDelete)
+    partsCut(ins.start_ms, ins.end_ms, clipLengthMs - (ins.end_ms - ins.start_ms))
     skipCanvasTransitionRef.current = true
     seekAfterInsertRef.current = ins.start_ms
     editor.applyTrim(next.segments, next.keyframes, editor.trims, rangeAfterPieces(next.segments))
@@ -4388,6 +4419,7 @@ export function EditorShell({
     if (out.segments.some(x => x.locked && x.start_ms < at && x.end_ms > at)) { notifyLocked('The part of the clip there is locked — unlock it first'); return }
     pause()
     const next = rippleInsert(out, at, len)
+    partsCut(a, seg.end_ms, clipLengthMs - (seg.end_ms - a)); partsIn(at, len, clipLengthMs - (seg.end_ms - a) + len)
     const d = at - a
     const moved: SegmentLocal = {
       ...me, start_ms: at, end_ms: at + len,
@@ -4602,6 +4634,7 @@ export function EditorShell({
     }
     if (state.segments.some(x => x.locked && !isShot(x, mainVideoId) && x.start_ms < at && x.end_ms > at)) { notifyLocked('The part of the clip there is locked — unlock it first'); return }
     const ripple = rippleInsert(state, at, len)
+    partsIn(at, len, clipLengthMs + len)
     const part = { ...asMainPart(seg, rawClip.start_ms), start_ms: at, end_ms: at + len }
     // (videos on rows stay where they were, as they are)
     const onTop = editor.segments.filter(x => isShot(x, mainVideoId) && x.id !== seg.id)
@@ -4697,6 +4730,7 @@ export function EditorShell({
       const [a, b] = edge === 'start' ? [from, to] : [to, from]
       if (ins.end_ms - ins.start_ms - (b - a) < 300) return
       const next = rippleCut(state, Math.round(a), Math.round(b), rippleDelete)
+      partsCut(Math.round(a), Math.round(b), clipLengthMs - (Math.round(b) - Math.round(a)))
       skipCanvasTransitionRef.current = true
       editor.applyTrim(next.segments, next.keyframes, editor.trims, rangeAfterPieces(next.segments))
       useMediaStore.setState({ overlays: next.overlays, textOverlays: next.textOverlays, audioTracks: next.audioTracks, transitions: next.transitions })
@@ -4710,6 +4744,7 @@ export function EditorShell({
     if (amount < 50) { notifyLocked(room > 0 ? 'The clip is as long as a clip can be (5 minutes)' : edge === 'start' ? 'This is where the video starts' : 'This is where the video ends'); return }
     const t = edge === 'start' ? ins.start_ms : ins.end_ms
     const next = rippleInsert(state, t, amount)
+    partsIn(t, amount, clipLengthMs + amount)
     const segs = next.segments.map(s => (s.id !== ins.id ? s : edge === 'start'
       ? { ...s, start_ms: t, crop_boxes: s.crop_boxes.map((b, i) => (i === 0 ? { ...b, source_offset_ms: Math.max(0, (b.source_offset_ms ?? 0) - amount) } : b)) }
       : { ...s, end_ms: s.end_ms + amount }))
@@ -4752,6 +4787,7 @@ export function EditorShell({
       overlays: media.overlays, textOverlays: media.textOverlays, audioTracks: media.audioTracks, transitions: media.transitions,
     }
     const next = rippleInsert(state, t, amount)
+    partsIn(t, amount, clipLengthMs + amount)
     const segs = next.segments.map(s => {
       if (s.id !== segId) return s
       return edge === 'start'
@@ -4796,6 +4832,7 @@ export function EditorShell({
     }
     // Room for it at the join, then the part grows over it (from the earlier frames it gets back)
     const next = rippleInsert(state, t, amount)
+    partsIn(t, amount, clipLengthMs + amount)
     const segs = next.segments.map(s => {
       if (edge === 'start' && s.id === segId) {
         // (its video position needs no change: it is kept relative to its start, and saving maps it
@@ -4871,7 +4908,7 @@ export function EditorShell({
    * was when the drag began, so the timeline and preview show the change live; the whole drag is
    * one undo step.
    */
-  type EdgeBase = { state: TimedState; trims: typeof trims; clipRange: typeof clipRange; start: number; end: number; map: typeof trim; limits: typeof clipEdgeLimits }
+  type EdgeBase = { state: TimedState; trims: typeof trims; clipRange: typeof clipRange; start: number; end: number; map: typeof trim; limits: typeof clipEdgeLimits; parts: CaptionPart[] }
   const edgeBaseRef = useRef<EdgeBase | null>(null)
   function moveClipEdge(edge: 'start' | 'end', delta: number, done = true, orig?: EdgeAt['clip']) {
     let base = edgeBaseRef.current
@@ -4881,6 +4918,7 @@ export function EditorShell({
         state: { segments: editor.segments, keyframes: editor.keyframes, overlays: media.overlays, textOverlays: media.textOverlays, audioTracks: media.audioTracks, transitions: media.transitions },
         // (a part's edge dragged: the clip as the drag found it — trimByEdgeLive — not as its last step left it)
         trims: editor.trims, clipRange: editor.clipRange, start: orig?.start ?? rawClip.start_ms, end: orig?.end ?? rawClip.end_ms, map: orig?.map ?? trim, limits: orig?.limits ?? clipEdgeLimits,
+        parts: useCaptionStore.getState().captionParts,
       }
       edgeBaseRef.current = base
       pause()
@@ -4895,6 +4933,7 @@ export function EditorShell({
       // Back where it started: the clip as it was
       useEditorStore.setState({ segments: base.state.segments, keyframes: base.state.keyframes, trims: base.trims, clipRange: base.clipRange })
       useMediaStore.setState({ overlays: base.state.overlays, textOverlays: base.state.textOverlays, audioTracks: base.state.audioTracks, transitions: base.state.transitions })
+      useCaptionStore.getState().setCaptionParts(base.parts)
       return
     }
     const step = edgeStep(base, edge, d)
@@ -4903,6 +4942,11 @@ export function EditorShell({
     seekAfterTrimRef.current = step.playhead
     editor.applyTrim(step.next.segments, step.next.keyframes, cleanTrims(base.trims, step.start, step.end), [step.start, step.end])
     useMediaStore.setState({ overlays: step.next.overlays, textOverlays: step.next.textOverlays, audioTracks: step.next.audioTracks, transitions: step.next.transitions })
+    // The caption parts (timeline time) with it, from where the drag started: the clip's start moved moves them all
+    const len0 = base.map.lengthMs
+    if (base.parts.length) useCaptionStore.getState().setCaptionParts(edge === 'start'
+      ? (d < 0 ? partsAfterInsert(base.parts, 0, -d, len0 - d) : partsAfterCut(base.parts, 0, d, len0 - d))
+      : (d > 0 ? cleanParts(base.parts, len0 + d) : partsAfterCut(base.parts, len0 + d, len0, len0 + d)))
   }
   /**
    * One end of the clip moved by `d` ms of timeline (start: < 0 earlier, more video; > 0 cut from the
@@ -4920,7 +4964,9 @@ export function EditorShell({
       const [a, z] = edge === 'start' ? [0, d] : [len + d, len]
       const locked = lockedInRange(state, a, z)
       if (locked.length) { notifyLocked(`${locked[0][0].toUpperCase()}${locked[0].slice(1)} there is locked — unlock it first`); return null }
-      next = rippleDelete(state, a, z)
+      // (texts and photos held to that end of the clip stay there: endCut.ts pinToEdges)
+      const cut = rippleDelete(state, a, z)
+      next = { ...cut, overlays: pinToEdges(state.overlays.filter(o => o.type === 'image'), cut.overlays, a, z, len, len - (z - a)), textOverlays: pinToEdges(state.textOverlays, cut.textOverlays, a, z, len, len - (z - a)) }
       if (edge === 'start') { start = trim0.toSource(d); playhead = 0 } else { end = trim0.toSourceEnd(len + d); playhead = Math.max(0, len + d - 1) }
     }
     return { next, start, end, playhead, added }
@@ -4943,8 +4989,9 @@ export function EditorShell({
       if (stored.locked) { notifyLocked('This part is locked — unlock it first'); return }
       pause()
       // The main video's last part: the clip ends there instead (endCut.ts — user, 2026-11-15: a deleted
-      // end exported as black). Read from the stores, not this render: several parts are deleted in a row
-      if (cutOk && cutAtEnd(segId)) { setActiveSegmentId(null); return }
+      // end exported as black); its first part: the clip starts after it (user, 2026-11-21). Read from the
+      // stores, not this render: several parts are deleted in a row
+      if (cutOk && (cutAtEnd(segId) || cutAtStart(segId))) { setActiveSegmentId(null); return }
       updateSegment(segId, { hidden: true, muted: true, crop_boxes: stored.crop_boxes.map((b, i) => (i === 0 ? { ...b, hidden: true } : b)) })
       setActiveSegmentId(null)
       return
@@ -4964,13 +5011,29 @@ export function EditorShell({
    * be under a second.
    */
   function cutAtEnd(segId: string): boolean {
+    return cutAtEdge(segId, 'end')
+  }
+  /** Deleting part `segId` of the main row where nothing with video comes before it: the clip starts after it (endCut.ts startCut) */
+  function cutAtStart(segId: string): boolean {
+    return cutAtEdge(segId, 'start')
+  }
+  /**
+   * The stretch endCut / startCut give, cut out (removePart). Videos in a window keep their time (an empty
+   * space stays); texts and photos held to that edge of the clip go along with it (afterCut) — the brand
+   * kit's logo over the whole clip kept every end from being cut (user, 2026-11-21).
+   */
+  function cutAtEdge(segId: string, edge: 'start' | 'end'): boolean {
     const editor = useEditorStore.getState(), media = useMediaStore.getState()
-    const r = endCut({
+    const opts = {
       segments: editor.segments, mainVideoId, partId: segId,
-      onTop: [...media.overlays, ...media.textOverlays],
-      isShot: s => isShot(s, mainVideoId), isTail,
-    })
-    if (!r || r.start < MIN_CLIP_LEFT_MS) return false
+      onTop: media.overlays.filter(o => o.type !== 'image'),
+      pinnable: [...media.overlays.filter(o => o.type === 'image'), ...media.textOverlays],
+      isShot: (s: SegmentLocal) => isShot(s, mainVideoId), isTail,
+    }
+    const r = edge === 'end' ? endCut(opts) : startCut(opts)
+    if (!r) return false
+    const len = clipLengthNow()
+    if (len - (r.end - r.start) < MIN_CLIP_LEFT_MS) return false
     const state: TimedState = {
       segments: editor.segments, keyframes: editor.keyframes,
       overlays: media.overlays, textOverlays: media.textOverlays, audioTracks: media.audioTracks, transitions: media.transitions,
@@ -4978,6 +5041,35 @@ export function EditorShell({
     if (lockedInRange(state, r.start, r.end).length) return false
     removePart(r.start, r.end)
     return true
+  }
+  /** The clip's length (timeline ms) as the stores have it now, not this render: removed parts, pieces, or its stretch of the video */
+  function clipLengthNow(): number {
+    const editor = useEditorStore.getState()
+    if (editor.trims.length) return trimMap(editor.trims, rawClip.start_ms, rawClip.end_ms).lengthMs
+    if (piecesOn) return piecesLength(piecesOf(mainRowOf(editor.segments), mainVideoId, s => isShot(s, mainVideoId), true))
+    return rawClip.end_ms - rawClip.start_ms
+  }
+  /**
+   * Empty space left at the clip's end or start because something played over it (a text, a photo, a
+   * video on a row): once nothing does any more — it was deleted — that space is cut too, so the export
+   * doesn't keep black there (user, 2026-11-21). Called right after such a delete (the same undo step).
+   */
+  function cutEmptyEdges() {
+    if (!cutOk) return
+    const main = useEditorStore.getState().segments.filter(s => !isShot(s, mainVideoId) && !isTail(s)).sort((a, b) => a.start_ms - b.start_ms)
+    if (main.length < 2) return
+    const gap = (s: SegmentLocal) => isGapPart(s, mainVideoId)
+    if (gap(main[main.length - 1])) {
+      let k = main.length - 1
+      while (k > 0 && gap(main[k - 1])) k--
+      if (k > 0) cutAtEnd(main[k].id)
+    }
+    const now = useEditorStore.getState().segments.filter(s => !isShot(s, mainVideoId) && !isTail(s)).sort((a, b) => a.start_ms - b.start_ms)
+    if (now.length > 1 && gap(now[0])) {
+      let k = 0
+      while (k < now.length - 1 && gap(now[k + 1])) k++
+      if (k < now.length - 1) cutAtStart(now[k].id)
+    }
   }
 
   function askRemoveFrame(segId: string) {
@@ -5012,6 +5104,8 @@ export function EditorShell({
     if (blocked({ kind: 'text', id })) return
     deleteTextOverlay(id)
     setActiveTextOverlayId(cur => cur === id ? null : cur)
+    // (an empty space it kept at the clip's end or start goes too)
+    cutEmptyEdges()
   }
 
   // ── Export: warn about empty frame slots first ─────────────────────────────
@@ -5086,6 +5180,8 @@ export function EditorShell({
     if (blocked({ kind: 'photo', id })) return
     deleteOverlay(id)
     if (activeOverlayId === id) setActiveOverlayId(null)
+    // (an empty space it kept at the clip's end or start goes too)
+    cutEmptyEdges()
   }
 
   async function handleInsertBroll(videoId: string) {
@@ -5835,6 +5931,8 @@ export function EditorShell({
     if (blocked({ kind: 'broll', id })) return
     removeBrollShot(id)
     if (pickedSegId === id) setPickedSegId(null)
+    // (an empty space it kept at the clip's end or start goes too)
+    cutEmptyEdges()
   }
 
   function handleInsertBrollAfterSeg(afterSegId: string) {
@@ -6634,7 +6732,7 @@ export function EditorShell({
     const t = setTimeout(() => setStaleNote(0), 5000)
     return () => clearTimeout(t)
   }, [exportOutdated])
-  const exportPrice = credits && clipLengthMs <= MAX_CLIP_MS ? ` · ${exportCredits(clipLengthMs)} credit${exportCredits(clipLengthMs) === 1 ? '' : 's'}` : ''
+  const exportPrice = credits && !exportFree && clipLengthMs <= MAX_CLIP_MS ? ` · ${exportCredits(clipLengthMs)} credit${exportCredits(clipLengthMs) === 1 ? '' : 's'}` : ''
   const exportControls = (
     <div data-tour="export" className="flex items-center gap-1.5 shrink-0">
       {rendering ? (
@@ -6852,6 +6950,7 @@ export function EditorShell({
       overlays: media.overlays, textOverlays: media.textOverlays, audioTracks: media.audioTracks, transitions: media.transitions,
     }
     const next = rippleStretch(state, at, d, s => isShot(s, mainVideoId) || s.lane === 'broll')
+    partsIn(at, d, clipLengthMs + d)
     skipCanvasTransitionRef.current = true
     seekAfterTrimRef.current = at
     editor.applyTrim(next.segments, next.keyframes, nextTrims)

@@ -1,3 +1,5 @@
+import { PLANS } from '@/lib/plans'
+
 /**
  * Every word the sign-in / sign-up screens show, in one place (user, 2026-11-03: releasing
  * worldwide) — a translation later is a copy of this object, not a hunt through the components.
@@ -9,7 +11,7 @@ export const AUTH = {
     home: 'Shortcut home',
     title: ['Long videos in.', 'Scroll-stopping shorts out.'],
     lead: 'Turn any talk, podcast or stream into clips ready for Instagram Reels and YouTube Shorts.',
-    fine: 'Try everything for ₹50 · No subscription',
+    fine: 'Try everything for ₹49 · No subscription',
     /**
      * The brand side's scenes (BrandScene): what the creator in each photo is saying, word by word;
      * the words from `pick[0]` up to (not including) `pick[1]` are the moment the AI picks; the
@@ -166,7 +168,8 @@ export const AUTH = {
   },
 
   notes: {
-    signedOutElsewhere: 'You were signed out because your account signed in on another device. One device can be signed in at a time.',
+    // (plans v2, 2026-11-21: devices at once per plan, plans.ts `devices`)
+    signedOutElsewhere: `You were signed out because your account signed in on another device. The Trial can be signed in on ${PLANS.trial.devices} device at a time, Starter on ${PLANS.starter.devices} and Pro on ${PLANS.creator.devices}.`,
     noAccount: (email: string) => `There’s no account for ${email} yet — confirm your password and we’ll create it.`,
     newCodeSent: (email: string) => `A new code is on its way to ${email}.`,
     verifiedSignIn: 'Your email is confirmed and your account is ready. Sign in to continue.',

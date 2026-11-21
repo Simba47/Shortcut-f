@@ -1,6 +1,7 @@
 import { Resend } from 'resend'
 import { COMPANY } from '@/lib/company'
 import { type ReceiptEmailInput, receiptEmail } from '@/lib/receiptEmail'
+import { type ExpiryEmailInput, expiryEmail } from '@/lib/expiryEmail'
 
 let resend: Resend | null = null
 
@@ -69,10 +70,12 @@ export async function sendOtpEmail(
 export async function sendReceiptEmail(r: Omit<ReceiptEmailInput, 'base' | 'attached'> & {
   to: string
   /** The invoice / receipt as a PDF, when it could be made */
-  pdf?: { filename: string; content: Uint8Array } | null
+  /** Its papers as PDFs (the tax invoice and the receipt: user, 2026-11-21) */
+  pdfs?: Array<{ filename: string; content: Uint8Array }>
 }): Promise<void> {
   const base = (process.env.APP_URL || process.env.AUTH_URL || 'https://shortcutapp.in').replace(/\/$/, '')
-  const mail = receiptEmail({ ...r, base, attached: !!r.pdf })
+  const pdfs = r.pdfs ?? []
+  const mail = receiptEmail({ ...r, base, attached: pdfs.length > 0 })
   const { error } = await getResend().emails.send({
     from: FROM,
     to: r.to,
@@ -81,10 +84,21 @@ export async function sendReceiptEmail(r: Omit<ReceiptEmailInput, 'base' | 'atta
     subject: mail.subject,
     html: mail.html,
     text: mail.text,
-    ...(r.pdf ? { attachments: [{ filename: r.pdf.filename, content: Buffer.from(r.pdf.content), contentType: 'application/pdf' }] } : {}),
+    ...(pdfs.length ? { attachments: pdfs.map(f => ({ filename: f.filename, content: Buffer.from(f.content), contentType: 'application/pdf' })) } : {}),
   })
   if (error) {
     console.error('[mailer] Resend rejected the receipt email:', error)
     throw new Error(`Failed to send receipt email: ${error.message}`)
+  }
+}
+
+/** Videos coming into their last days (server/services/expiry.ts): one email per account (lib/expiryEmail.ts builds it) */
+export async function sendExpiryEmail(r: Omit<ExpiryEmailInput, 'base'> & { to: string }): Promise<void> {
+  const base = (process.env.APP_URL || process.env.AUTH_URL || 'https://shortcutapp.in').replace(/\/$/, '')
+  const mail = expiryEmail({ ...r, base })
+  const { error } = await getResend().emails.send({ from: FROM, to: r.to, replyTo: COMPANY.email, subject: mail.subject, html: mail.html, text: mail.text })
+  if (error) {
+    console.error('[mailer] Resend rejected the expiry email:', error)
+    throw new Error(`Failed to send expiry email: ${error.message}`)
   }
 }

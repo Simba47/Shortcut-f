@@ -22,20 +22,8 @@ function refuseNoPlan(key: PlanKey): void {
   if (key === 'free') throw Object.assign(new Error(NO_PLAN_MESSAGE), { status: 403, expose: true })
 }
 
-export async function checkVideoQuota(userId: string): Promise<void> {
-  const key = await getUserPlan(userId)
-  refuseNoPlan(key)
-  const plan = PLANS[key]
-  // Stock clips saved for auto B-roll don't count
-  const [row] = await sql<{ count: string }[]>`SELECT COUNT(*) as count FROM videos WHERE user_id = ${userId} AND role <> 'asset'`
-  const count = parseInt(row?.count ?? '0', 10)
-  if (count >= plan.maxVideos) {
-    throw Object.assign(
-      new Error(`Your ${plan.name} plan allows ${plan.maxVideos} video${(plan.maxVideos as number) === 1 ? '' : 's'}. Upgrade to add more.`),
-      { status: 403 }
-    )
-  }
-}
+// (checkVideoQuota, a count of videos held, was replaced on 2026-11-21 by the plan's storage in GB:
+// storage.ts checkStorage)
 
 export async function checkClipQuota(userId: string): Promise<void> {
   const plan = await getUserPlanConfig(userId)

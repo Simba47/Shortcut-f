@@ -43,6 +43,8 @@ export function InvoiceSheet({ inv, purchase }: { inv: InvoiceRow; purchase: Pur
       <dl className="iv-meta">
         <div><dt>{taxed ? 'Invoice no.' : 'Receipt no.'}</dt><dd className="iv-mono">{inv.invoiceNo ?? '—'}</dd></div>
         <div><dt>Date paid</dt><dd>{day(inv.paidAt)}</dd></div>
+        {/* (an invoice made after the payment, for one paid before we had a GSTIN: when it was made) */}
+        {taxed && inv.invoiceIssuedAt && <div><dt>Issued on</dt><dd>{day(new Date(inv.invoiceIssuedAt))}</dd></div>}
         <div><dt>Paid by</dt><dd>Online · Razorpay</dd></div>
         <div><dt>Amount paid</dt><dd className="iv-strong">{money(inv.amountPaise)}</dd></div>
       </dl>
@@ -103,6 +105,7 @@ export function InvoiceSheet({ inv, purchase }: { inv: InvoiceRow; purchase: Pur
       <section className="iv-notes">
         {note && <p>{note}</p>}
         <p>Payment ID <span className="iv-mono">{inv.razorpayPaymentId}</span>{taxed ? ' · The price includes GST.' : ''}</p>
+        {inv.seeAlso && <p>For this payment there is also: {inv.seeAlso}</p>}
         <p>This is a computer-generated {taxed ? 'invoice' : 'receipt'} and needs no signature.</p>
       </section>
 
@@ -121,6 +124,9 @@ export const INVOICE_CSS = `
 .iv-bar { max-width: 794px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .iv-back { color: #52525b; font-size: 14px; text-decoration: none; }
 .iv-back:hover { color: #18181b; }
+.iv-papers { display: inline-flex; gap: 3px; padding: 3px; border-radius: 10px; background: #e4e4e7; }
+.iv-papers a { padding: 5px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; color: #52525b; text-decoration: none; }
+.iv-papers a[aria-current="page"] { color: #18181b; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
 .iv-print { background: #0a0a0a; color: #fff; border: 0; border-radius: 10px; padding: 10px 16px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .iv-print:hover { background: #27272a; }
 .iv-sheet { max-width: 794px; margin: 0 auto; background: #fff; border-radius: 16px; position: relative; overflow: hidden;

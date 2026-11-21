@@ -866,3 +866,18 @@
 [data-theme="light"] .dash-low > svg { color: #d97706; }
 [data-theme="light"] .dash-low-cta { color: #fff; background: #0c0c0e; }
 [data-theme="light"] .dash-low-cta:hover { background: #26262a; }
+
+/* Expiry (plans v2, 2026-11-21): Pro's ★ Keep beside the date; a video in its last days flagged in amber with
+   Download all; a note under it (what Download all or Keep did) */
+.vcard-keep { margin-left: 4px; display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent; color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.vcard-keep:hover { color: var(--text, #fff); border-color: rgba(200,255,0,.45); }
+.vcard-keep.is-kept { color: #c8ff00; border-color: rgba(200,255,0,.45); background: rgba(200,255,0,.08); }
+.vcard-keep:disabled { opacity: .5; cursor: wait; }
+.vcard-expiry { margin-top: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vcard-expiry-tag { font-size: 11px; font-weight: 600; color: #f5a623; background: rgba(245,166,35,.12); border: 1px solid rgba(245,166,35,.35);
+  padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.vcard-expiry-btn { font: inherit; font-size: 11px; font-weight: 600; color: var(--text, #fff); background: rgba(255,255,255,.06);
+  border: 1px solid var(--border); padding: 2px 9px; border-radius: 999px; cursor: pointer; }
+.vcard-expiry-btn:hover { border-color: rgba(255,255,255,.3); }
+.vcard-expiry-note { margin: 4px 0 0; font-size: 11px; color: var(--text-muted); }

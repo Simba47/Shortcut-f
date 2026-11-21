@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/server/auth'
 import { listVideos, deleteVideos, cleanIds, manualClipCounts } from '@/server/services/videos'
 import { apiError } from '@/lib/api-error'
+import { refreshExpiry } from '@/server/services/expiry'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { GetObjectCommand } from '@aws-sdk/client-s3'
@@ -15,6 +16,8 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const forEditor = req.nextUrl.searchParams.get('assets') === '1'
+    // (the dashboard: each video's expiry brought up to the plan first, so a plan just bought shows within a minute)
+    if (!forEditor) await refreshExpiry(user.id, { soon: true }).catch(e => console.warn('[expiry] refresh failed:', e instanceof Error ? e.message : e))
     const rows = await listVideos(user.id, forEditor)
     // (the dashboard's "Open clips": how many are cut by hand, the rest the AI's; a hiccup only leaves it out)
     const manual = forEditor ? {} : await manualClipCounts(rows.filter(v => v.clip_count > 0).map(v => v.id as string)).catch(() => null)

@@ -1,0 +1,39 @@
+/* Make my clips' progress card (MmcProgress.tsx): its own loops, on the timeline tools' stage (toolHints.css
+   .th-*) like the Guide's demos (guide.css .gdv-*). Prefix .mmcv-*. Each is a 216 × 120 scene. */
+
+/* a new step's loop fades in over the last one */
+.mmcv-in { animation: mmcv-in 420ms ease-out both; }
+@keyframes mmcv-in { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .mmcv-in { animation: none; } }
+
+.mmcv span, .mmcv b { position: absolute; display: block; }
+.mmcv .th-pic i { position: absolute; }
+
+/* Writing the title and hook: the title drops onto the top of the clip, letter by letter */
+.mmcv-title {
+  left: 5px; right: 5px; top: 12px; padding: 3px 0; border-radius: 4px; text-align: center; white-space: nowrap;
+  font-size: 7.5px; font-weight: 900; letter-spacing: .03em; color: #0a0a0a; background: #c8ff00;
+  box-shadow: 0 3px 8px rgba(0,0,0,0.5); animation-name: mmcv-title;
+}
+.mmcv-title > em { font-style: normal; display: inline-block; animation-name: mmcv-type; animation-timing-function: steps(11, end); }
+@keyframes mmcv-title { 0%, 8% { opacity: 0; transform: translateY(-14px) scale(.8); } 18%, 88% { opacity: 1; transform: none; } 96%, 100% { opacity: 0; transform: none; } }
+@keyframes mmcv-type { 0%, 18% { clip-path: inset(0 100% 0 0); } 52%, 100% { clip-path: inset(0 0 0 0); } }
+
+/* Getting the video ready / looking for screens and graphics: a line sweeps the wide picture, corners mark what it finds */
+.mmcv-sweep {
+  top: 0; bottom: 0; width: 2px; left: 0; background: #c8ff00; box-shadow: 0 0 10px 2px rgba(200,255,0,0.55);
+  animation-name: mmcv-sweep; animation-timing-function: linear;
+}
+@keyframes mmcv-sweep { 0% { transform: translateX(0); opacity: 0; } 6% { opacity: 1; } 88% { opacity: 1; } 100% { transform: translateX(154px); opacity: 0; } }
+.mmcv-found {
+  border-radius: 4px; box-shadow: inset 0 0 0 1.5px #c8ff00, 0 0 8px rgba(200,255,0,0.35); opacity: 0; animation-name: mmcv-found;
+}
+@keyframes mmcv-found { 0%, 30% { opacity: 0; transform: scale(.7); } 36%, 90% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+
+/* Framing: the 9:16 frame finds the person in the wide picture and stays on them; outside it dims */
+.mmcv-frame {
+  top: 0; bottom: 0; left: 53px; width: 50px; border-radius: 3px;
+  box-shadow: inset 0 0 0 2px #c8ff00, 0 0 0 200px rgba(0,0,0,0.55), 0 0 12px rgba(200,255,0,0.4);
+  animation-name: mmcv-frame;
+}
+@keyframes mmcv-frame { 0%, 14% { transform: translateX(0); } 42%, 84% { transform: translateX(-45px); } 100% { transform: translateX(0); } }

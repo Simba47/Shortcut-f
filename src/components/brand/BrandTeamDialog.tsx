@@ -158,7 +158,7 @@ function KitTeam({ kitId, lock, onLock }: { kitId: string; lock: boolean; onLock
   if (!state.can_share) {
     return (
       <p className="text-[11px] leading-relaxed" style={{ color: 'rgb(var(--ed-fg) / 0.55)' }}>
-        Share this kit with your team so everyone&rsquo;s clips look the same — on the Agency plan.
+        Share this kit with your team so everyone&rsquo;s clips look the same — on the Pro plan.
         {state.people.length > 0 && ` The ${state.people.length === 1 ? 'person' : `${state.people.length} people`} you shared it with can use it again once your plan shares kits.`}{' '}
         <a href="/pricing" className="font-semibold hover:underline" style={{ color: 'var(--ed-accent-text)' }}>Upgrade</a>
       </p>

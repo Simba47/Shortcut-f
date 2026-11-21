@@ -44,7 +44,7 @@ export const privacyCards: LegalCard[] = [
   {
     icon: Clock,
     title: 'Data Retention',
-    body: <>We retain your account data for as long as your account is active. Your videos, clips and transcripts are kept for the history period of your plan, and you can delete them at any time. When you delete your account, we delete your account details, videos, audio, clips, transcripts and project data, and backup copies are removed within 30 days. We keep limited records, such as payment and tax records, only as long as the law requires.</>,
+    body: <>We retain your account data for as long as your account is active. Your videos, with their clips and transcripts, are deleted automatically when your plan’s storage period ends (shown on our pricing page, counted from each upload); we email you a few days before, and on plans that offer it you can choose to keep a video. You can also delete them at any time. If your plan ends, your videos are deleted 7 days later. When you delete your account, we delete your account details, videos, audio, clips, transcripts and project data, and backup copies are removed within 30 days. We keep limited records, such as payment and tax records, only as long as the law requires.</>,
   },
   {
     icon: RefreshCw,

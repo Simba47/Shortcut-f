@@ -3,10 +3,12 @@ import type { AudioTrack, BoxKeyframe, CaptionStyle, Overlay, SegmentLocal, Text
 import { BRAND_ENDS_ON, captionBand, cleanBrandKitData, type BrandKit } from '@/lib/shared/brandKit'
 import { cleanBrandOn, type BrandOn } from '@/lib/shared/brandOn'
 import { lockHolds } from '@/lib/shared/brandTeam'
-import { brandChanged, putBrandOn, takeBrandOff, updateBrand, type BrandTarget } from '@/modules/brand/engine'
+import { brandChanged, brandNewFrames, putBrandOn, takeBrandOff, updateBrand, type BrandTarget } from '@/modules/brand/engine'
 import { isShot } from '@/modules/editor/shots'
 import { rowsToLocal } from '@/modules/editor/utils'
 import { hasColumn } from './clips'
+import { cleanTrims, trimMap } from '@/lib/trims'
+import { playLengthMs } from '@/modules/editor/playLength'
 
 /**
  * The brand engine (modules/brand/engine.ts) on clips that aren't open in the editor (brand kit
@@ -43,6 +45,12 @@ interface Loaded {
   userId: string
   /** Its caption style row, if it has one */
   hasStyle: boolean
+  /**
+   * A clip with parts removed (trim_ranges) keeps its photos' times in its stretch of the video; the engine
+   * works on the timeline as it plays (the editor's toTimelineState): this gives a photo's times back as
+   * saved. Null: the same either way.
+   */
+  savedTimes: ((o: { start_ms: number; end_ms: number }) => [number, number]) | null
 }
 
 /** A clip read as the editor reads it (app/editor/[clipId]/page.tsx): the parts the brand works on */
@@ -72,8 +80,6 @@ async function load(clipId: string): Promise<Loaded | null> {
   // Its length on the timeline: its stretch of the video, longer by videos put in between, and by
   // parts played slower (as the editor's page works it out)
   const own = (s: SegmentLocal) => !(s.crop_boxes[0]?.source_video_id && s.crop_boxes[0].source_video_id !== clip.video_id)
-  const inserted = segments.filter(s => s.video_offset_ms != null && !String(s.layout).startsWith('frame_') && !own(s))
-    .reduce((t, s) => t + Math.max(0, s.end_ms - s.start_ms), 0)
   const slower = segments.filter(s => own(s) && Number(s.speed) > 0 && Number(s.speed) !== 1)
     .reduce((t, s) => t + (s.end_ms - s.start_ms) * (1 - Number(s.speed)), 0)
   const caption = (styles[0] ?? {}) as Partial<CaptionStyle>
@@ -81,10 +87,19 @@ async function load(clipId: string): Promise<Loaded | null> {
   // sections cut by a video on top — `cut` — has to keep matching the parts)
   const noted = (clip.layers as { cut?: unknown } | null)?.cut
   const timelineEdits = !(Array.isArray(noted) && noted.length) && !segments.some(s => isShot(s, clip.video_id))
+  // Its length as it plays (parts removed, duplicated, videos put in between: modules/editor/playLength.ts),
+  // and its photos on that timeline — the kit's logo over its last seconds landed in a removed part, never
+  // seen, and one over the whole clip stopped short of a duplicated clip's end (user, 2026-11-21)
+  const trims = cleanTrims(clip.trims, clip.start_ms, clip.end_ms)
+  const map = trims.length ? trimMap(trims, clip.start_ms, clip.end_ms) : null
+  const onTimeline = (overlays as unknown as Overlay[]).map(o => (map
+    ? { ...o, start_ms: map.toTimeline(clip.start_ms + Number(o.start_ms)), end_ms: map.toTimeline(clip.start_ms + Number(o.end_ms)) }
+    : o))
   return {
     target: {
-      clipId, lengthMs: clip.end_ms - clip.start_ms + inserted + Math.max(0, slower), mainVideoId: clip.video_id, ends: BRAND_ENDS_ON,
-      overlays: overlays as unknown as Overlay[], texts: texts as unknown as TextOverlay[],
+      clipId, lengthMs: playLengthMs({ start_ms: clip.start_ms, end_ms: clip.end_ms, trim_ranges: clip.trims }, segments, clip.video_id),
+      mainVideoId: clip.video_id, ends: BRAND_ENDS_ON,
+      overlays: onTimeline, texts: texts as unknown as TextOverlay[],
       caption, textCase: caption.uppercase ? 'upper' : 'title', segments,
       keyframes, transitions: transitions as unknown as Transition[],
       // (with a video on top, the editor keeps a note of its layers beside the parts: changing the parts
@@ -101,6 +116,7 @@ async function load(clipId: string): Promise<Loaded | null> {
     brand: cleanBrandOn(clip.brand),
     userId: clip.user_id,
     hasStyle: styles.length > 0,
+    savedTimes: map ? o => [map.toSource(o.start_ms) - clip.start_ms, map.toSourceEnd(o.end_ms) - clip.start_ms] : null,
   }
 }
 
@@ -122,8 +138,10 @@ async function save(l: Loaded, next: BrandTarget, brand: BrandOn | null) {
   const removed = was.overlays.filter(o => !after.has(o.id)).map(o => o.id)
   const added = next.overlays.filter(o => !before.has(o.id))
   const changed = next.overlays.filter(o => before.has(o.id) && !same(o, before.get(o.id)))
+  // (times as saved: a clip with removed parts keeps them in its stretch of the video — Loaded.savedTimes)
+  const timesOf = (o: Overlay) => (l.savedTimes ? l.savedTimes(o) : [o.start_ms, o.end_ms])
   const row = (o: Overlay) => ({
-    storage_path: o.storage_path, x: o.x, y: o.y, w: o.w, h: o.h, start_ms: Math.round(o.start_ms), end_ms: Math.round(o.end_ms), z_index: o.z_index,
+    storage_path: o.storage_path, x: o.x, y: o.y, w: o.w, h: o.h, start_ms: Math.round(timesOf(o)[0]), end_ms: Math.round(timesOf(o)[1]), z_index: o.z_index,
     ...(hasOpacity ? { opacity: o.opacity ?? null } : {}),
   })
   const textOf = (t: TextOverlay | undefined) => [t?.font, t?.color, t?.size, t?.start_ms, t?.end_ms]
@@ -278,13 +296,24 @@ export async function catchUpClip(clipId: string): Promise<void> {
   }
 }
 
-/** The clip takes its kit as it is now, if it changed since the clip last took it */
+/**
+ * The clip takes its kit as it is now, if it changed since the clip last took it — and, as the editor does
+ * whenever the clip changes (brandNewFrames), the kit's logo keeps to its time as the clip got longer or
+ * shorter: a clip exported from the clip board without being opened since is right too (user, 2026-11-21)
+ */
 async function followKit(l: Loaded, kit: BrandKit) {
   const on = l.brand!
-  if (!on.applied) { await save(l, l.target, { ...on, applied: kit.data }); return }
-  if (!brandChanged(on.applied, kit.data)) return
-  const r = updateBrand(l.target, on.applied, kit, on.before)
-  await save(l, r.target, { ...on, before: r.before, applied: r.applied })
+  let target = l.target, next: BrandOn = on
+  if (!on.applied) next = { ...on, applied: kit.data }
+  else if (brandChanged(on.applied, kit.data)) {
+    const r = updateBrand(target, on.applied, kit, on.before)
+    target = r.target
+    next = { ...on, before: r.before, applied: r.applied }
+  }
+  const kept = brandNewFrames(target, kit, next.before)
+  if (kept) { target = kept.target; next = { ...next, before: kept.before } }
+  if (target === l.target && next === on) return
+  await save(l, target, next)
 }
 
 /** The brand kit on one of the user's clips, as saved (null: none) */

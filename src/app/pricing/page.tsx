@@ -4,15 +4,19 @@ import { useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { PLANS } from '@/lib/plans'
-import { TOPUP_PACKS, TEST_PACK, TRIAL_PACK, TRIAL_DAYS } from '@/lib/credits'
-import { planFeatureRows, creditUses, readingLabel } from '@/lib/planFeatures'
+import {
+  TOPUP_PACKS, TRIAL_PACK, TRIAL_DAYS, TOPUP_CREDIT_DAYS, READING_CREDITS, CAPTION_CREDITS_PER_MINUTE, EXPORT_CREDITS_PER_MINUTE, packUses,
+} from '@/lib/credits'
+import { planCompareRows, everyPlanIncludes, creditPrices } from '@/lib/planFeatures'
+import { SAFETY_PER_DAY, CLIP_CREDITS } from '@/lib/aiLimits'
 import { BrandLogo } from '@/components/ui/brand-logo'
 import { CreditsBadge } from '@/components/ui/credits-badge'
 import { useCredits } from '@/lib/useCredits'
 import { buyCreditPack, loadCheckoutScript, CHECKOUT_SCRIPT } from '@/lib/razorpayCheckout'
 import { PaymentsCards } from '@/components/billing/BillingCards'
 
-// (user, 2026-11-16) No free plan: the Trial pack (paid once) comes first
+// (user, 2026-11-16) No free plan: the Trial pack (paid once) comes first. Plans v2 (2026-11-21): Trial,
+// Starter, Pro; Agency (not sold) shows only to someone still on it
 const PLAN_ORDER = ['trial', 'starter', 'creator', 'agency'] as const
 
 export default function PricingPage() {
@@ -22,7 +26,7 @@ export default function PricingPage() {
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   // Signed in, two tabs (user, 2026-11-19): Plans, and Payments & invoices (#billing, so a link can open it):
-  // payment history, and on Agency the company details for invoices
+  // payment history, and on Pro the company details for invoices
   const [tab, setTab] = useState<'plans' | 'billing'>('plans')
   const [paidKey, setPaidKey] = useState(0)
   useEffect(() => {
@@ -115,6 +119,9 @@ export default function PricingPage() {
     }
   }
 
+  // The plans on show: those sold, and Agency only to someone still on it
+  const shown = PLAN_ORDER.filter(key => PLANS[key].sold || mine?.plan === key)
+
   async function cancel() {
     if (!window.confirm('Stop renewing? You keep your plan until the month you paid for ends.')) return
     setError(null)
@@ -147,7 +154,7 @@ export default function PricingPage() {
         )}
       </nav>
 
-      <main className="max-w-5xl mx-auto px-6 pt-14 pb-20">
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 pt-10 pb-20">
         {/* (open signed out too, for Razorpay's review: then only the plans, no tabs) */}
         {session && (
           <div className="flex justify-center mb-10">
@@ -158,207 +165,106 @@ export default function PricingPage() {
           </div>
         )}
 
-        {session && tab === 'billing' ? <PaymentsCards reloadKey={paidKey} /> : <>
-        <h1 className="text-3xl font-bold text-white text-center mb-2">Simple, transparent pricing</h1>
-        <p className="text-center mb-3" style={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.9rem' }}>
-          Your plan gives you credits worth its price, and every action uses them, up to your plan&apos;s monthly limits. Try everything first with the ₹{TRIAL_PACK.price} Trial pack, paid once · Paid plans renew monthly · Cancel anytime
-        </p>
+        {session && tab === 'billing' ? <PaymentsCards reloadKey={paidKey} /> : <div className="st-billing flex flex-col gap-6">
+        {/* (user, 2026-11-21: "a lot and useless"; the Buy credits page's look, simple, and the plans told apart):
+            the plans as cards like the credit packs, only what differs on each; what every plan has said once; the
+            prices short; packs one line to Buy credits */}
+        <header className="text-center">
+          <h1 className="st-title">Plans</h1>
+          <p className="st-sub">Every plan gives you credits to spend on anything: reading videos, AI clips, captions and exports. Start with the Trial, then pick the plan that fits how much you make.</p>
+        </header>
 
-        {mine?.testMode && (
-          <div className="mx-auto max-w-sm mb-10 rounded-xl px-4 py-2.5 text-center text-xs" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#f59e0b' }}>
-            Test mode — clicking Subscribe activates the plan instantly with no payment
-          </div>
-        )}
+        {mine?.testMode && <div className="st-alert" style={{ color: '#f59e0b', background: 'rgba(245,158,11,0.08)' }}>Test mode: Subscribe turns the plan on at once with no payment.</div>}
+        {mine?.paymentsMode === 'mock' && <div className="st-alert" style={{ color: '#6cb3ff', background: 'rgba(51,149,255,0.08)' }}>Dummy payments: this runs with dummy Razorpay keys. Nothing is charged.</div>}
+        {mine?.paymentsMode === 'test' && <div className="st-alert" style={{ color: '#6cb3ff', background: 'rgba(51,149,255,0.08)' }}>Razorpay test mode: use Razorpay&apos;s test cards. Nothing real is charged.</div>}
         {mine?.subscription && (
-          <p className="text-center text-xs mb-8" style={{ color: 'rgba(255,255,255,0.5)' }}>
+          <p className="st-hint text-center" style={{ margin: 0 }}>
             {mine.subscription.status === 'cancelled'
               ? `Your plan ends on ${mine.subscription.expiresAt ? new Date(mine.subscription.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : 'the last day of this month'}. `
               : `Renews${mine.subscription.expiresAt ? ` on ${new Date(mine.subscription.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}. `}
-            {mine.subscription.status !== 'cancelled' && (
-              <button onClick={cancel} className="underline" style={{ color: 'rgba(255,255,255,0.7)' }}>Cancel subscription</button>
-            )}
-            {' '}<button type="button" onClick={() => pickTab('billing')} className="underline" style={{ color: 'rgba(255,255,255,0.7)' }}>Payments &amp; invoices</button>
+            {mine.subscription.status !== 'cancelled' && <button type="button" onClick={cancel} className="st-link">Cancel subscription</button>}
           </p>
         )}
+        {notice && <p className="st-ok text-center" role="status">{notice}</p>}
+        {error && <p className="st-err text-center" role="alert">{error}</p>}
 
-        {mine?.paymentsMode === 'mock' && (
-          <div className="mx-auto max-w-md mb-6 rounded-xl px-4 py-2.5 text-center text-xs" style={{ background: 'rgba(51,149,255,0.08)', border: '1px solid rgba(51,149,255,0.25)', color: '#6cb3ff' }}>
-            Dummy payments: this runs with dummy Razorpay keys. Nothing is charged. Put real keys in the settings to take real payments.
-          </div>
-        )}
-        {mine?.paymentsMode === 'test' && (
-          <div className="mx-auto max-w-md mb-6 rounded-xl px-4 py-2.5 text-center text-xs" style={{ background: 'rgba(51,149,255,0.08)', border: '1px solid rgba(51,149,255,0.25)', color: '#6cb3ff' }}>
-            Razorpay test mode: use Razorpay&apos;s test cards. Nothing real is charged.
-          </div>
-        )}
-        {notice && (
-          <p className="text-center text-sm mb-6" style={{ color: '#c8ff00' }}>{notice}</p>
-        )}
-
-        {error && (
-          <p className="text-center text-sm mb-6" style={{ color: '#f87171' }}>{error}</p>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {PLAN_ORDER.map(key => {
-            const plan = PLANS[key]
-            const isPaid = plan.price > 0
-            // The Trial: paid once, its credits come with the payment
-            const once = plan.oneTime
-            const isPopular = key === 'creator'
-            const busy = loading === key
-            return (
-              <div
-                key={key}
-                className="rounded-2xl flex flex-col"
-                style={{
-                  background: isPopular ? 'rgba(200,255,0,0.08)' : '#161616',
-                  border: `1px solid ${isPopular ? 'rgba(200,255,0,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                  padding: '24px 20px',
-                }}
-              >
-                {isPopular && (
-                  <div className="text-xs font-semibold mb-3 px-2 py-0.5 rounded self-start" style={{ background: '#c8ff00', color: '#000' }}>
-                    Most Popular
-                  </div>
-                )}
-                <div className="text-sm font-semibold mb-1" style={{ color: 'rgba(255,255,255,0.5)' }}>{plan.name}</div>
-                <div className="flex items-end gap-1 mb-5">
-                  {isPaid ? (
-                    <>
-                      <span className="text-3xl font-bold text-white">₹{plan.price}</span>
-                      <span className="text-sm pb-1" style={{ color: 'rgba(255,255,255,0.35)' }}>{once ? ' once' : '/month'}</span>
-                    </>
-                  ) : (
-                    <span className="text-3xl font-bold text-white">Free</span>
+        <section className="st-card">
+          <div className={`st-plans${shown.length > 3 ? ' has-4' : ''}`}>
+            {shown.map(key => {
+              const plan = PLANS[key]
+              const once = plan.oneTime
+              const credits = once ? TRIAL_PACK.credits : plan.monthlyCredits
+              const uses = packUses(credits, CLIP_CREDITS)
+              const current = mine?.plan === key
+              const popular = key === 'creator'
+              const busy = loading === key || (once && topupBusy === 'trial')
+              const n = (x: number) => x.toLocaleString('en-IN')
+              return (
+                <div key={key} className={`st-pack st-plan${popular ? ' is-popular' : ''}${current ? ' is-current' : ''}`}>
+                  {current ? <span className="st-pack-badge is-mine">Your plan</span> : popular && <span className="st-pack-badge">Most popular</span>}
+                  <span className="st-plan-name">{plan.name}</span>
+                  <span className="st-pack-price">₹{n(plan.price)}<span className="st-plan-per">{once ? ' once' : '/month'}</span></span>
+                  <span className="st-pack-credits">{n(credits)} credits {once ? `for ${TRIAL_DAYS} days` : 'every month'}</span>
+                  <ul className="st-pack-uses">
+                    <li><b>{n(uses.aiClips)}</b> AI clips</li>
+                    <li className="st-pack-or">or</li>
+                    <li><b>{n(uses.captionedMinutes)}</b> manual exports with captions</li>
+                  </ul>
+                  <dl className="st-plan-rows">
+                    {planCompareRows(plan).map(r => (
+                      <div key={r.label} className={r.value === false ? 'is-off' : r.strong ? 'is-strong' : undefined}>
+                        <dt>{r.label}</dt><dd>{r.value === false ? '—' : r.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {once ? (
+                    current ? <span className="st-plan-state">Ends {mine?.trial?.endsAt ? new Date(mine.trial.endsAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'soon'}</span>
+                      : mine && (mine.plan !== 'free' || mine.trial?.used) ? <span className="st-plan-state">{mine.plan !== 'free' ? 'You have a plan' : 'Trial used'}</span>
+                      : <button type="button" className="st-btn st-btn-ghost st-pack-buy" disabled={!!loading || !!topupBusy} onClick={() => handleSubscribe(key)}>
+                          {busy ? 'Opening payment…' : `Start trial for ₹${plan.price}`}</button>
+                  ) : current ? (
+                    <span className="st-plan-state">₹{n(plan.price)} a month</span>
+                  ) : !plan.sold ? null : (
+                    <button type="button" className={`st-btn ${popular ? 'st-btn-lime' : 'st-btn-ghost'} st-pack-buy`} disabled={!!loading || !!topupBusy} onClick={() => handleSubscribe(key)}>
+                      {busy ? 'Opening payment…' : `Choose ${plan.name}`}</button>
                   )}
                 </div>
-
-                {/* What the plan gives, in credits: the number people compare first */}
-                <div className="mb-5 rounded-xl px-3 py-2.5" style={{ background: 'rgba(200,255,0,0.08)', border: '1px solid rgba(200,255,0,0.22)' }}>
-                  <div className="text-base font-bold" style={{ color: '#c8ff00' }}>
-                    {once ? `${TRIAL_PACK.credits} credits` : `${plan.monthlyCredits} credits`}
-                    <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.5)' }}>{once ? ` for ${TRIAL_DAYS} days` : ' every month'}</span>
-                  </div>
-                  <div className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                    {readingLabel(plan.readingMinutes)} of video read {once ? 'in total' : 'a month'}
-                    {once ? ' · unused credits move into your plan when you upgrade' : ' · unused credits roll over one month'}
-                  </div>
-                </div>
-
-                <ul className="flex-1 space-y-2.5 mb-6">
-                  {planFeatureRows(plan).map(({ label, included }) => (
-                    <li key={label} className="flex items-center gap-2 text-sm" style={{ color: included ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.2)' }}>
-                      <span style={{ color: included ? '#c8ff00' : 'rgba(255,255,255,0.15)', fontSize: '1rem', lineHeight: '1' }}>
-                        {included ? '✓' : '×'}
-                      </span>
-                      {label}
-                    </li>
-                  ))}
-                </ul>
-
-                {once ? (
-                  mine?.plan === 'trial' ? (
-                    <div aria-current="true" className="w-full py-2.5 rounded-xl text-sm font-semibold text-center cursor-default select-none"
-                      style={{ background: 'transparent', color: '#c8ff00', border: '1.5px solid rgba(200,255,0,0.55)' }}>
-                      ✓ Your trial{mine.trial?.endsAt ? ` — ends ${new Date(mine.trial.endsAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}
-                    </div>
-                  ) : mine && (mine.plan !== 'free' || mine.trial?.used) ? (
-                    // Once per account, and not for someone on a plan
-                    <div className="w-full py-2.5 rounded-xl text-sm font-semibold text-center" style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                      {mine.plan !== 'free' ? 'You have a plan' : 'Trial used'}
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => handleSubscribe(key)}
-                      disabled={!!loading || !!topupBusy}
-                      className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity"
-                      style={{ background: '#c8ff00', color: '#000', opacity: (loading || topupBusy) && topupBusy !== 'trial' ? 0.4 : 1, cursor: loading || topupBusy ? 'wait' : 'pointer' }}
-                    >
-                      {topupBusy === 'trial' ? 'Opening payment…' : `Start trial — ₹${plan.price} once`}
-                    </button>
-                  )
-                ) : isPaid ? (
-                  mine?.plan === key ? (
-                    // The plan they are on: a status, not a button (it must not look like something to press)
-                    <div aria-current="true" className="w-full py-2.5 rounded-xl text-sm font-semibold text-center cursor-default select-none"
-                      style={{ background: 'transparent', color: '#c8ff00', border: '1.5px solid rgba(200,255,0,0.55)' }}>
-                      ✓ Your plan — ₹{plan.price}/mo
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => handleSubscribe(key)}
-                      disabled={!!loading}
-                      className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity"
-                      style={{
-                        background: isPopular ? '#c8ff00' : 'rgba(255,255,255,0.1)',
-                        color: isPopular ? '#000' : '#fff',
-                        opacity: loading && !busy ? 0.4 : 1,
-                        cursor: loading ? 'wait' : 'pointer',
-                      }}
-                    >
-                      {busy ? 'Opening payment…' : `Subscribe — ₹${plan.price}/mo`}
-                    </button>
-                  )
-                ) : (
-                  <div className="w-full py-2.5 rounded-xl text-sm font-semibold text-center" style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                    Default plan
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-        <p className="text-center text-xs mt-5" style={{ color: 'rgba(255,255,255,0.35)' }}>
-          A video gets at most 1 AI clip per minute of its length, and at most {PLANS.starter.ai.clipsPerDay}, {PLANS.creator.ai.clipsPerDay} or {PLANS.agency.ai.clipsPerDay} AI clips are made a day on Starter, Creator or Agency. Monthly limits reset on the 1st, India time.
-        </p>
-
-        <section className="mt-14">
-          <h2 className="text-xl font-bold text-white text-center mb-1">What a credit buys</h2>
-          <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>You see the price before every step. Nothing is charged by surprise, and a job that fails gives its credits back.</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {creditUses().map(({ name, price, note }) => (
-              <div key={name} className="rounded-2xl p-4" style={{ background: '#161616', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <div className="text-sm font-semibold text-white">{name}</div>
-                <div className="text-sm font-bold mt-1" style={{ color: '#c8ff00' }}>{price}</div>
-                <p className="text-xs mt-1.5" style={{ color: 'rgba(255,255,255,0.45)' }}>{note}</p>
-              </div>
-            ))}
+              )
+            })}
           </div>
+          <p className="st-hint" style={{ margin: 0 }}>
+            An AI clip is {CLIP_CREDITS} credits, from a video already read (reading is {READING_CREDITS} credits per 10 minutes of video). A manual export is a clip of up to a minute
+            you cut yourself, with captions ({CAPTION_CREDITS_PER_MINUTE} credits) and the export ({EXPORT_CREDITS_PER_MINUTE}). Prices include GST. Plans renew monthly and you can cancel
+            anytime; unused credits roll over one month, and your Trial&apos;s unused credits move into your plan.
+          </p>
         </section>
 
-        <section className="mt-14">
-          <h2 id="topups" className="text-xl font-bold text-white text-center mb-1">Need more credits?</h2>
-          <p className="text-center text-sm mb-6" style={{ color: 'rgba(255,255,255,0.4)' }}>Top-up packs for paid plans, paid once. Top-up credits last 12 months. Your plan&apos;s monthly limits stay the same: for more of those, upgrade.</p>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[...TOPUP_PACKS, ...(mine?.testPack ? [TEST_PACK] : [])].map(pack => (
-              <div key={pack.key} className="rounded-2xl p-4 text-center" style={{ background: '#161616', border: '1px solid rgba(255,255,255,0.08)' }}>
-                <div className="text-2xl font-bold text-white">{pack.credits}</div>
-                <div className="text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>credits</div>
-                <div className="text-lg font-semibold text-white mt-2">₹{pack.price}</div>
-                {mine && ((mine.plan !== 'free' && mine.plan !== 'trial') || pack.key === 'test') ? (
-                  <button onClick={() => handleTopup(pack.key)} disabled={!!topupBusy}
-                    className="w-full mt-3 py-2 rounded-xl text-xs font-semibold transition-opacity"
-                    style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', opacity: topupBusy && topupBusy !== pack.key ? 0.4 : 1, cursor: topupBusy ? 'wait' : 'pointer' }}>
-                    {topupBusy === pack.key ? 'Opening…' : `Buy — ₹${pack.price}`}
-                  </button>
-                ) : (
-                  <div className="mt-3 py-2 rounded-xl text-xs font-semibold" style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.35)' }}>
-                    {session ? 'Choose a paid plan first' : 'Sign in to buy'}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+        <section className="st-card">
+          <h2 className="st-card-title">Every plan includes</h2>
+          <ul className="st-includes">{everyPlanIncludes().map(t => <li key={t}>{t}</li>)}</ul>
         </section>
 
-        <p className="text-center text-xs mt-14" style={{ color: 'rgba(255,255,255,0.35)' }}>
-          Prices include GST. See our{' '}
-          <a href="/refunds" className="underline" style={{ color: 'rgba(255,255,255,0.6)' }}>Refund and Cancellation Policy</a>,{' '}
-          <a href="/terms" className="underline" style={{ color: 'rgba(255,255,255,0.6)' }}>Terms</a> and{' '}
-          <a href="/privacy" className="underline" style={{ color: 'rgba(255,255,255,0.6)' }}>Privacy Policy</a>.
+        <section className="st-card">
+          <h2 className="st-card-title">What a credit buys</h2>
+          <ul className="st-prices">{creditPrices().map(p => <li key={p.name}><span>{p.name}</span><b>{p.price}</b></li>)}</ul>
+          <p className="st-hint" style={{ margin: 0 }}>You see the price before every step. A job that fails gives its credits back.</p>
+        </section>
+
+        <section id="topups" className="st-card">
+          <h2 className="st-card-title">Need more credits?</h2>
+          <p className="st-hint" style={{ margin: 0 }}>
+            Credit packs for paid plans, paid once, last {Math.round(TOPUP_CREDIT_DAYS / 30.4)} months:{' '}
+            {TOPUP_PACKS.map(p => `${p.credits.toLocaleString('en-IN')} for ₹${p.price.toLocaleString('en-IN')}`).join(' · ')}.{' '}
+            {session ? <a href="/billing#credits" className="st-link">Buy credits</a> : <a href="/login" className="st-link">Sign in to buy</a>}
+          </p>
+        </section>
+
+        <p className="st-hint text-center" style={{ margin: 0 }}>
+          A video gets at most 1 AI clip per minute of its length, and for safety one account can make up to {SAFETY_PER_DAY.aiClips} AI clips and read {SAFETY_PER_DAY.readingMinutes / 60} hours
+          of video a day. Videos and their clips are deleted after the days shown (from each upload): you get an email a few days before. See our{' '}
+          <a href="/refunds" className="st-link">Refund and Cancellation Policy</a>, <a href="/terms" className="st-link">Terms</a> and <a href="/privacy" className="st-link">Privacy Policy</a>.
         </p>
-        </>}
+        </div>}
       </main>
     </div>
   )

@@ -2,6 +2,8 @@ import { redirect, notFound } from 'next/navigation'
 import { requireUser } from '@/server/auth'
 import { ClipPickerShell, type ClipOrigin } from './ClipPickerShell'
 import sql from '@/lib/db'
+import { freeExports } from '@/server/services/export'
+import { playLengths } from '@/server/services/clipLength'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import { GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
@@ -118,6 +120,12 @@ export default async function VideoPickerPage({
     titleStyle: str(r.payload.title_style),
   }]) : [])
 
+  // Make my clips clips whose first export is in their price (user, 2026-11-21): Export asks no credits
+  const freeExport = await freeExports(clipsRaw.filter(c => c.auto && !c.output_storage_path).map(c => c.id)).catch(() => new Set<string>())
+  // How long each clip plays (removed parts out, duplicated parts in): its price and the 5-minute limit go by
+  // this, as the editor's and the server's do (user, 2026-11-21: they went by its stretch of the video)
+  const plays = await playLengths(clipsRaw.map(c => c.id)).catch(() => new Map<string, number>())
+
   // Download links: fresh ones on every load (the link stored with a clip expires after 7 days)
   const savedClips = await Promise.all(clipsRaw.map(async (c, idx) => ({
     id: c.id, title: c.title ?? null, start_ms: c.start_ms, end_ms: c.end_ms,
@@ -129,6 +137,8 @@ export default async function VideoPickerPage({
     layout: c.layout ?? null, index: idx + 1, origin: originOf(c),
     favorite: !!c.favorite, reason: c.reason ?? null, changed: !!c.changed, opened: !!c.opened,
     made: (c.job_id && madeBy.get(c.job_id)) || null,
+    free_export: freeExport.has(c.id),
+    play_ms: plays.get(c.id) ?? c.end_ms - c.start_ms,
   })))
 
   return (

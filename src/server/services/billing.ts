@@ -40,6 +40,8 @@ async function razorpayPlanId(plan: PaidPlanKey): Promise<string> {
 /** Starts checkout: a subscription at Razorpay, recorded as 'created'. The plan is not on until it is paid. */
 export async function startSubscription(userId: string, planKey: unknown) {
   const plan = paidPlan(planKey)
+  // A plan no longer sold (Agency since 2026-11-21) can't be started; whoever already pays for it keeps it
+  if (!PLANS[plan].sold) throw Object.assign(new Error(`The ${PLANS[plan].name} plan is no longer offered. Choose Pro instead.`), { status: 400, expose: true })
   await ensureBillingSchema()
   const planId = await razorpayPlanId(plan)
   const sub = await createRazorpaySubscription(planId, { user_id: userId, plan })

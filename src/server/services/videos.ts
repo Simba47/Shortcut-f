@@ -4,7 +4,7 @@ import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand } from '@aw
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { aiProvider, askGemini, GEMINI_MODEL, type GeminiUsage } from '@/lib/gemini'
 import { creditsMode } from '@/lib/credits'
-import { clipsAllowed, clipCredits, moreLater, type LimitedBy } from '@/lib/aiLimits'
+import { clipsAllowed, clipCredits, SAFETY_NOTE, type LimitedBy } from '@/lib/aiLimits'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import sql from '@/lib/db'
 import { findClips, type FoundClip, type Subscores } from './clipFinder'
@@ -39,7 +39,9 @@ export async function listVideos(userId: string, includeAssets = false) {
       to_jsonb(videos)->>'poster_path' AS poster_path,
       -- A link import: how much of the file is in / saved (the dashboard's import card: MB, speed, time left)
       (to_jsonb(videos)->>'download_bytes')::bigint AS download_bytes, (to_jsonb(videos)->>'download_total')::bigint AS download_total,
-      (SELECT COUNT(*)::int FROM clips c WHERE c.video_id = videos.id) AS clip_count
+      (SELECT COUNT(*)::int FROM clips c WHERE c.video_id = videos.id) AS clip_count,
+      -- When it expires (null: never, or expiry off) and whether it is kept (Pro's ★ Keep): server/services/expiry.ts
+      to_jsonb(videos)->>'expires_at' AS expires_at, COALESCE((to_jsonb(videos)->>'kept')::boolean, false) AS kept
     -- Stock clips saved for auto B-roll are the user's assets, not videos they uploaded
     FROM videos WHERE user_id = ${userId} AND (${includeAssets} OR role <> 'asset') ORDER BY created_at DESC
   `
@@ -659,11 +661,10 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
     const { getUserPlan, NO_PLAN_AI_MESSAGE } = await import('./quota')
     const planKey = await getUserPlan(userId)
     if (planKey === 'free') throw Object.assign(new Error(NO_PLAN_AI_MESSAGE), { status: 403, expose: true })
-    const r = clipsAllowed({ requested, perRun: allowance.perRun, dayLeft: allowance.dayLeft, videoLeft: allowance.videoLeft, monthLeft: allowance.monthLeft })
+    const r = clipsAllowed({ requested, perRun: allowance.perRun, dayLeft: allowance.dayLeft, videoLeft: allowance.videoLeft })
     if (r.count === 0) {
-      if (r.limitedBy === 'month') throw Object.assign(new Error(`You've used your ${allowance.clipsPerMonth} AI clips. ${moreLater(planKey)}`), { status: 403, expose: true })
       throw Object.assign(new Error(r.limitedBy === 'day'
-        ? `You've made ${allowance.clipsToday} of today's ${allowance.clipsPerDay} AI clips. More tomorrow.`
+        ? `You've made ${allowance.clipsToday} AI clips today, the most for one day. ${SAFETY_NOTE}`
         : `This video already has ${allowance.videoClips} AI clips, the most for its length (1 per minute of video).`), { status: 429, expose: true })
     }
     count = r.count; limitedBy = r.limitedBy
@@ -705,6 +706,8 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
     const [aiJob] = await sql`
       INSERT INTO ai_edit_jobs (video_id, clip_count, status) VALUES (${videoId}, ${count}, 'queued') RETURNING id
     `
+    // (paid at CLIP_CREDITS, which has each clip's first export in it: the clip board doesn't charge for that export)
+    if (clipHold) await sql`UPDATE ai_edit_jobs SET export_included = true WHERE id = ${aiJob.id}`
     const payload = {
       ai_edit_job_id: aiJob.id, video_id: videoId, clip_count: count, add_broll: addBroll,
       captions: options.captions !== false, title: options.title !== false,

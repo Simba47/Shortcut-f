@@ -45,6 +45,32 @@ export function cleanParts(parts: unknown, lengthMs: number): CaptionPart[] {
   return out
 }
 
+/**
+ * The parts after [a, b) of the timeline was cut out (a part deleted, an edge dragged in, a pause cut):
+ * those after it move up with what they're on (user, 2026-11-21: they stayed where they were, so a look
+ * changed at the wrong words — in the preview and the export alike). The look playing at `b` plays on from
+ * `a`; parts starting inside the cut otherwise go. Made safe for the clip's new length (cleanParts).
+ */
+export function partsAfterCut(parts: CaptionPart[], a: number, b: number, lengthAfter: number): CaptionPart[] {
+  const d = b - a
+  if (!(d > 0) || !parts.length) return parts
+  const sorted = [...parts].sort((x, y) => x.start_ms - y.start_ms)
+  const playingAtB = [...sorted].reverse().find(p => p.start_ms <= b)
+  const out: CaptionPart[] = []
+  for (const p of sorted) {
+    if (p.start_ms < a) out.push(p)
+    else if (p.start_ms >= b) out.push({ ...p, start_ms: p.start_ms - d })
+    else if (p === playingAtB) out.push({ ...p, start_ms: a })
+  }
+  return cleanParts(out, lengthAfter)
+}
+
+/** The parts after `d` ms were put in at `at` (a video put in, a part duplicated or pasted, cut video given back): those from `at` on move later */
+export function partsAfterInsert(parts: CaptionPart[], at: number, d: number, lengthAfter: number): CaptionPart[] {
+  if (!(d > 0) || !parts.length) return parts
+  return cleanParts(parts.map(p => (p.start_ms >= at ? { ...p, start_ms: p.start_ms + d } : p)), lengthAfter)
+}
+
 /** Every part as it plays, the first one (the clip's own style) included */
 export function playedParts(base: Partial<CaptionStyle>, parts: CaptionPart[], lengthMs: number): PlayedPart[] {
   const starts = [{ id: null as string | null, start_ms: 0, style: {} as Partial<CaptionStyle> }, ...parts]

@@ -12,6 +12,9 @@ import { useCredits, type CreditsInfo } from '@/lib/useCredits'
 import { CreditsBadge } from '@/components/ui/credits-badge'
 import { CAPTION_CREDITS_PER_MINUTE, EXPORT_CREDITS_PER_MINUTE } from '@/lib/credits'
 import { ASK_AI_CREDITS, CLIP_CREDITS } from '@/lib/aiLimits'
+import { PLANS, isTopPlan } from '@/lib/plans'
+import { formatStorage } from '@/lib/storage'
+import { canKeep, expiresLabel, expiresSoon } from '@/lib/expiry'
 import type { Video } from '@chai-cut/shared'
 import { ACCEPTED_VIDEO_EXTENSIONS } from '@chai-cut/shared'
 import { Breadcrumbs } from '@/components/ui/breadcrumbs'
@@ -30,16 +33,22 @@ type DashVideo = Video & { video_url?: string | null; clip_count?: number; error
   download_bytes?: number | null
   download_total?: number | null
   /** A link import: 'Google Drive' / 'Dropbox' */
-  link_from?: string | null }
+  link_from?: string | null
+  /** When it is deleted (plans v2, 2026-11-21: Trial 7 days, plans 30): null when it never is (kept, or expiry off) */
+  expires_at?: string | null
+  /** Pro's ★ Keep: it never expires */
+  kept?: boolean }
 type SortKey = 'newest' | 'oldest' | 'name'
 interface PlanInfo {
   plan: string
   planName: string
-  maxVideos: number
+  /** The plan's storage (plans v2, 2026-11-21: GB held, not a count of videos) */
+  storageGb: number
+  storageBytes: number
   maxFileSizeBytes: number
   maxFileSizeGb: number
   autoCaption: boolean
-  usage: { videos: number; clips: number }
+  usage: { videos: number; clips: number; storageBytes: number }
 }
 
 // Videos uploaded before titles existed fall back to their position in the list
@@ -93,7 +102,7 @@ export default function DashboardPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   // "Upload video" asks where the video comes from: this device, or a Drive link
   const [chooserOpen, setChooserOpen] = useState(false)
-  // How many videos there were when the running-low line was hidden (it comes back once there are more)
+  // How much was stored (bytes) when the running-low line was hidden (it comes back once more is stored)
   const [lowHiddenAt, setLowHiddenAt] = useState(-1)
   useEffect(() => {
     try { const v = Number(sessionStorage.getItem('dashSeenLow')); if (Number.isFinite(v) && v > 0) setLowHiddenAt(v) } catch { /* storage blocked */ }
@@ -161,7 +170,11 @@ export default function DashboardPage() {
     return () => document.removeEventListener('keydown', onKey)
   }, [])
 
-  const atLimit = !!planInfo && planInfo.usage.videos >= planInfo.maxVideos
+  // The storage full: nothing more fits until a video is deleted (or, from step 3, expires)
+  const storageFree = planInfo ? Math.max(0, planInfo.storageBytes - (planInfo.usage.storageBytes ?? 0)) : 0
+  const atLimit = !!planInfo && planInfo.storageBytes > 0 && storageFree <= 0
+  const topPlan = isTopPlan(planInfo?.plan)
+  const moreSpace = topPlan ? 'Delete a video to make room.' : 'Delete a video to make room, or upgrade for more space.'
   // No plan (no free plan since 2026-11-16): uploading starts with the Trial pack or a plan
   const noPlan = planInfo?.plan === 'free'
 
@@ -180,7 +193,8 @@ export default function DashboardPage() {
 
   function validateFile(f: File): string | null {
     // The plan's limit, once it's loaded (the server checks it again either way)
-    if (planInfo && f.size > planInfo.maxFileSizeBytes) return `This file is larger than your plan's ${planInfo.maxFileSizeGb} GB limit.`
+    if (planInfo && f.size > planInfo.maxFileSizeBytes) return `This file is larger than your plan's ${planInfo.maxFileSizeGb} GB limit for one video.`
+    if (planInfo && planInfo.storageBytes > 0 && f.size > storageFree) return `This file is ${formatStorage(f.size)}, and ${formatStorage(storageFree)} of your ${planInfo.storageGb} GB is free. ${moreSpace}`
     const ext = '.' + f.name.split('.').pop()?.toLowerCase()
     if (!ACCEPTED_VIDEO_EXTENSIONS.includes(ext as never)) return `Unsupported format. Accepted: ${ACCEPTED_VIDEO_EXTENSIONS.join(', ')}`
     return null
@@ -188,8 +202,8 @@ export default function DashboardPage() {
 
   function startUpload(f: File) {
     if (uploading) return
-    if (noPlan) { setUploadError('Uploading needs a plan. Start with the ₹50 Trial pack (Start trial, top right) or choose a plan.'); return }
-    if (atLimit) { setUploadError(`You've used all ${planInfo?.maxVideos} videos on your plan. Delete a video or upgrade to add more.`); return }
+    if (noPlan) { setUploadError(`Uploading needs a plan. Start with the ₹${PLANS.trial.price} Trial pack (Start trial, top right) or choose a plan.`); return }
+    if (atLimit) { setUploadError(`Your ${planInfo?.storageGb} GB of storage is full. ${moreSpace}`); return }
     const error = validateFile(f)
     if (error) { setUploadError(error); return }
     setUploadError(null)
@@ -260,13 +274,14 @@ export default function DashboardPage() {
   if (loading) return <DashSkeleton />
 
   searchBlocked.current = chooserOpen || !!choosing || !!pendingDelete
-  const usagePct = planInfo && planInfo.maxVideos > 0 ? Math.min(100, (planInfo.usage.videos / planInfo.maxVideos) * 100) : 0
+  const usedBytes = planInfo?.usage.storageBytes ?? 0
+  const usagePct = planInfo && planInfo.storageBytes > 0 ? Math.min(100, (usedBytes / planInfo.storageBytes) * 100) : 0
   const isEmpty = videos.length === 0
-  // Running low (user, 2026-11-11: told before an upload is refused, not after): with a sixth of the plan's videos
-  // left (5 of 30: from 25; at least 2 — 8 of 10) until it's full (then the strip says so). ✕ hides it — until another video is added (kept for
-  // the visit: dashSeenLow in this tab's storage)
-  const used = planInfo?.usage.videos ?? 0
-  const low = !!planInfo && !atLimit && planInfo.maxVideos > 1 && used >= planInfo.maxVideos - Math.max(2, Math.round(planInfo.maxVideos / 6))
+  // Running low (user, 2026-11-11: told before an upload is refused, not after): 85% of the plan's storage used
+  // until it's full (then the strip says so). ✕ hides it — until more is stored (kept for the visit: dashSeenLow in
+  // this tab's storage)
+  const used = usedBytes
+  const low = !!planInfo && !atLimit && usagePct >= 85
   const showLow = low && used > lowHiddenAt
 
   return (
@@ -283,14 +298,14 @@ export default function DashboardPage() {
           {planInfo && !noPlan && (
             <div
               className={`dash-usage${usagePct >= 100 ? ' is-full' : usagePct >= 90 ? ' is-warn' : ''}`}
-              role="img" aria-label={`${planInfo.usage.videos} of ${planInfo.maxVideos} videos used`}
+              role="img" aria-label={`${formatStorage(usedBytes)} of ${planInfo.storageGb} GB storage used`}
             >
-              <span className="dash-usage-label"><strong>{planInfo.usage.videos}</strong> / {planInfo.maxVideos} videos</span>
+              <span className="dash-usage-label"><strong>{formatStorage(usedBytes)}</strong> / {planInfo.storageGb} GB</span>
               <div className="dash-usage-bar"><div style={{ width: `${usagePct}%` }} /></div>
             </div>
           )}
           <CreditsBadge credits={credits} className="dash-credits" />
-          {/* No plan: the ₹50 Trial pack is the way in (no free plan since 2026-11-16); on the Trial, upgrade */}
+          {/* No plan: the Trial pack is the way in (no free plan since 2026-11-16); on the Trial, upgrade */}
           {(planInfo?.plan === 'free' || planInfo?.plan === 'trial') && (
             <a href="/pricing" className="dash-btn-fill fill-btn fill-btn-sm"><FillButtonContent>{planInfo.plan === 'free' ? 'Start trial' : 'Upgrade'}</FillButtonContent></a>
           )}
@@ -346,10 +361,10 @@ export default function DashboardPage() {
           <div className="dash-low" role="status">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9L2.4 17.6A2 2 0 004.1 20.6h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" /></svg>
             <p>
-              You&apos;ve used <strong>{used} of your {planInfo.maxVideos}</strong> videos.
-              <span> {planInfo.maxVideos - used === 1 ? 'Room for 1 more' : `Room for ${planInfo.maxVideos - used} more`} — delete old ones, or get more with a bigger plan.</span>
+              You&apos;ve used <strong>{formatStorage(usedBytes)} of your {planInfo.storageGb} GB</strong> of storage.
+              <span> {formatStorage(storageFree)} free — delete old videos{topPlan ? '' : ', or get more space with a bigger plan'}.</span>
             </p>
-            <a href="/pricing" className="dash-low-cta">See plans</a>
+            {!topPlan && <a href="/pricing" className="dash-low-cta">See plans</a>}
             <button type="button" className="dash-low-x" aria-label="Hide this message" onClick={() => hideLow(used)}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
             </button>
@@ -419,8 +434,8 @@ export default function DashboardPage() {
               </>
             ) : atLimit ? (
               <>
-                <p>You&apos;ve used all {planInfo?.maxVideos} videos on your {planInfo?.planName} plan</p>
-                <p>Delete a video to free up space, or <a href="/pricing">upgrade your plan</a>.</p>
+                <p>Your {planInfo?.storageGb} GB of storage on {planInfo?.planName} is full</p>
+                <p>Delete a video to free up space{topPlan ? '.' : <>, or <a href="/pricing">upgrade your plan</a>.</>}</p>
               </>
             ) : (
               <>
@@ -480,6 +495,13 @@ export default function DashboardPage() {
                   if (!res?.ok) return (res ? (await res.json().catch(() => ({}))).error : null) ?? 'Couldn’t start it again. Please try once more.'
                   await fetchVideos()
                   refreshCredits()
+                  return null
+                }}
+                plan={planInfo?.plan ?? null}
+                onKeep={async keep => {
+                  const res = await fetch(`/api/videos/${video.id}/keep`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keep }) }).catch(() => null)
+                  if (!res?.ok) return (res ? (await res.json().catch(() => ({}))).error : null) ?? 'Couldn’t change it. Please try again.'
+                  await fetchVideos()
                   return null
                 }}
                 onOpen={() => setChoosing({ id: video.id, title, videoUrl: video.video_url, posterUrl: video.poster_url, durationMs: video.duration_ms })}
@@ -663,7 +685,7 @@ function LinkImportStrip({ video, onChanged }: { video: DashVideo; onChanged: ()
   const pace = useLinkPace(video.download_bytes, video.download_total, step)
   const [busy, setBusy] = useState<'continue' | 'cancel' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [price, setPrice] = useState<{ on: boolean; credits?: number; balance?: number; overMs?: number; uploadsLeft?: number } | null>(null)
+  const [price, setPrice] = useState<{ on: boolean; credits?: number; balance?: number; overMs?: number; uploadsLeft?: number | null } | null>(null)
 
   // Waiting for the OK: what reading it costs (asked once it is waiting)
   useEffect(() => {
@@ -693,10 +715,11 @@ function LinkImportStrip({ video, onChanged }: { video: DashVideo; onChanged: ()
 
   const credits = price?.credits ?? 0
   const minutes = Math.max(1, Math.ceil((video.duration_ms ?? 0) / 60_000))
-  // (past the plan's hours or uploads, or short of credits: said here, Continue would only be refused)
+  // (the Trial's uploads used up, past today's safety limit, or short of credits: said here, Continue would only be refused.
+  // uploadsLeft is null on a paid plan: no uploads limit since 2026-11-21)
   const blocked = waiting && price?.on
-    ? (price.uploadsLeft ?? 1) <= 0 ? 'You have no uploads left on your plan.'
-      : (price.overMs ?? 0) > 0 ? `This ${minutes} min video is longer than the time left on your plan.`
+    ? (price.uploadsLeft ?? 1) <= 0 ? 'You have no uploads left on your Trial. Choose a plan to upload more.'
+      : (price.overMs ?? 0) > 0 ? `This ${minutes} min video goes past today's limit for one day. It comes back at midnight.`
         : credits > (price.balance ?? 0) ? `Reading it needs ${credits} credits and you have ${price.balance ?? 0}. Top up to continue.`
           : null
     : null
@@ -758,9 +781,13 @@ function LinkImportStrip({ video, onChanged }: { video: DashVideo; onChanged: ()
   )
 }
 
-function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDelete, onOpen, onGo, onRetry }: {
+function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDelete, onOpen, onGo, onRetry, plan, onKeep }: {
   video: DashVideo
   title: string
+  /** The account's plan: the Trial is flagged in its last 2 days, the plans in their last 3; Pro can ★ Keep */
+  plan: string | null
+  /** ★ Keep on or off (null: done; else what went wrong) */
+  onKeep: (keep: boolean) => Promise<string | null>
   /** "Make clips": asks AI edit or manual edit, then opens the clip board */
   onOpen: () => void
   /** "Open clips": straight to the clip board that has them — the AI's or the ones cut by hand */
@@ -786,6 +813,36 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
   }
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState(title)
+  // Expiry (plans v2, 2026-11-21): flagged in its last days, with Download all and (Pro) ★ Keep
+  const soon = video.status === 'ready' && !video.kept && expiresSoon(video.expires_at, plan)
+  // (only where videos expire: a kept one, or one with a date — expiry off, there is nothing to keep)
+  const keepable = canKeep(plan) && video.status === 'ready' && (!!video.kept || !!video.expires_at)
+  const [keepBusy, setKeepBusy] = useState(false)
+  const [expiryNote, setExpiryNote] = useState<string | null>(null)
+  async function toggleKeep(e: { stopPropagation: () => void }) {
+    e.stopPropagation()
+    if (keepBusy) return
+    setKeepBusy(true); setExpiryNote(null)
+    const problem = await onKeep(!video.kept)
+    setKeepBusy(false)
+    if (problem) setExpiryNote(problem)
+  }
+  // Every exported clip of it, one after another, each named after its clip (/api/clips/[id]/download)
+  async function downloadAll(e: { stopPropagation: () => void }) {
+    e.stopPropagation()
+    setExpiryNote(null)
+    const res = await fetch(`/api/videos/${video.id}/exports`).catch(() => null)
+    const list: Array<{ id: string; title: string | null }> = res?.ok ? (await res.json().catch(() => ({}))).clips ?? [] : []
+    if (!res?.ok) { setExpiryNote('Couldn’t get the clips. Please try again.'); return }
+    if (!list.length) { setExpiryNote('No exported clips yet. Export them on the clip board first.'); return }
+    list.forEach((c, i) => setTimeout(() => {
+      const a = document.createElement('a')
+      a.href = `/api/clips/${c.id}/download?name=${encodeURIComponent(c.title || `Clip ${i + 1}`)}`
+      a.rel = 'noopener'
+      document.body.appendChild(a); a.click(); a.remove()
+    }, i * 900))
+    setExpiryNote(`Downloading ${list.length} clip${list.length === 1 ? '' : 's'}…`)
+  }
   // (user, 2026-11-11: "clicking the video does nothing") the picture and the name open it too, as Make clips —
   // only a ready video, not while selecting (the card ticks) or renaming. A press that ends a rename (its box
   // loses focus on the press, so by the click it's closed) only saves the name: it doesn't open the video too
@@ -1008,7 +1065,22 @@ function VideoCard({ video, title, selecting, selected, onToggle, onRename, onDe
           <p className="vcard-meta">
             <span>{dateStr}</span>
             {durationLabel && <><span className="vcard-meta-dot" aria-hidden="true">·</span><span>{durationLabel}</span></>}
+            {/* Pro: ★ Keep on any ready video (it never expires); lit when kept */}
+            {keepable && !selecting && (
+              <button type="button" className={`vcard-keep${video.kept ? ' is-kept' : ''}`} onClick={toggleKeep} disabled={keepBusy}
+                aria-pressed={!!video.kept} title={video.kept ? 'Kept for good. Press to let it expire again (it gets 7 more days)' : 'Keep this video for good (it still counts in your storage)'}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill={video.kept ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" /></svg>
+                {video.kept ? 'Kept' : 'Keep'}
+              </button>
+            )}
           </p>
+          {soon && video.expires_at && !selecting && (
+            <div className="vcard-expiry" role="status">
+              <span className="vcard-expiry-tag">{expiresLabel(video.expires_at)}</span>
+              {(video.clip_count ?? 0) > 0 && <button type="button" className="vcard-expiry-btn" onClick={downloadAll}>Download all</button>}
+            </div>
+          )}
+          {expiryNote && <p className="vcard-expiry-note" role="status">{expiryNote}</p>}
         </div>
         {/* The only way into the clip picker, so a stray click on the card doesn't navigate */}
         {ready && !selecting && (
@@ -1381,8 +1453,8 @@ function EditModeDialog({ videoId, title, videoUrl, posterUrl, durationMs, credi
                 {credits && (o.mode === 'ai' ? (
                   <span className="emd-cost">
                     {reading === 'paid'
-                      ? <>This video is <b>already read</b>. AI clips: <b>{CLIP_CREDITS} credits</b> each. Ask AI: <b>{ASK_AI_CREDITS} credits</b> a search.</>
-                      : <>AI clips: <b>{CLIP_CREDITS} credits</b> each. Ask AI: <b>{ASK_AI_CREDITS} credits</b> a search.</>}
+                      ? <>This video is <b>already read</b>. AI clips: <b>{CLIP_CREDITS} credits</b> each, export included. Ask AI: <b>{ASK_AI_CREDITS} credits</b> a search.</>
+                      : <>AI clips: <b>{CLIP_CREDITS} credits</b> each, export included. Ask AI: <b>{ASK_AI_CREDITS} credits</b> a search.</>}
                   </span>
                 ) : (
                   <span className="emd-cost">

@@ -1,7 +1,7 @@
 import sql from '@/lib/db'
 import type { RenderQuality } from '@chai-cut/shared'
 import { creditsMode, exportCredits } from '@/lib/credits'
-import { charge, linkJob, release, RENDER_CANCELLED, type Hold } from './credits'
+import { charge, ensureCreditsSchema, linkJob, release, RENDER_CANCELLED, type Hold } from './credits'
 
 // retranscribe: regenerate this clip's captions first (Gemini), then render —
 // the worker queues the render once the new transcript is saved.
@@ -18,10 +18,14 @@ export async function queueRender(userId: string, clipId: string, quality: Rende
 
   // Credits: per started clip minute, up to 5 minutes (checked only when credits are on, so the site
   // behaves as before until then). Taken before anything changes, given back if the export cannot
-  // be queued.
+  // be queued. The minutes it plays (removed parts out, duplicated parts in: clipLength.ts), as the
+  // editor's price shows — not its stretch of the video (user, 2026-11-21)
   let hold: Hold | null = null
   if (creditsMode() !== 'off') {
-    hold = await charge(userId, { amount: exportCredits(row.end_ms - row.start_ms), refType: 'render', refId: clipId })
+    const { playLength } = await import('./clipLength')
+    const amount = exportCredits(await playLength({ id: clipId, start_ms: row.start_ms, end_ms: row.end_ms }))
+    // (a Make my clips clip's first export is in its price: user, 2026-11-21)
+    if (!(await freeExports([clipId])).has(clipId)) hold = await charge(userId, { amount, refType: 'render', refId: clipId })
   }
   try {
     return await startRender(userId, clipId, row.storage_path as string, quality, retranscribe, removeFillers, hold)
@@ -29,6 +33,21 @@ export async function queueRender(userId: string, clipId: string, quality: Rende
     if (hold) await release(hold.id).catch(e => console.error('[credits] could not give the credits back:', e))
     throw err
   }
+}
+
+/**
+ * Of these clips, the ones whose export is free (user, 2026-11-21): a Make my clips clip from a run paid at
+ * CLIP_CREDITS (7, export included: ai_edit_jobs.export_included) that has never been exported. Once one
+ * export has finished it pays like any other; a failed or stopped one leaves it free. Clips from runs
+ * before (6 credits) and all other clips pay. Nothing when credits are off (exports are free then anyway).
+ */
+export async function freeExports(clipIds: string[]): Promise<Set<string>> {
+  if (!clipIds.length || creditsMode() === 'off') return new Set()
+  await ensureCreditsSchema()
+  const rows = await sql<{ id: string }[]>`
+    SELECT c.id FROM clips c JOIN ai_edit_jobs a ON a.id = c.ai_edit_job_id
+    WHERE c.id = ANY(${clipIds}) AND a.export_included AND c.output_storage_path IS NULL`
+  return new Set(rows.map(r => r.id))
 }
 
 async function startRender(

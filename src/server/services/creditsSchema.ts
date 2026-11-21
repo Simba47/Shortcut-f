@@ -42,6 +42,9 @@ export function ensureCreditsSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         settled_at TIMESTAMPTZ
       )`
+    // A Make my clips run paid at the price with its clips' first export in it (user, 2026-11-21: 7 credits a
+    // clip, no export credits asked again): export.ts freeExports. Runs before it stay false (paid 6, export paid)
+    await sql`ALTER TABLE ai_edit_jobs ADD COLUMN IF NOT EXISTS export_included BOOLEAN NOT NULL DEFAULT false`
     await sql`CREATE INDEX IF NOT EXISTS credit_holds_open_idx ON credit_holds (status, created_at) WHERE status = 'held'`
     await sql`CREATE INDEX IF NOT EXISTS credit_holds_user_idx ON credit_holds (user_id, created_at DESC)`
     // Everything that happened, in order. Rows are added, never edited or deleted.

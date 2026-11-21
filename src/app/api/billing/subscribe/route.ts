@@ -24,6 +24,8 @@ export async function POST(req: NextRequest) {
   if (!plan || !(PAID_PLAN_KEYS as readonly string[]).includes(plan)) {
     return NextResponse.json({ error: 'Invalid plan' }, { status: 400 })
   }
+  // Not sold any more (Agency since 2026-11-21): never started, not even on a test copy
+  if (!PLANS[plan].sold) return NextResponse.json({ error: `The ${PLANS[plan].name} plan is no longer offered. Choose Pro instead.` }, { status: 400 })
 
   if (!razorpayConfigured()) {
     if (process.env.ALLOW_TEST_SUBSCRIBE !== '1') {

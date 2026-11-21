@@ -9,6 +9,8 @@ import { privacyCards, PRIVACY_DOC } from '@/components/legal/privacyDoc'
 import { termsCards, TERMS_DOC } from '@/components/legal/termsDoc'
 import { COMPANY } from '@/lib/company'
 import { BrandTeamDialog } from '@/components/brand/BrandTeamDialog'
+import { formatStorage } from '@/lib/storage'
+import { isTopPlan } from '@/lib/plans'
 
 /**
  * Profile button and menu. The button: a small profile photo and the name on a black rounded rectangle. The menu:
@@ -23,7 +25,7 @@ import { BrandTeamDialog } from '@/components/brand/BrandTeamDialog'
  * waiting for the backend. TODO(backend): wire them up.
  */
 
-type PlanSummary = { plan?: string; planName: string; maxVideos: number; usage: { videos: number } }
+type PlanSummary = { plan?: string; planName: string; storageGb: number; storageBytes: number; usage: { videos: number; storageBytes: number } }
 
 type Tier = 'none' | 'trial' | 'starter' | 'creator' | 'agency'
 /**
@@ -107,8 +109,10 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
     fetch('/api/billing/plan').then(r => (r.ok ? r.json() : null)).then(setFetched).catch(() => {})
   }, [planInfo])
   const plan = planInfo ?? fetched
-  const used = plan ? Math.min(1, plan.usage.videos / Math.max(1, plan.maxVideos)) : 0
-  const topPlan = plan?.planName?.toLowerCase() === 'agency' || plan?.planName?.toLowerCase() === 'business'
+  // The plan's storage used (plans v2, 2026-11-21: GB, not a count of videos)
+  const used = plan ? Math.min(1, (plan.usage.storageBytes ?? 0) / Math.max(1, plan.storageBytes ?? 0)) : 0
+  // The top plan: Pro since 2026-11-21 (key 'creator'; Agency, no longer sold, too): no upgrade to offer, and its brand kits can be shared (Team)
+  const topPlan = isTopPlan(plan?.plan)
 
   const [open, setOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
@@ -184,11 +188,11 @@ export function AccountMenu({ planInfo, onNavigate, onSignOut }: {
                   {/* ("No plan" is already the whole name) */}
                   {tierOf(plan.plan, plan.planName) !== 'none' && <span className="am-plan-word">plan</span>}
                 </span>
-                <span className="am-usage-count"><b>{plan.usage.videos}</b> / {plan.maxVideos} videos</span>
+                <span className="am-usage-count"><b>{formatStorage(plan.usage.storageBytes ?? 0)}</b> / {plan.storageGb} GB</span>
               </div>
               <div className="am-bar" aria-hidden="true"><span style={{ width: `${Math.max(3, used * 100)}%` }} data-high={used >= 0.85 || undefined} /></div>
               <a href="/pricing" onClick={go('/pricing')} className={topPlan ? 'am-cta am-cta-ghost' : 'am-cta'} role="menuitem">
-                {topPlan ? 'Manage plan' : (<><Icon d={<path d="M13 2L4 14h7l-1 8 9-12h-7z" />} />Upgrade for more videos</>)}
+                {topPlan ? 'Manage plan' : (<><Icon d={<path d="M13 2L4 14h7l-1 8 9-12h-7z" />} />Upgrade for more space</>)}
               </a>
             </div>
           )}

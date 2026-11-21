@@ -5,7 +5,7 @@ declare module 'next-auth' {
     user: {
       id: string
     } & DefaultSession['user']
-    /** The account signed in on another device since (modules/auth/one-device.ts) */
+    /** The account signed in on another device since (modules/auth/devices.ts) */
     replaced?: boolean
   }
 }

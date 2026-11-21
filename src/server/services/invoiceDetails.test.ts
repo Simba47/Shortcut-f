@@ -49,10 +49,10 @@ async function pay(userId: string, plan: string) {
   return p
 }
 
-test('an Agency account gets its company details on the invoice, for the plan and for a top-up', opts, async () => {
-  const u = await newUser('agency')
-  await saveProfile(u)
-  for (const plan of ['agency', 'topup:medium']) {
+test('a Pro account (and Agency, not sold since 2026-11-21) gets its company details on the invoice, for the plan and for a top-up', opts, async () => {
+  for (const [acct, plan] of [['creator', 'creator'], ['creator', 'topup:medium'], ['agency', 'agency'], ['agency', 'topup:medium']]) {
+    const u = await newUser(acct)
+    await saveProfile(u)
     const p = await pay(u, plan)
     assert.equal(p.customer.name, 'Acme Media Pvt Ltd', plan)
     assert.equal(p.customer.gstin, '27AABCS1234A1Z5', plan)
@@ -61,17 +61,17 @@ test('an Agency account gets its company details on the invoice, for the plan an
   }
 })
 
-test('the first Agency payment uses the details even before the account shows Agency', opts, async () => {
-  const u = await newUser('creator')
+test('the first Pro payment uses the details even before the account shows Pro', opts, async () => {
+  const u = await newUser('starter')
   await saveProfile(u)
-  const p = await pay(u, 'agency')
+  const p = await pay(u, 'creator')
   assert.equal(p.customer.gstin, '27AABCS1234A1Z5')
 })
 
-test('Starter, Creator and the Trial get the plain invoice: account name, no GSTIN, our state', opts, async () => {
-  for (const [plan, paid] of [['starter', 'starter'], ['creator', 'topup:small'], ['trial', 'topup:trial'], ['free', 'topup:trial']] as const) {
+test('Starter and the Trial get the plain invoice: account name, no GSTIN, our state', opts, async () => {
+  for (const [plan, paid] of [['starter', 'starter'], ['starter', 'topup:small'], ['trial', 'topup:trial'], ['free', 'topup:trial']] as const) {
     const u = await newUser(plan)
-    await saveProfile(u)   // kept from an earlier Agency month: saved but not used
+    await saveProfile(u)   // kept from an earlier Pro month: saved but not used
     const p = await pay(u, paid)
     assert.equal(p.customer.name, 'Account Name', plan)
     assert.equal(p.customer.gstin, null, plan)

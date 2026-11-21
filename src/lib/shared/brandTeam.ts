@@ -18,7 +18,8 @@ export const cleanRole = (v: unknown): KitRole => (v === 'edit' ? 'edit' : 'use'
 export const ROLE_NAMES: Record<KitRole, string> = { use: 'Can use', edit: 'Can edit' }
 
 /** How many people one kit can be shared with on each plan (a plan not listed can't share) */
-export const TEAM_SEATS: Record<string, number> = { agency: 10 }
+// Pro since 2026-11-21 (plans v2: Agency's team sharing moved to Pro); keep the worker's lib/brandKit.ts TEAM_PLANS in step
+export const TEAM_SEATS: Record<string, number> = { creator: 10, agency: 10 }
 export const teamSeats = (plan: string | null | undefined) => TEAM_SEATS[plan ?? 'free'] ?? 0
 
 /** How long an invite can be accepted (days) */

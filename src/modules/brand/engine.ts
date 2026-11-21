@@ -328,8 +328,8 @@ export function putBrandOn(t: BrandTarget, kit: BrandKit): { target: BrandTarget
 
 /**
  * While the brand is on: frames picked since (a new section, or a section given another frame) get
- * it too, and a logo the kit shows throughout keeps covering the whole clip as it gets longer or
- * shorter. Null when there's nothing to do.
+ * it too, and the kit's logo keeps to its time — the whole clip, or its first or last seconds — as the
+ * clip gets longer or shorter. Null when there's nothing to do.
  */
 export function brandNewFrames(t: BrandTarget, kit: BrandKit, before: BrandBefore | null): { target: BrandTarget; before: BrandBefore } | null {
   const known = before?.frames ?? {}
@@ -341,11 +341,14 @@ export function brandNewFrames(t: BrandTarget, kit: BrandKit, before: BrandBefor
     return r.seg
   })
   let overlays = t.overlays
-  if (kit.data.logo.show === 'all') {
-    // (the clip's own part: not over the kit's intro and outro)
+  // The kit's logo keeps to its time (over the whole clip, or its first or last seconds) as the clip gets
+  // longer or shorter (user, 2026-11-21: one over the last seconds stayed where the end had been, or was
+  // cut out with it). (The clip's own part: not over the kit's intro and outro.) A locked one stays put.
+  {
     const [a, z] = mainSpan(t, before)
-    const short = overlays.find(o => brandLogos(o) && (Math.abs(o.start_ms - a) > 1 || Math.abs(o.end_ms - z) > 1))
-    if (short) overlays = overlays.map(o => (o.id === short.id ? { ...o, start_ms: a, end_ms: z } : o))
+    const [s, e] = logoSpan(kit.data.logo, z - a).map(x => x + a)
+    const off = e > s ? overlays.find(o => brandLogos(o) && (Math.abs(o.start_ms - s) > 1 || Math.abs(o.end_ms - e) > 1)) : undefined
+    if (off) overlays = overlays.map(o => (o.id === off.id ? { ...o, start_ms: s, end_ms: e } : o))
   }
   if (!Object.keys(add).length && overlays === t.overlays) return null
   return { target: { ...t, segments, overlays }, before: { ...(before ?? NO_BEFORE), frames: { ...known, ...add } } }

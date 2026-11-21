@@ -10,6 +10,7 @@ import { creditsMode } from '@/lib/credits'
 import { balance, ensureFreeGrant, sweep } from '@/server/services/credits'
 import { listBrandKits } from '@/server/services/brandKits'
 import { toolGuides } from '@/server/services/toolGuides'
+import { freeExports } from '@/server/services/export'
 import { cleanBrandOn } from '@/lib/shared/brandOn'
 import { brandCaptionWords } from '@/lib/brandWords'
 import { transcriptWindow } from '@/modules/editor/transcriptWindow'
@@ -64,6 +65,9 @@ export default async function EditorPage({
     listBrandKits(user.id).catch(() => undefined),
     // The timeline tools' little loops: until the first finished export, or as the Guide page's switch says
     toolGuides(user.id).then(g => g.on).catch(() => true),
+    // A Make my clips clip's first export is in its price (user, 2026-11-21): its Export shows no credits
+    clip.ai_edit_job_id && !clip.output_storage_path
+      ? freeExports([clipId]).then(f => f.has(clipId)).catch(() => false) : Promise.resolve(false),
   ])
 
   // Fire all independent queries in parallel — one round-trip after the clip fetch
@@ -257,7 +261,7 @@ export default async function EditorPage({
     initialOverlays: overlays ?? [],
   }
 
-  const [initialCredits, initialBrandKits, toolGuideLoops] = await headStart
+  const [initialCredits, initialBrandKits, toolGuideLoops, exportIncluded] = await headStart
   return isMobile ? <EditorShellMobile {...shellProps} />
-    : <EditorShell {...shellProps} backStart={backStart} aiMade={aiMade} initialCredits={initialCredits} initialBrandKits={initialBrandKits} toolGuideLoops={toolGuideLoops} />
+    : <EditorShell {...shellProps} backStart={backStart} aiMade={aiMade} initialCredits={initialCredits} initialBrandKits={initialBrandKits} toolGuideLoops={toolGuideLoops} exportIncluded={exportIncluded} />
 }

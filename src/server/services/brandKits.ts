@@ -218,7 +218,7 @@ async function seatsTaken(kitId: string): Promise<number> {
 export async function inviteToKit(userId: string, kitId: string, email: unknown, role: unknown): Promise<{ person?: KitShare; invite?: KitInviteOut }> {
   await ownKit(userId, kitId)
   const seats = teamSeats(await getUserPlan(userId))
-  if (!seats) throw err('Sharing brand kits with your team is on the Agency plan.', 403)
+  if (!seats) throw err('Sharing brand kits with your team is on the Pro plan.', 403)
   if (!(await sharesReady()) || !(await invitesReady())) throw err('Teams are being set up — try again in a few minutes.', 503)
   const mail = typeof email === 'string' ? email.trim().toLowerCase() : ''
   if (mail.length > 200 || !looksLikeEmail(mail)) throw err('Type their email address', 400)

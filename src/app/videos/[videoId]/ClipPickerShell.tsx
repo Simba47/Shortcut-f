@@ -17,6 +17,7 @@ import { exportCredits, MAX_CLIP_MS } from '@/lib/credits'
 import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { AiScan } from '@/components/clips/AiScan'
+import { MmcProgress, stepScene } from '@/components/clips/MmcProgress'
 import { MmcPop, CaptionChoices, TitleChoices, cleanMakeLook, captionStyleName, titleStyleName, frameName, DEFAULT_MAKE_LOOK, CLIP_LAYOUTS, type MakeLook } from '@/components/clips/MakeClipsChoices'
 import { useRouter } from 'next/navigation'
 import { FilterChip } from '@/components/ui/filter-chip'
@@ -64,6 +65,10 @@ interface SavedClip {
   opened?: boolean
   /** Make my clips: what was ticked before its run (null: not saved, or not made by it) */
   made?: MadeWith | null
+  /** Its export is in its price (a Make my clips clip never exported, user 2026-11-21): Export asks no credits */
+  free_export?: boolean
+  /** How long it plays (ms): parts removed in the editor out, duplicated ones in (server clipLength.ts) */
+  play_ms?: number
 }
 /** What a Make my clips run was made with (page.tsx reads it from its job) */
 type MadeWith = Record<AutoOption, boolean> & {
@@ -75,6 +80,9 @@ type MadeWith = Record<AutoOption, boolean> & {
 export type ClipOrigin = 'yours' | 'ask' | 'auto' | 'best'
 type ClipTab = 'all' | ClipOrigin | 'fav' | 'edited'
 /** Typed one after another as the Ask AI hint */
+/** How long a clip plays (ms): what the server worked out (play_ms), else its stretch of the video */
+const playMs = (c: { start_ms: number; end_ms: number; play_ms?: number }) => c.play_ms ?? c.end_ms - c.start_ms
+
 const ASK_EXAMPLES = ['funny reactions', 'controversial takes', 'emotional moments', 'big announcements', 'best advice']
 const CLIP_TABS: Array<{ id: ClipTab; label: string; empty: string }> = [
   { id: 'all', label: 'All clips', empty: '' },
@@ -131,16 +139,19 @@ interface AutoJob {
  */
 const CLIMB = 1.5, PACE = 0.25
 function useSmoothProgress(jobId: string | null, real: number, to: number | null, active: boolean): number {
-  const [shown, setShown] = useState(real)
+  // A run that's going starts at 1% and climbs to where it is (user, 2026-11-21: it started at 30%, when the
+  // captions and moments were there already and the first report came in at 30)
+  const [shown, setShown] = useState(active ? 1 : real)
   const live = useRef({ real, to, active })
   live.current = { real, to, active }
-  useEffect(() => { setShown(real) }, [jobId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setShown(active ? 1 : real) }, [jobId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!active) setShown(real) }, [real, active])
   useEffect(() => {
     if (!active) return
     const t = setInterval(() => setShown(s => {
       const { real, to } = live.current
-      if (s < real) return Math.min(real, s + CLIMB)
+      // (far behind — just started, or the page opened mid-run — it catches up faster, easing in)
+      if (s < real) return Math.min(real, s + Math.max(CLIMB, (real - s) * 0.12))
       const cap = to == null ? s : to - 0.5
       return s >= cap ? s : Math.min(cap, s + Math.max(0.04, Math.min(PACE, (cap - s) * 0.05)))
     }), 500)
@@ -492,8 +503,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // What is left of the AI limits for this video and account (api/videos/[id]/allowance; null when
   // credits are off, and then nothing extra is shown). Reloaded after every run and search.
   type Allowance = {
-    clips: { perRun: number; clipsPerDay: number; clipsToday: number; dayLeft: number; clipsPerMonth: number; clipsThisMonth: number; monthLeft: number; clipCredits: number; videoCap: number; videoClips: number; videoLeft: number; savedLeft: number; searchesIncluded: number; searchesUsed: number; nextSearchCredits: number }
-    askAi: { usedThisMonth: number; perMonth: number; usedToday: number; perDay: number; countsAs: number; nextCredits: number }
+    clips: { perRun: number; clipsPerDay: number; clipsToday: number; dayLeft: number; clipCredits: number; videoCap: number; videoClips: number; videoLeft: number; savedLeft: number; searchesIncluded: number; searchesUsed: number; nextSearchCredits: number }
+    askAi: { usedToday: number; perDay: number; countsAs: number; nextCredits: number }
   }
   const [allowance, setAllowance] = useState<Allowance | null>(null)
   /** Why a run makes fewer clips than asked for, or what it used */
@@ -556,18 +567,22 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     if (!toExport.length) return
     let need = 0
     try {
-      for (const c of toExport) need += exportCredits(c.end_ms - c.start_ms)
+      // (a Make my clips clip's first export is paid for with the clip: user, 2026-11-21)
+      for (const c of toExport) need += c.free_export ? 0 : exportCredits(playMs(c))
     } catch (e) {
       // (over 5 minutes: the server refuses it too; said on the card)
       const error = (e as Error).message
-      for (const c of toExport) if (c.end_ms - c.start_ms > MAX_CLIP_MS) setDlState(d => ({ ...d, [c.id]: { error } }))
-      const ok = toExport.filter(c => c.end_ms - c.start_ms <= MAX_CLIP_MS)
+      for (const c of toExport) if (playMs(c) > MAX_CLIP_MS) setDlState(d => ({ ...d, [c.id]: { error } }))
+      const ok = toExport.filter(c => playMs(c) <= MAX_CLIP_MS)
       if (ok.length) exportOrDownload(ok.map(c => c.id))
       return
     }
     const n = toExport.length
+    const included = toExport.filter(c => c.free_export).length
     const what = n === 1 ? 'this clip' : `${n} clips`
     const start = () => { for (const c of toExport) void exportClip(c.id); window.setTimeout(refreshCredits, 1500) }
+    // Only clips whose export is already paid for (Make my clips): nothing to ask, it exports
+    if (credits && need === 0) { start(); return }
     if (!credits) {
       // (credits off: no prices anywhere on the site)
       confirm({ title: `Export ${what}?`, body: `${n === 1 ? 'It saves' : 'They save'} to your device when ready.`, confirmLabel: 'Export', cancelLabel: 'Cancel', tone: 'warning' }, start)
@@ -583,7 +598,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     }
     confirm({
       title: `${cr(need)} ${need === 1 ? 'is' : 'are'} used for ${n === 1 ? 'this export' : `exporting ${n} clips`}`,
-      body: `${n === 1 ? 'It saves' : 'They save'} to your device when ready. You have ${cr(credits.balance)}.`,
+      body: `${n === 1 ? 'It saves' : 'They save'} to your device when ready.${included ? ` ${included === 1 ? '1 is' : `${included} are`} Make my clips clips, their export already paid.` : ''} You have ${cr(credits.balance)}.`,
       confirmLabel: 'Export', cancelLabel: 'Cancel', tone: 'warning',
     }, start)
   }
@@ -633,12 +648,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     fetch(`/api/clips/${id}/status`).then(r => (r.ok ? r.json() : null)).then((d: { status: string; output_url: string | null } | null) => {
       if (!d) return
       if (d.status === 'done' && d.output_url) {
-        setClips(cs => cs.map(x => x.id === id ? { ...x, status: 'done', output_url: d.output_url } : x))
+        // (its included export is used: another one is paid, like any clip's)
+        setClips(cs => cs.map(x => x.id === id ? { ...x, status: 'done', output_url: d.output_url, free_export: false } : x))
         setDlState(s => { const n = { ...s }; delete n[id]; return n })
         saveFile(id)
       } else if (d.status === 'failed') {
         setClips(cs => cs.map(x => x.id === id ? { ...x, status: 'failed' } : x))
-        setDlState(s => ({ ...s, [id]: { error: 'The export failed. Your credits were given back.' } }))
+        const free = clips.find(x => x.id === id)?.free_export
+        setDlState(s => ({ ...s, [id]: { error: free ? 'The export failed. Try again: it’s still included.' : 'The export failed. Your credits were given back.' } }))
         refreshCredits()
       }
     }).catch(() => {}))), !!waitingDl)
@@ -686,7 +703,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   // (length is the Length filter's alone: Sort's "Shortest / Longest first" were the same thing twice — out
   // 2026-11-09, back with a merge, out again 2026-11-12)
   const [sortBy, setSortBy] = useState<'new' | 'old' | 'video'>('new')
-  const lenOf = (c: { start_ms: number; end_ms: number }) => c.end_ms - c.start_ms
+  const lenOf = playMs
   const exported = (c: { status: string; output_url: string | null }) => c.status === 'done' && !!c.output_url
   const clipFiltering = lenF !== 'all' || expF !== 'all'
   const shownClips = tabClips.filter(c => {
@@ -2022,33 +2039,22 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           </div>
         )}
         {autoRunning && autoJob && (
-          <div className="flex flex-col gap-1.5 px-3 py-2.5 rounded-xl" style={{ background: 'rgba(200,255,0,0.04)', border: '1px solid rgba(200,255,0,0.12)' }}>
-            <div className="flex items-center justify-between gap-2 text-xs">
-              {/* What the worker says it's doing (an older worker says nothing: guessed from the percent) */}
-              <span className="min-w-0" style={{ color: 'rgb(var(--cb-fg) / 0.7)' }}>
-                {autoJob.status === 'queued' ? 'Waiting to start…'
-                  : autoJob.stage?.text ? `${autoJob.stage.text}…`
-                  : autoJob.progress < 20 ? 'Reading the video…' : autoJob.progress < 35 ? 'Finding the best moments…' : 'Framing clips…'}
-              </span>
-              <span className="shrink-0 font-semibold tabular-nums" style={{ color: ACCENT }}>{Math.floor(autoShown)}%</span>
-            </div>
-            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgb(var(--cb-fg) / 0.08)' }}>
-              <div className="h-full rounded-full transition-[width] duration-500 ease-linear" style={{ width: `${Math.max(3, autoShown)}%`, background: ACCENT }} />
-            </div>
-            <div className="flex items-center gap-2">
-              <p className="flex-1 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.4)' }}>
-                {autoJob.clip_count ? `Making ${autoJob.clip_count} clip${autoJob.clip_count === 1 ? '' : 's'}` : ''}
-                {/* Reading comes first and is the slow part of a long video */}
-                {autoJob.status === 'running' && autoJob.progress < 20 ? ' · a long video takes a while to read; you can leave this page, it carries on' : ''}
-              </p>
-              <button type="button" onClick={stopMakingClips} disabled={autoStopping}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors hover:bg-red-500/20 disabled:opacity-50"
-                style={{ color: '#fca5a5', border: '1px solid rgba(239,68,68,0.35)' }}>
-                {autoStopping ? <Spinner /> : <span aria-hidden="true" className="w-2 h-2 rounded-[2px]" style={{ background: 'currentColor' }} />}
-                {autoStopping ? 'Stopping…' : 'Stop'}
-              </button>
-            </div>
-          </div>
+          // The loop + ring card (user, 2026-11-21): what the worker says it's doing (an older worker says
+          // nothing: guessed from the percent)
+          <MmcProgress
+            // (from 1%: user, 2026-11-21) and the loop of the step it's on
+            percent={Math.max(1, autoShown)}
+            scene={stepScene(autoJob.status === 'running' ? autoJob.stage?.text : null, autoJob.progress)}
+            accent={ACCENT}
+            text={autoJob.status === 'queued' ? 'Waiting to start…'
+              : autoJob.stage?.text ? `${autoJob.stage.text}…`
+              : autoJob.progress < 20 ? 'Reading the video…' : autoJob.progress < 35 ? 'Finding the best moments…' : 'Framing clips…'}
+            note={(autoJob.clip_count ? `Making ${autoJob.clip_count} clip${autoJob.clip_count === 1 ? '' : 's'}` : '')
+              // Reading comes first and is the slow part of a long video
+              + (autoJob.status === 'running' && autoJob.progress < 20 ? ' · a long video takes a while to read; you can leave this page, it carries on' : '')}
+            stopping={autoStopping}
+            onStop={stopMakingClips}
+          />
         )}
         {autoJob?.status === 'failed' && autoJob.error === 'Cancelled by you' && (
           <p className="text-xs" style={{ color: 'rgb(var(--cb-fg) / 0.55)' }}>
@@ -2082,10 +2088,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             const searchesLeft = Math.max(0, c.searchesIncluded - c.searchesUsed)
             const searchPrice = c.nextSearchCredits > 0 ? `${c.nextSearchCredits} credit${c.nextSearchCredits === 1 ? '' : 's'}` : `${searchesLeft} of ${c.searchesIncluded} left`
             // (user, 2026-11-12: three lines of numbers looked like a bill) one line: what's left by the limit that
-            // runs out first — this month, today or this video — and the full breakdown in its ⓘ
-            const month = Math.max(0, c.monthLeft), day = Math.max(0, c.dayLeft), vid = Math.max(0, c.videoLeft)
-            const left = Math.min(month, day, vid)
-            const by = left === vid && vid < month && vid < day ? 'for this video' : left === day && day < month ? 'today' : 'this month'
+            // runs out first — this video (1 per minute of it) or today's safety limit; no monthly limit since
+            // 2026-11-21 (credits are the limit) — and the full breakdown in its ⓘ
+            const day = Math.max(0, c.dayLeft), vid = Math.max(0, c.videoLeft)
+            const left = Math.min(day, vid)
+            const by = vid <= day ? 'for this video' : 'today'
             const leftLine = left === 0 ? `No AI clips left ${by}` : `${left} AI clip${left === 1 ? '' : 's'} left ${by}`
             return (
               <div className="flex flex-col gap-2">
@@ -2093,9 +2100,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                   <span><b className="font-semibold" style={{ color: left === 0 ? '#f87171' : 'rgb(var(--cb-fg) / 0.85)' }}>{leftLine}</b> · {c.clipCredits} credits each</span>
                   <InfoTip label="Your AI clip limits" size={12}>
                     <span className="mmc-tip-list" style={{ marginTop: 0, paddingTop: 0, borderTop: 0 }}>
-                      <span><b>This month:</b> {Math.min(c.clipsThisMonth, c.clipsPerMonth)} of {c.clipsPerMonth} used</span>
-                      <span><b>Today:</b> {c.clipsToday} of {c.clipsPerDay} used</span>
-                      <span><b>This video:</b> {c.videoClips} of {c.videoCap} used</span>
+                      <span><b>This video:</b> {c.videoClips} of {c.videoCap} used (1 per minute of video)</span>
+                      <span><b>Each run:</b> up to {c.perRun} clips</span>
                       <span><b>Each clip:</b> {c.clipCredits} credits</span>
                       <span>{c.savedLeft > 0
                         ? <><b>Next run:</b> uses {c.savedLeft} saved moment{c.savedLeft === 1 ? '' : 's'}, no new search needed</>
@@ -2240,9 +2246,9 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         })()}
         {allowance && (
           <p className="shrink-0 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
-            {allowance.askAi.usedThisMonth >= allowance.askAi.perMonth
-              ? `All ${allowance.askAi.perMonth} searches used. More next month, or upgrade.`
-              : `${allowance.askAi.perMonth - allowance.askAi.usedThisMonth} of ${allowance.askAi.perMonth} searches left · ${allowance.askAi.nextCredits} credits a search${allowance.askAi.countsAs > 1 ? ` (on this video one counts as ${allowance.askAi.countsAs})` : ''}`}
+            {allowance.askAi.usedToday + allowance.askAi.countsAs > allowance.askAi.perDay
+              ? `You've reached today's limit of ${allowance.askAi.perDay} searches. More after midnight.`
+              : `${allowance.askAi.nextCredits} credits a search${allowance.askAi.countsAs > 1 ? ` (this video is long: one search counts ${allowance.askAi.countsAs} hours)` : ''}`}
           </p>
         )}
         {/* The results under the rest: the card is the one thing that scrolls — title, search, chips and results

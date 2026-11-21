@@ -6,7 +6,7 @@ import { findTopupPack, TOPUP_CREDIT_DAYS, TRIAL_DAYS } from './credits'
 const DAY = 86_400_000
 
 export interface Purchase {
-  /** The invoice line and the email: "Creator plan", "Trial pack", "500 credits top-up" */
+  /** The invoice line and the email: "Pro plan", "Trial pack", "500 credits top-up" */
   name: string
   /** Under the name: what it gives */
   detail: string

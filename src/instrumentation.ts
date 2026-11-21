@@ -11,4 +11,18 @@ export async function register() {
   } catch (e) {
     console.warn('[gemini] credits-empty watch not set up:', e instanceof Error ? e.message : e)
   }
+  // Videos expire after their plan's days (plans v2, 2026-11-21): the hourly sweep that warns and deletes
+  // (server/services/expiry.ts; VIDEO_EXPIRY, off on a computer unless set). Never stops the site from starting.
+  try {
+    const { startExpirySweep } = await import('@/server/services/expiry')
+    const { deleteVideos } = await import('@/server/services/videos')
+    const { sendExpiryEmail } = await import('@/modules/auth/mailer')
+    const { canKeep } = await import('@/lib/expiry')
+    startExpirySweep({
+      remove: deleteVideos,
+      notify: (to, videos) => sendExpiryEmail({ to: to.email, name: to.name, canKeep: canKeep(to.plan), videos }),
+    })
+  } catch (e) {
+    console.warn('[expiry] sweep not set up:', e instanceof Error ? e.message : e)
+  }
 }

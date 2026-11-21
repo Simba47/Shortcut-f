@@ -140,15 +140,12 @@ test('a plan gives credits worth what it costs: 1 credit = ₹1', () => {
   assert.equal(TRIAL_PACK.price, PLANS.trial.price)
 })
 
-test('the Trial pack: ₹50 for 99 credits that cover its limits with 18 left to export, and it is sold by its key to anyone', () => {
+test('the Trial pack: ₹49 for 99 credits over 7 days, 2 uploads, and it is sold by its key to anyone (plans v2, 2026-11-21)', () => {
   const t = PLANS.trial
-  assert.equal(TRIAL_PACK.price, 50); assert.equal(TRIAL_PACK.credits, 99)
-  // 30 min read 45, 3 AI clips 18, 2 Ask AI 14, 20 rewrites 4 = 81
-  const limits = (t.readingMinutes / 10) * 15 + t.ai.clipsPerMonth * 6 + t.ai.askAiPerMonth * 7 + t.ai.rewritesPerMonth / 5
-  assert.equal(limits, 81)
-  assert.equal(TRIAL_PACK.credits - limits, 18)
-  assert.equal(t.uploadsPerMonth, 2)
-  assert.equal(TRIAL_DAYS, 14)
+  assert.equal(TRIAL_PACK.price, 49); assert.equal(TRIAL_PACK.credits, 99)
+  assert.equal(t.uploadsLimit, 2)
+  assert.equal(TRIAL_DAYS, 7)
+  assert.equal(t.retentionDays, TRIAL_DAYS)
   assert.ok(t.oneTime && t.allowancesOnce && !t.watermark && t.autoCaption)
   assert.equal(findTopupPack('trial', { test: false }), TRIAL_PACK)
   assert.equal(ledgerLabel('grant:trial', null), 'Trial pack')
@@ -185,8 +182,8 @@ test('pack cards: the struck price is the plans rate (1 credit = Rs 1), and what
   assert.deepEqual(packSaving(by.bulk), { was: 3000, saved: 201, percent: 7 })
   for (const p of TOPUP_PACKS) { const s = packSaving(p); if (s) assert.ok(s.was > p.price, p.key) }
   // 6 credits an AI clip; captions 2 + export 1 a minute for a clip you cut yourself
-  assert.deepEqual(packUses(200, CLIP_CREDITS), { aiClips: 33, captionedMinutes: 66 })
-  assert.deepEqual(packUses(500, CLIP_CREDITS), { aiClips: 83, captionedMinutes: 166 })
-  assert.deepEqual(packUses(3000, CLIP_CREDITS), { aiClips: 500, captionedMinutes: 1000 })
+  assert.deepEqual(packUses(200, CLIP_CREDITS), { aiClips: 28, captionedMinutes: 66 })
+  assert.deepEqual(packUses(500, CLIP_CREDITS), { aiClips: 71, captionedMinutes: 166 })
+  assert.deepEqual(packUses(3000, CLIP_CREDITS), { aiClips: 428, captionedMinutes: 1000 })
   assert.ok(TOPUP_PACKS.some(p => p.key === POPULAR_PACK))
 })

@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
 
 /**
  * The payments page: your payments (newest first), your plan (which credit packs you can buy there),
- * and on Agency what goes on your invoices and the states to choose from (plans.ts gstInvoices)
+ * and on Pro what goes on your invoices and the states to choose from (plans.ts gstInvoices)
  */
 export async function GET() {
   const user = await requireUser()
@@ -21,7 +21,8 @@ export async function GET() {
     const [payments, plan] = await Promise.all([listPayments(user.id), getUserPlan(user.id)])
     const invoiceDetails = PLANS[plan].gstInvoices
     return NextResponse.json({
-      payments: payments.map(p => ({ id: p.id, invoiceNo: p.invoiceNo, planName: p.planName, amountPaise: p.amountPaise, paidAt: p.paidAt })),
+      // (each payment's two papers: its tax invoice's number — null until it has one — and its receipt's)
+      payments: payments.map(p => ({ id: p.id, invoiceNo: p.invoiceNo, receiptNo: p.receiptNo, planName: p.planName, amountPaise: p.amountPaise, paidAt: p.paidAt })),
       plan,
       // the ₹1 test pack, for an email in TEST_PACK_EMAILS only
       testPack: testPackAllowed(user.email),

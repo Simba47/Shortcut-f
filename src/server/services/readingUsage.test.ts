@@ -72,14 +72,24 @@ test('deleting a video gives no reading or credits back', opts, async () => {
   assert.equal(await left(u), 80)
 })
 
-test('past the hours: refused, even with credits, and told to upgrade', opts, async () => {
-  const u = await user('starter', 500)
-  await reading.recordReading(u, await video(u, 175 * MIN), 175 * MIN)
+test('no monthly hours since 2026-11-21: past the old 3 hours a Starter still uploads, paying credits', opts, async () => {
+  const u = await user('starter', 5000)
+  await reading.recordReading(u, await video(u, 300 * MIN), 300 * MIN)
+  await reading.checkBeforeUpload(u, 60 * MIN)
+  assert.equal(await left(u), 5000 - 450)
+})
+
+test('past today\'s 20 hours (the safety limit): refused even with credits, and told it comes back at midnight', opts, async () => {
+  const u = await user('starter', 5000)
+  await reading.recordReading(u, await video(u, 1195 * MIN), 1195 * MIN)
   await assert.rejects(reading.checkBeforeUpload(u, 20 * MIN), (e: { status?: number; message?: string }) =>
-    e.status === 403 && /20 min/.test(e.message ?? '') && /only 5 min/.test(e.message ?? '') && /upgrade/i.test(e.message ?? ''))
+    e.status === 429 && /20 min/.test(e.message ?? '') && /only 5 min/.test(e.message ?? '') && /midnight/.test(e.message ?? ''))
   await reading.recordReading(u, await video(u, 5 * MIN), 5 * MIN)
-  await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number }) => e.status === 403)
-  await assert.rejects(reading.checkBeforeUpload(u, null), (e: { status?: number }) => e.status === 403)
+  await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number }) => e.status === 429)
+  await assert.rejects(reading.checkBeforeUpload(u, null), (e: { status?: number }) => e.status === 429)
+  // yesterday's reading doesn't count for today
+  await sql`UPDATE reading_usage SET created_at = now() - interval '2 days' WHERE user_id = ${u}`
+  await reading.checkBeforeUpload(u, 60 * MIN)
 })
 
 test('not enough credits for a video inside the hours: refused, saying what it needs and what there is', opts, async () => {
@@ -105,19 +115,19 @@ test('a video that fails gives its credits, hours and upload back, once', opts, 
 test('the uploads run out, even with short videos', opts, async () => {
   const u = await user('trial', 500)
   for (let i = 0; i < 2; i++) await reading.recordReading(u, await video(u, MIN), MIN)
-  await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number; message?: string }) => e.status === 403 && /your 2 uploads on your Trial/.test(e.message ?? ''))
+  await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number; message?: string }) => e.status === 403 && /the 2 uploads on your Trial/.test(e.message ?? ''))
 })
 
 test('no plan (no free plan since 2026-11-16): an upload is refused and told to start the Trial pack, even with credits', opts, async () => {
   const u = await user('free', 500)
   await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number; message?: string }) => e.status === 403 && /Trial pack/.test(e.message ?? ''))
-  const quota = await import('./quota')
-  await assert.rejects(quota.checkVideoQuota(u), (e: { status?: number; message?: string }) => e.status === 403 && /Trial pack/.test(e.message ?? ''))
+  const storage = await import('./storage')
+  await assert.rejects(storage.checkStorage(u, MIN), (e: { status?: number; message?: string }) => e.status === 403 && /Trial pack/.test(e.message ?? ''))
 })
 
-test('a Trial whose 14 days are over is no plan again', opts, async () => {
+test('a Trial whose 7 days are over is no plan again', opts, async () => {
   const u = await user('trial', 50)
-  await sql`UPDATE topup_orders SET paid_at = now() - interval '15 days' WHERE user_id = ${u}`
+  await sql`UPDATE topup_orders SET paid_at = now() - interval '8 days' WHERE user_id = ${u}`
   const quota = await import('./quota')
   assert.equal(await quota.getUserPlan(u), 'free')
   await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number; message?: string }) => e.status === 403 && /Trial pack/.test(e.message ?? ''))
@@ -146,14 +156,14 @@ test('a link or unreadable file needs at least one 10-minute price in credits', 
   await assert.rejects(reading.checkBeforeUpload(u, null), (e: { status?: number; message?: string }) => e.status === 402 && /15 credits/.test(e.message ?? ''))
 })
 
-test('a length not known yet: the lower of the hours and what the credits buy is written on the video, for the worker to check', opts, async () => {
-  const a = await user('starter', 40)                                      // 40 credits buy 2 × 10 minutes; 3 hours left
+test('a length not known yet: the lower of today\'s safety limit and what the credits buy is written on the video, for the worker to check', opts, async () => {
+  const a = await user('starter', 40)                                      // 40 credits buy 2 × 10 minutes
   const v = await video(a, null)
   await reading.recordReading(a, v, null)
   const [row] = await sql<{ reading_limit_ms: string }[]>`SELECT reading_limit_ms FROM videos WHERE id = ${v}`
   assert.equal(Number(row.reading_limit_ms), 20 * MIN)
-  const b = await user('starter', 500)                                      // plenty of credits, 5 minutes left
-  await reading.recordReading(b, await video(b, 175 * MIN), 175 * MIN)
+  const b = await user('starter', 5000)                                     // plenty of credits, 5 minutes of today's 20 hours left
+  await reading.recordReading(b, await video(b, 1195 * MIN), 1195 * MIN)
   const w = await video(b, null)
   await reading.recordReading(b, w, null)
   const [row2] = await sql<{ reading_limit_ms: string }[]>`SELECT reading_limit_ms FROM videos WHERE id = ${w}`
@@ -207,9 +217,9 @@ test('the same file uploaded again after its video was deleted is not counted ag
   assert.equal(use.uploads, 1)
   assert.equal(await left(u), paid, 'no credits for it')
 
-  // Only once per deleted video: a third copy, after deleting the second, is a new upload (and too long here)
+  // Only once per deleted video: a third copy, after deleting the second, is a new upload, priced as usual
   await sql`DELETE FROM videos WHERE id = ${again}`
-  await assert.rejects(reading.checkBeforeUpload(u, 150 * MIN, SIZE), (e: { status?: number }) => e.status === 403)
+  assert.equal(await reading.readingPrice(u, 150 * MIN, SIZE).then(p => p.on && p.credits), 225)
 })
 
 test('not the same file: another size, another length, or the first copy still there — counted as usual', opts, async () => {

@@ -11,17 +11,6 @@ let ai: typeof import('./aiUsage')
 let credits: typeof import('./credits')
 const users: string[] = []
 
-// "Earlier this month": the first instant of the month (on the 1st that is also today, so a test
-// that needs the month used up but not the day lifts the daily cap with withAskAiDayCap)
-const monthStart = async () => (await import('@/lib/aiLimits')).istMonthStart()
-async function withAskAiDayCap<T>(plan: 'trial' | 'starter', n: number, fn: () => Promise<T>): Promise<T> {
-  const { PLANS } = await import('@/lib/plans')
-  const ai = PLANS[plan].ai as { askAiPerDay: number }
-  const was = ai.askAiPerDay
-  ai.askAiPerDay = n
-  try { return await fn() } finally { ai.askAiPerDay = was }
-}
-
 async function setup(plan = 'starter', videoMs = 20 * MIN, grantCredits = 0) {
   const [u] = await sql<{ id: string }[]>`INSERT INTO users (email, plan) VALUES (${`ai-test-${Math.random().toString(36).slice(2)}@example.test`}, ${plan}) RETURNING id`
   users.push(u.id)
@@ -59,7 +48,7 @@ test('clips today count every AI clip made today, and a run still going counts w
   await run(videoId, 8, 8, 'done', "now() - interval '2 days'")   // another day: not today
   const a = await ai.clipAllowance(userId, videoId)
   assert.equal(a.clipsToday, 15)
-  assert.equal(a.dayLeft, 15)
+  assert.equal(a.dayLeft, 300 - 15)   // today's safety limit
   assert.equal(a.videoClips, 10 + 5 + 8)
   assert.equal(a.videoCap, 60)
   assert.equal(a.perRun, 10)
@@ -95,44 +84,47 @@ test('fresh searches: 1 included per video, then priced by the video length; a f
 const pick = (a: { searchesUsed: number; searchesIncluded: number; nextSearchCredits: number }) =>
   ({ searchesUsed: a.searchesUsed, searchesIncluded: a.searchesIncluded, nextSearchCredits: a.nextSearchCredits })
 
-test('Ask AI: 7 credits a search up to the month\'s limit, then refused even with credits; 402 when credits run out', opts, async () => {
-  const { userId, videoId } = await setup('trial', 20 * MIN, 7)   // the Trial: 2 in total
+test('Ask AI: 7 credits a search, no monthly limit (2026-11-21): past the old 2 on the Trial it goes on while credits last; 402 when they run out', opts, async () => {
+  const { userId, videoId } = await setup('trial', 20 * MIN, 7)
   const a1 = await ai.beginAiAction(userId, 'ask_ai', videoId)
   assert.equal(a1.credits, 7); await a1.done()
   assert.equal((await credits.balance(userId)).balance, 0)
   await assert.rejects(ai.beginAiAction(userId, 'ask_ai', videoId), (e: { status?: number }) => e.status === 402)
-  // with credits, the Trial's second is its last: then refused, and told to upgrade (not "next month")
   await credits.grant(userId, { kind: 'plan', amount: 50, expiresAt: new Date(Date.now() + 30 * 86_400_000), sourceRef: `ai-test-more:${userId}` })
-  await (await ai.beginAiAction(userId, 'ask_ai', videoId)).done()
-  await assert.rejects(ai.beginAiAction(userId, 'ask_ai', videoId), (e: { status?: number; message?: string }) => e.status === 403 && /Upgrade to a plan/.test(e.message ?? '') && !/next month/.test(e.message ?? ''))
+  for (let i = 0; i < 5; i++) await (await ai.beginAiAction(userId, 'ask_ai', videoId)).done()   // 6 on the Trial: the old limit was 2
+  assert.equal((await credits.balance(userId)).balance, 50 - 35)
+  // a Starter with 40 searches earlier this month (the old limit was 10): still searches
   const { userId: u2, videoId: v2 } = await setup('starter', 20 * MIN, 500)
-  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${u2}, 'ask_ai', now() - interval '2 hours' FROM generate_series(1, 10)`
-  await withAskAiDayCap('starter', 1000, () => assert.rejects(ai.beginAiAction(u2, 'ask_ai', v2), (e: { status?: number; message?: string }) => e.status === 403 && /upgrade/i.test(e.message ?? '')))
-  assert.equal((await credits.balance(u2)).balance, 500)
+  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${u2}, 'ask_ai', now() - interval '2 days' FROM generate_series(1, 40)`
+  await (await ai.beginAiAction(u2, 'ask_ai', v2)).done()
+  assert.equal((await credits.balance(u2)).balance, 493)
 })
 
-test('Ask AI: the daily cap holds, and a failed search gives its credits and count back', opts, async () => {
+test('Ask AI: today\'s safety limit (100) holds even with credits, and a failed search gives its credits and count back', opts, async () => {
   const { userId, videoId } = await setup('starter', 20 * MIN, 500)
-  await withAskAiDayCap('starter', 2, async () => {
-    for (let i = 0; i < 2; i++) await (await ai.beginAiAction(userId, 'ask_ai', videoId)).done()
-    await assert.rejects(ai.beginAiAction(userId, 'ask_ai', videoId), (e: { status?: number; message?: string }) => e.status === 429 && /today/i.test(e.message ?? ''))
-  })
+  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${userId}, 'ask_ai', now() - interval '2 minutes' FROM generate_series(1, 100)`
+  await assert.rejects(ai.beginAiAction(userId, 'ask_ai', videoId), (e: { status?: number; message?: string }) => e.status === 429 && /today/i.test(e.message ?? '') && /midnight/.test(e.message ?? ''))
+  assert.equal((await credits.balance(userId)).balance, 500)
   const { userId: u2, videoId: v2 } = await setup('starter', 20 * MIN, 8)
   const h = await ai.beginAiAction(u2, 'ask_ai', v2)
   assert.equal((await credits.balance(u2)).balance, 1)
   await h.fail()
   assert.equal((await credits.balance(u2)).balance, 8)
-  assert.equal((await ai.aiActionCounts(u2)).askAiThisMonth, 0)
+  assert.equal((await ai.aiActionCounts(u2)).askAiToday, 0)
 })
 
-test('rewrites: 1 credit for every 5, up to the month\'s limit, then refused even with credits', opts, async () => {
-  const { userId } = await setup('trial', 20 * MIN, 10)   // the Trial: 20 rewrites
+test('rewrites: 1 credit for every 5, no monthly limit; today\'s safety limit (300) holds', opts, async () => {
+  const { userId } = await setup('trial', 20 * MIN, 10)
   const charged: number[] = []
   for (let i = 0; i < 6; i++) { const h = await ai.beginAiAction(userId, 'rewrite'); charged.push(h.credits); await h.done() }
   assert.deepEqual(charged, [1, 0, 0, 0, 0, 1])
   assert.equal((await credits.balance(userId)).balance, 8)
-  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${userId}, 'rewrite', now() - interval '2 hours' FROM generate_series(1, 14)`
-  await assert.rejects(ai.beginAiAction(userId, 'rewrite'), (e: { status?: number; message?: string }) => e.status === 403 && /upgrade/i.test(e.message ?? ''))
+  // past the Trial's old 20: still going
+  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${userId}, 'rewrite', now() - interval '2 days' FROM generate_series(1, 30)`
+  await (await ai.beginAiAction(userId, 'rewrite')).done()
+  const { userId: u2 } = await setup('starter', 20 * MIN, 100)
+  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${u2}, 'rewrite', now() - interval '2 minutes' FROM generate_series(1, 300)`
+  await assert.rejects(ai.beginAiAction(u2, 'rewrite'), (e: { status?: number; message?: string }) => e.status === 429 && /today/i.test(e.message ?? ''))
 })
 
 test('more than 10 AI requests in a minute are slowed down (429)', opts, async () => {
@@ -146,10 +138,10 @@ test('with credits off nothing is counted or refused; in shadow mode it is count
   process.env.CREDITS_MODE = 'off'
   try {
     for (let i = 0; i < 12; i++) await (await ai.beginAiAction(userId, 'ask_ai')).done()
-    assert.equal((await ai.aiActionCounts(userId)).askAiThisMonth, 0)
+    assert.equal((await ai.aiActionCounts(userId)).askAiToday, 0)
     process.env.CREDITS_MODE = 'shadow'
     for (let i = 0; i < 7; i++) { const h = await ai.beginAiAction(userId, 'ask_ai'); assert.equal(h.credits, 0); await h.done() }
-    assert.equal((await ai.aiActionCounts(userId)).askAiThisMonth, 7)
+    assert.equal((await ai.aiActionCounts(userId)).askAiToday, 7)
   } finally { process.env.CREDITS_MODE = 'on' }
 })
 
@@ -162,23 +154,30 @@ test('AI cost is recorded per call with its tokens and an estimated price', opts
   assert.equal(rows[1].cost_micro_usd, null)                          // no price known: tokens only
 })
 
-test('the Trial\'s limits are once only: last month\'s use still counts; a paid plan starts again', opts, async () => {
-  const { userId: free } = await setup('trial', 20 * MIN)
+test('rewrites\' "1 credit per 5" counts from the month\'s start on a paid plan, for ever on the Trial', opts, async () => {
+  const { userId: trial } = await setup('trial', 20 * MIN)
   const { userId: paid } = await setup('starter', 20 * MIN)
-  for (const u of [free, paid]) await sql`INSERT INTO ai_actions (user_id, kind, created_at) VALUES (${u}, 'ask_ai', now() - interval '60 days')`
-  assert.equal((await ai.aiActionCounts(free)).askAiThisMonth, 1)
-  assert.equal((await ai.aiActionCounts(paid)).askAiThisMonth, 0)
+  for (const u of [trial, paid]) await sql`INSERT INTO ai_actions (user_id, kind, created_at) VALUES (${u}, 'rewrite', now() - interval '60 days')`
+  assert.equal((await ai.aiActionCounts(trial)).rewritesThisMonth, 1)
+  assert.equal((await ai.aiActionCounts(paid)).rewritesThisMonth, 0)
 })
 
-test('Ask AI on a long video counts and costs 1 per started hour; past the limit it is refused whole', opts, async () => {
+test('Ask AI on a long video counts and costs 1 per started hour; past today\'s safety limit it is refused whole', opts, async () => {
   const { userId, videoId } = await setup('starter', 150 * MIN, 50)
-  await withAskAiDayCap('starter', 1000, async () => {
-    const a = await ai.beginAiAction(userId, 'ask_ai', videoId, 3)
-    assert.equal(a.credits, 21); await a.done()
-    assert.equal((await ai.aiActionCounts(userId)).askAiThisMonth, 3)
-    await sql`INSERT INTO ai_actions (user_id, kind) SELECT ${userId}, 'ask_ai' FROM generate_series(1, 6)`   // 9 of 10 used
-    await assert.rejects(ai.beginAiAction(userId, 'ask_ai', videoId, 3), (e: { status?: number; message?: string }) => e.status === 403 && /counts as 3/.test(e.message ?? ''))
-    assert.equal((await ai.aiActionCounts(userId)).askAiThisMonth, 9)
-    assert.equal((await credits.balance(userId)).balance, 29)
-  })
+  const a = await ai.beginAiAction(userId, 'ask_ai', videoId, 3)
+  assert.equal(a.credits, 21); await a.done()
+  assert.equal((await ai.aiActionCounts(userId)).askAiToday, 3)
+  await sql`INSERT INTO ai_actions (user_id, kind, created_at) SELECT ${userId}, 'ask_ai', now() - interval '5 minutes' FROM generate_series(1, 95)`   // 98 of 100 today
+  await assert.rejects(ai.beginAiAction(userId, 'ask_ai', videoId, 3), (e: { status?: number; message?: string }) => e.status === 429 && /today/.test(e.message ?? ''))
+  assert.equal((await ai.aiActionCounts(userId)).askAiToday, 98)
+  assert.equal((await credits.balance(userId)).balance, 29)
+})
+
+test('no monthly AI clip limit: a run is only held by its size, the video (1 per minute) and today\'s safety limit (300)', opts, async () => {
+  const { userId, videoId } = await setup('starter', 120 * MIN)
+  await run(videoId, 60, 60, 'done', "now() - interval '3 days'")   // 60 this month (the old Starter limit was 20)
+  const a = await ai.clipAllowance(userId, videoId)
+  assert.equal(a.dayLeft, 300)
+  assert.equal(a.videoLeft, 60)
+  assert.ok(!('monthLeft' in a))
 })

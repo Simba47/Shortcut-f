@@ -16,7 +16,7 @@ import { ZoomFit } from '@/components/ui/zoom-fit'
 import { PLANS } from '@/lib/plans'
 import {
   CAPTION_CREDITS_PER_MINUTE, EXPORT_CREDITS_PER_MINUTE, PLAN_CREDIT_DAYS, READING_CREDITS, SUBJECTS_CREDITS_PER_MINUTE,
-  TOPUP_CREDIT_DAYS, TRIAL_DAYS, TRIAL_PACK, exportCredits, readingCredits,
+  TOPUP_CREDIT_DAYS, TRIAL_DAYS, TRIAL_PACK, readingCredits,
 } from '@/lib/credits'
 import { ASK_AI_CREDITS, CLIP_CREDITS, REWRITES_PER_CREDIT, clipCredits } from '@/lib/aiLimits'
 import { ACCEPTED_VIDEO_EXTENSIONS, SARVAM_LANGUAGES } from '@/lib/shared/constants'
@@ -149,11 +149,13 @@ const EDITOR_TOOLS = [
 ]
 
 // A worked example for the Credits panel, from the real prices: a 30-minute video, 10 AI clips, each exported
+// (an AI clip's export is in its price since 2026-11-21)
 const EX_MIN = 30, EX_CLIPS = 10
-const EX = { read: readingCredits(EX_MIN * 60_000), clips: clipCredits(EX_CLIPS), exports: EX_CLIPS * exportCredits(60_000) }
-const EX_TOTAL = EX.read + EX.clips + EX.exports
+const EX = { read: readingCredits(EX_MIN * 60_000), clips: clipCredits(EX_CLIPS) }
+const EX_TOTAL = EX.read + EX.clips
 
-const PAID_ORDER = ['trial', 'starter', 'creator', 'agency'] as const
+// (plans v2, 2026-11-21: Trial, Starter, Pro; Agency no longer sold)
+const PAID_ORDER = ['trial', 'starter', 'creator'] as const
 const sizes = PAID_ORDER.map(k => `${PLANS[k].name} ${PLANS[k].maxFileSizeGb} GB`).join(' · ')
 const perRun = PAID_ORDER.map(k => `${PLANS[k].name} ${PLANS[k].ai.clipsPerRun}`).join(' · ')
 
@@ -162,7 +164,7 @@ const TRANSITIONS = [['fade', 'Dissolve'], ['slideleft', 'Slide'], ['wipe', 'Wip
 
 const PRICES = [
   { n: READING_CREDITS, unit: 'per 10 min', what: 'Reading a video' },
-  { n: CLIP_CREDITS, unit: 'per clip', what: 'Make my clips' },
+  { n: CLIP_CREDITS, unit: 'per clip', what: 'Make my clips (export included)' },
   { n: ASK_AI_CREDITS, unit: 'per hour', what: 'Ask AI search' },
   { n: CAPTION_CREDITS_PER_MINUTE, unit: 'per min', what: 'Captions on your clip' },
   { n: SUBJECTS_CREDITS_PER_MINUTE, unit: 'per min', what: 'Following people' },
@@ -221,7 +223,7 @@ export default async function GuidePage() {
             </div>
             <div className="gd-example">
               <b>Example</b>
-              <span>A {EX_MIN}-minute video: reading {EX.read} + {EX_CLIPS} AI clips {EX.clips} + exporting them {EX.exports} = <strong>{EX_TOTAL} credits</strong></span>
+              <span>A {EX_MIN}-minute video: reading {EX.read} + {EX_CLIPS} AI clips with their exports {EX.clips} = <strong>{EX_TOTAL} credits</strong></span>
             </div>
             <ul className="gd-facts gd-facts-row">
               <li><Check aria-hidden="true" /><span>Plan credits last {PLAN_CREDIT_DAYS} days</span></li>
@@ -248,7 +250,7 @@ export default async function GuidePage() {
           <Section id="make-my-clips" title="Make my clips" line="AI finds the best moments in your video and finishes each one for you."
             steps={[
               'Open the video’s Clip board and press Make my clips.',
-              `Choose how many (per run: ${perRun}). ${CLIP_CREDITS} credits a clip.`,
+              `Choose how many (per run: ${perRun}). ${CLIP_CREDITS} credits a clip, its export included.`,
               'Each clip comes cut, framed, captioned and with a title hook.',
             ]}>
             <Live className="gd-wide lp-root gd-lp"><ClipForge clips={10} /></Live>

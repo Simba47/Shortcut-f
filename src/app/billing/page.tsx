@@ -107,7 +107,7 @@ function PurchaseCard({ c, plan, testPack, onBought }: { c: CreditsState; plan: 
               })}
             </div>
             <p className="st-hint" style={{ marginTop: 10 }}>
-              An AI clip is {CLIP_CREDITS} credits, from a video already read (reading is {READING_CREDITS} credits per 10 minutes of video). A manual export
+              An AI clip is {CLIP_CREDITS} credits with its export, from a video already read (reading is {READING_CREDITS} credits per 10 minutes of video). A manual export
               is a clip of up to a minute you cut yourself, with captions ({CAPTION_CREDITS_PER_MINUTE} credits) and the export ({EXPORT_CREDITS_PER_MINUTE}).
               The struck price is the same credits at the plans&apos; rate of ₹1 a credit. Paid once, prices include GST. Pack credits last {Math.round(TOPUP_CREDIT_DAYS / 30.4)} months, and your plan&apos;s credits are used first.
             </p>

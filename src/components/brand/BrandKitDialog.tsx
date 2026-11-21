@@ -4,6 +4,7 @@ import { BrandTagIcon } from '@/components/brand/BrandTagIcon'
 import { useEffect, useState } from 'react'
 import { useBrandKits, BrandKitStudio } from '@/components/editor/BrandKit'
 import type { BrandKit } from '@/lib/shared/brandKit'
+import { isTopPlan } from '@/lib/plans'
 import { ROLE_NAMES, type KitInviteIn } from '@/lib/shared/brandTeam'
 import { useConfirm } from '@/components/editor/ConfirmDialog'
 import { BRAND_KITS_OPEN, BRAND_KITS_CLOSED, type BrandKitsStart } from './brandKitsEvents'
@@ -194,7 +195,7 @@ function BrandKitDialog({ start, onClose }: { start: Start; onClose: () => void 
                 {busy ? 'Making it…' : '+ New brand kit'}
               </button>
             )}
-            {atLimit && own.length > 0 && <p className="bkd-note">Your plan has room for {brand.limit}. <a href="/pricing">Upgrade</a> for more.</p>}
+            {atLimit && own.length > 0 && <p className="bkd-note">Your plan has room for {brand.limit}.{isTopPlan(brand.plan) ? ' Delete one to make another.' : <> <a href="/pricing">Upgrade</a> for more.</>}</p>}
             {shared.length > 0 && (
               <>
                 <div className="bkd-side-head mt-2"><span>Shared with you</span></div>

@@ -231,7 +231,7 @@ function ProfileCard({ account, onSaved, onPhoto }: { account: Account; onSaved:
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z" /></svg>
             </span>
             <div className="min-w-0 flex-1">
-              {/* (user, 2026-11-13) one piece of text, "Agency plan", in the same small grey capitals as "Email" */}
+              {/* (user, 2026-11-13) one piece of text, "Pro plan", in the same small grey capitals as "Email" */}
               <span className="st-tile-label">{account.planName} plan</span>
               {/* (user, 2026-11-13: beside the name they ran out of the half-width tile) under it, wrapping */}
               <span className="st-tile-links">

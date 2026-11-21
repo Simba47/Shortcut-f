@@ -2,7 +2,7 @@ import sql from '@/lib/db'
 import { creditsMode } from '@/lib/credits'
 import {
   aiLimitsFor, allowanceSince, videoClipCap, extraSearchCredits, istDayStart, rewriteCredits,
-  askAiCredits, AI_REQUESTS_PER_MINUTE, CLIP_CREDITS, moreLater,
+  askAiCredits, AI_REQUESTS_PER_MINUTE, CLIP_CREDITS, SAFETY_PER_DAY, SAFETY_NOTE,
 } from '@/lib/aiLimits'
 import { charge, release, settle, type Hold } from './credits'
 import { getUserPlan, NO_PLAN_AI_MESSAGE } from './quota'
@@ -12,8 +12,8 @@ import { getUserPlan, NO_PLAN_AI_MESSAGE } from './quota'
 //     pick from them instead of asking Gemini again. A fresh search is what costs, so it is counted
 //     per video (moment_searches): included per plan, then paid in credits.
 //   - Clips made per day and per video are counted from the clips themselves.
-//   - Ask AI and hook/title rewrites have a monthly allowance (ai_actions), then credits, with a
-//     daily cap and a per-minute speed limit on top.
+//   - Ask AI and hook/title rewrites are counted (ai_actions) and paid in credits; no monthly limit since
+//     2026-11-21 (plans v2), only the day's safety limit (SAFETY_PER_DAY) and a per-minute speed limit.
 //   - Every Gemini call's tokens and estimated price are written down (ai_usage), so the
 //     allowances can be set from real costs.
 // Like credits, all of it follows CREDITS_MODE: off = nothing counted or refused; shadow = counted,
@@ -124,9 +124,10 @@ export interface ClipAllowance {
   /** How long the video is (Ask AI counts 1 per started hour of it) */
   durationMs: number | null
   perRun: number
+  /** Today's safety limit (SAFETY_PER_DAY, every plan) */
   clipsPerDay: number; clipsToday: number; dayLeft: number
-  /** AI clips a month (each costs CLIP_CREDITS); past them a run is refused */
-  clipsPerMonth: number; clipsThisMonth: number; monthLeft: number; clipCredits: number
+  /** What each AI clip costs */
+  clipCredits: number
   videoCap: number; videoClips: number; videoLeft: number
   savedLeft: number
   searchesIncluded: number; searchesUsed: number
@@ -151,19 +152,15 @@ export async function clipAllowance(userId: string, videoId: string): Promise<Cl
   const [today] = await sql<{ n: string }[]>`
     SELECT COALESCE(SUM(${runClips}), 0) AS n FROM ai_edit_jobs j JOIN videos v ON v.id = j.video_id
     WHERE v.user_id = ${userId} AND j.created_at >= ${istDayStart()}`
-  const [month] = await sql<{ n: string }[]>`
-    SELECT COALESCE(SUM(${runClips}), 0) AS n FROM ai_edit_jobs j JOIN videos v ON v.id = j.video_id
-    WHERE v.user_id = ${userId} AND j.created_at >= ${allowanceSince(planKey)}`
   const [forVideo] = await sql<{ n: string }[]>`SELECT COALESCE(SUM(${runClips}), 0) AS n FROM ai_edit_jobs j WHERE j.video_id = ${videoId}`
   const [searches] = await sql<{ n: number }[]>`
     SELECT count(*)::int AS n FROM moment_searches s LEFT JOIN ai_edit_jobs j ON j.id = s.ai_edit_job_id
     WHERE s.video_id = ${videoId} AND (s.ai_edit_job_id IS NULL OR j.status IS DISTINCT FROM 'failed')`
-  const clipsToday = Number(today.n), videoClips = Number(forVideo.n), clipsThisMonth = Number(month.n)
+  const clipsToday = Number(today.n), videoClips = Number(forVideo.n)
   const videoCap = videoClipCap(video.duration_ms)
   return {
     perRun: limits.clipsPerRun,
-    clipsPerDay: limits.clipsPerDay, clipsToday, dayLeft: Math.max(0, limits.clipsPerDay - clipsToday),
-    clipsPerMonth: limits.clipsPerMonth, clipsThisMonth, monthLeft: Math.max(0, limits.clipsPerMonth - clipsThisMonth),
+    clipsPerDay: SAFETY_PER_DAY.aiClips, clipsToday, dayLeft: Math.max(0, SAFETY_PER_DAY.aiClips - clipsToday),
     clipCredits: CLIP_CREDITS,
     videoCap, videoClips, videoLeft: Math.max(0, videoCap - videoClips), durationMs: video.duration_ms,
     savedLeft: (await unusedMoments(videoId)).length,
@@ -176,35 +173,32 @@ export async function clipAllowance(userId: string, videoId: string): Promise<Cl
 
 export type AiActionKind = 'ask_ai' | 'rewrite'
 
-export async function aiActionCounts(userId: string): Promise<{ askAiThisMonth: number; askAiToday: number; rewritesThisMonth: number; lastMinute: number }> {
+export async function aiActionCounts(userId: string): Promise<{ askAiToday: number; rewritesThisMonth: number; rewritesToday: number; lastMinute: number }> {
   await ensureAiUsageSchema()
+  // (rewrites since the month began: what their "1 credit per 5" counts from)
   const since = allowanceSince(await getUserPlan(userId))
-  const [r] = await sql<{ am: number; ad: number; rm: number; lm: number }[]>`
+  const day = istDayStart()
+  const [r] = await sql<{ ad: number; rm: number; rd: number; lm: number }[]>`
     SELECT
-      COALESCE(sum(units) FILTER (WHERE kind = 'ask_ai' AND created_at >= ${since}), 0)::int AS am,
-      COALESCE(sum(units) FILTER (WHERE kind = 'ask_ai' AND created_at >= ${istDayStart()}), 0)::int AS ad,
+      COALESCE(sum(units) FILTER (WHERE kind = 'ask_ai' AND created_at >= ${day}), 0)::int AS ad,
       count(*) FILTER (WHERE kind = 'rewrite' AND created_at >= ${since})::int AS rm,
+      count(*) FILTER (WHERE kind = 'rewrite' AND created_at >= ${day})::int AS rd,
       count(*) FILTER (WHERE created_at >= now() - interval '1 minute')::int AS lm
     FROM ai_actions WHERE user_id = ${userId}`
-  return { askAiThisMonth: r.am, askAiToday: r.ad, rewritesThisMonth: r.rm, lastMinute: r.lm }
+  return { askAiToday: r.ad, rewritesThisMonth: r.rm, rewritesToday: r.rd, lastMinute: r.lm }
 }
 
-/** Past the month's limit a search is refused, whatever credits are left. `units`: what it counts as (aiLimits askAiUnits) */
-function refuseAskAi(plan: string, limits: { askAiPerMonth: number; askAiPerDay: number }, counts: { askAiThisMonth: number; askAiToday: number }, units: number) {
+/** A search is refused with no plan, or past today's safety limit (whatever credits are left). `units`: what it counts as (aiLimits askAiUnits) */
+function refuseAskAi(plan: string, counts: { askAiToday: number }, units: number) {
   if (plan === 'free') throw fail(NO_PLAN_AI_MESSAGE, 403)
-  const more = moreLater(plan)
-  // The month's limit first: with both used up, "more tomorrow" would be wrong (the day and month caps are often equal)
-  const left = limits.askAiPerMonth - counts.askAiThisMonth
-  if (left <= 0) throw fail(`You've used your ${limits.askAiPerMonth} Ask AI searches. ${more}`, 403)
-  if (counts.askAiToday >= limits.askAiPerDay) throw fail(`You've used today's ${limits.askAiPerDay} Ask AI searches. More tomorrow.`, 429)
-  if (units > left) throw fail(`A search on this video counts as ${units}, and you have ${left} left. ${more}`, 403)
+  if (counts.askAiToday + units > SAFETY_PER_DAY.askAi) throw fail(`You've reached today's limit of ${SAFETY_PER_DAY.askAi} Ask AI searches. ${SAFETY_NOTE}`, 429)
 }
 
 /** The credits one Ask AI search takes (0 unless credits are on); refused first if it can't be done at all */
 export async function askAiPrice(userId: string, units: number): Promise<number> {
   if (creditsMode() !== 'on') return 0
   const plan = await getUserPlan(userId)
-  refuseAskAi(plan, aiLimitsFor(plan), await aiActionCounts(userId), units)
+  refuseAskAi(plan, await aiActionCounts(userId), units)
   return askAiCredits(units)
 }
 
@@ -219,7 +213,7 @@ export interface AiActionHandle {
 
 /**
  * Starts one Ask AI search or rewrite (`units`: what it counts as, aiLimits askAiUnits): checks the speed limit and the
- * month's and day's limits, counts it, and takes its credits (402 if there are not enough).
+ * day's safety limit, counts it, and takes its credits (402 if there are not enough).
  * Call done() when the AI answered, fail() when it did not.
  */
 export async function beginAiAction(userId: string, kind: AiActionKind, videoId: string | null = null, units = 1): Promise<AiActionHandle> {
@@ -228,14 +222,13 @@ export async function beginAiAction(userId: string, kind: AiActionKind, videoId:
   if (mode === 'off') return noop
   await ensureAiUsageSchema()
   const plan = await getUserPlan(userId)
-  const limits = aiLimitsFor(plan)
   const counts = await aiActionCounts(userId)
   const enforce = mode === 'on'
   if (enforce && counts.lastMinute >= AI_REQUESTS_PER_MINUTE) throw fail('Too many AI requests in a minute. Wait a moment and try again.', 429)
-  if (enforce && kind === 'ask_ai') refuseAskAi(plan, limits, counts, units)
+  if (enforce && kind === 'ask_ai') refuseAskAi(plan, counts, units)
   if (enforce && kind === 'rewrite' && plan === 'free') throw fail(NO_PLAN_AI_MESSAGE, 403)
-  if (enforce && kind === 'rewrite' && counts.rewritesThisMonth >= limits.rewritesPerMonth) {
-    throw fail(`You've used your ${limits.rewritesPerMonth} rewrites. ${moreLater(plan)}`, 403)
+  if (enforce && kind === 'rewrite' && counts.rewritesToday >= SAFETY_PER_DAY.rewrites) {
+    throw fail(`You've reached today's limit of ${SAFETY_PER_DAY.rewrites} rewrites. ${SAFETY_NOTE}`, 429)
   }
   const price = kind === 'ask_ai' ? askAiCredits(units) : rewriteCredits(counts.rewritesThisMonth)
 

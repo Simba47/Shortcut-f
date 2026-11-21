@@ -9,19 +9,19 @@ const paid = new Date('2026-11-18T10:00:00+05:30')
 
 test('a plan is a monthly subscription that renews', () => {
   const p = describePurchase('creator', paid)
-  assert.equal(p.name, 'Creator plan')
+  assert.equal(p.name, 'Pro plan')  // the 'creator' key, named Pro since 2026-11-21
   assert.equal(p.kind, 'subscription')
   assert.equal(p.credits, 999)
   assert.equal(p.validUntil, null)
   assert.match(renewalNote(p)!, /renews every month/)
 })
 
-test('the Trial pack is one-time: 99 credits for 14 days, never "renews"', () => {
+test('the Trial pack is one-time: 99 credits for 7 days, never "renews"', () => {
   const p = describePurchase('topup:trial', paid)
   assert.equal(p.name, 'Trial pack')
   assert.equal(p.kind, 'one-time')
   assert.equal(p.credits, 99)
-  assert.equal(p.validUntil!.toISOString(), new Date(paid.getTime() + 14 * 86_400_000).toISOString())
+  assert.equal(p.validUntil!.toISOString(), new Date(paid.getTime() + 7 * 86_400_000).toISOString())
   assert.doesNotMatch(`${p.name} ${p.detail} ${renewalNote(p)}`, /renews every|plan is active|one month/)
   assert.match(renewalNote(p)!, /one-time payment/)
 })

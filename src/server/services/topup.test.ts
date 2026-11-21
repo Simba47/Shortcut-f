@@ -114,11 +114,11 @@ test('an unknown pack is refused, and the free plan is sent to upgrade', opts, a
   await assert.rejects(topup.startTopup(free, 'small'), (e: { status?: number; message?: string }) => e.status === 403 && /paid plan/i.test(e.message ?? ''))
 })
 
-test('the Trial pack (user, 2026-11-16): ₹50 once for 99 credits and the Trial plan for 14 days; once per account; unused credits carry into a plan', opts, async () => {
+test('the Trial pack (user, 2026-11-16; ₹49 and 7 days since 2026-11-21): 99 credits and the Trial plan; once per account; unused credits carry into a plan', opts, async () => {
   const u = await newUser('free')
   const quota = await import('./quota')
   const order = await topup.startTopup(u, 'trial')
-  assert.equal(order.amountPaise, 5000); assert.equal(order.credits, 99)
+  assert.equal(order.amountPaise, 4900); assert.equal(order.credits, 99)
   await mock.mockPay({ orderId: order.orderId, outcome: 'success' }, collect)
   await deliverAll()
   await deliverAll()   // delivered again: nothing more
@@ -127,7 +127,7 @@ test('the Trial pack (user, 2026-11-16): ₹50 once for 99 credits and the Trial
   const [g] = await sql<{ kind: string; expires_at: Date }[]>`SELECT kind, expires_at FROM credit_grants WHERE user_id = ${u}`
   assert.equal(g.kind, 'trial')
   const days = (g.expires_at.getTime() - Date.now()) / 86_400_000
-  assert.ok(days > 13.9 && days <= 14, `trial credits last 14 days (${days})`)
+  assert.ok(days > 6.9 && days <= 7, `trial credits last 7 days (${days})`)
   // on the Trial: no second trial, no top-ups
   await assert.rejects(topup.startTopup(u, 'trial'), (e: { status?: number; message?: string }) => e.status === 403 && /Trial already/.test(e.message ?? ''))
   await assert.rejects(topup.startTopup(u, 'small'), (e: { status?: number; message?: string }) => e.status === 403 && /paid plans/.test(e.message ?? ''))
@@ -192,7 +192,7 @@ test('a plan payment gives the plan\'s credits once, and each renewal gives them
 
 test('credits are never granted for a subscription that is not the user\'s', opts, async () => {
   const owner = await newUser('free'), thief = await newUser('free')
-  const sub = await billing.startSubscription(owner, 'agency')
+  const sub = await billing.startSubscription(owner, 'creator')
   await mock.mockPay({ subscriptionId: sub.subscriptionId, outcome: 'success' }, collect)
   // a webhook whose notes name another user
   for (const h of hooks) {
@@ -202,6 +202,12 @@ test('credits are never granted for a subscription that is not the user\'s', opt
     if (change?.kind === 'active') await billing.activate(change)
   }
   assert.equal((await credits.balance(thief)).balance, 0)
+})
+
+test('Agency is no longer sold (plans v2, 2026-11-21): a new subscription to it is refused', opts, async () => {
+  const u = await newUser('free')
+  await assert.rejects(billing.startSubscription(u, 'agency'), (e: { status?: number; message?: string }) => e.status === 400 && /no longer offered/.test(e.message ?? ''))
+  assert.equal((await sql`SELECT 1 FROM subscriptions WHERE user_id = ${u}`).length, 0)
 })
 
 test('a Razorpay plan made under one set of keys is not reused under another', opts, async () => {

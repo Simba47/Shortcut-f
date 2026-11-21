@@ -46,6 +46,11 @@ export function ensureBillingSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`
     await sql`CREATE INDEX IF NOT EXISTS payments_user_idx ON payments (user_id, paid_at DESC)`
+    // (user, 2026-11-21) Every payment has two papers: a receipt (its own numbers, receipt_no) and, once we have a
+    // GSTIN, a tax invoice (invoice_no). invoice_issued_at: when its invoice was made, if later than the payment
+    // (payments taken before the GSTIN was set got theirs afterwards: invoices.ts ensureDocuments)
+    await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS receipt_no TEXT UNIQUE`
+    await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_issued_at TIMESTAMPTZ`
     // The last invoice number of each financial year (numbers run 1, 2, 3 … with no gaps)
     await sql`CREATE TABLE IF NOT EXISTS billing_counters (fy TEXT PRIMARY KEY, last INTEGER NOT NULL)`
     // What a customer wants on their invoices

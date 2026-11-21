@@ -20,7 +20,7 @@ test('roles, seats and who the lock holds', () => {
   assert.equal(cleanRole('edit'), 'edit')
   assert.equal(cleanRole('owner'), 'use')
   assert.equal(teamSeats('agency'), 10)
-  assert.equal(teamSeats('creator'), 0)
+  assert.equal(teamSeats('creator'), 10)  // Pro since 2026-11-21 (plans v2)
   assert.equal(teamSeats(null), 0)
   assert.equal(lockHolds({ lock: true }, 'use'), true)
   assert.equal(lockHolds({ lock: true }, 'edit'), false)

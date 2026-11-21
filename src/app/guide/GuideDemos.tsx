@@ -18,15 +18,16 @@ function Pic() {
   return <div className="th-pic"><i className="th-pic-sun" /><i className="th-pic-ground" /><i className="th-pic-head" /><i className="th-pic-body" /></div>
 }
 
-export function Demo({ scene, label }: { scene: Scene; label: string }) {
+/** askText: what's typed in Ask AI's box (Make my clips' card shows "best moments": MmcProgress.tsx) */
+export function Demo({ scene, label, askText }: { scene: Scene; label: string; askText?: string }) {
   return (
     <div className="th-stage gdv" data-scene={scene} style={{ ['--th-d' as string]: `${D[scene]}s` }} role="img" aria-label={label}>
-      <div className="th-loop">{parts(scene)}</div>
+      <div className="th-loop">{parts(scene, askText)}</div>
     </div>
   )
 }
 
-function parts(scene: Scene) {
+function parts(scene: Scene, askText = 'funny reactions') {
   switch (scene) {
     case 'upload':
       return (<>
@@ -52,7 +53,7 @@ function parts(scene: Scene) {
       return (<>
         <span className="gdv-input gdv-ask-in">
           <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M20 20l-4-4" /></svg>
-          <span className="gdv-ask-text">funny reactions</span>
+          <span className="gdv-ask-text">{askText}</span>
         </span>
         <div className="th-bar" data-k="main" style={{ left: 16, width: 184, top: 44, height: 22 }} />
         <i className="gdv-mark" style={{ left: 38, width: 24, ...dl(0) }} />

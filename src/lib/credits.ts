@@ -145,12 +145,12 @@ export function packUses(credits: number, clipCredits: number): { aiClips: numbe
 export const TEST_PACK = { key: 'test', credits: 1, price: 1 } as const
 /**
  * The Trial pack (plans.ts `trial`, user 2026-11-16): bought once per account by someone with no plan,
- * paid once like a credit pack: ₹50 for 99 credits (more than ₹1 a credit, the user's choice). Its credits
- * and the Trial plan last TRIAL_DAYS from the payment. (what its limits use: 45 for 30 minutes read, 18 for
- * 3 AI clips, 14 for 2 Ask AI, 4 for 20 rewrites; the other 18 export about 18 one-minute clips)
+ * paid once like a credit pack: ₹49 for 99 credits (more than ₹1 a credit, the user's choice). Its credits
+ * and the Trial plan last TRIAL_DAYS from the payment (7 since 2026-11-21, plans v2; was 14), as do its
+ * uploads (plans.ts retentionDays). Its 2 uploads (uploadsLimit) are its only count; the credits do the rest.
  */
 export const TRIAL_PACK = { key: 'trial', credits: 99, price: PLANS.trial.price } as const
-export const TRIAL_DAYS = 14
+export const TRIAL_DAYS = 7
 export type TopupPack = typeof TOPUP_PACKS[number] | typeof TEST_PACK | typeof TRIAL_PACK
 export type TopupPackKey = TopupPack['key']
 

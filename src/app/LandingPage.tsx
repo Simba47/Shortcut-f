@@ -24,29 +24,35 @@ import type Lenis from 'lenis'
 import { InsightsSection, ProblemSection, ProofSection } from '@/components/landing/sections'
 import { neutralStyle, useLiteMotion } from '@/components/ui/use-lite-motion'
 import { PLANS } from '@/lib/plans'
-import { readingLabel } from '@/lib/planFeatures'
+import { brandKitLimit } from '@/lib/shared/brandKit'
+import { teamSeats } from '@/lib/shared/brandTeam'
+import { canKeep } from '@/lib/expiry'
 import { TRIAL_PACK, TRIAL_DAYS } from '@/lib/credits'
 import { COMPANY } from '@/lib/company'
 import { GMAIL_COMPOSE, openMailAppOnPhones } from '@/components/ui/email-link'
 
-// (user, 2026-11-16) No free plan: a ₹50 Trial pack, paid once, to try everything
+// (user, 2026-11-16) No free plan: a Trial pack, paid once, to try everything (₹49 for 7 days since 2026-11-21)
 const trial = PLANS.trial
 
 // (user, 2026-11-14) The landing page shows the real plans, read from lib/plans.ts — the same source as the
 // Pricing page and the app — so its names, prices and limits can't drift apart again. (It used to have its own
 // copy: Starter shown as "Pro", Agency as "Business", Creator left out, and an Annual price billing doesn't offer.)
 // The key facts only; the Pricing page lists every limit.
-const LANDING_PLANS = ['trial', 'starter', 'creator', 'agency'] as const
+// (plans v2, user 2026-11-21: Trial, Starter, Pro; Agency is no longer sold)
+const LANDING_PLANS = ['trial', 'starter', 'creator'] as const
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 function planFeatures(plan: (typeof PLANS)[keyof typeof PLANS]) {
-  // (the Trial's allowances are once only; a paid plan's renew every month)
-  const per = plan.allowancesOnce ? 'in total' : 'a month'
+  // (plans v2, 2026-11-21: credits are the only limit, so no monthly counts to list)
   return [
-    { text: `${readingLabel(plan.readingMinutes)} of video read ${per}`, included: true },
-    { text: `${count(plan.uploadsPerMonth, 'upload', 'uploads')} ${per}`, included: true },
-    { text: plan.maxClips ? `${count(plan.maxClips, 'clip', 'clips')} in total` : `${plan.ai.clipsPerMonth} AI clips ${per}`, included: true },
+    { text: 'Spend credits on anything, no monthly limits', included: true },
+    ...(plan.uploadsLimit != null ? [{ text: `${count(plan.uploadsLimit, 'upload', 'uploads')} in total`, included: true }] : []),
     { text: 'Unlimited clips you cut yourself', included: !plan.maxClips },
+    { text: `${plan.storageGb} GB of storage`, included: true },
+    { text: count(plan.devices, 'device signed in at a time', 'devices signed in at a time'), included: true },
     { text: `Up to ${plan.maxFileSizeGb} GB per video`, included: true },
+    { text: count(brandKitLimit(plan.key), 'brand kit', 'brand kits'), included: true },
+    { text: 'Share brand kits with your team', included: teamSeats(plan.key) > 0 },
+    { text: canKeep(plan.key) ? `Videos kept ${plan.retentionDays} days, or for good with ★ Keep` : `Videos kept ${plan.retentionDays} days`, included: true },
     { text: 'Captions on AI clips', included: plan.autoCaption },
     { text: 'No watermark', included: !plan.watermark },
     { text: 'Priority exports', included: plan.priorityExports },

@@ -5,7 +5,7 @@ import { amountInRupees } from '@/lib/invoice'
 import { ledgerLabel } from '@/lib/credits'
 
 // The account's money cards (user, 2026-11-19): Credit history in a popup from the account menu, Payment
-// history and the Agency invoice details on Plans & billing (its Payments & invoices tab). The Purchase credits card is the billing page (/billing), where the credits button goes.
+// history and the Pro invoice details on Plans & billing (its Payments & invoices tab). The Purchase credits card is the billing page (/billing), where the credits button goes.
 // Styles: .st-* in globals.css; wrap them in .st-billing for the bigger text.
 
 type CreditRow = { id: string; delta: number; reason: string; refType: string | null; shadow: boolean; createdAt: string }
@@ -62,13 +62,13 @@ export function CreditHistory() {
   )
 }
 
-type Payment = { id: string; invoiceNo: string | null; planName: string; amountPaise: number; paidAt: string }
+type Payment = { id: string; invoiceNo: string | null; receiptNo: string | null; planName: string; amountPaise: number; paidAt: string }
 type Details = { name: string | null; gstin: string | null; stateCode: string | null; address: string | null }
 type State = { code: string; name: string }
 type PaymentsInfo = { payments: Payment[]; invoiceDetails: boolean; details: Details | null; states: State[]; taxInvoices: boolean }
 
 /**
- * Payment history, and on Agency the company details for the invoices beside it (plans.ts gstInvoices).
+ * Payment history, and on Pro the company details for the invoices beside it (plans.ts gstInvoices).
  * `reloadKey`: change it to load again (after a payment on the same page).
  */
 export function PaymentsCards({ reloadKey = 0 }: { reloadKey?: number }) {
@@ -106,12 +106,12 @@ export function PaymentsCards({ reloadKey = 0 }: { reloadKey?: number }) {
   return (
     <div className="st-billing flex flex-col gap-6">
       {error && <div className="st-alert st-alert-red" role="alert">{error}</div>}
-      {/* Agency: Payment history | Details on your invoices, side by side; other plans: Payment history alone */}
+      {/* Pro: Payment history | Details on your invoices, side by side; other plans: Payment history alone */}
       <div className="st-grid">
         <section className={`st-card${info?.invoiceDetails ? '' : ' st-wide'}`}>
           <div>
             <h2 className="st-card-title">Payment history</h2>
-            <p className="st-card-desc">Every payment you have made, for a plan, the Trial or a credit pack. Open its {info?.taxInvoices ? 'GST invoice' : 'receipt'} to view, print or save it.</p>
+            <p className="st-card-desc">Every payment you have made, for a plan, the Trial or a credit pack. Each has a tax invoice and a receipt: open either to view, print or save it.</p>
           </div>
           {!info && !error && <p className="st-hint">Loading…</p>}
           {payments && payments.length === 0 && <p className="st-hint">No payments yet. When you pay for a plan or credits, each payment shows up here.</p>}
@@ -121,7 +121,7 @@ export function PaymentsCards({ reloadKey = 0 }: { reloadKey?: number }) {
                 <thead>
                   <tr style={HEAD}>
                     <th style={{ padding: '8px 8px 8px 0' }}>Date</th><th style={{ padding: 8 }}>Plan</th>
-                    <th style={{ padding: 8, textAlign: 'right' }}>Amount</th><th style={{ padding: 8 }}>Invoice</th>
+                    <th style={{ padding: 8, textAlign: 'right' }}>Amount</th><th style={{ padding: 8 }}>Invoice</th><th style={{ padding: 8 }}>Receipt</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -130,8 +130,14 @@ export function PaymentsCards({ reloadKey = 0 }: { reloadKey?: number }) {
                       <td style={{ padding: '10px 8px 10px 0', whiteSpace: 'nowrap' }}>{new Date(p.paidAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
                       <td style={{ padding: 10 }}>{p.planName}</td>
                       <td style={{ padding: 10, textAlign: 'right', whiteSpace: 'nowrap' }}>₹{amountInRupees(p.amountPaise)}</td>
+                      {/* (user, 2026-11-21: "Invoice" opened a receipt) each paper its own link, named by its number */}
                       <td style={{ padding: 10, whiteSpace: 'nowrap' }}>
-                        <a href={`/billing/invoice/${p.id}`} className="st-link" target="_blank" rel="noopener">{p.invoiceNo ?? 'View'}</a>
+                        {p.invoiceNo
+                          ? <a href={`/billing/invoice/${p.id}?paper=invoice`} className="st-link" target="_blank" rel="noopener">{p.invoiceNo}</a>
+                          : <span className="st-hint">Being made</span>}
+                      </td>
+                      <td style={{ padding: 10, whiteSpace: 'nowrap' }}>
+                        <a href={`/billing/invoice/${p.id}?paper=receipt`} className="st-link" target="_blank" rel="noopener">{p.receiptNo ?? 'View'}</a>
                       </td>
                     </tr>
                   ))}
@@ -141,7 +147,7 @@ export function PaymentsCards({ reloadKey = 0 }: { reloadKey?: number }) {
           )}
         </section>
 
-        {/* Company details on invoices: Agency only (plans.ts gstInvoices, user 2026-11-19) */}
+        {/* Company details on invoices: Pro only (plans.ts gstInvoices; Agency until 2026-11-21) */}
         {info?.invoiceDetails && (
           <form className="st-card" onSubmit={save}>
             <div>

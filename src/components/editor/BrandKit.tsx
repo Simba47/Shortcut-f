@@ -9,8 +9,9 @@ import { PlatformOverlay, PLATFORM_SAFE, type Platform } from './PlatformOverlay
 import { ensureBrandFont, KitFontsContext } from './brandFonts'
 import { KitColoursContext } from './brandPalette'
 import { openBrandKits, BRAND_KITS_CLOSED } from '@/components/brand/brandKitsEvents'
-import { BrandStart, BrandCard, type Found } from '@/components/brand/BrandMaker'
+import { BrandCard, type Found } from '@/components/brand/BrandMaker'
 import type { KitInviteIn } from '@/lib/shared/brandTeam'
+import { PLANS, isTopPlan, type PlanKey } from '@/lib/plans'
 import * as kitHistory from '@/modules/brand/kitHistory'
 import { templateOf, templateFontFamily } from '@/modules/captions/templates'
 import {
@@ -397,7 +398,9 @@ export function BrandKitPanel({ brand, onEdit }: {
   // (kits shared with this user don't count against their plan)
   const own = brand.kits.filter(k => !k.shared_by).length
   const full = own >= brand.limit
-  const planName = brand.plan.charAt(0).toUpperCase() + brand.plan.slice(1)
+  // The plan's own name (the 'creator' key is "Pro" since 2026-11-21); Pro, the top plan, has no upgrade to offer
+  const planName = (PLANS[brand.plan as PlanKey] ?? PLANS.free).name
+  const top = isTopPlan(brand.plan)
 
   async function newKit() {
     setBusy(true); setNote(null)
@@ -459,10 +462,10 @@ export function BrandKitPanel({ brand, onEdit }: {
         All your brand kits</button>
       {/* At the bottom of the panel, however many kits there are (user, 2026-11-10) */}
       <div className="mt-auto flex flex-col gap-2">
-        {full && <p className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>That&rsquo;s all your plan has room for. <a href="/pricing" className="font-semibold hover:underline" style={{ color: 'var(--ed-accent-text)' }}>Upgrade</a> for more.</p>}
+        {full && <p className="text-[11px]" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>That&rsquo;s all your plan has room for.{top ? ' Delete one to make another.' : <> <a href="/pricing" className="font-semibold hover:underline" style={{ color: 'var(--ed-accent-text)' }}>Upgrade</a> for more.</>}</p>}
         {note && <p role="alert" className="text-[11px]" style={{ color: '#fca5a5' }}>{note}</p>}
         <button type="button" onClick={newKit} disabled={busy || full}
-          title={full ? `Your ${planName} plan has room for ${brand.limit} brand kit${brand.limit === 1 ? '' : 's'}. Upgrade for more.` : 'Make a new brand kit'}
+          title={full ? `Your ${planName} plan has room for ${brand.limit} brand kit${brand.limit === 1 ? '' : 's'}.${top ? '' : ' Upgrade for more.'}` : 'Make a new brand kit'}
           className="flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40"
           style={{ color: 'var(--ed-text)', background: 'rgb(var(--ed-fg) / 0.06)', boxShadow: 'inset 0 0 0 1px rgb(var(--ed-fg) / 0.12)' }}>
           <span aria-hidden="true">+</span> {busy ? 'Making…' : 'New brand kit'}
@@ -526,7 +529,7 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
 }) {
   const kit = brand.current
   // What the last way in (a link, a logo) found: the card offers its colours
-  const [found, setFound] = useState<Found | null>(null)
+  const [found] = useState<Found | null>(null)
   // The app's buttons over the preview: where the logo is safe from them
   const [platform, setPlatform] = useState<Platform>('instagram')
   const latest = useRef<{ id: string; data: BrandKitData; pending: boolean } | null>(null)
@@ -690,8 +693,9 @@ export function BrandKitStudio({ brand, onKitId = null, onTurnOn, onTurnOff, onC
             )}
             <div className="flex flex-col gap-5" inert={readOnly || undefined} style={readOnly ? { opacity: 0.6 } : undefined}>
             {cur.id === 'basics' && (
-              <BrandCard kit={kit} brand={brand} now={now} set={set} found={found} readOnly={readOnly}
-                start={readOnly ? undefined : <BrandStart kit={kit} brand={brand} now={now} set={set} onFound={setFound} />} />
+              /* (no "Start from" — a link read for the logo and colours — for now: Instagram turns away our servers'
+                 requests, user 2026-11-21. Back later: start={<BrandStart kit={kit} brand={brand} now={now} set={set} onFound={setFound} />}) */
+              <BrandCard kit={kit} brand={brand} now={now} set={set} found={found} readOnly={readOnly} />
             )}
             {cur.id === 'style' && <TextAndCaptions d={d} now={now} set={set} />}
             </div>

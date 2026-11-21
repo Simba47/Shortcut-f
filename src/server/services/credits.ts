@@ -3,7 +3,7 @@ import sql from '@/lib/db'
 import { ensureCreditsSchema } from './creditsSchema'
 import { PLANS, type PlanKey } from '@/lib/plans'
 import { allocate, creditsMode, freeSignupCredits, HOLD_TTL_HOURS, PLAN_CREDIT_DAYS, type GrantKind, type SpendableGrant } from '@/lib/credits'
-import { CLIP_CREDITS } from '@/lib/aiLimits'
+import { CLIP_CREDITS, CLIP_CREDITS_BEFORE_EXPORT } from '@/lib/aiLimits'
 
 export { ensureCreditsSchema }
 
@@ -191,9 +191,9 @@ export async function release(holdId: string, db: Db = sql): Promise<void> {
 export async function sweep(userId?: string): Promise<void> {
   if (creditsMode() === 'off') return
   await ensureCreditsSchema()
-  const open = await sql<{ id: string; user_id: string; amount: number; ref_type: string; status: string | null; job_type: string | null; error: string | null; stale: boolean; run: string | null; run_status: string | null; made: number; very_stale: boolean }[]>`
+  const open = await sql<{ id: string; user_id: string; amount: number; ref_type: string; status: string | null; job_type: string | null; error: string | null; stale: boolean; run: string | null; run_status: string | null; made: number; very_stale: boolean; export_included: boolean | null }[]>`
     SELECT h.id, h.user_id, h.amount, h.ref_type, j.status, j.type AS job_type, j.error, (h.created_at < now() - make_interval(hours => ${HOLD_TTL_HOURS})) AS stale,
-      (h.created_at < now() - interval '7 days') AS very_stale, a.id AS run, a.status AS run_status,
+      (h.created_at < now() - interval '7 days') AS very_stale, a.id AS run, a.status AS run_status, a.export_included,
       (SELECT count(*)::int FROM clips c WHERE c.ai_edit_job_id = a.id) AS made
     FROM credit_holds h LEFT JOIN jobs j ON j.id = h.job_id
       LEFT JOIN ai_edit_jobs a ON h.ref_type = 'ai_clips' AND a.id::text = j.payload->>'ai_edit_job_id'
@@ -205,7 +205,8 @@ export async function sweep(userId?: string): Promise<void> {
       // A Make my clips run's clips: paid for what it made. It may wait a long time on "found fewer: make these?", with its first job done
       if (h.run_status === 'done' || h.run_status === 'failed') {
         await settle(h.id)
-        const back = h.amount - h.made * CLIP_CREDITS
+        // (at the price it was charged at: a run from before the export was included paid 6 a clip)
+        const back = h.amount - h.made * (h.export_included ? CLIP_CREDITS : CLIP_CREDITS_BEFORE_EXPORT)
         if (back > 0) await grant(h.user_id, { kind: 'refund', amount: back, expiresAt: new Date(Date.now() + PLAN_CREDIT_DAYS * 86_400_000), sourceRef: `clips:${h.id}` })
       } else if (h.very_stale) await release(h.id)
       continue

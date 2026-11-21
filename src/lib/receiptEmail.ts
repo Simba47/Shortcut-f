@@ -10,6 +10,8 @@ export interface ReceiptEmailInput {
   amountPaise: number
   paidAt: Date
   invoiceNo: string | null
+  /** The receipt's number, when the main paper is the tax invoice (both are sent: user, 2026-11-21) */
+  receiptNo?: string | null
   paymentId: string
   invoiceId: string
   taxInvoice: boolean
@@ -36,7 +38,7 @@ function leadLine(p: Purchase): string {
 export function receiptEmail(r: ReceiptEmailInput): { subject: string; html: string; text: string } {
   const p = r.purchase
   const amount = `₹${amountInRupees(r.amountPaise)}`
-  const doc = r.taxInvoice ? 'tax invoice' : 'receipt'
+  const doc = r.taxInvoice ? (r.receiptNo ? 'tax invoice and receipt' : 'tax invoice') : 'receipt'
   const link = `${r.base}/billing/invoice/${r.invoiceId}`
   const hello = r.name ? `Hi ${r.name.split(/\s+/)[0]},` : 'Hi,'
   const lead = leadLine(p)
@@ -46,6 +48,7 @@ export function receiptEmail(r: ReceiptEmailInput): { subject: string; html: str
     ...(p.kind === 'subscription' ? [['Billing', 'Every month, until you cancel'] as [string, string]] : []),
     ...(p.kind === 'one-time' && p.validUntil ? [['Credits valid until', day(p.validUntil)] as [string, string]] : []),
     ...(r.invoiceNo ? [[r.taxInvoice ? 'Invoice no.' : 'Receipt no.', r.invoiceNo] as [string, string]] : []),
+    ...(r.receiptNo ? [['Receipt no.', r.receiptNo] as [string, string]] : []),
     ['Payment ID', r.paymentId],
   ]
   const subject = `Payment received: ${p.name}, ${amount}`
@@ -99,7 +102,7 @@ export function receiptEmail(r: ReceiptEmailInput): { subject: string; html: str
         </td></tr>
         <tr><td style="padding:24px 28px 8px;">
           <a href="${esc(link)}" style="display:inline-block;background:#0a0a0a;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:12px 22px;border-radius:10px;">View ${doc}</a>
-          <span style="display:inline-block;margin-left:10px;font-size:12.5px;color:#71717a;">${r.attached ? `Your ${doc} is also attached as a PDF.` : 'Print it or save it as a PDF from there.'}</span>
+          <span style="display:inline-block;margin-left:10px;font-size:12.5px;color:#71717a;">${r.attached ? (r.receiptNo ? `Your ${doc} are also attached as PDFs.` : `Your ${doc} is also attached as a PDF.`) : 'Print it or save it as a PDF from there.'}</span>
         </td></tr>
         <tr><td style="padding:16px 28px 28px;">
           ${note ? `<p style="margin:0 0 10px;font-size:13px;line-height:1.55;color:#52525b;">${esc(note)}</p>` : ''}
@@ -125,7 +128,7 @@ export function receiptEmail(r: ReceiptEmailInput): { subject: string; html: str
     ...rows.map(([k, v]) => `${k}: ${v}`),
     '',
     `View your ${doc}: ${link}`,
-    ...(r.attached ? [`Your ${doc} is also attached to this email as a PDF.`] : []),
+    ...(r.attached ? [r.receiptNo ? `Your ${doc} are also attached to this email as PDFs.` : `Your ${doc} is also attached to this email as a PDF.`] : []),
     '',
     ...(note ? [note] : []),
     `Questions? Reply to this email or write to ${COMPANY.email}.`,

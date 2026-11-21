@@ -40,12 +40,18 @@ export async function ingestLink(userId: string, rawUrl: string) {
     throw err('That\'s a folder link. Open the video in Google Drive and copy its own link.', 400)
   }
 
-  const { checkVideoQuota, getUserPlanConfig } = await import('./quota')
+  const { getUserPlan } = await import('./quota')
+  const { checkStorage, ensureStorageSchema, linkTooBigMessage } = await import('./storage')
   const { checkBeforeUpload, recordReading } = await import('./readingUsage')
   const { creditsMode } = await import('@/lib/credits')
-  await checkVideoQuota(userId)
+  const { PLANS } = await import('@/lib/plans')
+  // The size isn't known until the download: refused only when the storage is already full; the download then
+  // stops at what is free (or the plan's one-file limit, the smaller)
+  const free = await checkStorage(userId, 0)
   await checkBeforeUpload(userId, null)
-  const plan = await getUserPlanConfig(userId)
+  const planKey = await getUserPlan(userId)
+  const plan = PLANS[planKey]
+  await ensureStorageSchema()
   await ensureLinkColumns()
   // Credits on: the reading's price is asked once the file is in and its length known (user, 2026-11-19:
   // a file upload asks first, a Drive link used to be charged without asking). The worker stops at
@@ -63,8 +69,11 @@ export async function ingestLink(userId: string, rawUrl: string) {
   // Every link import needs this job: it downloads the file (on every plan). Captions are not
   // made here: they cost money, so they're made when someone asks (captions switched on in the
   // editor, Make my clips, Best moments, Ask AI).
-  // max_bytes: the worker stops downloads bigger than the plan allows.
-  const payload = { video_id: video.id, storage_path: '', link_source: source, max_bytes: plan.maxFileSizeBytes, transcribe_full: false }
+  // max_bytes: the worker stops downloads bigger than the plan allows: its one-file limit, or what is free of
+  // its storage when that is less (too_big_message: what it then says; an older worker says the plan's limit)
+  const byStorage = free < plan.maxFileSizeBytes
+  const maxBytes = Math.min(plan.maxFileSizeBytes, free)
+  const payload = { video_id: video.id, storage_path: '', link_source: source, max_bytes: maxBytes, too_big_message: linkTooBigMessage(planKey, maxBytes, byStorage), transcribe_full: false }
   await sql`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${sql.json(payload)}, 'queued')`
 
   return { video_id: video.id }
@@ -98,6 +107,11 @@ export async function continueLinkImport(userId: string, videoId: string): Promi
   if (!v) throw err('Not found', 404)
   if (v.status !== 'awaiting_ok' || !v.storage_path) throw Object.assign(err('This video isn\'t waiting for an OK any more.', 409), { expose: true })
   const { checkBeforeUpload, recordReading } = await import('./readingUsage')
+  // (its file is in: checked with its real size, beside the rest; the user can Cancel it, which deletes it)
+  const { checkStorage, ensureStorageSchema } = await import('./storage')
+  await ensureStorageSchema()
+  const [sized] = await sql<{ bytes: string | null }[]>`SELECT COALESCE(file_size, download_total) AS bytes FROM videos WHERE id = ${videoId}`
+  await checkStorage(userId, Number(sized?.bytes ?? 0), videoId)
   await checkBeforeUpload(userId, v.duration_ms)
   const [taken] = await sql`UPDATE videos SET status = 'uploaded', ask_ok = false WHERE id = ${videoId} AND status = 'awaiting_ok' RETURNING id`
   if (!taken) throw Object.assign(err('This video isn\'t waiting for an OK any more.', 409), { expose: true })
@@ -145,12 +159,13 @@ export async function signUploadRequest(userId: string, r: SignUploadRequest): P
   if (startsUpload) {
     if (!r.file?.name || !(r.file.size > 0)) throw err('File details missing', 400)
     const ext = uploadExtension(r.file.name)
-    const { checkVideoQuota, checkFileSizeQuota, checkBrollSize } = await import('./quota')
+    const { checkFileSizeQuota, checkBrollSize } = await import('./quota')
     if (r.asset === true) {
       await checkBrollSize(userId, r.file.size)
     } else {
-      await checkVideoQuota(userId)
       await checkFileSizeQuota(userId, r.file.size)
+      const { checkStorage } = await import('./storage')
+      await checkStorage(userId, r.file.size)
       const { checkBeforeUpload } = await import('./readingUsage')
       await checkBeforeUpload(userId, typeof r.file.duration_ms === 'number' ? r.file.duration_ms : null, r.file.size)
     }
@@ -218,15 +233,16 @@ export async function completeUpload(userId: string, storagePath: string, durati
   }
 
   // Check the file as it actually arrived (the size the browser reported could be wrong), and the
-  // video count again (it was checked when the upload started, which may be a while ago)
-  const { checkVideoQuota, checkFileSizeQuota, checkBrollSize } = await import('./quota')
+  // storage again (it was checked when the upload started, which may be a while ago: another upload may have finished since)
+  const { checkFileSizeQuota, checkBrollSize } = await import('./quota')
+  const { checkStorage, ensureStorageSchema } = await import('./storage')
   const { checkBeforeUpload, recordReading } = await import('./readingUsage')
   try {
     if (asset) {
       await checkBrollSize(userId, size)
     } else {
       await checkFileSizeQuota(userId, size)
-      await checkVideoQuota(userId)
+      await checkStorage(userId, size)
       await checkBeforeUpload(userId, durationMs ?? null, size)
     }
   } catch (e) {
@@ -234,10 +250,11 @@ export async function completeUpload(userId: string, storagePath: string, durati
     throw e
   }
 
+  await ensureStorageSchema()
   const [video] = await sql`
-    INSERT INTO videos (user_id, source_type, storage_path, status, duration_ms, title, role)
+    INSERT INTO videos (user_id, source_type, storage_path, status, duration_ms, title, role, file_size)
     VALUES (${userId}, 'upload', ${storagePath}, 'ready', ${durationMs ?? null}, ${title?.trim().slice(0, 120) || null},
-      ${asset ? 'asset' : 'project'})
+      ${asset ? 'asset' : 'project'}, ${size})
     RETURNING id
   `
   if (!video) throw err('Failed to create video record', 500)

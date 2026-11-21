@@ -5,6 +5,7 @@ import sql from '@/lib/db'
 import { razorpayConfigured, razorpayMode } from '@/lib/razorpay'
 import { subscriptionSummary, trialSummary } from '@/server/services/billing'
 import { readingUse } from '@/server/services/readingUsage'
+import { storageUsed } from '@/server/services/storage'
 import { testPackAllowed } from '@/lib/credits'
 
 export const runtime = 'nodejs'
@@ -23,7 +24,7 @@ export async function GET() {
   // The Trial pack: bought yet (once per account), and when it ends
   const trial = await trialSummary(user.id).catch(() => ({ used: false, active: false, endsAt: null }))
   const [videoRow, clipRow] = await Promise.all([
-    // Only the user's own videos: B-roll and overlay files (role 'asset') don't count, as in checkVideoQuota
+    // Only the user's own videos: B-roll and overlay files (role 'asset') don't count, as in storage.ts
     sql<{ count: string }[]>`SELECT COUNT(*) as count FROM videos WHERE user_id = ${user.id} AND role IS DISTINCT FROM 'asset'`,
     sql<{ count: string }[]>`
       SELECT COUNT(*) as count FROM clips c
@@ -32,15 +33,18 @@ export async function GET() {
     `,
   ])
 
-  const reading = await readingUse(user.id).catch(() => ({ uploads: 0, usedMs: 0 }))
+  const reading = await readingUse(user.id).catch(() => ({ uploads: 0, usedMs: 0, todayMs: 0 }))
+  // The plan's storage used (plans v2, 2026-11-21: GB held, not a count of videos)
+  const storageBytes = await storageUsed(user.id).catch(() => 0)
 
   return NextResponse.json({
     plan: planKey,
     planName: plan.name,
     price: plan.price,
-    maxVideos: plan.maxVideos,
-    readingMinutes: plan.readingMinutes,
-    uploadsPerMonth: plan.uploadsPerMonth,
+    storageGb: plan.storageGb,
+    storageBytes: plan.storageBytes,
+    // Uploads in total: only the Trial has a number (null: no limit); credits are the only other limit
+    uploadsLimit: plan.uploadsLimit,
     maxClips: plan.maxClips,
     maxFileSizeGb: plan.maxFileSizeGb,
     maxFileSizeBytes: plan.maxFileSizeBytes,
@@ -59,6 +63,7 @@ export async function GET() {
     usage: {
       videos: parseInt(videoRow[0]?.count ?? '0', 10),
       clips: parseInt(clipRow[0]?.count ?? '0', 10),
+      storageBytes,
       uploads: reading.uploads,
       readingMinutes: Math.ceil(reading.usedMs / 60_000),
     },

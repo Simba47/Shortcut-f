@@ -5,7 +5,7 @@ import PostgresAdapter from '@auth/pg-adapter'
 import { Pool } from 'pg'
 import { authConfig } from './auth.config'
 import { verifyPassword } from './modules/auth/password'
-import { startSession, isCurrentSession } from './modules/auth/one-device'
+import { startSession, isCurrentSession, endSession } from './modules/auth/devices'
 import sql from './lib/db'
 import { clientIp, loginSucceeded, startLoginAttempt } from './modules/auth/limits'
 import { queueServerEvent } from './server/analytics'
@@ -79,6 +79,12 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       profile: p => ({ id: p.sub, name: p.name ?? null, email: p.email?.toLowerCase().trim(), image: null }),
     })] : []),
   ],
+  events: {
+    // Signed out here: this device's place is free for another (modules/auth/devices.ts)
+    async signOut(message) {
+      if ('token' in message && message.token) await endSession(message.token.sid as string | undefined)
+    },
+  },
   callbacks: {
     async signIn({ account, profile }) {
       if (account?.provider !== 'google') return true
@@ -95,8 +101,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.id = user.id
         // A new account made by Google: its email is confirmed (Google confirmed it)
         if (account?.provider === 'google') await sql`UPDATE users SET "emailVerified" = COALESCE("emailVerified", now()) WHERE id = ${user.id as string}`
-        // One device per account: this sign-in becomes the only one, any other device is signed out
-        token.sid = await startSession(user.id as string)
+        // Devices at once (plans v2, 2026-11-21: Trial 1, Starter 2, Pro 3): past the plan's number, the device
+        // used least recently is signed out (modules/auth/devices.ts). Its browser, to tell devices apart.
+        let agent: string | null = null
+        try { agent = (await (await import('next/headers')).headers()).get('user-agent') } catch { /* not in a request */ }
+        token.sid = await startSession(user.id as string, agent)
         delete token.replaced
         // Google Analytics (server/analytics.ts): a Google sign-in that made the account is a sign_up
         // (an email sign-up's is sent when its code is confirmed), any other a login. By id only.
