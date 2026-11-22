@@ -62,6 +62,16 @@ export function formatMoney(minor: number, currency: Currency | string, opts: { 
   return `₹${major.toLocaleString('en-IN', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
 }
 
+/**
+ * The Trial pack's price in words: in `currency` when the visitor's is known (₹49, $1.99); else for everyone, which
+ * is rupees, and "₹49 / $1.99" while dollars are switched on (server messages can't tell where someone is)
+ */
+export function trialPriceText(currency?: Currency | null): string {
+  if (currency) return formatMoney(planPriceMinor('trial', currency) ?? 0, currency)
+  const inr = formatMoney(planPriceMinor('trial', 'INR') ?? 0, 'INR')
+  return usdPaymentsOn() ? `${inr} / ${formatMoney(planPriceMinor('trial', 'USD') ?? 0, 'USD')}` : inr
+}
+
 /** "$9/month" style price of a plan for a page; '' when it is not sold in that currency */
 export function planPriceLabel(plan: string, currency: Currency): string {
   const m = planPriceMinor(plan, currency)

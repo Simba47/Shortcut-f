@@ -1,6 +1,7 @@
 import sql from '@/lib/db'
 import { effectivePlan } from '@/server/services/billing'
 import { PLANS, type PlanKey } from '@/lib/plans'
+import { trialPriceText } from '@/lib/currency'
 
 export async function getUserPlan(userId: string): Promise<PlanKey> {
   const [row] = await sql<{ plan: string }[]>`SELECT plan FROM users WHERE id = ${userId}`
@@ -15,9 +16,9 @@ export async function getUserPlanConfig(userId: string) {
 }
 
 /** No plan (no free plan since 2026-11-16): nothing that costs us runs until the Trial pack or a plan is bought */
-export const NO_PLAN_MESSAGE = `Uploading needs a plan. Start with the ₹${PLANS.trial.price} Trial pack (try everything, paid once) or choose a plan.`
+export const NO_PLAN_MESSAGE = `Uploading needs a plan. Start with the ${trialPriceText()} Trial pack (try everything, paid once) or choose a plan.`
 /** The same for the AI tools, for an account whose Trial has ended (its videos are still there) */
-export const NO_PLAN_AI_MESSAGE = `The AI tools need a plan. Choose a plan, or start with the ₹${PLANS.trial.price} Trial pack if you haven't yet.`
+export const NO_PLAN_AI_MESSAGE = `The AI tools need a plan. Choose a plan, or start with the ${trialPriceText()} Trial pack if you haven't yet.`
 function refuseNoPlan(key: PlanKey): void {
   if (key === 'free') throw Object.assign(new Error(NO_PLAN_MESSAGE), { status: 403, expose: true })
 }

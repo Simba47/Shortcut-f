@@ -68,7 +68,7 @@ export function creditUses(): { name: string; price: string; note: string }[] {
  * plan; `strong`: what this plan adds over the one below it (lit on the card).
  */
 export type CompareRow = { label: string; value: string | false; strong?: boolean }
-export function planCompareRows(plan: Plan): CompareRow[] {
+export function planCompareRows(plan: Plan, currency: 'INR' | 'USD' = 'INR'): CompareRow[] {
   const kits = brandKitLimit(plan.key)
   const team = teamSeats(plan.key) > 0
   const keep = canKeep(plan.key)
@@ -83,7 +83,8 @@ export function planCompareRows(plan: Plan): CompareRow[] {
     { label: 'Brand kits', value: team ? `${kits}, shared with your team` : String(kits), strong: team },
     { label: 'Clips per Make my clips', value: `Up to ${plan.ai.clipsPerRun}` },
     { label: 'Priority exports', value: plan.priorityExports ? 'Yes' : false, strong: plan.priorityExports },
-    { label: 'GST invoice with your company', value: plan.gstInvoices ? 'Yes' : false, strong: plan.gstInvoices },
+    // (paying in dollars there is no GST on the invoice: the company's name and address only)
+    { label: currency === 'INR' ? 'GST invoice with your company' : 'Invoice with your company details', value: plan.gstInvoices ? 'Yes' : false, strong: plan.gstInvoices },
   ]
 }
 

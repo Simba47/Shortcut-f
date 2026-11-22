@@ -12,7 +12,7 @@ import { useCredits, type CreditsInfo } from '@/lib/useCredits'
 import { CreditsBadge } from '@/components/ui/credits-badge'
 import { CAPTION_CREDITS_PER_MINUTE, EXPORT_CREDITS_PER_MINUTE } from '@/lib/credits'
 import { ASK_AI_CREDITS, CLIP_CREDITS } from '@/lib/aiLimits'
-import { PLANS, isTopPlan } from '@/lib/plans'
+import { isTopPlan } from '@/lib/plans'
 import { formatStorage } from '@/lib/storage'
 import { canKeep, expiresLabel, expiresSoon } from '@/lib/expiry'
 import type { Video } from '@chai-cut/shared'
@@ -23,6 +23,8 @@ import { DashSkeleton } from './DashSkeleton'
 import { FillButtonContent } from '@/components/ui/fill-button'
 import { useVideoUpload, formatBytes, uploadPace } from '@/modules/upload/useVideoUpload'
 import { useSmoothPct } from '@/lib/useSmoothPct'
+import { trialPriceText, type Currency } from '@/lib/currency'
+import { useCurrency } from '@/lib/useCurrency'
 
 type DashVideo = Video & { video_url?: string | null; clip_count?: number; error?: string | null
   /** Its picture (the worker's jobs/poster.ts), when it has one: shown instead of loading the video */
@@ -40,6 +42,8 @@ type DashVideo = Video & { video_url?: string | null; clip_count?: number; error
   kept?: boolean }
 type SortKey = 'newest' | 'oldest' | 'name'
 interface PlanInfo {
+  /** Rupees or dollars, once the account has paid (null: not yet) */
+  currency?: Currency | null
   plan: string
   planName: string
   /** The plan's storage (plans v2, 2026-11-21: GB held, not a count of videos) */
@@ -79,6 +83,8 @@ export default function DashboardPage() {
   const [videos, setVideos] = useState<DashVideo[]>([])
   const [loading, setLoading] = useState(true)
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null)
+  // The Trial's price in the visitor's currency (rupees, or dollars outside India once they are on)
+  const { currency } = useCurrency(planInfo?.currency ?? null)
 
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<SortKey>('newest')
@@ -202,7 +208,7 @@ export default function DashboardPage() {
 
   function startUpload(f: File) {
     if (uploading) return
-    if (noPlan) { setUploadError(`Uploading needs a plan. Start with the ₹${PLANS.trial.price} Trial pack (Start trial, top right) or choose a plan.`); return }
+    if (noPlan) { setUploadError(`Uploading needs a plan. Start with the ${trialPriceText(currency)} Trial pack (Start trial, top right) or choose a plan.`); return }
     if (atLimit) { setUploadError(`Your ${planInfo?.storageGb} GB of storage is full. ${moreSpace}`); return }
     const error = validateFile(f)
     if (error) { setUploadError(error); return }

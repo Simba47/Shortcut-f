@@ -218,7 +218,7 @@ export default function PricingPage() {
                     <li><b>{n(uses.captionedMinutes)}</b> manual exports with captions</li>
                   </ul>
                   <dl className="st-plan-rows">
-                    {planCompareRows(plan).map(r => (
+                    {planCompareRows(plan, currency).map(r => (
                       <div key={r.label} className={r.value === false ? 'is-off' : r.strong ? 'is-strong' : undefined}>
                         <dt>{r.label}</dt><dd>{r.value === false ? '—' : r.value}</dd>
                       </div>

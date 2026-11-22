@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  usdPaymentsOn,
+  usdPaymentsOn, trialPriceText,
   planPriceMinor, packPriceMinor, formatMoney, currencyFromTimeZone, chooseCurrency, packSavingIn, USD_PLAN_CENTS, USD_PACK_CENTS,
 } from './currency.ts'
 import { PLANS } from './plans.ts'
@@ -92,4 +92,26 @@ test('the struck pack price in rupees is unchanged; in dollars it is the same cr
   assert.equal(packSavingIn({ key: 'small', credits: 200 }, 'USD'), null, '$3 for 200 saves only a cent')
   assert.deepEqual(packSavingIn({ key: 'medium', credits: 500 }, 'USD'), { was: 751, saved: 51, percent: 7 })
   assert.deepEqual(packSavingIn({ key: 'bulk', credits: 3000 }, 'USD'), { was: 4508, saved: 608, percent: 13 })
+})
+
+test('the Trial\'s price in words: the visitor\'s own, or ₹49 for everyone (and ₹49 / $1.99 once dollars are on)', () => {
+  assert.equal(trialPriceText('INR'), '₹49')
+  assert.equal(trialPriceText('USD'), '$1.99')
+  const was = process.env.NEXT_PUBLIC_USD_PAYMENTS
+  try {
+    delete process.env.NEXT_PUBLIC_USD_PAYMENTS
+    assert.equal(trialPriceText(), '₹49', 'dollars off: exactly as before')
+    process.env.NEXT_PUBLIC_USD_PAYMENTS = '1'
+    assert.equal(trialPriceText(), '₹49 / $1.99')
+  } finally {
+    if (was === undefined) delete process.env.NEXT_PUBLIC_USD_PAYMENTS; else process.env.NEXT_PUBLIC_USD_PAYMENTS = was
+  }
+})
+
+test('Pro\'s invoice row: GST in rupees, the company\'s details only in dollars', async () => {
+  const { planCompareRows } = await import('./planFeatures.ts')
+  const { PLANS } = await import('./plans.ts')
+  const row = (c: 'INR' | 'USD') => planCompareRows(PLANS.creator, c).at(-1)
+  assert.deepEqual(row('INR'), { label: 'GST invoice with your company', value: 'Yes', strong: true })
+  assert.deepEqual(row('USD'), { label: 'Invoice with your company details', value: 'Yes', strong: true })
 })

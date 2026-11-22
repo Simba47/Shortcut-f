@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { Check } from 'lucide-react'
 import { BrandLogo } from '@/components/ui/brand-logo'
+import { TrialFine } from './TrialFine'
 import { CrowdCanvas } from '@/components/ui/crowd-canvas'
 import { AuthStage } from './AuthStage'
 import { COMPANY } from '@/lib/company'
@@ -62,7 +63,7 @@ export function AuthShell({ brand = DEFAULT_BRAND, navAction, children }: {
         <aside className="auth-brand" data-scene={brand.visual || undefined}>
           <Link href="/" aria-label={AUTH.brand.home} className="auth-home"><BrandLogo /></Link>
           {brand.visual ? <BrandScene>{pitch}</BrandScene> : <div className="auth-stage">{pitch}</div>}
-          <p className="auth-fine">{AUTH.brand.fine}</p>
+          <p className="auth-fine"><TrialFine /></p>
         </aside>
 
         <main className="auth-side">

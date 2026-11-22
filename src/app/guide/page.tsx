@@ -26,6 +26,7 @@ import { ToolGuidesSwitch } from './ToolGuidesSwitch'
 import { Demo } from './GuideDemos'
 import { Live } from './Live'
 import './guide.css'
+import { trialPriceText } from '@/lib/currency'
 
 /**
  * The Guide (user, 2026-11-19): every part of Shortcut, for signed-in users — shown more than told ("no normal
@@ -206,7 +207,7 @@ export default async function GuidePage() {
               <a href="#editor"><span className="gd-flow-n">3</span><b>Edit</b><span>Open any clip to trim it, change the layout, style the captions, add music.</span></a>
               <a href="#export"><span className="gd-flow-n">4</span><b>Export</b><span>Make the video in 1080p, download it and post it.</span></a>
             </nav>
-            <p className="gd-note"><Sparkles aria-hidden="true" /><span>New here? The Trial pack: {TRIAL_PACK.credits} credits for ₹{TRIAL_PACK.price}, for {TRIAL_DAYS} days, to try everything. <Link href="/pricing">See plans</Link></span></p>
+            <p className="gd-note"><Sparkles aria-hidden="true" /><span>New here? The Trial pack: {TRIAL_PACK.credits} credits for {trialPriceText()}, for {TRIAL_DAYS} days, to try everything. <Link href="/pricing">See plans</Link></span></p>
           </section>
 
           {/* ── Credits ── */}
