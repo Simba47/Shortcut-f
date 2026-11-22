@@ -10,12 +10,16 @@ export const PLANS = {
     // Credits given every billing month: the plan's price (the Trial pack's are given once when it is paid: TRIAL_PACK)
     monthlyCredits: 0,
     // A paid plan gives credits worth its price (1 credit = ₹1), and every action uses them. Since
-    // 2026-11-21 (user, plans v2) credits are the only limit: no monthly hours, uploads, AI clips, Ask AI
-    // or rewrites. Every price keeps 60%+ (Shortcut-Unit-Economics-Simple-Nov-2026.pdf), so spending
+    // 2026-11-21 (user, plans v2) credits are the limit: no monthly uploads, AI clips, Ask AI or rewrites;
+    // the monthly hours of video came back on 2026-11-22 (readingMinutes). Every price keeps 60%+ (Shortcut-Unit-Economics-Simple-Nov-2026.pdf), so spending
     // them all is fine; what is left are safety limits (aiLimits.ts SAFETY_PER_DAY) and the worker's
     // per-person jobs at once (shortcut-b queue.ts).
     // Uploads in total: only the Trial has a number (each upload costs a GPU start-up, ₹3.63, and its
     // margin is thin); null = no limit. Deleting a video gives none back.
+    // Minutes of video read (uploaded) a month; the Trial's in total. Back on 2026-11-22 (user: "num of hr
+    // restriction is removed, we need to add that"), the limits from before plans v2: reading is the dearest use
+    // of a credit (about 44% profit on short videos), so without it a plan spent on reading falls below 60%.
+    readingMinutes: 0,
     uploadsLimit: 0 as number | null,
     // The Trial's counts (its uploads, its rewrites' "1 credit per 5") run for its whole life, not a month
     allowancesOnce: true,
@@ -59,6 +63,7 @@ export const PLANS = {
     price: 49,
     // Its 99 credits come with the payment (TRIAL_PACK), not every month
     monthlyCredits: 0,
+    readingMinutes: 30,
     uploadsLimit: 2,
     allowancesOnce: true,
     oneTime: true,
@@ -82,6 +87,7 @@ export const PLANS = {
     price: 599,
     // Credits given every billing month: the plan's price
     monthlyCredits: 599,
+    readingMinutes: 180,
     uploadsLimit: null,
     allowancesOnce: false,
     oneTime: false,
@@ -107,6 +113,7 @@ export const PLANS = {
     price: 999,
     // Credits given every billing month: the plan's price
     monthlyCredits: 999,
+    readingMinutes: 300,
     uploadsLimit: null,
     allowancesOnce: false,
     oneTime: false,
@@ -132,6 +139,7 @@ export const PLANS = {
     price: 2599,
     // Credits given every billing month: the plan's price
     monthlyCredits: 2599,
+    readingMinutes: 840,
     uploadsLimit: null,
     allowancesOnce: false,
     oneTime: false,

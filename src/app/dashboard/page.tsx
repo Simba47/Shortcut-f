@@ -685,7 +685,7 @@ function LinkImportStrip({ video, onChanged }: { video: DashVideo; onChanged: ()
   const pace = useLinkPace(video.download_bytes, video.download_total, step)
   const [busy, setBusy] = useState<'continue' | 'cancel' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [price, setPrice] = useState<{ on: boolean; credits?: number; balance?: number; overMs?: number; uploadsLeft?: number | null } | null>(null)
+  const [price, setPrice] = useState<{ on: boolean; credits?: number; balance?: number; overMs?: number; msLeft?: number; limitedBy?: 'plan' | 'day'; uploadsLeft?: number | null } | null>(null)
 
   // Waiting for the OK: what reading it costs (asked once it is waiting)
   useEffect(() => {
@@ -715,10 +715,13 @@ function LinkImportStrip({ video, onChanged }: { video: DashVideo; onChanged: ()
 
   const credits = price?.credits ?? 0
   const minutes = Math.max(1, Math.ceil((video.duration_ms ?? 0) / 60_000))
-  // (the Trial's uploads used up, past today's safety limit, or short of credits: said here, Continue would only be refused.
+  // (the Trial's uploads used up, past the plan's hours (back 2026-11-22) or today's safety limit, or short of credits: said
+  // here, Continue would only be refused.
   // uploadsLeft is null on a paid plan: no uploads limit since 2026-11-21)
   const blocked = waiting && price?.on
     ? (price.uploadsLeft ?? 1) <= 0 ? 'You have no uploads left on your Trial. Choose a plan to upload more.'
+      : (price.overMs ?? 0) > 0 && price.limitedBy === 'plan'
+        ? `This ${minutes} min video is longer than the ${Math.floor((price.msLeft ?? 0) / 60_000)} min of video left on your plan. Upgrade for more hours.`
       : (price.overMs ?? 0) > 0 ? `This ${minutes} min video goes past today's limit for one day. It comes back at midnight.`
         : credits > (price.balance ?? 0) ? `Reading it needs ${credits} credits and you have ${price.balance ?? 0}. Top up to continue.`
           : null

@@ -5,7 +5,8 @@ import { readingCredits } from './credits'
 // database), so the rules are tested on their own (aiLimits.test.ts) and the page can show the
 // same numbers the server applies. The numbers themselves live in plans.ts (`ai`).
 //
-// Since 2026-11-21 (user, plans v2) credits are the only limit on what a plan can do: every AI action is
+// Since 2026-11-21 (user, plans v2) credits are the only limit on the AI actions (the hours of video read have
+// a monthly limit again since 2026-11-22: readingQuote): every AI action is
 // priced above its cost. What stays is safety: a run's size (clipsPerRun), 1 AI clip per minute of video,
 // AI requests a minute, and a high daily limit (SAFETY_PER_DAY) no real person reaches, so a script or a
 // stolen account can't drain the prepaid Gemini balance for everyone. (How many jobs one person runs at
@@ -97,17 +98,23 @@ export function allowanceSince(plan: string | null | undefined, now: Date = new 
 }
 
 /**
- * One more upload: the uploads left (null: no limit; only the Trial has one), how much of this video is
- * past today's safety limit (then it is refused), and what the video costs. `used`: uploads counted so far
+ * One more upload: the uploads left (null: no limit; only the Trial has one), the minutes of video it may still
+ * read, how much of this video is past them (then it is refused), and what the video costs. The minutes left are
+ * the lower of the plan's hours (readingMinutes: a month, the Trial's in total; back since 2026-11-22) and today's
+ * safety limit; `limitedBy` says which one ('plan' or 'day'). `used`: uploads and minutes counted so far
  * (allowanceSince) and minutes read today. A length not known yet (the browser couldn't read it; a link) is
  * priced when the worker has found it.
  */
 export function readingQuote(
-  plan: { uploadsLimit: number | null },
-  used: { uploads: number; todayMs: number },
+  plan: { uploadsLimit: number | null; readingMinutes: number },
+  used: { uploads: number; usedMs: number; todayMs: number },
   durationMs: number | null | undefined,
-): { uploadsLeft: number | null; msLeft: number; overMs: number; credits: number } {
-  const msLeft = Math.max(0, SAFETY_PER_DAY.readingMinutes * MINUTE - used.todayMs)
+): { uploadsLeft: number | null; msLeft: number; overMs: number; credits: number; limitedBy: 'plan' | 'day' } {
+  const planLeft = Math.max(0, plan.readingMinutes * MINUTE - used.usedMs)
+  const dayLeft = Math.max(0, SAFETY_PER_DAY.readingMinutes * MINUTE - used.todayMs)
+  // (the plan's before the day: when both are used up the refusal names the one that lasts)
+  const limitedBy = planLeft <= dayLeft ? 'plan' : 'day'
+  const msLeft = Math.min(planLeft, dayLeft)
   const overMs = Math.max(0, (durationMs ?? 0) - msLeft)
-  return { uploadsLeft: plan.uploadsLimit == null ? null : Math.max(0, plan.uploadsLimit - used.uploads), msLeft, overMs, credits: readingCredits(durationMs ?? 0) }
+  return { uploadsLeft: plan.uploadsLimit == null ? null : Math.max(0, plan.uploadsLimit - used.uploads), msLeft, overMs, credits: readingCredits(durationMs ?? 0), limitedBy }
 }
