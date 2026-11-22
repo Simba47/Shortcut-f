@@ -3,14 +3,15 @@ import sql from '@/lib/db'
 import { creditsMode, PLAN_CREDIT_DAYS, READING_CREDITS, readingCredits } from '@/lib/credits'
 import { allowanceSince, istDayStart, readingQuote, SAFETY_PER_DAY, SAFETY_NOTE } from '@/lib/aiLimits'
 import { PLANS } from '@/lib/plans'
+import { readingLabel } from '@/lib/planFeatures'
 import { balance, charge, ensureCreditsSchema, ensureFreeGrant, grant, settle } from './credits'
 import { getUserPlan, NO_PLAN_MESSAGE } from './quota'
 
 // Every video read, and what it was paid. Our transcriber reads a video at upload, whatever is done with it
 // after, so it is counted and paid for there (lib/credits.ts readingCredits) and outlives the video: deleting
-// one gives nothing back. Since 2026-11-21 (plans v2) credits are the only limit: no monthly hours or uploads.
-// What stays: the Trial's 2 uploads (plans.ts uploadsLimit, its whole life) and the day's safety limit on
-// minutes read (aiLimits SAFETY_PER_DAY). A video that fails gives everything back (refundFailedReadings). The
+// one gives nothing back. Limits: the plan's hours of video (plans.ts readingMinutes: a month, the Trial's in
+// total; removed in plans v2 on 2026-11-21, back on 2026-11-22), the Trial's 2 uploads (uploadsLimit, its whole
+// life) and the day's safety limit on minutes read (aiLimits SAFETY_PER_DAY). A video that fails gives everything back (refundFailedReadings). The
 // same file uploaded again after its video was deleted, in the same month, is not counted again (againOf).
 // Like credits, all of it follows CREDITS_MODE: off = nothing counted or refused; shadow = counted, never
 // refused or charged; on = enforced.
@@ -144,6 +145,14 @@ export async function checkBeforeUpload(userId: string, durationMs: number | nul
   if (quote.uploadsLeft != null && quote.uploadsLeft <= 0) {
     throw fail(`You've used the ${plan.uploadsLimit} upload${plan.uploadsLimit === 1 ? '' : 's'} on your ${plan.name}. Choose a plan to upload more.`, 403)
   }
+  if (quote.limitedBy === 'plan') {
+    // The plan's hours (a month; the Trial's in total): past them, more next month or a bigger plan
+    const hours = readingLabel(plan.readingMinutes)
+    const span = plan.allowancesOnce ? `on your ${plan.name}` : `on your ${plan.name} plan this month`
+    const next = plan.allowancesOnce ? 'Choose a plan to upload more.' : 'More next month, or upgrade for more hours.'
+    if (quote.msLeft <= 0) throw fail(`You've used the ${hours} of video ${span}. ${next}`, 403)
+    if (quote.overMs > 0) throw fail(`This video is ${minutes(durationMs ?? 0)} min, and only ${minutes(quote.msLeft)} min of the ${hours} ${span} are left. ${next}`, 403)
+  }
   const day = `${SAFETY_PER_DAY.readingMinutes / 60} hours`
   if (quote.msLeft <= 0) throw fail(`You've uploaded ${day} of video today, the most for one day. ${SAFETY_NOTE}`, 429)
   if (quote.overMs > 0) throw fail(`This video is ${minutes(durationMs ?? 0)} min, and only ${minutes(quote.msLeft)} min of today's ${day} are left. ${SAFETY_NOTE}`, 429)
@@ -156,7 +165,7 @@ export async function checkBeforeUpload(userId: string, durationMs: number | nul
 
 /**
  * A new video is counted (once, however many times it is asked) and paid for. No length yet (a link,
- * a file the browser can't read): the lower of what today's safety limit and the credits still cover is written on the video, and the worker refuses it if it turns out longer, before reading it
+ * a file the browser can't read): the lower of what the plan's hours, today's safety limit and the credits still cover is written on the video, and the worker refuses it if it turns out longer, before reading it
  * (chai-cut-backend lib/readingLimit.ts); it is charged when the length is found (readingUse).
  */
 export async function recordReading(userId: string, videoId: string, durationMs: number | null | undefined, fileSize?: number | null): Promise<void> {
@@ -174,15 +183,16 @@ export async function recordReading(userId: string, videoId: string, durationMs:
         ON CONFLICT (video_id) DO NOTHING`
       return
     }
-    const [u] = await tx<{ today: string }[]>`
-      SELECT COALESCE(SUM(duration_ms), 0) AS today FROM reading_usage
-      WHERE user_id = ${userId} AND created_at >= ${istDayStart()}`
+    const [u] = await tx<{ today: string; used: string }[]>`
+      SELECT COALESCE(SUM(duration_ms) FILTER (WHERE created_at >= ${istDayStart()}), 0) AS today,
+        COALESCE(SUM(duration_ms) FILTER (WHERE created_at >= ${allowanceSince(plan)}), 0) AS used
+      FROM reading_usage WHERE user_id = ${userId}`
     const [row] = await tx<{ id: string }[]>`
       INSERT INTO reading_usage (user_id, video_id, duration_ms, file_size) VALUES (${userId}, ${videoId}, ${durationMs ?? null}, ${size})
       ON CONFLICT (video_id) DO NOTHING RETURNING id`
     if (!row) return
     // (uploads don't matter here: checkBeforeUpload refused already)
-    const { credits, msLeft } = readingQuote(PLANS[plan], { uploads: 0, todayMs: Number(u.today) }, durationMs)
+    const { credits, msLeft } = readingQuote(PLANS[plan], { uploads: 0, usedMs: Number(u.used), todayMs: Number(u.today) }, durationMs)
     if (credits > 0) await chargeReading(userId, videoId, row.id, credits, tx)
     if (durationMs == null && creditsMode() === 'on') {
       const bought = Math.floor((await balance(userId, tx)).balance / READING_CREDITS) * 10 * 60_000

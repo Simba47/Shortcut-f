@@ -73,15 +73,29 @@ test('a paid plan counts from the start of the India month, Free counts everythi
 
 const HOUR = 60 * 60_000
 test('readingQuote: every video costs credits; no uploads limit on a paid plan; past today\'s 20 hours is refused', () => {
-  const paid = { uploadsLimit: null }
-  assert.deepEqual(readingQuote(paid, { uploads: 500, todayMs: 0 }, HOUR), { uploadsLeft: null, msLeft: 20 * HOUR, overMs: 0, credits: 90 })
+  // (a plan with more hours than a day: only the day's safety limit matters here)
+  const paid = { uploadsLimit: null, readingMinutes: 100 * 60 }
+  assert.deepEqual(readingQuote(paid, { uploads: 500, usedMs: 0, todayMs: 0 }, HOUR), { uploadsLeft: null, msLeft: 20 * HOUR, overMs: 0, credits: 90, limitedBy: 'day' })
   // 19.5 hours read today and a 1-hour video: 30 minutes are past the day's safety limit
-  assert.deepEqual(readingQuote(paid, { uploads: 4, todayMs: 19.5 * HOUR }, HOUR), { uploadsLeft: null, msLeft: 0.5 * HOUR, overMs: 0.5 * HOUR, credits: 90 })
+  assert.deepEqual(readingQuote(paid, { uploads: 4, usedMs: 19.5 * HOUR, todayMs: 19.5 * HOUR }, HOUR), { uploadsLeft: null, msLeft: 0.5 * HOUR, overMs: 0.5 * HOUR, credits: 90, limitedBy: 'day' })
   // the Trial: 2 uploads in total
-  assert.deepEqual(readingQuote(PLANS.trial, { uploads: 1, todayMs: 0 }, HOUR).uploadsLeft, 1)
+  assert.deepEqual(readingQuote(PLANS.trial, { uploads: 1, usedMs: 0, todayMs: 0 }, 10 * MIN).uploadsLeft, 1)
 })
 test('readingQuote: a video of unknown length is priced at nothing yet, and the Trial\'s uploads never go below 0', () => {
-  assert.deepEqual(readingQuote({ uploadsLimit: 2 }, { uploads: 3, todayMs: 0 }, null), { uploadsLeft: 0, msLeft: 20 * HOUR, overMs: 0, credits: 0 })
+  assert.deepEqual(readingQuote({ uploadsLimit: 2, readingMinutes: 100 * 60 }, { uploads: 3, usedMs: 0, todayMs: 0 }, null), { uploadsLeft: 0, msLeft: 20 * HOUR, overMs: 0, credits: 0, limitedBy: 'day' })
+})
+test('the plan\'s hours are back (2026-11-22): Trial 30 min in total, Starter 3 h, Pro 5 h, Agency 14 h a month', () => {
+  assert.deepEqual([PLANS.free, PLANS.trial, PLANS.starter, PLANS.creator, PLANS.agency].map(p => p.readingMinutes), [0, 30, 180, 300, 840])
+  // Starter with 2.5 hours read this month and a 1-hour video: 30 minutes are past the plan's hours
+  assert.deepEqual(readingQuote(PLANS.starter, { uploads: 6, usedMs: 2.5 * HOUR, todayMs: 0 }, HOUR),
+    { uploadsLeft: null, msLeft: 0.5 * HOUR, overMs: 0.5 * HOUR, credits: 90, limitedBy: 'plan' })
+  // all 3 hours used: nothing left, and it says the plan (it lasts longer than a day)
+  const used = readingQuote(PLANS.starter, { uploads: 9, usedMs: 3 * HOUR, todayMs: 3 * HOUR }, 5 * MIN)
+  assert.equal(used.msLeft, 0); assert.equal(used.limitedBy, 'plan')
+  // the Trial's 30 minutes: a 20-minute video after a 15-minute one is 5 minutes over
+  assert.deepEqual(readingQuote(PLANS.trial, { uploads: 1, usedMs: 15 * MIN, todayMs: 15 * MIN }, 20 * MIN).overMs, 5 * MIN)
+  // a video that fits is let through
+  assert.equal(readingQuote(PLANS.creator, { uploads: 0, usedMs: 4 * HOUR, todayMs: 0 }, 59 * MIN).overMs, 0)
 })
 
 test('Ask AI counts 1 per started hour of the video, and costs 7 credits for each', () => {

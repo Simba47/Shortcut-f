@@ -39,9 +39,11 @@ import { GMAIL_COMPOSE, openMailAppOnPhones } from '@/components/ui/email-link'
 const LANDING_PLANS = ['trial', 'starter', 'creator'] as const
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 function planFeatures(plan: (typeof PLANS)[keyof typeof PLANS]) {
-  // (plans v2, 2026-11-21: credits are the only limit, so no monthly counts to list)
+  // (plans v2, 2026-11-21: credits for what you do; the hours of video read are back since 2026-11-22)
+  const hours = plan.readingMinutes >= 60 ? count(plan.readingMinutes / 60, 'hour', 'hours') : `${plan.readingMinutes} minutes`
   return [
-    { text: 'Spend credits on anything, no monthly limits', included: true },
+    { text: `${hours} of video ${plan.allowancesOnce ? 'in total' : 'a month'}`, included: true },
+    { text: 'Spend credits on anything', included: true },
     ...(plan.uploadsLimit != null ? [{ text: `${count(plan.uploadsLimit, 'upload', 'uploads')} in total`, included: true }] : []),
     { text: 'Unlimited clips you cut yourself', included: !plan.maxClips },
     { text: `${plan.storageGb} GB of storage`, included: true },
