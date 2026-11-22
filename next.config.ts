@@ -32,6 +32,8 @@ experimental: {
     // Raise the 10 MB default cap on incoming request bodies for route handlers.
     // Without this, uploads > 10 MB are silently truncated before busboy reads them.
     middlewareClientMaxBodySize: 2 * 1024 * 1024 * 1024,
+    // Next.js's upgrade agent keeps this app on security releases (next upgrade --agent=security, 2026-11-22)
+    agentUpgrade: 'security',
   },
 }
 
