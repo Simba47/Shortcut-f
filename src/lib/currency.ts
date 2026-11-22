@@ -78,11 +78,23 @@ export function currencyFromTimeZone(tz: string | null | undefined): Currency {
 }
 
 /**
+ * Dollar payments switched on (NEXT_PUBLIC_USD_PAYMENTS=1, user 2026-11-22: "add an off switch"): only once
+ * Razorpay has enabled international payments and USD on the account. Off, everyone sees and pays rupees. Read
+ * on the server at run time and built into the pages (NEXT_PUBLIC_), so changing it needs a redeploy (Railway
+ * redeploys on a variable change).
+ */
+export function usdPaymentsOn(): boolean {
+  return process.env.NEXT_PUBLIC_USD_PAYMENTS === '1'
+}
+
+/**
  * The currency a purchase is made in: the account's, once it has paid (`locked`, from its payments), so an
  * account never switches between rupees and dollars; before that, what the page asked for; else rupees.
+ * Dollars only while they are switched on (`usdOn`), except for an account that already pays in them.
  */
-export function chooseCurrency(locked: Currency | null | undefined, asked: unknown): Currency {
+export function chooseCurrency(locked: Currency | null | undefined, asked: unknown, usdOn: boolean = usdPaymentsOn()): Currency {
   if (locked) return locked
+  if (asked === 'USD' && !usdOn) return 'INR'
   return isCurrency(asked) ? asked : 'INR'
 }
 

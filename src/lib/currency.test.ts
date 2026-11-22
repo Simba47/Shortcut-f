@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  usdPaymentsOn,
   planPriceMinor, packPriceMinor, formatMoney, currencyFromTimeZone, chooseCurrency, packSavingIn, USD_PLAN_CENTS, USD_PACK_CENTS,
 } from './currency.ts'
 import { PLANS } from './plans.ts'
@@ -56,13 +57,30 @@ test('India\'s time zone pays in rupees, anywhere else in dollars; no time zone 
 })
 
 test('an account that has paid keeps its currency whatever the page asks; before that the page decides', () => {
-  assert.equal(chooseCurrency('INR', 'USD'), 'INR', 'paid in rupees: no switching to dollars')
-  assert.equal(chooseCurrency('USD', 'INR'), 'USD', 'paid in dollars: no switching to the cheaper rupees')
-  assert.equal(chooseCurrency(null, 'USD'), 'USD')
-  assert.equal(chooseCurrency(null, 'INR'), 'INR')
-  assert.equal(chooseCurrency(null, undefined), 'INR', 'an old page that sends nothing: rupees, as before')
-  assert.equal(chooseCurrency(null, 'EUR'), 'INR', 'a currency we do not sell in')
-  assert.equal(chooseCurrency(null, { x: 1 }), 'INR')
+  assert.equal(chooseCurrency('INR', 'USD', true), 'INR', 'paid in rupees: no switching to dollars')
+  assert.equal(chooseCurrency('USD', 'INR', true), 'USD', 'paid in dollars: no switching to the cheaper rupees')
+  assert.equal(chooseCurrency(null, 'USD', true), 'USD')
+  assert.equal(chooseCurrency(null, 'INR', true), 'INR')
+  assert.equal(chooseCurrency(null, undefined, true), 'INR', 'an old page that sends nothing: rupees, as before')
+  assert.equal(chooseCurrency(null, 'EUR', true), 'INR', 'a currency we do not sell in')
+  assert.equal(chooseCurrency(null, { x: 1 }, true), 'INR')
+})
+
+test('dollars switched off (NEXT_PUBLIC_USD_PAYMENTS not 1): a page asking for dollars pays in rupees', () => {
+  assert.equal(chooseCurrency(null, 'USD', false), 'INR')
+  assert.equal(chooseCurrency(null, 'INR', false), 'INR')
+  assert.equal(chooseCurrency('USD', 'USD', false), 'USD', 'an account already paying in dollars keeps them')
+  const was = process.env.NEXT_PUBLIC_USD_PAYMENTS
+  try {
+    delete process.env.NEXT_PUBLIC_USD_PAYMENTS
+    assert.equal(usdPaymentsOn(), false, 'off unless set')
+    assert.equal(chooseCurrency(null, 'USD'), 'INR')
+    process.env.NEXT_PUBLIC_USD_PAYMENTS = '1'
+    assert.equal(usdPaymentsOn(), true)
+    assert.equal(chooseCurrency(null, 'USD'), 'USD')
+  } finally {
+    if (was === undefined) delete process.env.NEXT_PUBLIC_USD_PAYMENTS; else process.env.NEXT_PUBLIC_USD_PAYMENTS = was
+  }
 })
 
 test('the struck pack price in rupees is unchanged; in dollars it is the same credits at Starter\'s rate', () => {

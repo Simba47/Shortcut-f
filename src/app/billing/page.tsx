@@ -32,7 +32,7 @@ const KIND_WORD: Record<string, string> = { plan: 'plan credits', topup: 'top-up
 function PurchaseCard({ c, plan, testPack, accountCurrency, onBought }: { c: CreditsState; plan: string | null; testPack: boolean; accountCurrency: Currency | null; onBought: () => void }) {
   const [busy, setBusy] = useState<string | null>(null)
   // Rupees or dollars (2026-11-22): the account's once it has paid, else the time zone's guess or the switch
-  const { currency, setCurrency, locked } = useCurrency(accountCurrency)
+  const { currency, setCurrency, locked, available } = useCurrency(accountCurrency)
   const money = (minor: number | null) => (minor === null ? '' : formatMoney(minor, currency))
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -84,7 +84,7 @@ function PurchaseCard({ c, plan, testPack, accountCurrency, onBought }: { c: Cre
           </p>
         ) : (
           <>
-            {!locked && <div style={{ marginBottom: 12 }}><CurrencySwitch currency={currency} onChange={setCurrency} locked={false} /></div>}
+            {!locked && available && <div style={{ marginBottom: 12 }}><CurrencySwitch currency={currency} onChange={setCurrency} locked={false} /></div>}
             {/* Each pack: the price first and biggest (what is paid), the plans' price struck beside it, then the
                 credits and what they make (user, 2026-11-19: so the credits are not read as rupees) */}
             <div className="st-packs">

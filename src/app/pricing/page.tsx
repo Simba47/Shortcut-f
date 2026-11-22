@@ -49,7 +49,7 @@ export default function PricingPage() {
     fetch('/api/billing/plan').then(r => r.ok ? r.json() : null).then(d => d && setMine(d)).catch(() => {})
   }, [session])
   // Rupees or dollars (2026-11-22): the account's once it has paid, else the time zone's guess or the switch
-  const { currency, setCurrency, locked } = useCurrency(mine?.currency ?? null)
+  const { currency, setCurrency, locked, available } = useCurrency(mine?.currency ?? null)
   const price = (key: string) => { const m = planPriceMinor(key, currency); return m === null ? '' : formatMoney(m, currency) }
 
   async function handleSubscribe(planKey: string) {
@@ -191,7 +191,7 @@ export default function PricingPage() {
             {mine.subscription.status !== 'cancelled' && <button type="button" onClick={cancel} className="st-link">Cancel subscription</button>}
           </p>
         )}
-        <CurrencySwitch currency={currency} onChange={setCurrency} locked={locked} />
+        <CurrencySwitch currency={currency} onChange={setCurrency} locked={locked} available={available} />
         {notice && <p className="st-ok text-center" role="status">{notice}</p>}
         {error && <p className="st-err text-center" role="alert">{error}</p>}
 
