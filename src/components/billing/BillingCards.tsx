@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { amountInRupees } from '@/lib/invoice'
+import { formatMoney } from '@/lib/currency'
 import { ledgerLabel } from '@/lib/credits'
 
 // The account's money cards (user, 2026-11-19): Credit history in a popup from the account menu, Payment
@@ -62,7 +62,7 @@ export function CreditHistory() {
   )
 }
 
-type Payment = { id: string; invoiceNo: string | null; receiptNo: string | null; planName: string; amountPaise: number; paidAt: string }
+type Payment = { id: string; invoiceNo: string | null; receiptNo: string | null; planName: string; amountPaise: number; currency?: string; paidAt: string }
 type Details = { name: string | null; gstin: string | null; stateCode: string | null; address: string | null }
 type State = { code: string; name: string }
 type PaymentsInfo = { payments: Payment[]; invoiceDetails: boolean; details: Details | null; states: State[]; taxInvoices: boolean }
@@ -129,7 +129,7 @@ export function PaymentsCards({ reloadKey = 0 }: { reloadKey?: number }) {
                     <tr key={p.id} style={ROW}>
                       <td style={{ padding: '10px 8px 10px 0', whiteSpace: 'nowrap' }}>{new Date(p.paidAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
                       <td style={{ padding: 10 }}>{p.planName}</td>
-                      <td style={{ padding: 10, textAlign: 'right', whiteSpace: 'nowrap' }}>₹{amountInRupees(p.amountPaise)}</td>
+                      <td style={{ padding: 10, textAlign: 'right', whiteSpace: 'nowrap' }}>{formatMoney(p.amountPaise, p.currency ?? 'INR', { cents: true })}</td>
                       {/* (user, 2026-11-21: "Invoice" opened a receipt) each paper its own link, named by its number */}
                       <td style={{ padding: 10, whiteSpace: 'nowrap' }}>
                         {p.invoiceNo

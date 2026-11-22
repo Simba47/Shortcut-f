@@ -1,13 +1,15 @@
 // The "Payment received" email (user, 2026-11-18: designed, and a one-time pack never reads like a
 // monthly plan). Pure: builds the subject, HTML and plain text; mailer.ts sends them.
 import { COMPANY } from './company'
-import { amountInRupees } from './invoice'
+import { formatMoney } from './currency'
 import { type Purchase, renewalNote } from './purchase'
 
 export interface ReceiptEmailInput {
   name: string | null
   purchase: Purchase
   amountPaise: number
+  /** 'INR' (the default) or 'USD': amountPaise is then cents */
+  currency?: string
   paidAt: Date
   invoiceNo: string | null
   /** The receipt's number, when the main paper is the tax invoice (both are sent: user, 2026-11-21) */
@@ -37,7 +39,7 @@ function leadLine(p: Purchase): string {
 
 export function receiptEmail(r: ReceiptEmailInput): { subject: string; html: string; text: string } {
   const p = r.purchase
-  const amount = `₹${amountInRupees(r.amountPaise)}`
+  const amount = formatMoney(r.amountPaise, r.currency ?? 'INR', { cents: true })
   const doc = r.taxInvoice ? (r.receiptNo ? 'tax invoice and receipt' : 'tax invoice') : 'receipt'
   const link = `${r.base}/billing/invoice/${r.invoiceId}`
   const hello = r.name ? `Hi ${r.name.split(/\s+/)[0]},` : 'Hi,'

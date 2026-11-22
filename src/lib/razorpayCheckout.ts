@@ -24,16 +24,17 @@ export function loadCheckoutScript(src: string = CHECKOUT_SCRIPT): Promise<void>
 /**
  * Buying a credit pack (or the Trial pack): an order, Razorpay's payment window, then the server checks
  * the payment and adds the credits. What was added and the new balance; null when the window was closed
- * without paying. Throws with a message to show when anything fails.
+ * without paying. Throws with a message to show when anything fails. `currency`: what the page showed ('INR' or
+ * 'USD'); the server keeps an account that has paid in its own.
  */
-export async function buyCreditPack(packKey: string): Promise<{ credits: number; balance: number } | null> {
-  const res = await fetch('/api/billing/topup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pack: packKey }) })
+export async function buyCreditPack(packKey: string, currency?: string): Promise<{ credits: number; balance: number } | null> {
+  const res = await fetch('/api/billing/topup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pack: packKey, currency }) })
   const d = await res.json()
   if (!res.ok) throw new Error(d.error ?? 'Failed')
   await loadCheckoutScript(d.checkoutScript ?? CHECKOUT_SCRIPT)
   return new Promise((resolve, reject) => {
     const rz = new window.Razorpay({
-      key: d.keyId, order_id: d.orderId, amount: d.amountPaise, currency: 'INR',
+      key: d.keyId, order_id: d.orderId, amount: d.amountPaise, currency: d.currency ?? 'INR',
       name: 'Shortcut', description: `${d.packName}, one time`,
       prefill: d.email ? { email: d.email } : undefined, theme: { color: '#c8ff00' },
       handler: async (r: { razorpay_payment_id: string; razorpay_order_id: string; razorpay_signature: string }) => {

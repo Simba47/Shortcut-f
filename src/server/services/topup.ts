@@ -2,13 +2,14 @@ import { randomUUID } from 'node:crypto'
 import sql from '@/lib/db'
 import { TOPUP_CREDIT_DAYS, TRIAL_DAYS, findTopupPack, testPackAllowed } from '@/lib/credits'
 import {
-  checkoutScriptUrl, createRazorpayOrder, fetchRazorpayPayment, paidPayment, rupeesToPaise, verifyOrderSignature,
+  checkoutScriptUrl, createRazorpayOrder, fetchRazorpayPayment, paidPayment, verifyOrderSignature,
   type TopupChange,
 } from '@/lib/razorpay'
+import { chooseCurrency, formatMoney, packPriceMinor } from '@/lib/currency'
 import { ensureCreditsSchema } from './creditsSchema'
 import { balance, grant } from './credits'
 import { getUserPlan } from './quota'
-import { trialSummary } from './billing'
+import { accountCurrency, trialSummary } from './billing'
 import { recordPayment } from './invoices'
 
 const fail = (message: string, status: number) => Object.assign(new Error(message), { status, expose: true })
@@ -16,9 +17,10 @@ const fail = (message: string, status: number) => Object.assign(new Error(messag
 /**
  * Starts buying a credit pack: an order at Razorpay for the pack's price (taken from our own pack
  * table, never from the browser), recorded as ours, and what the payment window needs. The ₹1 test
- * pack only for an email in TEST_PACK_EMAILS, on any plan.
+ * pack only for an email in TEST_PACK_EMAILS, on any plan. In rupees or dollars (`askedCurrency`, what the
+ * page showed); an account that has paid before keeps its own currency.
  */
-export async function startTopup(userId: string, packKey: unknown, email?: string | null) {
+export async function startTopup(userId: string, packKey: unknown, email?: string | null, askedCurrency?: unknown) {
   const pack = findTopupPack(packKey, { test: testPackAllowed(email) })
   if (!pack) throw fail('Unknown credit pack', 400)
   const plan = await getUserPlan(userId)
@@ -31,12 +33,17 @@ export async function startTopup(userId: string, packKey: unknown, email?: strin
     throw fail('Top-ups are for paid plans. Choose a plan to get more credits.', 403)
   }
   await ensureCreditsSchema()
-  const amountPaise = rupeesToPaise(pack.price)
+  const currency = chooseCurrency(await accountCurrency(userId), askedCurrency)
+  const amountPaise = packPriceMinor(pack.key, currency)
+  if (amountPaise === null) throw fail(`That pack is not sold in ${currency}.`, 400)
   const order = await createRazorpayOrder(amountPaise, `topup_${randomUUID().replace(/-/g, '').slice(0, 24)}`, {
     kind: 'topup', user_id: userId, pack: pack.key, credits: String(pack.credits),
-  })
-  await sql`INSERT INTO topup_orders (order_id, user_id, pack, credits, amount_paise) VALUES (${order.id}, ${userId}, ${pack.key}, ${pack.credits}, ${amountPaise})`
-  return { orderId: order.id, amountPaise, credits: pack.credits, packName: pack.key === 'trial' ? `Trial pack, ${pack.credits} credits` : `${pack.credits} credits`, keyId: process.env.RAZORPAY_KEY_ID, checkoutScript: checkoutScriptUrl() }
+  }, currency)
+  await sql`INSERT INTO topup_orders (order_id, user_id, pack, credits, amount_paise, currency) VALUES (${order.id}, ${userId}, ${pack.key}, ${pack.credits}, ${amountPaise}, ${currency})`
+  return {
+    orderId: order.id, amountPaise, currency, priceLabel: formatMoney(amountPaise, currency), credits: pack.credits,
+    packName: pack.key === 'trial' ? `Trial pack, ${pack.credits} credits` : `${pack.credits} credits`, keyId: process.env.RAZORPAY_KEY_ID, checkoutScript: checkoutScriptUrl(),
+  }
 }
 
 /**
@@ -66,11 +73,12 @@ export async function applyTopup(c: TopupChange): Promise<{ granted: boolean }> 
 export async function completeTopup(userId: string, p: { orderId: string; paymentId: string; signature: string }) {
   if (!verifyOrderSignature(p, process.env.RAZORPAY_KEY_SECRET ?? '')) throw fail('The payment could not be verified.', 400)
   await ensureCreditsSchema()
-  const [own] = await sql<{ pack: string; credits: number; amount_paise: number }[]>`SELECT pack, credits, amount_paise FROM topup_orders WHERE order_id = ${p.orderId} AND user_id = ${userId}`
+  const [own] = await sql<{ pack: string; credits: number; amount_paise: number; currency: string }[]>`SELECT pack, credits, amount_paise, currency FROM topup_orders WHERE order_id = ${p.orderId} AND user_id = ${userId}`
   if (!own) throw fail('Unknown order', 404)
   const remote = await fetchRazorpayPayment(p.paymentId)
   const payment = paidPayment(remote)
-  if (!payment || remote.order_id !== p.orderId || payment.amountPaise < own.amount_paise) {
+  // (in the order's own currency: 700 cents is not 700 paise)
+  if (!payment || remote.order_id !== p.orderId || payment.currency !== own.currency || payment.amountPaise < own.amount_paise) {
     throw fail('The payment is not complete yet. If money was taken, your credits will appear shortly.', 409)
   }
   // (an order for the test pack was only made for someone allowed it)

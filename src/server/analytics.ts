@@ -82,18 +82,18 @@ export function queueServerEvent(name: string, params: ServerParams, userId: str
 }
 
 /** The purchase event's details (plans, top-ups, the Trial pack); null for the ₹1 test pack */
-export function purchaseParams(p: { transactionId: string; plan: string; itemName: string; amountPaise: number }): ServerParams | null {
+export function purchaseParams(p: { transactionId: string; plan: string; itemName: string; amountPaise: number; currency?: string }): ServerParams | null {
   if (p.plan === 'topup:test') return null
   const value = Math.round(p.amountPaise) / 100
   const category = p.plan === 'topup:trial' ? 'trial' : p.plan.startsWith('topup:') ? 'topup' : 'plan'
   return {
-    transaction_id: p.transactionId, value, currency: 'INR',
+    transaction_id: p.transactionId, value, currency: p.currency ?? 'INR',
     items: [{ item_id: p.plan, item_name: p.itemName, item_category: category, price: value, quantity: 1 }],
   }
 }
 
 /** A payment, once (invoices.ts recordPayment) */
-export function queuePurchase(userId: string, p: { transactionId: string; plan: string; itemName: string; amountPaise: number }): void {
+export function queuePurchase(userId: string, p: { transactionId: string; plan: string; itemName: string; amountPaise: number; currency?: string }): void {
   const params = purchaseParams(p)
   if (params) queueServerEvent('purchase', params, userId)
 }

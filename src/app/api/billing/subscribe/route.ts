@@ -41,7 +41,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const sub = await startSubscription(user.id, plan)
+    // body.currency: what the page showed ('INR' or 'USD'); an account that has paid keeps its own
+    const sub = await startSubscription(user.id, plan, body?.currency)
     return NextResponse.json({ ...sub, keyId: process.env.RAZORPAY_KEY_ID, email: user.email, checkoutScript: checkoutScriptUrl() })
   } catch (err) {
     return apiError(err)

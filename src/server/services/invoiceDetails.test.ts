@@ -61,6 +61,36 @@ test('a Pro account (and Agency, not sold since 2026-11-21) gets its company det
   }
 })
 
+test('a payment in dollars is an export: no GST, place of supply outside India, kept in cents with the rupees settled', opts, async () => {
+  for (const acct of ['starter', 'creator']) {
+    const u = await newUser(acct)
+    await saveProfile(u)   // an Indian state saved on the profile does not make a dollar payment Indian
+    const id = `pay_usd_${Math.random().toString(36).slice(2)}`
+    const rowId = await invoices.recordPayment(u, null, 'topup:medium', { id, amountPaise: 700, currency: 'USD', paidAt: new Date(), baseAmountPaise: 61600 })
+    assert.ok(rowId)
+    const [p] = await sql<{ currency: string; amount_paise: number; base_amount_paise: number | null; gst_rate: string; taxable_paise: number; cgst_paise: number; sgst_paise: number; igst_paise: number; place_of_supply: string }[]>`
+      SELECT currency, amount_paise, base_amount_paise, gst_rate, taxable_paise, cgst_paise, sgst_paise, igst_paise, place_of_supply FROM payments WHERE id = ${rowId}`
+    assert.equal(p.currency, 'USD', acct)
+    assert.equal(p.amount_paise, 700)
+    assert.equal(p.base_amount_paise, 61600)
+    assert.equal(Number(p.gst_rate), 0)
+    assert.deepEqual([p.taxable_paise, p.cgst_paise, p.sgst_paise, p.igst_paise], [700, 0, 0, 0])
+    assert.equal(p.place_of_supply, '96')
+    const inv = (await invoices.listPayments(u))[0]
+    assert.equal(inv.currency, 'USD')
+  }
+})
+
+test('a rupee payment is still taxed as before and is recorded as INR', opts, async () => {
+  const u = await newUser('starter')
+  const id = `pay_inr_${Math.random().toString(36).slice(2)}`
+  const rowId = await invoices.recordPayment(u, null, 'starter', { id, amountPaise: 59900, currency: 'INR', paidAt: new Date() })
+  const [p] = await sql<{ currency: string; gst_rate: string; taxable_paise: number }[]>`SELECT currency, gst_rate, taxable_paise FROM payments WHERE id = ${rowId}`
+  assert.equal(p.currency, 'INR')
+  assert.equal(Number(p.gst_rate), invoices.sellerDetails().gstRate)
+  assert.ok(p.taxable_paise < 59900 || invoices.sellerDetails().gstRate === 0)
+})
+
 test('the first Pro payment uses the details even before the account shows Pro', opts, async () => {
   const u = await newUser('starter')
   await saveProfile(u)

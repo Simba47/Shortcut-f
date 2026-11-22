@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { findTopupPack, type TopupPackKey } from './credits'
+import { isCurrency, packPriceMinor, type Currency } from './currency'
 
 // Razorpay, over its REST API (no SDK: three calls and two signature checks). Keys come from
 // RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET; the webhook is signed with RAZORPAY_WEBHOOK_SECRET.
@@ -78,9 +79,12 @@ export function verifyWebhookSignature(rawBody: string, signature: string | null
 }
 
 type SubEntity = { id?: string; status?: string; current_end?: number | null; notes?: Record<string, unknown> | unknown[] }
-/** A payment that went through, as the invoice needs it */
-export interface PaidPayment { id: string; amountPaise: number; paidAt: Date }
-type PaymentEntity = { id?: string; amount?: number; status?: string; created_at?: number }
+/**
+ * A payment that went through, as the invoice needs it. amountPaise is in the smallest unit of `currency` (cents for
+ * dollars); a payment in dollars also carries what Razorpay settled in rupees (`baseAmountPaise`), when it says.
+ */
+export interface PaidPayment { id: string; amountPaise: number; currency: Currency; paidAt: Date; baseAmountPaise?: number }
+type PaymentEntity = { id?: string; amount?: number; currency?: string; status?: string; created_at?: number; base_amount?: number; base_currency?: string }
 export type SubscriptionChange =
   | { kind: 'active'; subscriptionId: string; userId: string; plan: PaidPlanKey; expiresAt: Date | null; payment?: PaidPayment }
   | { kind: 'ended'; subscriptionId: string; userId: string | null; plan: string | null; expiresAt: Date | null }
@@ -92,7 +96,11 @@ export type SubscriptionChange =
 /** The payment in an event, when it was taken ('captured' or 'authorized') */
 export function paidPayment(p: PaymentEntity | undefined | null): PaidPayment | undefined {
   if (!p?.id || typeof p.amount !== 'number' || !(p.status === 'captured' || p.status === 'authorized')) return undefined
-  return { id: p.id, amountPaise: p.amount, paidAt: new Date((p.created_at ?? Math.floor(Date.now() / 1000)) * 1000) }
+  // (no currency said: rupees, as every payment was before dollars; one we don't sell in is not a payment of ours)
+  const currency = p.currency === undefined ? 'INR' : p.currency
+  if (!isCurrency(currency)) return undefined
+  const base = currency !== 'INR' && p.base_currency === 'INR' && typeof p.base_amount === 'number' ? { baseAmountPaise: p.base_amount } : {}
+  return { id: p.id, amountPaise: p.amount, currency, paidAt: new Date((p.created_at ?? Math.floor(Date.now() / 1000)) * 1000), ...base }
 }
 
 export function subscriptionChange(event: { event?: string; payload?: { subscription?: { entity?: SubEntity }; payment?: { entity?: PaymentEntity } } } | null): SubscriptionChange | null {
@@ -116,11 +124,12 @@ export function subscriptionChange(event: { event?: string; payload?: { subscrip
 
 /** A top-up that was paid in full, as the credits need it */
 export interface TopupChange { kind: 'topup'; orderId: string; userId: string; pack: TopupPackKey; credits: number; payment: PaidPayment }
-type OrderEntity = { id?: string; amount_paid?: number; notes?: Record<string, unknown> | unknown[] }
+type OrderEntity = { id?: string; amount_paid?: number; currency?: string; notes?: Record<string, unknown> | unknown[] }
 
 /**
  * What an `order.paid` event means: a pack bought and paid in full. The credits come from our own
- * pack table by its key, never from the notes, and the amount paid must cover the pack's price.
+ * pack table by its key, never from the notes, and the amount paid must cover the pack's price in the order's
+ * currency (rupees or dollars), which must be the payment's too.
  */
 export function topupChange(event: { event?: string; payload?: { order?: { entity?: OrderEntity }; payment?: { entity?: PaymentEntity } } } | null): TopupChange | null {
   if (event?.event !== 'order.paid') return null
@@ -132,7 +141,10 @@ export function topupChange(event: { event?: string; payload?: { order?: { entit
   // the test pack too: applyTopup still needs our own order for this user, made only for someone allowed it
   const pack = findTopupPack(notes.pack, { test: true })
   if (notes.kind !== 'topup' || !userId || !pack) return null
-  if ((order.amount_paid ?? payment.amountPaise) < rupeesToPaise(pack.price)) return null
+  const currency = order.currency === undefined ? 'INR' : order.currency
+  if (!isCurrency(currency) || payment.currency !== currency) return null
+  const price = packPriceMinor(pack.key, currency)
+  if (price === null || (order.amount_paid ?? payment.amountPaise) < price) return null
   return { kind: 'topup', orderId: order.id, userId, pack: pack.key, credits: pack.credits, payment }
 }
 
@@ -154,9 +166,9 @@ async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Pr
   return JSON.parse(text) as T
 }
 
-/** A monthly plan at `amountPaise`, made once and then reused (see billing.ts) */
-export const createRazorpayPlan = (name: string, amountPaise: number) =>
-  call<{ id: string }>('POST', '/plans', { period: 'monthly', interval: 1, item: { name, amount: amountPaise, currency: 'INR' } })
+/** A monthly plan at `amountPaise` (the smallest unit of `currency`), made once and then reused (see billing.ts) */
+export const createRazorpayPlan = (name: string, amountPaise: number, currency: Currency = 'INR') =>
+  call<{ id: string }>('POST', '/plans', { period: 'monthly', interval: 1, item: { name, amount: amountPaise, currency } })
 
 /** A subscription to a plan; `total_count` is the number of billing cycles (10 years of months) */
 export const createRazorpaySubscription = (planId: string, notes: Record<string, string>) =>
@@ -170,11 +182,11 @@ export const fetchRazorpaySubscription = (subscriptionId: string) =>
   call<{ id: string; status: string; current_end?: number | null; notes?: Record<string, unknown> }>('GET', `/subscriptions/${subscriptionId}`)
 
 export const fetchRazorpayPayment = (paymentId: string) =>
-  call<PaymentEntity & { currency?: string; order_id?: string }>('GET', `/payments/${paymentId}`)
+  call<PaymentEntity & { order_id?: string }>('GET', `/payments/${paymentId}`)
 
 /** An order for a one-time payment (a top-up pack); the checkout window pays it and the webhook says when it is paid */
-export const createRazorpayOrder = (amountPaise: number, receipt: string, notes: Record<string, string>) =>
-  call<{ id: string; amount: number; status: string }>('POST', '/orders', { amount: amountPaise, currency: 'INR', receipt, notes })
+export const createRazorpayOrder = (amountPaise: number, receipt: string, notes: Record<string, string>, currency: Currency = 'INR') =>
+  call<{ id: string; amount: number; currency?: string; status: string }>('POST', '/orders', { amount: amountPaise, currency, receipt, notes })
 
 export const fetchRazorpayOrder = (orderId: string) =>
   call<{ id: string; amount: number; amount_paid?: number; status: string; notes?: Record<string, unknown> }>('GET', `/orders/${orderId}`)

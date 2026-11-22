@@ -5,7 +5,8 @@ import fontkit from '@pdf-lib/fontkit'
 import type { InvoiceRow } from '@/server/services/invoices'
 import { type Purchase, renewalNote } from '@/lib/purchase'
 import { COMPANY } from '@/lib/company'
-import { amountInRupees, rupeesInWords, stateName } from '@/lib/invoice'
+import { amountInWords, stateName } from '@/lib/invoice'
+import { formatMoney } from '@/lib/currency'
 
 // The invoice / receipt as an A4 PDF, attached to the "Payment received" email (user, 2026-11-18).
 // Drawn to look like the page (app/billing/invoice/[id]/InvoiceSheet.tsx): keep the two in step.
@@ -31,12 +32,14 @@ const MARK_BOTTOM = 'M66 116H10Q4 116 8 112L68 52A32 32 0 0 1 66 116Z'
 const hex = (h: string): RGB => rgb(parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255)
 const C = { ink: hex('#0a0a0a'), body: hex('#3f3f46'), muted: hex('#71717a'), faint: hex('#a1a1aa'), rule: hex('#e4e4e7'), lime: hex('#c8ff00'), white: hex('#ffffff') }
 const day = (d: Date) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' })
-const money = (p: number) => `₹${amountInRupees(p)}`
 
 export async function invoicePdf(inv: InvoiceRow, purchase: Purchase): Promise<Uint8Array> {
   const s = inv.seller
   const taxed = !!s?.taxInvoice
   const title = taxed ? 'Tax invoice' : 'Receipt'
+  const money = (p: number) => formatMoney(p, inv.currency, { cents: true })
+  // A payment in dollars: an export of services under the LUT, no GST (2026-11-22)
+  const exported = inv.currency !== 'INR'
   const pdf = await PDFDocument.create()
   pdf.registerFontkit(fontkit)
   const [regBytes, semiBytes, heavyBytes] = await fontBytes()
@@ -140,7 +143,7 @@ export async function invoicePdf(inv: InvoiceRow, purchase: Purchase): Promise<U
   const top = y
   label('Amount in words', M, y)
   let wy = y - 14
-  for (const l of wrap(rupeesInWords(inv.amountPaise), 9.5, W / 2 - 20)) { text(l, M, wy, 9.5, reg, C.body); wy -= 14 }
+  for (const l of wrap(amountInWords(inv.amountPaise, inv.currency), 9.5, W / 2 - 20)) { text(l, M, wy, 9.5, reg, C.body); wy -= 14 }
   const tx = M + W - 210
   const rows: [string, string][] = taxed
     ? [['Taxable value', money(inv.taxablePaise)],
@@ -158,7 +161,8 @@ export async function invoicePdf(inv: InvoiceRow, purchase: Purchase): Promise<U
   page.drawLine({ start: { x: M, y }, end: { x: M + W, y }, thickness: 0.75, color: C.rule, dashArray: [3, 3] })
   y -= 18
   const note = renewalNote(purchase)
-  const notes = [...(note ? [note] : []), `Payment ID ${inv.razorpayPaymentId}${taxed ? ' · The price includes GST.' : ''}`,
+  const notes = [...(note ? [note] : []), `Payment ID ${inv.razorpayPaymentId}${taxed && !exported ? ' · The price includes GST.' : ''}`,
+    ...(exported && taxed ? [`Supply meant for export under LUT without payment of IGST${s?.lut ? ` (LUT ARN ${s.lut})` : ''}.`] : []),
     // (an invoice made after the payment, for one paid before we had a GSTIN: when it was made; and the other paper)
     ...(taxed && inv.invoiceIssuedAt ? [`Issued on ${day(new Date(inv.invoiceIssuedAt))}.`] : []),
     ...(inv.seeAlso ? [`For this payment there is also: ${inv.seeAlso}`] : []),
