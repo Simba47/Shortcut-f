@@ -29,6 +29,8 @@ import { teamSeats } from '@/lib/shared/brandTeam'
 import { canKeep } from '@/lib/expiry'
 import { TRIAL_PACK, TRIAL_DAYS } from '@/lib/credits'
 import { COMPANY } from '@/lib/company'
+import { formatMoney, planPriceMinor, type Currency } from '@/lib/currency'
+import { useCurrency } from '@/lib/useCurrency'
 import { GMAIL_COMPOSE, openMailAppOnPhones } from '@/components/ui/email-link'
 
 // (user, 2026-11-14) The landing page shows the real plans, read from lib/plans.ts — the same source as the
@@ -58,21 +60,23 @@ function planFeatures(plan: (typeof PLANS)[keyof typeof PLANS]) {
   ]
 }
 
-const PRICING_PLANS: PricingPlan[] = LANDING_PLANS.map(key => {
+/** The plans for the landing page, in rupees or dollars (2026-11-22: dollars outside India) */
+const pricingPlans = (currency: Currency): PricingPlan[] => LANDING_PLANS.filter(key => planPriceMinor(key, currency) !== null).map(key => {
   const plan = PLANS[key]
   const once = plan.oneTime
+  const price = (planPriceMinor(key, currency) ?? 0) / 100
   return {
     name: plan.name,
-    price: plan.price,
+    price,
     // (user, 2026-11-14) Annual shown for now while the plans are discussed: 20% off the monthly price.
     // Billing is monthly only — the buttons still lead to the monthly plans.
-    yearlyPrice: Math.round(plan.price * 0.8),
+    yearlyPrice: currency === 'INR' ? Math.round(price * 0.8) : Math.round(price * 80) / 100,
     once,
     // (user's website copy, 2026-11-21)
     headline: once ? `${TRIAL_PACK.credits} credits to try everything.` : `${plan.monthlyCredits.toLocaleString('en-IN')} credits every month.`,
     subline: once ? `Lasts ${TRIAL_DAYS} days. No subscription.` : 'Unused credits roll over one month.',
     features: planFeatures(plan),
-    buttonText: once ? `Start for ₹${plan.price}` : `Choose ${plan.name}`,
+    buttonText: once ? `Start for ${formatMoney(planPriceMinor(key, currency) ?? 0, currency)}` : `Choose ${plan.name}`,
     // Sign up first (landing visitors are signed out), then straight to the Pricing page to pay
     // (lib/nextPath.ts keeps ?callbackUrl through the email code and Google)
     href: '/signup?callbackUrl=%2Fpricing',
@@ -419,6 +423,8 @@ function SquiggleArrow() {
 }
 
 export function LandingPage() {
+  // Prices in rupees in India and dollars elsewhere, by the visitor's time zone (or their pick on the Plans page)
+  const { currency } = useCurrency()
   // One progress value drives the whole hero → features transition:
   // 0 when the features sheet enters the bottom of the screen, 1 when it reaches the top.
   const sheetRef = useRef<HTMLDivElement>(null)
@@ -752,7 +758,9 @@ export function LandingPage() {
       {/* ── PRICING ── */}
       <SectionTransition id="pricing" variant="zoom" className="section-wrap">
         <PricingSection
-          plans={PRICING_PLANS}
+          plans={pricingPlans(currency)}
+          currency={currency}
+          locale={currency === 'INR' ? 'en-IN' : 'en-US'}
           eyebrow="Pricing"
           title="Simple Plans. More Content. Less Editing."
           description="Choose a plan that matches how much content you create."

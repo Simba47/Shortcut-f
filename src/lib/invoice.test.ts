@@ -1,6 +1,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { splitTax, fiscalYear, formatInvoiceNo, stateName, normalizeGstin, amountInRupees } from './invoice.ts'
+import { splitTax, fiscalYear, formatInvoiceNo, stateName, normalizeGstin, amountInRupees, amountInWords, rupeesInWords } from './invoice.ts'
+
+test('an amount in words in its currency: dollars for an export invoice, rupees as before', () => {
+  assert.equal(amountInWords(900, 'USD'), 'US Dollars Nine Only')
+  assert.equal(amountInWords(199, 'USD'), 'US Dollars One and Ninety-Nine Cents Only')
+  assert.equal(amountInWords(3900, 'USD'), 'US Dollars Thirty-Nine Only')
+  assert.equal(amountInWords(59900, 'INR'), rupeesInWords(59900))
+})
+
+test('place of supply 96 is outside India (a payment in dollars)', () => {
+  assert.equal(stateName('96'), 'Outside India')
+})
 
 test('GST inside the price: ₹599 at 18% is ₹507.63 + ₹91.37, split half and half within the state', () => {
   const t = splitTax(59900, 18, true)

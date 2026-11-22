@@ -15,7 +15,12 @@ export function ensureBillingSchema(): Promise<void> {
     // so the cache is kept per key: swapping keys makes new plans instead of reusing ones that are not there
     await sql`ALTER TABLE billing_plans ADD COLUMN IF NOT EXISTS key_id TEXT NOT NULL DEFAULT ''`
     await sql`ALTER TABLE billing_plans DROP CONSTRAINT IF EXISTS billing_plans_pkey`
-    await sql`CREATE UNIQUE INDEX IF NOT EXISTS billing_plans_uq ON billing_plans (plan, amount_paise, key_id)`
+    // (2026-11-22) Plans in dollars too: a Razorpay plan has one currency, so the cache is kept per currency
+    // (amount_paise is then cents; rows from before are rupees). Its unique index replaces billing_plans_uq
+    // (plan, amount_paise, key_id), which is dropped once.
+    await sql`ALTER TABLE billing_plans ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'INR'`
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS billing_plans_cur_uq ON billing_plans (plan, amount_paise, key_id, currency)`
+    await sql`DROP INDEX IF EXISTS billing_plans_uq`
     // One row per webhook event handled: a delivery Razorpay repeats is recognised and skipped
     await sql`
       CREATE TABLE IF NOT EXISTS billing_events (
@@ -51,6 +56,10 @@ export function ensureBillingSchema(): Promise<void> {
     // (payments taken before the GSTIN was set got theirs afterwards: invoices.ts ensureDocuments)
     await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS receipt_no TEXT UNIQUE`
     await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS invoice_issued_at TIMESTAMPTZ`
+    // (2026-11-22) A payment in dollars (an export of services: no GST, place of supply 96): amount_paise and the
+    // tax columns are then cents, and base_amount_paise is what Razorpay settled in rupees, when it said
+    await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'INR'`
+    await sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS base_amount_paise INTEGER`
     // The last invoice number of each financial year (numbers run 1, 2, 3 … with no gaps)
     await sql`CREATE TABLE IF NOT EXISTS billing_counters (fy TEXT PRIMARY KEY, last INTEGER NOT NULL)`
     // What a customer wants on their invoices

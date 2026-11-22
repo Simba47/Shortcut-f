@@ -10,12 +10,15 @@ import { sendReceiptEmail } from '@/modules/auth/mailer'
 import { describePurchase } from '@/lib/purchase'
 import { invoiceFileName, invoicePdf } from '@/server/services/invoicePdf'
 import { queuePurchase } from '@/server/analytics'
+import { OUTSIDE_INDIA, type Currency } from '@/lib/currency'
 
 /**
  * Who we invoice as. Set these for real GST invoices; without a GSTIN the paper says "Payment
  * receipt", not "Tax invoice" (a tax invoice must carry the seller's GSTIN).
  *   COMPANY_GSTIN, COMPANY_STATE_CODE (default: the first two digits of the GSTIN, else 36 Telangana),
- *   GST_RATE (default 18), INVOICE_SAC (the service's accounting code), COMPANY_ADDRESS (one line)
+ *   GST_RATE (default 18), INVOICE_SAC (the service's accounting code), COMPANY_ADDRESS (one line),
+ *   COMPANY_LUT_ARN: the ARN of this financial year's Letter of Undertaking (GST RFD-11), printed on every
+ *   invoice for a payment in dollars (an export of services without IGST). Renew it every April.
  */
 export function sellerDetails() {
   const gstin = normalizeGstin(process.env.COMPANY_GSTIN)
@@ -31,13 +34,14 @@ export function sellerDetails() {
     sac: process.env.INVOICE_SAC || null,
     gstRate: Number.isFinite(rate) && rate >= 0 ? rate : 18,
     taxInvoice: !!gstin,
+    lut: process.env.COMPANY_LUT_ARN?.trim() || null,
   }
 }
 
 /** The seller as printed on an invoice, fixed when it is issued */
-export interface SellerSnapshot { legalName: string; gstin: string | null; stateCode: string; address: string; email: string; sac: string | null; taxInvoice: boolean }
+export interface SellerSnapshot { legalName: string; gstin: string | null; stateCode: string; address: string; email: string; sac: string | null; taxInvoice: boolean; lut?: string | null }
 const sellerSnapshot = (s: ReturnType<typeof sellerDetails>): SellerSnapshot => ({
-  legalName: s.legalName, gstin: s.gstin, stateCode: s.stateCode, address: s.address, email: s.email, sac: s.sac, taxInvoice: s.taxInvoice,
+  legalName: s.legalName, gstin: s.gstin, stateCode: s.stateCode, address: s.address, email: s.email, sac: s.sac, taxInvoice: s.taxInvoice, lut: s.lut,
 })
 
 export type Customer = { name: string | null; email: string; gstin: string | null; stateCode: string | null; address: string | null }
@@ -92,9 +96,15 @@ export async function recordPayment(userId: string, subscriptionId: string | nul
     const details = !!(PLANS[plan as keyof typeof PLANS]?.gstInvoices || PLANS[u?.plan as keyof typeof PLANS]?.gstInvoices)
     const [bp] = details ? await tx<{ name: string | null; gstin: string | null; state_code: string | null; address: string | null }[]>`
       SELECT name, gstin, state_code, address FROM billing_profiles WHERE user_id = ${userId}` : []
-    // Place of supply: the customer's state; when we do not know it, ours
-    const placeOfSupply = bp?.state_code || seller.stateCode
-    const tax = splitTax(p.amountPaise, seller.gstRate, placeOfSupply === seller.stateCode)
+    // A payment in dollars is an export of services (2026-11-22): zero-rated under the LUT, so no GST, and the
+    // place of supply is outside India (96). Otherwise the customer's state; when we do not know it, ours.
+    // (no currency said: rupees, as every payment was before dollars)
+    const currency: Currency = p.currency ?? 'INR'
+    const exported = currency !== 'INR'
+    if (exported && !seller.lut) console.error('[billing] a payment in dollars without COMPANY_LUT_ARN set: its invoice has no LUT line')
+    const placeOfSupply = exported ? OUTSIDE_INDIA : bp?.state_code || seller.stateCode
+    const gstRate = exported ? 0 : seller.gstRate
+    const tax = splitTax(p.amountPaise, gstRate, placeOfSupply === seller.stateCode)
     const fy = fiscalYear(p.paidAt)
     // Its two papers (user, 2026-11-21): a receipt always (its own numbers), and a tax invoice when we have a GSTIN
     const receiptNo = formatReceiptNo(fy, await nextNumber(tx, receiptCounterKey(fy)))
@@ -102,16 +112,17 @@ export async function recordPayment(userId: string, subscriptionId: string | nul
     const customer: Customer = { name: bp?.name || u?.name || null, email: u?.email ?? '', gstin: bp?.gstin ?? null, stateCode: bp?.state_code ?? null, address: bp?.address ?? null }
     const [row] = await tx<{ id: string }[]>`
       INSERT INTO payments (user_id, razorpay_payment_id, razorpay_subscription_id, plan, amount_paise, paid_at, invoice_no, receipt_no,
-        gst_rate, taxable_paise, cgst_paise, sgst_paise, igst_paise, place_of_supply, customer, seller)
+        gst_rate, taxable_paise, cgst_paise, sgst_paise, igst_paise, place_of_supply, customer, seller, currency, base_amount_paise)
       VALUES (${userId}, ${p.id}, ${subscriptionId}, ${plan}, ${p.amountPaise}, ${p.paidAt}, ${invoiceNo}, ${receiptNo},
-        ${seller.gstRate}, ${tax.taxablePaise}, ${tax.cgstPaise}, ${tax.sgstPaise}, ${tax.igstPaise}, ${placeOfSupply}, ${tx.json(customer as never)}, ${tx.json(sellerSnapshot(seller) as never)})
+        ${gstRate}, ${tax.taxablePaise}, ${tax.cgstPaise}, ${tax.sgstPaise}, ${tax.igstPaise}, ${placeOfSupply}, ${tx.json(customer as never)}, ${tx.json(sellerSnapshot(seller) as never)},
+        ${currency}, ${p.baseAmountPaise ?? null})
       RETURNING id`
     return row.id
   })
   if (paymentRowId) {
     await emailReceipt(paymentRowId).catch(e => console.error('[billing] receipt email failed:', e instanceof Error ? e.message : e))
     // Google Analytics: the purchase, once per payment like the invoice (server/analytics.ts; never throws)
-    queuePurchase(userId, { transactionId: p.id, plan, itemName: PLANS[plan as keyof typeof PLANS]?.name ?? topupLabel(plan) ?? plan, amountPaise: p.amountPaise })
+    queuePurchase(userId, { transactionId: p.id, plan, itemName: PLANS[plan as keyof typeof PLANS]?.name ?? topupLabel(plan) ?? plan, amountPaise: p.amountPaise, currency: p.currency ?? 'INR' })
   }
   return paymentRowId
 }
@@ -193,13 +204,15 @@ export interface InvoiceRow {
   seeAlso?: string | null
   gstRate: number; taxablePaise: number; cgstPaise: number; sgstPaise: number; igstPaise: number
   placeOfSupply: string | null; customer: Customer; seller: SellerSnapshot; razorpayPaymentId: string
+  /** The money's currency ('INR' or 'USD': every amount above is in its smallest unit), and for dollars what reached us in rupees */
+  currency: Currency; baseAmountPaise: number | null
 }
 
 type DbRow = {
   id: string; invoice_no: string | null; plan: string; amount_paise: number; paid_at: Date; gst_rate: string
   taxable_paise: number; cgst_paise: number; sgst_paise: number; igst_paise: number; place_of_supply: string | null
   customer: Customer; seller: SellerSnapshot; razorpay_payment_id: string
-  receipt_no: string | null; invoice_issued_at: Date | null
+  receipt_no: string | null; invoice_issued_at: Date | null; currency?: string | null; base_amount_paise?: number | null
 }
 const toInvoice = (r: DbRow): InvoiceRow => ({
   id: r.id, invoiceNo: r.invoice_no, plan: r.plan, planName: PLANS[r.plan as keyof typeof PLANS]?.name ?? topupLabel(r.plan) ?? r.plan,
@@ -207,6 +220,7 @@ const toInvoice = (r: DbRow): InvoiceRow => ({
   cgstPaise: r.cgst_paise, sgstPaise: r.sgst_paise, igstPaise: r.igst_paise, placeOfSupply: r.place_of_supply,
   customer: r.customer, seller: r.seller, razorpayPaymentId: r.razorpay_payment_id,
   receiptNo: r.receipt_no ?? null, invoiceIssuedAt: r.invoice_issued_at ?? null,
+  currency: r.currency === 'USD' ? 'USD' : 'INR', baseAmountPaise: r.base_amount_paise ?? null,
 })
 
 export type PaperKind = 'receipt' | 'invoice'
@@ -255,7 +269,7 @@ async function emailReceipt(paymentRowId: string) {
   }))).filter((x): x is { filename: string; content: Uint8Array } => !!x)
   const main = asPaper(inv, papersOf(inv)[0])!
   await sendReceiptEmail({
-    to: inv.customer.email, name: inv.customer.name, purchase, amountPaise: inv.amountPaise, pdfs,
+    to: inv.customer.email, name: inv.customer.name, purchase, amountPaise: inv.amountPaise, currency: inv.currency, pdfs,
     invoiceNo: main.invoiceNo, receiptNo: inv.invoiceNo ? inv.receiptNo : null, paidAt: inv.paidAt, paymentId: inv.razorpayPaymentId, invoiceId: inv.id, taxInvoice: !!main.seller?.taxInvoice,
   })
   await sql`UPDATE payments SET emailed_at = now() WHERE id = ${paymentRowId}`

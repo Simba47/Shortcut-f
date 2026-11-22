@@ -26,7 +26,7 @@ const CARDS: LegalCard[] = [
   {
     icon: CreditCard,
     title: 'Subscription Payments',
-    body: <>Paid plans are billed monthly in advance, in Indian Rupees (₹), and renew automatically until you cancel. Because a plan’s credits and features are available the moment it starts, a month that has started is not refunded, in full or in part, except in the cases listed under ‘When We Refund’.</>,
+    body: <>Paid plans are billed monthly in advance, in Indian Rupees (₹) in India or US Dollars ($) elsewhere, and renew automatically until you cancel. Because a plan’s credits and features are available the moment it starts, a month that has started is not refunded, in full or in part, except in the cases listed under ‘When We Refund’.</>,
   },
   {
     icon: Coins,

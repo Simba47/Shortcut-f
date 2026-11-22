@@ -14,6 +14,9 @@ import { CreditsBadge } from '@/components/ui/credits-badge'
 import { useCredits } from '@/lib/useCredits'
 import { buyCreditPack, loadCheckoutScript, CHECKOUT_SCRIPT } from '@/lib/razorpayCheckout'
 import { PaymentsCards } from '@/components/billing/BillingCards'
+import { CurrencySwitch } from '@/components/billing/CurrencySwitch'
+import { useCurrency } from '@/lib/useCurrency'
+import { formatMoney, packPriceMinor, planPriceMinor, type Currency } from '@/lib/currency'
 
 // (user, 2026-11-16) No free plan: the Trial pack (paid once) comes first. Plans v2 (2026-11-21): Trial,
 // Starter, Pro; Agency (not sold) shows only to someone still on it
@@ -40,11 +43,14 @@ export default function PricingPage() {
     window.history.replaceState(null, '', t === 'billing' ? '#billing' : window.location.pathname)
   }
 
-  const [mine, setMine] = useState<{ plan: string; testMode: boolean; paymentsMode?: 'off' | 'mock' | 'test' | 'live'; testPack?: boolean; subscription: { status: string; expiresAt: string | null } | null; trial?: { used: boolean; active: boolean; endsAt: string | null } } | null>(null)
+  const [mine, setMine] = useState<{ plan: string; testMode: boolean; paymentsMode?: 'off' | 'mock' | 'test' | 'live'; testPack?: boolean; subscription: { status: string; expiresAt: string | null } | null; trial?: { used: boolean; active: boolean; endsAt: string | null }; currency?: Currency | null } | null>(null)
   useEffect(() => {
     if (!session) return
     fetch('/api/billing/plan').then(r => r.ok ? r.json() : null).then(d => d && setMine(d)).catch(() => {})
   }, [session])
+  // Rupees or dollars (2026-11-22): the account's once it has paid, else the time zone's guess or the switch
+  const { currency, setCurrency, locked, available } = useCurrency(mine?.currency ?? null)
+  const price = (key: string) => { const m = planPriceMinor(key, currency); return m === null ? '' : formatMoney(m, currency) }
 
   async function handleSubscribe(planKey: string) {
     if (!session) { router.push('/login'); return }
@@ -57,7 +63,7 @@ export default function PricingPage() {
       const res = await fetch('/api/billing/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan: planKey }),
+        body: JSON.stringify({ plan: planKey, currency }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Failed')
@@ -104,7 +110,7 @@ export default function PricingPage() {
     if (!session) { router.push('/login'); return }
     setTopupBusy(packKey); setError(null); setNotice(null)
     try {
-      const out = await buyCreditPack(packKey)
+      const out = await buyCreditPack(packKey, currency)
       if (out) {
         setNotice(`${out.credits} credits added. You now have ${out.balance}.`)
         refreshCredits()
@@ -119,8 +125,8 @@ export default function PricingPage() {
     }
   }
 
-  // The plans on show: those sold, and Agency only to someone still on it
-  const shown = PLAN_ORDER.filter(key => PLANS[key].sold || mine?.plan === key)
+  // The plans on show: those sold, and Agency only to someone still on it (in rupees: it has no dollar price)
+  const shown = PLAN_ORDER.filter(key => (PLANS[key].sold && planPriceMinor(key, currency) !== null) || mine?.plan === key)
 
   async function cancel() {
     if (!window.confirm('Stop renewing? You keep your plan until the month you paid for ends.')) return
@@ -185,6 +191,7 @@ export default function PricingPage() {
             {mine.subscription.status !== 'cancelled' && <button type="button" onClick={cancel} className="st-link">Cancel subscription</button>}
           </p>
         )}
+        <CurrencySwitch currency={currency} onChange={setCurrency} locked={locked} available={available} />
         {notice && <p className="st-ok text-center" role="status">{notice}</p>}
         {error && <p className="st-err text-center" role="alert">{error}</p>}
 
@@ -203,7 +210,7 @@ export default function PricingPage() {
                 <div key={key} className={`st-pack st-plan${popular ? ' is-popular' : ''}${current ? ' is-current' : ''}`}>
                   {current ? <span className="st-pack-badge is-mine">Your plan</span> : popular && <span className="st-pack-badge">Most popular</span>}
                   <span className="st-plan-name">{plan.name}</span>
-                  <span className="st-pack-price">₹{n(plan.price)}<span className="st-plan-per">{once ? ' once' : '/month'}</span></span>
+                  <span className="st-pack-price">{price(key)}<span className="st-plan-per">{once ? ' once' : '/month'}</span></span>
                   <span className="st-pack-credits">{n(credits)} credits {once ? `for ${TRIAL_DAYS} days` : 'every month'}</span>
                   <ul className="st-pack-uses">
                     <li><b>{n(uses.aiClips)}</b> AI clips</li>
@@ -221,9 +228,9 @@ export default function PricingPage() {
                     current ? <span className="st-plan-state">Ends {mine?.trial?.endsAt ? new Date(mine.trial.endsAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'soon'}</span>
                       : mine && (mine.plan !== 'free' || mine.trial?.used) ? <span className="st-plan-state">{mine.plan !== 'free' ? 'You have a plan' : 'Trial used'}</span>
                       : <button type="button" className="st-btn st-btn-ghost st-pack-buy" disabled={!!loading || !!topupBusy} onClick={() => handleSubscribe(key)}>
-                          {busy ? 'Opening payment…' : `Start trial for ₹${plan.price}`}</button>
+                          {busy ? 'Opening payment…' : `Start trial for ${price(key)}`}</button>
                   ) : current ? (
-                    <span className="st-plan-state">₹{n(plan.price)} a month</span>
+                    <span className="st-plan-state">{price(key)} a month</span>
                   ) : !plan.sold ? null : (
                     <button type="button" className={`st-btn ${popular ? 'st-btn-lime' : 'st-btn-ghost'} st-pack-buy`} disabled={!!loading || !!topupBusy} onClick={() => handleSubscribe(key)}>
                       {busy ? 'Opening payment…' : `Choose ${plan.name}`}</button>
@@ -234,7 +241,7 @@ export default function PricingPage() {
           </div>
           <p className="st-hint" style={{ margin: 0 }}>
             An AI clip is {CLIP_CREDITS} credits, from a video already read (reading is {READING_CREDITS} credits per 10 minutes of video). A manual export is a clip of up to a minute
-            you cut yourself, with captions ({CAPTION_CREDITS_PER_MINUTE} credits) and the export ({EXPORT_CREDITS_PER_MINUTE}). Prices include GST. Plans renew monthly and you can cancel
+            you cut yourself, with captions ({CAPTION_CREDITS_PER_MINUTE} credits) and the export ({EXPORT_CREDITS_PER_MINUTE}). {currency === 'INR' ? 'Prices include GST.' : 'Prices are in US dollars; your bank may add its own foreign-currency fee.'} Plans renew monthly and you can cancel
             anytime; unused credits roll over one month, and your Trial&apos;s unused credits move into your plan.
           </p>
         </section>
@@ -254,7 +261,7 @@ export default function PricingPage() {
           <h2 className="st-card-title">Need more credits?</h2>
           <p className="st-hint" style={{ margin: 0 }}>
             Credit packs for paid plans, paid once, last {Math.round(TOPUP_CREDIT_DAYS / 30.4)} months:{' '}
-            {TOPUP_PACKS.map(p => `${p.credits.toLocaleString('en-IN')} for ₹${p.price.toLocaleString('en-IN')}`).join(' · ')}.{' '}
+            {TOPUP_PACKS.map(p => `${p.credits.toLocaleString('en-IN')} for ${formatMoney(packPriceMinor(p.key, currency) ?? 0, currency)}`).join(' · ')}.{' '}
             {session ? <a href="/billing#credits" className="st-link">Buy credits</a> : <a href="/login" className="st-link">Sign in to buy</a>}
           </p>
         </section>

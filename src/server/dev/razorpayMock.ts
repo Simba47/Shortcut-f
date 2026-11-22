@@ -15,7 +15,7 @@ type Order = { id: string; amount: number; amount_paid: number; currency: string
 type Method = 'card' | 'upi' | 'netbanking' | 'wallet'
 const METHODS: Method[] = ['card', 'upi', 'netbanking', 'wallet']
 type Pay = { id: string; amount: number; status: 'captured'; created_at: number; currency: string; method: Method; order_id?: string; subscription_id?: string }
-interface Store { plans: Map<string, { id: string; amount: number }>; subs: Map<string, Sub>; orders: Map<string, Order>; payments: Map<string, Pay> }
+interface Store { plans: Map<string, { id: string; amount: number; currency: string }>; subs: Map<string, Sub>; orders: Map<string, Order>; payments: Map<string, Pay> }
 
 const g = globalThis as { __rzpMock?: Store }
 const fresh = (): Store => ({ plans: new Map(), subs: new Map(), orders: new Map(), payments: new Map() })
@@ -44,9 +44,9 @@ export async function mockApi(method: string, path: string, body: Record<string,
   const [kind, rid, action] = parts
 
   if (kind === 'plans' && method === 'POST' && !rid) {
-    const item = (body?.item ?? {}) as { amount?: number }
+    const item = (body?.item ?? {}) as { amount?: number; currency?: string }
     if (!item.amount) return err(400, 'The amount is required')
-    const plan = { id: id('plan'), amount: item.amount }
+    const plan = { id: id('plan'), amount: item.amount, currency: String(item.currency ?? 'INR') }
     s.plans.set(plan.id, plan)
     return { status: 200, body: { ...plan, entity: 'plan', period: body?.period, interval: body?.interval, item } }
   }
@@ -80,7 +80,7 @@ export async function mockApi(method: string, path: string, body: Record<string,
   }
   if (kind === 'payments' && rid && method === 'GET') {
     const pay = s.payments.get(rid)
-    return pay ? { status: 200, body: { ...pay, entity: 'payment' } } : err(404, 'The requested URL was not found on the server.')
+    return pay ? { status: 200, body: { ...pay, ...payEntity(pay).entity, entity: 'payment' } } : err(404, 'The requested URL was not found on the server.')
   }
   return err(404, 'The requested URL was not found on the server.')
 }
@@ -100,7 +100,9 @@ async function emit(send: Sender, event: string, payload: Record<string, unknown
 }
 
 const subEntity = (sub: Sub) => ({ entity: { id: sub.id, status: sub.status, current_end: sub.current_end, notes: sub.notes } })
-const payEntity = (p: Pay) => ({ entity: { id: p.id, amount: p.amount, status: p.status, created_at: p.created_at } })
+// (a payment in dollars, like Razorpay's: what it settled in rupees, at a made-up ₹88 to the dollar)
+const payEntity = (p: Pay) => ({ entity: { id: p.id, amount: p.amount, currency: p.currency, status: p.status, created_at: p.created_at,
+  ...(p.currency !== 'INR' ? { base_amount: p.amount * 88, base_currency: 'INR' } : {}) } })
 
 function newPayment(amount: number, extra: Partial<Pay>): Pay {
   const p: Pay = { id: id('pay'), amount, status: 'captured', created_at: now(), currency: 'INR', method: 'card', ...extra }
@@ -123,7 +125,8 @@ export async function mockPay(a: { subscriptionId?: string; orderId?: string; ou
   if (a.subscriptionId) {
     const sub = s.subs.get(a.subscriptionId)
     if (!sub) return { ok: false, error: 'Unknown subscription' }
-    const pay = newPayment(s.plans.get(sub.plan_id)!.amount, { subscription_id: sub.id, method })
+    const plan = s.plans.get(sub.plan_id)!
+    const pay = newPayment(plan.amount, { subscription_id: sub.id, method, currency: plan.currency })
     sub.status = 'active'
     sub.current_end = now() + 30 * DAY
     await emit(send, 'subscription.activated', { subscription: subEntity(sub), payment: payEntity(pay) })
@@ -134,11 +137,11 @@ export async function mockPay(a: { subscriptionId?: string; orderId?: string; ou
     const order = s.orders.get(a.orderId)
     if (!order) return { ok: false, error: 'Unknown order' }
     if (order.status === 'paid') return { ok: false, error: 'This order is already paid' }
-    const pay = newPayment(order.amount, { order_id: order.id, method })
+    const pay = newPayment(order.amount, { order_id: order.id, method, currency: order.currency })
     order.status = 'paid'
     order.amount_paid = order.amount
     await emit(send, 'payment.captured', { payment: payEntity(pay) })
-    await emit(send, 'order.paid', { order: { entity: { id: order.id, amount_paid: order.amount_paid, notes: order.notes } }, payment: payEntity(pay) })
+    await emit(send, 'order.paid', { order: { entity: { id: order.id, amount_paid: order.amount_paid, currency: order.currency, notes: order.notes } }, payment: payEntity(pay) })
     return { ok: true, razorpay_payment_id: pay.id, razorpay_order_id: order.id, razorpay_signature: hmac(keySecret(), `${order.id}|${pay.id}`) }
   }
   return { ok: false, error: 'Nothing to pay' }
@@ -148,7 +151,7 @@ export async function mockPay(a: { subscriptionId?: string; orderId?: string; ou
 export function mockInfo(a: { subscriptionId?: string; orderId?: string }): { ok: true; amount: number; currency: string; kind: 'subscription' | 'order' } | { ok: false } {
   const s = store()
   const sub = a.subscriptionId ? s.subs.get(a.subscriptionId) : undefined
-  if (sub) return { ok: true, amount: s.plans.get(sub.plan_id)!.amount, currency: 'INR', kind: 'subscription' }
+  if (sub) { const plan = s.plans.get(sub.plan_id)!; return { ok: true, amount: plan.amount, currency: plan.currency, kind: 'subscription' } }
   const order = a.orderId ? s.orders.get(a.orderId) : undefined
   return order ? { ok: true, amount: order.amount, currency: order.currency, kind: 'order' } : { ok: false }
 }
@@ -158,7 +161,8 @@ export async function mockRenew(subscriptionId: string, send: Sender = sendWebho
   const s = store()
   const sub = s.subs.get(subscriptionId)
   if (!sub || sub.status !== 'active') return { ok: false, error: 'Only an active subscription renews' }
-  const pay = newPayment(s.plans.get(sub.plan_id)!.amount, { subscription_id: sub.id })
+  const plan = s.plans.get(sub.plan_id)!
+  const pay = newPayment(plan.amount, { subscription_id: sub.id, currency: plan.currency })
   sub.current_end = (sub.current_end ?? now()) + 30 * DAY
   await emit(send, 'subscription.charged', { subscription: subEntity(sub), payment: payEntity(pay) })
   return { ok: true, paymentId: pay.id }

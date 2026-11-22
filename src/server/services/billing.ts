@@ -7,8 +7,9 @@ import { TRIAL_DAYS } from '@/lib/credits'
 import { givenPlan, higherPlan } from '@/server/services/givenPlan'
 import {
   PAID_PLAN_KEYS, type PaidPlanKey, type SubscriptionChange, razorpayMode,
-  createRazorpayPlan, createRazorpaySubscription, cancelRazorpaySubscription, fetchRazorpaySubscription, rupeesToPaise,
+  createRazorpayPlan, createRazorpaySubscription, cancelRazorpaySubscription, fetchRazorpaySubscription,
 } from '@/lib/razorpay'
+import { chooseCurrency, formatMoney, isCurrency, planPriceMinor, type Currency } from '@/lib/currency'
 
 /** A renewal's webhook can arrive a little after the paid month ends: access is not cut in that gap */
 const GRACE_MS = 2 * 24 * 3600 * 1000
@@ -21,32 +22,50 @@ function paidPlan(plan: unknown): PaidPlanKey {
 }
 
 /**
- * Razorpay's plan for one of ours at today's price: made on first use, then reused for the same keys.
- * With dummy keys (the fake Razorpay forgets everything on a restart) nothing is cached.
+ * Razorpay's plan for one of ours at today's price in `currency`: made on first use, then reused for the same
+ * keys. With dummy keys (the fake Razorpay forgets everything on a restart) nothing is cached.
  */
-async function razorpayPlanId(plan: PaidPlanKey): Promise<string> {
-  const amount = rupeesToPaise(PLANS[plan].price)
-  const make = () => createRazorpayPlan(`Shortcut ${PLANS[plan].name}`, amount)
+async function razorpayPlanId(plan: PaidPlanKey, currency: Currency, amount: number): Promise<string> {
+  const make = () => createRazorpayPlan(`Shortcut ${PLANS[plan].name}${currency === 'INR' ? '' : ` (${currency})`}`, amount, currency)
   if (razorpayMode() === 'mock') return (await make()).id
   const keyId = process.env.RAZORPAY_KEY_ID ?? ''
-  const [have] = await sql<{ razorpay_plan_id: string }[]>`SELECT razorpay_plan_id FROM billing_plans WHERE plan = ${plan} AND amount_paise = ${amount} AND key_id = ${keyId}`
+  const find = () => sql<{ razorpay_plan_id: string }[]>`
+    SELECT razorpay_plan_id FROM billing_plans WHERE plan = ${plan} AND amount_paise = ${amount} AND key_id = ${keyId} AND currency = ${currency}`
+  const [have] = await find()
   if (have) return have.razorpay_plan_id
   const made = await make()
-  await sql`INSERT INTO billing_plans (plan, amount_paise, razorpay_plan_id, key_id) VALUES (${plan}, ${amount}, ${made.id}, ${keyId}) ON CONFLICT DO NOTHING`
-  const [row] = await sql<{ razorpay_plan_id: string }[]>`SELECT razorpay_plan_id FROM billing_plans WHERE plan = ${plan} AND amount_paise = ${amount} AND key_id = ${keyId}`
+  await sql`INSERT INTO billing_plans (plan, amount_paise, razorpay_plan_id, key_id, currency) VALUES (${plan}, ${amount}, ${made.id}, ${keyId}, ${currency}) ON CONFLICT DO NOTHING`
+  const [row] = await find()
   return row.razorpay_plan_id
 }
 
-/** Starts checkout: a subscription at Razorpay, recorded as 'created'. The plan is not on until it is paid. */
-export async function startSubscription(userId: string, planKey: unknown) {
+/**
+ * The currency an account pays in once it has paid: its latest payment's (rupees or dollars). Null before the
+ * first payment, when the page's choice is used (currency.ts chooseCurrency). Keeps an account from paying for
+ * the same plan in the cheaper currency later.
+ */
+export async function accountCurrency(userId: string): Promise<Currency | null> {
+  await ensureBillingSchema()
+  const [row] = await sql<{ currency: string }[]>`SELECT currency FROM payments WHERE user_id = ${userId} ORDER BY paid_at DESC LIMIT 1`
+  return row && isCurrency(row.currency) ? row.currency : null
+}
+
+/**
+ * Starts checkout: a subscription at Razorpay, recorded as 'created'. The plan is not on until it is paid.
+ * `askedCurrency`: what the pricing page showed ('INR' or 'USD'); an account that has paid keeps its own.
+ */
+export async function startSubscription(userId: string, planKey: unknown, askedCurrency?: unknown) {
   const plan = paidPlan(planKey)
   // A plan no longer sold (Agency since 2026-11-21) can't be started; whoever already pays for it keeps it
   if (!PLANS[plan].sold) throw Object.assign(new Error(`The ${PLANS[plan].name} plan is no longer offered. Choose Pro instead.`), { status: 400, expose: true })
   await ensureBillingSchema()
-  const planId = await razorpayPlanId(plan)
-  const sub = await createRazorpaySubscription(planId, { user_id: userId, plan })
+  const currency = chooseCurrency(await accountCurrency(userId), askedCurrency)
+  const amount = planPriceMinor(plan, currency)
+  if (amount === null) throw Object.assign(new Error(`The ${PLANS[plan].name} plan is not offered in ${currency}.`), { status: 400, expose: true })
+  const planId = await razorpayPlanId(plan, currency, amount)
+  const sub = await createRazorpaySubscription(planId, { user_id: userId, plan, currency })
   await sql`INSERT INTO subscriptions (user_id, plan, status, razorpay_subscription_id) VALUES (${userId}, ${plan}, 'created', ${sub.id})`
-  return { subscriptionId: sub.id, plan, planName: PLANS[plan].name, amountPaise: rupeesToPaise(PLANS[plan].price) }
+  return { subscriptionId: sub.id, plan, planName: PLANS[plan].name, amountPaise: amount, currency, priceLabel: formatMoney(amount, currency) }
 }
 
 /** Turns a plan on (after a payment or an activation/charge event), and ends the user's other subscriptions */

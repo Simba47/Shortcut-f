@@ -75,6 +75,8 @@ export function ensureCreditsSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         paid_at TIMESTAMPTZ
       )`
+    // (2026-11-22) An order in dollars: amount_paise is then cents. Rows from before are rupees.
+    await sql`ALTER TABLE topup_orders ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'INR'`
   })().catch(e => { ready = null; throw e })
   return ready
 }

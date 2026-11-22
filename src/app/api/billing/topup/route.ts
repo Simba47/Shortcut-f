@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   if (!razorpayConfigured()) return NextResponse.json({ error: 'Payments are not set up yet.' }, { status: 503 })
   const body = await req.json().catch(() => null)
   try {
-    return NextResponse.json({ ...(await startTopup(user.id, body?.pack, user.email)), email: user.email })
+    return NextResponse.json({ ...(await startTopup(user.id, body?.pack, user.email, body?.currency)), email: user.email })
   } catch (err) {
     return apiError(err)
   }

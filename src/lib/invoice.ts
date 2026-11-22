@@ -48,6 +48,8 @@ export const GST_STATES: Record<string, string> = {
 
 export function stateName(code: string | null | undefined): string {
   if (!code) return ''
+  // GST's code for a supply outside India (an export: a payment in dollars)
+  if (code === '96') return 'Outside India'
   return GST_STATES[code] ?? code
 }
 
@@ -85,6 +87,17 @@ export function rupeesInWords(paise: number): string {
   const p = Math.round(paise)
   const rupees = Math.floor(p / 100), rest = p % 100
   return `Rupees ${inWords(rupees)}${rest ? ` and ${twoDigits(rest)} Paise` : ''} Only`
+}
+
+/**
+ * An amount in words in its currency: rupees as above; dollars "US Dollars Nine and Ninety-Nine Cents Only"
+ * (an export invoice, 2026-11-22)
+ */
+export function amountInWords(minor: number, currency: string): string {
+  if (currency !== 'USD') return rupeesInWords(minor)
+  const m = Math.round(minor)
+  const dollars = Math.floor(m / 100), cents = m % 100
+  return `US Dollars ${inWords(dollars)}${cents ? ` and ${twoDigits(cents)} Cents` : ''} Only`
 }
 
 /** 259900 → "2,599.00" (Indian digit grouping) */
