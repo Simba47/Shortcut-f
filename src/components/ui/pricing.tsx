@@ -204,7 +204,8 @@ export function PricingSection({
           </div>
           <PricingToggle />
           {/* (a size smaller, user 2026-11-21: narrower row, tighter cards) */}
-          <div className={cn('mx-auto mt-8 grid max-w-6xl grid-cols-1 items-stretch gap-4', cols)}>
+          {/* (three plans since Agency left: a narrower row so each card keeps the size it had among four — user 2026-11-23) */}
+          <div className={cn('mx-auto mt-8 grid grid-cols-1 items-stretch gap-4', plans.length === 3 ? 'max-w-[1000px]' : 'max-w-6xl', cols)}>
             {plans.map((plan, index) => (
               <PricingCard key={plan.name} plan={plan} index={index} />
             ))}

@@ -68,9 +68,17 @@ const CAP_NAMES = { karaoke: 'Karaoke', box: 'Box', highlight: 'Highlight' }
 const TITLE = '10 great moments'
 // Export, inside its step (ms): pressed, rendering, done
 const RENDER_FROM = 400, RENDER_MS = 1900
-// The timeline: 40 s of the long episode (16:00–16:40); the picked moment is 16:15–16:25
-const RULER = ['16:00', '16:05', '16:10', '16:15', '16:20', '16:25', '16:30', '16:35', '16:40']
-const SEL = { from: 0.375, to: 0.625 }
+// The timeline (user 2026-11-22, from the app's own segment timeline): the clip is 7:12 long, cut into segments, each
+// with its layout and length (they add up to exactly 7:12); a ruler a minute apart; the playhead crosses it once a tour
+const CLIP_LEN = 432
+const SEGS = [
+  { s: 64, l: 'Vertical' }, { s: 48, l: 'Vertical' }, { s: 96, l: 'Split' },
+  { s: 54, l: 'Vertical' }, { s: 82, l: 'Split' }, { s: 88, l: 'Vertical' },
+] as const
+const RULER = [0, 1, 2, 3, 4, 5, 6, 7].map(min => ({ at: (min * 60) / CLIP_LEN, label: `${min}:00` }))
+const SEL = { from: 0, to: 1 }
+// (minutes and seconds only, no tenths — user 2026-11-22)
+const fmtLong = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
 const SELECT_OPEN_MS = 1400
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n))
@@ -155,6 +163,8 @@ export function HeroEditor() {
       el.style.opacity = '1'
       el.style.left = `${r.x * 100}%`; el.style.top = `${r.y * 100}%`; el.style.width = `${r.w * 100}%`; el.style.height = `${r.h * 100}%`
     }
+    // the playhead moves by transform (smooth, no layout work each frame) across the lanes' width
+    const headTrack = () => headRef.current?.parentElement?.clientWidth ?? 0
     /** Everything at tour time `t`: the moving parts straight on the page, the rest through React */
     const draw = (t: number) => {
       const vw = view(t)
@@ -183,9 +193,12 @@ export function HeroEditor() {
           selImgRef.current.style.width = `${100 / (2 * half)}%`
         }
       }
-      const s = video.readyState >= 2 ? video.currentTime % CLIP_S : 0
-      if (headRef.current) headRef.current.style.left = `${(SEL.from + (SEL.to - SEL.from) * (s / CLIP_S)) * 100}%`
-      if (timeRef.current) timeRef.current.textContent = fmt(s)
+      // the playhead (user 2026-11-22: "move it fast and smoothly — 7:12 is only the clip's length"): one steady sweep
+      // across the whole 7:12 timeline for each pass of the 10-second video, so the bar and the picture start again
+      // together; the counter runs with it, 0:00.0 → 7:12.0
+      const k = video.readyState >= 2 ? (video.currentTime % CLIP_S) / CLIP_S : 0
+      if (headRef.current) headRef.current.style.transform = `translateX(${k * headTrack()}px)`
+      if (timeRef.current) timeRef.current.textContent = fmtLong(k * CLIP_LEN)
       // Export: how far the render is
       if (vw.exp === 'rendering') {
         const p = clamp01((t - START[STEP.export] - RENDER_FROM) / RENDER_MS)
@@ -342,7 +355,7 @@ export function HeroEditor() {
               <span className="he-play">
                 <svg viewBox="0 0 12 12"><path d="M3 2h2v8H3zM7 2h2v8H7z" fill="currentColor" /></svg>
               </span>
-              <span className="he-time"><span ref={timeRef}>0:00.0</span> / 0:10.0</span>
+              <span className="he-time"><span ref={timeRef}>0:00</span> / 7:12</span>
               <span className="he-speed">1x</span>
             </div>
             <div className="he-rows">
@@ -354,11 +367,7 @@ export function HeroEditor() {
               </div>
               <div className="he-lanes">
                 <div className="he-ruler">
-                  {/* (no times under the moment's own label) */}
-                  {RULER.map((r, i) => {
-                    const at = i / (RULER.length - 1)
-                    return at > SEL.from - 0.03 && at < SEL.to + 0.03 ? null : <span key={r} style={{ left: `${at * 100}%` }}>{r}</span>
-                  })}
+                  {RULER.map(r => <span key={r.label} style={{ left: `${r.at * 100}%` }}>{r.label}</span>)}
                 </div>
                 <div className="he-lane">
                   <span className="he-chip he-chip-title" data-on={v.titleOn || undefined} style={{ left: `${SEL.from * 100}%`, width: `${(SEL.to - SEL.from) * 100}%` }}>
@@ -369,13 +378,19 @@ export function HeroEditor() {
                   <span className="he-chip he-chip-cap" data-on={v.capsOn || undefined} style={{ left: `${(SEL.from + 0.01) * 100}%`, width: `${(SEL.to - SEL.from) * 0.42 * 100}%` }}>Every episode has…</span>
                   <span className="he-chip he-chip-cap" data-on={v.capsOn || undefined} style={{ left: `${(SEL.from + (SEL.to - SEL.from) * 0.52) * 100}%`, width: `${(SEL.to - SEL.from) * 0.44 * 100}%` }}>and now they all…</span>
                 </div>
-                <div className="he-lane he-lane-video"><div className="he-strip" /></div>
-                {/* the moment, trimmed on the Video track: bright between its handles, the rest dimmed */}
-                <div ref={selRef} className="he-sel" style={{ left: `${SEL.from * 100}%`, width: 0, opacity: 0 }}>
-                  <div className="he-sel-win"><div ref={selImgRef} className="he-sel-img" /></div>
-                  <span className="he-sel-label">Your moment · 0:10</span>
+                {/* the clip's segments, as in the editor: each with its layout and its length; "+" where two join.
+                    They come in one by one as the moment is picked; the Split ones light up while Split is on */}
+                <div className="he-lane he-lane-video he-segs" data-picked={v.picked || undefined}>
+                  {SEGS.map((g, i) => (
+                    <span key={i} className={`he-seg he-seg-${i % 2 ? 'b' : 'a'}`} data-on={(v.split && g.l === 'Split') || undefined}
+                      style={{ flexGrow: g.s, '--i': i } as React.CSSProperties}>
+                      <b><i />{g.l}</b>
+                      <em>{fmtLong(g.s)}</em>
+                      {i < SEGS.length - 1 && <span className="he-seg-join">+</span>}
+                    </span>
+                  ))}
                 </div>
-                <div ref={headRef} className="he-head" style={{ left: `${SEL.from * 100}%` }} />
+                <div ref={headRef} className="he-head" style={{ left: 0 }} />
               </div>
             </div>
           </div>
