@@ -211,6 +211,12 @@ const AUTO_ICONS: Record<AutoOption, React.ReactNode> = {
   layouts: <><rect x="3.5" y="2" width="9" height="12" rx="2" /><path className="mmc-i-cut" d="M3.5 8h9" /></>,
 }
 const AUTO_OPTIONS_KEY = 'clipboard.makeOptions'
+// B-rolls (back on the card, user 2026-11-24; parked 2026-10-29): free stock footage on top while the speaker
+// talks below, only where it fits what is said (the worker: lib/broll.ts). Off by default; remembered per browser
+const AUTO_BROLL_KEY = 'clipboard.makeBroll'
+const BROLL_TIP = 'Free stock footage on top while the speaker talks below, only where it fits what they say. You can swap each one in the editor'
+// footage playing on top, the speaker below
+const BROLL_ICON = <><rect x="3.5" y="2" width="9" height="12" rx="2" /><path d="M3.5 8h9" /><path className="mmc-i-cut" d="M7 3.6v2.8L9.4 5z" fill="currentColor" stroke="none" /><circle cx="8" cy="11" r="1.3" /></>
 
 /** A brand kit: a little tag */
 const BRAND_ICON = BRAND_TAG
@@ -474,8 +480,14 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
     setAutoCount(c)
     setCountText(String(c))
   }
-  // B-roll in Make my clips: its option was taken off the card, so clips are made without it
-  const autoBroll = false
+  const [autoBroll, setAutoBroll] = useState(false)
+  useEffect(() => { try { setAutoBroll(localStorage.getItem(AUTO_BROLL_KEY) === 'on') } catch { /* storage blocked */ } }, [])
+  function toggleBroll() {
+    setAutoBroll(on => {
+      try { localStorage.setItem(AUTO_BROLL_KEY, on ? 'off' : 'on') } catch { /* storage blocked */ }
+      return !on
+    })
+  }
   const [autoJob, setAutoJob] = useState<AutoJob | null>(null)
   const [autoClips, setAutoClips] = useState<AutoClip[]>([])
   const [autoStarting, setAutoStarting] = useState(false)
@@ -1858,6 +1870,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               {/* (user, 2026-11-12: no hover tooltips) what each option does, here instead of on the tiles */}
               <span className="mmc-tip-list">
                 {AUTO_TILES.map(o => <span key={o.id}><b>{o.label}:</b> {o.tip}{o.id === 'captions' ? '. Click it to pick their style' : ''}</span>)}
+                <span><b>B-rolls:</b> {BROLL_TIP}</span>
                 <span><b>Layout:</b> {LAYOUT_TIP}</span>
                 <span><b>Frame:</b> {FRAME_TIP}</span>
               </span>
@@ -1976,6 +1989,15 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
                     : opener('title', AUTO_ICONS.title, 'Title',
                       langOf(TITLE_LANGUAGES, titleLang),
                       { on: autoOpts.title, flip: () => toggleAutoOpt('title') })}
+                  {/* B-rolls: a switch only (nothing to pick) */}
+                  <div className="mmc-li" data-dim={!autoBroll || undefined}>
+                    <span className="mmc-li-main mmc-li-static" style={{ flex: '1 1 auto' }}>
+                      {icon(BROLL_ICON)}
+                      <span className="mmc-li-name">B-rolls</span>
+                      <span className="mmc-li-value">{autoBroll ? 'Stock footage on top' : 'Off'}</span>
+                    </span>
+                    {sw(autoBroll, 'B-rolls on the clips', toggleBroll)}
+                  </div>
                 </div>
               </div>
               {/* Look: the brand kit the clips get (user, 2026-11-16: Layout and Frame taken out — only Brand here,
