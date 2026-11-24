@@ -303,8 +303,11 @@ export function ClipsGallery({ video, videoUrl, videoKey = null, needsProxy, sto
                 <article key={c.id} className="ag-card">
                   <div className="relative">
                     <ClipPlayer videoUrl={playUrl} mainVideoId={video.id} waitForPlay
-                      stockUrls={Object.fromEntries(c.segments.flatMap(sg => sg.crop_boxes.map(b => b.source_video_id))
-                        .filter((id): id is string => !!id && !!stockUrls[id]).map(id => [id, stockUrls[id]]))}
+                      // (its own: full shots and the videos in frame slots — Make my clips' B-rolls)
+                      stockUrls={Object.fromEntries(c.segments.flatMap(sg => [
+                        ...sg.crop_boxes.map(b => b.source_video_id),
+                        ...(sg.frame?.items ?? []).map(it => it.kind === 'video' ? it.source_video_id : null),
+                      ]).filter((id): id is string => !!id && !!stockUrls[id]).map(id => [id, stockUrls[id]]))}
                       startMs={c.start_ms} endMs={c.end_ms} segments={c.segments}
                       words={c.words} captionStyle={c.captionStyle} textOverlays={c.textOverlays} trims={c.trims} overlays={c.overlays} />
                     {/* Score and length on top of the reel */}
