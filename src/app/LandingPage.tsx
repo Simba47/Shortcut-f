@@ -48,10 +48,11 @@ function planFeatures(plan: (typeof PLANS)[keyof typeof PLANS]) {
     { text: count(plan.devices, 'device signed in at a time', 'devices signed in at a time'), included: true },
     { text: `Up to ${plan.maxFileSizeGb} GB per video`, included: true },
     { text: count(brandKitLimit(plan.key), 'brand kit', 'brand kits'), included: true },
-    { text: 'Share brand kits with your team', included: teamSeats(plan.key) > 0 },
     { text: canKeep(plan.key) ? `Videos kept ${plan.retentionDays} days, or for good with ★ Keep` : `Videos kept ${plan.retentionDays} days`, included: true },
     { text: 'Captions on AI clips', included: plan.autoCaption },
     { text: 'No watermark', included: !plan.watermark },
+    // (these two last on every card, user 2026-11-23)
+    { text: 'Share brand kits with your team', included: teamSeats(plan.key) > 0 },
     { text: 'Priority exports', included: plan.priorityExports },
   ]
 }
@@ -794,7 +795,8 @@ export function LandingPage() {
           <Link href="/signup" className="btn-nav-primary cta-btn">
             <span className="cta-btn-label">Get Started with Shortcut</span>
             <span className="cta-btn-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              {/* (an up-right arrow: on hover the badge slides to the button's start and turns 45° — user 2026-11-23) */}
+              <svg viewBox="0 0 24 24"><path d="M7 17L17 7M8 7h9v9" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </span>
           </Link>
           {/* (the reassurance under the button, user 2026-11-22) */}
