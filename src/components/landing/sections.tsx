@@ -892,7 +892,7 @@ export function WhoSection() {
       <ul className="lx-who-grid">
         {WHO.map(({ Icon, name, line }, i) => (
           <li key={name} className="lx-who-card" data-anim="up" style={d(0.25 + (i % 3) * 0.12 + Math.floor(i / 3) * 0.22)}>
-            <span className="lx-who-ico" aria-hidden="true"><Icon strokeWidth={1.8} /></span>
+            <span className={`lx-who-ico lx-who-ico-${i}`} aria-hidden="true"><Icon strokeWidth={1.8} /></span>
             <h3>{name}</h3>
             <p>{line}</p>
           </li>

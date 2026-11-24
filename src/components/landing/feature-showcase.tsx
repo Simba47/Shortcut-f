@@ -50,7 +50,7 @@ export function FeatureShowcase({ eyebrow, title, items, onJump }: {
     return () => window.removeEventListener('resize', size)
   }, [])
   // the panel: about 60 % of the screen, never wider than 900 px; the gap between panels
-  const w = Math.min(vw * 0.52, 820), gap = Math.max(28, vw * 0.035)
+  const w = Math.min(vw * 0.38, 600), gap = Math.max(24, vw * 0.03)
 
   const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end end'] })
   const raw = useTransform(scrollYProgress, [0.05, 0.95], [0, n - 1], { clamp: true })
