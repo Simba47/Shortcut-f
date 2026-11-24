@@ -55,6 +55,7 @@ export function AuthSlider({ initialMode, google = false }: { initialMode: Mode;
 /** Why a Google sign-in came back without signing in (NextAuth's ?error= on /login) */
 function googleError(code: string | null): string | null {
   if (!code) return null
+  if (code === 'blocked') return AUTH.errors.blocked
   if (code === 'AccessDenied') return AUTH.google.denied
   if (code === 'Configuration') return AUTH.google.unavailable
   return AUTH.google.failed
@@ -84,6 +85,8 @@ function AuthFlow({ mode, setMode, flip, google }: {
   const [error, setFormError] = useState<FormError | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [cooldown, setCooldown] = useState(0)
+  /** The account was deleted by Shortcut's admin: the panel that offers its restore link (and until when) */
+  const [deleted, setDeleted] = useState<{ email: string; restoreBy: string | null } | null>(null)
   const router = useRouter()
   /** "Forgot password?" is sending the code */
   const [forgotBusy, setForgotBusy] = useState(false)
@@ -118,6 +121,14 @@ function AuthFlow({ mode, setMode, flip, google }: {
   // each — the address loses the ?error / ?reset)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
+    // (Google sign-in of a deleted account: the panel, for the email Google gave)
+    if (params.get('error') === 'deleted') {
+      const e = params.get('email') ?? ''
+      if (e) { setEmail(e); setDeleted({ email: e, restoreBy: null }) }
+      params.delete('error'); params.delete('email')
+      window.history.replaceState(null, '', `${window.location.pathname}${params.size ? `?${params}` : ''}`)
+      return
+    }
     const msg = googleError(params.get('error'))
     const reset = params.get('reset') === '1'
     if (!msg && !reset) return
@@ -147,6 +158,9 @@ function AuthFlow({ mode, setMode, flip, google }: {
   async function signInNow(): Promise<boolean | 'too_many'> {
     const res = await signIn('credentials', { email: norm(), password, redirect: false })
     if (res?.code === 'too_many') return 'too_many'
+    // (deleted or blocked since the form asked: said here, nothing more to try)
+    if (res?.code === 'deleted') { setDeleted({ email: norm(), restoreBy: null }); return true }
+    if (res?.code === 'blocked') { setError(AUTH.errors.blocked, 'email'); return true }
     if (res?.error) return false
     // (signed in: the panda celebrates while the next page gets ready, then it opens)
     const next = takeNextPath()
@@ -159,6 +173,9 @@ function AuthFlow({ mode, setMode, flip, google }: {
     const r = await fetch('/api/auth/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: norm() }) })
     const d = await r.json()
     if (!r.ok) { setError(d.error ?? AUTH.errors.generic); return null }
+    // Deleted or blocked by Shortcut's admin: said here (the panel, or the message), not asked for a password
+    if (d.status === 'deleted') { setDeleted({ email: norm(), restoreBy: d.restoreBy ?? null }); return null }
+    if (d.status === 'blocked') { setError(AUTH.errors.blocked, 'email'); return null }
     return d.status
   }
   /** Run a step: loading on, messages cleared, a network failure said plainly */
@@ -256,6 +273,8 @@ function AuthFlow({ mode, setMode, flip, google }: {
       {error && !error.at && <p className="auth-error" role="alert">{error.text}</p>}
     </>
   )
+
+  if (deleted) return <DeletedPanel email={deleted.email} restoreBy={deleted.restoreBy} onBack={() => { setDeleted(null); setError(null); setNotice(null) }} />
 
   if (step === 'code') {
     return (
@@ -364,3 +383,35 @@ function GoogleButton({ allowed }: { allowed: () => boolean }) {
     </>
   )
 }
+
+/**
+ * An account Shortcut's admin deleted (server/services/accountDeletion.ts): nothing is gone until its restore date.
+ * The restore link was emailed; this sends a new one (the old one stops working).
+ */
+function DeletedPanel({ email, restoreBy, onBack }: { email: string; restoreBy: string | null; onBack: () => void }) {
+  const t = AUTH.deleted
+  const [busy, setBusy] = useState(false)
+  const [sent, setSent] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const until = restoreBy ? new Date(restoreBy).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : null
+  async function send() {
+    setBusy(true); setFailed(false)
+    const r = await fetch('/api/account/restore-link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) }).catch(() => null)
+    setBusy(false)
+    if (r?.ok) setSent(true); else setFailed(true)
+  }
+  return (
+    <div key="deleted" className="auth-form">
+      <button type="button" className="auth-back" onClick={onBack}><ArrowLeft aria-hidden /> {t.otherEmail}</button>
+      <h1>{t.title}</h1>
+      <p className="auth-sub"><strong>{email}</strong></p>
+      <p className="auth-sub">{t.body(until)}</p>
+      {sent && <p className="auth-note" role="status">{t.sent(email)}</p>}
+      {failed && <p className="auth-error" role="alert">{t.failed}</p>}
+      <button type="button" className="auth-submit" onClick={send} disabled={busy || sent}>
+        <span>{busy ? t.busy : t.send}</span>
+      </button>
+    </div>
+  )
+}
+

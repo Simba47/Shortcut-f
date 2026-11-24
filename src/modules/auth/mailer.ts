@@ -102,3 +102,16 @@ export async function sendExpiryEmail(r: Omit<ExpiryEmailInput, 'base'> & { to: 
     throw new Error(`Failed to send expiry email: ${error.message}`)
   }
 }
+
+/** An email already built (lib/accountEmails.ts): to one address or several */
+export async function sendMail(to: string | string[], m: { subject: string; html: string; text: string }): Promise<void> {
+  const { error } = await getResend().emails.send({ from: FROM, to, replyTo: COMPANY.email, subject: m.subject, html: m.html, text: m.text })
+  if (error) {
+    console.error('[mailer] Resend rejected an email:', error)
+    throw new Error(`Failed to send email: ${error.message}`)
+  }
+}
+
+/** The site's address for links in emails, no trailing slash */
+export const siteBase = () => (process.env.APP_URL || process.env.AUTH_URL || 'https://shortcutapp.in').replace(/\/$/, '')
+

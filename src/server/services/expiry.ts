@@ -1,4 +1,5 @@
 import sql from '@/lib/db'
+import { ensureDeletionSchema } from './accountDeletion'
 import { PLANS, type PlanKey } from '@/lib/plans'
 import { canKeep, warnDays } from '@/lib/expiry'
 import { getUserPlan } from './quota'
@@ -147,7 +148,11 @@ export async function sweepExpiry(deps: {
     const [lease] = await sql`UPDATE app_flags SET at = now() WHERE key = 'video_expiry_sweep' AND at < now() - interval '50 minutes' RETURNING key`
     if (!lease) return null
   }
-  const owners = await sql<{ user_id: string }[]>`SELECT DISTINCT user_id FROM videos WHERE role IS DISTINCT FROM 'asset' AND user_id IS NOT NULL`
+  // (an account Shortcut's admin deleted is left alone: nothing of it expires while it can be restored —
+  // accountDeletion.ts; its videos get a fresh grace when it comes back)
+  await ensureDeletionSchema()
+  const live = sql`NOT EXISTS (SELECT 1 FROM users d WHERE d.id = v.user_id AND d.deleted_at IS NOT NULL)`
+  const owners = await sql<{ user_id: string }[]>`SELECT DISTINCT user_id FROM videos v WHERE role IS DISTINCT FROM 'asset' AND user_id IS NOT NULL AND ${live}`
   const plans = new Map<string, PlanKey>()
   for (const o of owners) {
     try { const p = await refreshExpiry(o.user_id); if (p) plans.set(o.user_id, p) } catch (e) { console.warn('[expiry] could not bring up to date', o.user_id, e instanceof Error ? e.message : e) }
@@ -159,7 +164,7 @@ export async function sweepExpiry(deps: {
     SELECT v.id, v.user_id, v.title, v.expires_at, (SELECT count(*)::int FROM clips c WHERE c.video_id = v.id) AS clips, u.email, u.name
     FROM videos v JOIN users u ON u.id = v.user_id
     WHERE v.expires_at IS NOT NULL AND v.expiry_warned_at IS NULL AND v.expires_at > now()
-      AND v.expires_at <= now() + interval '3 days' AND v.role IS DISTINCT FROM 'asset'
+      AND v.expires_at <= now() + interval '3 days' AND v.role IS DISTINCT FROM 'asset' AND ${live}
     ORDER BY v.user_id, v.expires_at`
   const byUser = new Map<string, Array<(typeof soon)[number]>>()
   for (const r of soon) {
@@ -182,7 +187,7 @@ export async function sweepExpiry(deps: {
   // What has expired goes, like a deleted video (its clips, exports and files)
   let deleted = 0
   const gone = await sql<{ id: string; user_id: string }[]>`
-    SELECT id, user_id FROM videos WHERE expires_at <= now() AND NOT kept AND role IS DISTINCT FROM 'asset' ORDER BY user_id`
+    SELECT id, user_id FROM videos v WHERE expires_at <= now() AND NOT kept AND role IS DISTINCT FROM 'asset' AND ${live} ORDER BY user_id`
   const goneBy = new Map<string, string[]>()
   for (const g of gone) goneBy.set(g.user_id, [...(goneBy.get(g.user_id) ?? []), g.id])
   for (const [userId, ids] of goneBy) {

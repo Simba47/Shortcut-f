@@ -139,6 +139,17 @@ export async function deleteAccount(userId: string, password: unknown): Promise<
       throw Object.assign(new Error('Your password is not right'), { status: 400 })
     }
   }
+  await purgeAccount(userId)
+}
+
+/**
+ * The account and everything in it, deleted for good: its files, then every row pointing at it, then the user. Run by
+ * Delete account in Settings (after the password), and for an account Shortcut's admin deleted once its 30 days to
+ * restore it are over (accountDeletion.ts).
+ */
+export async function purgeAccount(userId: string): Promise<void> {
+  const [row] = await sql<{ email: string }[]>`SELECT email FROM users WHERE id = ${userId}`
+  if (!row) return
 
   // Files first (best effort: a missing file shouldn't keep the account alive)
   const videos = await sql<{ storage_path: string | null }[]>`SELECT storage_path FROM videos WHERE user_id = ${userId}`

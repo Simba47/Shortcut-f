@@ -18,7 +18,8 @@
     "test:email": "npx tsx --test src/lib/shared/email.test.ts",
     "test:routes": "npx tsx --test src/lib/publicPaths.test.ts",
     "test:analytics": "npx tsx --test src/lib/analytics.test.ts",
-    "test:editor-words": "npx tsx --test src/modules/editor/transcriptWindow.test.ts"
+    "test:editor-words": "npx tsx --test src/modules/editor/transcriptWindow.test.ts",
+    "test:gemini": "npx tsx --test src/lib/geminiPriority.test.mts src/lib/geminiVertexModel.test.mts src/lib/geminiWif.test.mts src/lib/geminiUsage.test.ts src/lib/geminiKey.test.ts"
   },
   "dependencies": {
     "@auth/pg-adapter": "^1.11.3",

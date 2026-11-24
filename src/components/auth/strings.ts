@@ -175,7 +175,18 @@ export const AUTH = {
     verifiedSignIn: 'Your email is confirmed and your account is ready. Sign in to continue.',
     passwordUpdated: 'Your password is updated. Sign in with your new one.',
   },
+  // An account Shortcut's admin deleted (server/services/accountDeletion.ts): the sign-in form's panel
+  deleted: {
+    title: 'This account was deleted',
+    body: (until: string | null) => `Nothing is gone yet: its videos, clips and credits are kept${until ? ` until ${until}` : ''}. To get it back, open the restore link we emailed you and tell us in a line or two what went wrong.`,
+    send: 'Email me the restore link',
+    busy: 'Sending…',
+    sent: (email: string) => `A new restore link is on its way to ${email}. It can take a minute — check spam too.`,
+    failed: 'Could not send the link. Try again in a minute.',
+    otherEmail: 'Use a different email',
+  },
   errors: {
+    blocked: 'This account is blocked. If you think that’s a mistake, write to support@shortcutapp.in.',
     generic: 'Something went wrong. Try again.',
     agree: 'Tick the box to agree to the Terms and Privacy Policy before creating your account.',
     network: 'Something went wrong. Check your connection and try again.',

@@ -25,4 +25,14 @@ export async function register() {
   } catch (e) {
     console.warn('[expiry] sweep not set up:', e instanceof Error ? e.message : e)
   }
+  // Accounts Shortcut's admin deleted (user, 2026-11-24): their subscription cancelled at once, and deleted for good
+  // once their 30 days to restore them are over (server/services/accountDeletion.ts). Never stops the site from starting.
+  try {
+    const { startDeletionSweep } = await import('@/server/services/accountDeletion')
+    const { purgeAccount } = await import('@/server/services/account')
+    const { cancelRazorpaySubscription } = await import('@/lib/razorpay')
+    startDeletionSweep({ cancel: id => cancelRazorpaySubscription(id, false), purge: purgeAccount })
+  } catch (e) {
+    console.warn('[account] deleted-accounts sweep not set up:', e instanceof Error ? e.message : e)
+  }
 }

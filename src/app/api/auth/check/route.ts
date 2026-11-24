@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { accountStatus } from '@/modules/auth/services'
+import { accountLock } from '@/server/services/accountDeletion'
 import { clientIp } from '@/modules/auth/limits'
 import { looksLikeEmail } from '@/lib/shared/email'
 
@@ -25,7 +26,10 @@ export async function POST(req: NextRequest) {
     if (typeof email !== 'string' || !looksLikeEmail(email.trim())) {
       return NextResponse.json({ error: 'Enter a valid email' }, { status: 400 })
     }
-    return NextResponse.json({ status: await accountStatus(email) })
+    const status = await accountStatus(email)
+    // (a deleted account: until when it can be restored, for the form's note)
+    const restoreBy = status === 'deleted' ? ((await accountLock({ email })) as { restoreBy?: Date | null }).restoreBy ?? null : undefined
+    return NextResponse.json({ status, ...(restoreBy !== undefined ? { restoreBy } : {}) })
   } catch {
     return NextResponse.json({ error: 'Could not check that email. Try again.' }, { status: 500 })
   }
