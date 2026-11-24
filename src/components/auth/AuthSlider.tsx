@@ -7,6 +7,8 @@ import Link from 'next/link'
 import { ArrowLeft, ShieldCheck } from 'lucide-react'
 import { keepNextPath, takeNextPath } from '@/lib/nextPath'
 import { AuthShell, NavSwitch } from './AuthShell'
+import { PandaStage } from './PandaStage'
+import { pandaCelebrate, pandaOops, pandaSwitch } from './panda'
 import { CodeInput, EmailField, Field, PasswordInput, PasswordRules, SubmitButton, emailLooksRight, passwordOk } from './fields'
 import { AUTH } from './strings'
 
@@ -33,13 +35,18 @@ export function AuthSlider({ initialMode, google = false }: { initialMode: Mode;
   const other: Mode = mode === 'signin' ? 'signup' : 'signin'
 
   return (
-    <AuthShell navAction={
-      <NavSwitch
-        prompt={other === 'signup' ? AUTH.nav.newHere : AUTH.nav.haveAccount}
-        label={other === 'signup' ? AUTH.nav.toSignup : AUTH.nav.toSignin}
-        onClick={() => flip.current?.(other)}
-      />
-    }>
+    <AuthShell
+      // (the panda: sign-up opens with the card up top until it pulls the cord; sign-in, it waves)
+      panda={<PandaStage intro={initialMode === 'signup'} />}
+      cardWaits={initialMode === 'signup'}
+      navAction={
+        <NavSwitch
+          prompt={other === 'signup' ? AUTH.nav.newHere : AUTH.nav.haveAccount}
+          label={other === 'signup' ? AUTH.nav.toSignup : AUTH.nav.toSignin}
+          onClick={() => { pandaSwitch(); flip.current?.(other) }}
+        />
+      }
+    >
       <AuthFlow mode={mode} setMode={setMode} flip={flip} google={google} />
     </AuthShell>
   )
@@ -95,6 +102,12 @@ function AuthFlow({ mode, setMode, flip, google }: {
   const setError = (text: string | null, at?: ErrorAt) => setFormError(text ? { text, at } : null)
   /** The error under a box, if there's one there */
   const errorAt = (at: ErrorAt) => (error?.at === at ? error.text : null)
+  // An error shows: the panda's oops — a small slip in the form (passwords differ, not ticked, a weak
+  // password) gets the little head shake, anything else (wrong password, the server) the full oops
+  useEffect(() => {
+    if (!error) return
+    pandaOops(([AUTH.errors.mismatch, AUTH.errors.agree, AUTH.errors.weakPassword] as readonly string[]).includes(error.text))
+  }, [error])
   /** Typing in a box clears its own error */
   const typed = (at: ErrorAt) => { if (error?.at === at) setFormError(null) }
 
@@ -149,7 +162,11 @@ function AuthFlow({ mode, setMode, flip, google }: {
     if (res?.code === 'deleted') { setDeleted({ email: norm(), restoreBy: null }); return true }
     if (res?.code === 'blocked') { setError(AUTH.errors.blocked, 'email'); return true }
     if (res?.error) return false
-    router.push(takeNextPath())
+    // (signed in: the panda celebrates while the next page gets ready, then it opens)
+    const next = takeNextPath()
+    router.prefetch(next)
+    await pandaCelebrate()
+    router.push(next)
     return true
   }
   async function status(): Promise<'password' | 'google' | 'none' | null> {
@@ -282,8 +299,9 @@ function AuthFlow({ mode, setMode, flip, google }: {
   return (
     <>
       <div className="auth-tabs" role="tablist" aria-label={AUTH.tabs.label}>
-        <button type="button" role="tab" aria-selected={mode === 'signin'} onClick={() => switchTo('signin')}>{AUTH.tabs.signin}</button>
-        <button type="button" role="tab" aria-selected={mode === 'signup'} onClick={() => switchTo('signup')}>{AUTH.tabs.signup}</button>
+        {/* (picked by the person: the panda tugs the cord and the card drops back in — not when the flow switches) */}
+        <button type="button" role="tab" aria-selected={mode === 'signin'} onClick={() => { if (mode !== 'signin') pandaSwitch(); switchTo('signin') }}>{AUTH.tabs.signin}</button>
+        <button type="button" role="tab" aria-selected={mode === 'signup'} onClick={() => { if (mode !== 'signup') pandaSwitch(); switchTo('signup') }}>{AUTH.tabs.signup}</button>
         <span className="auth-tab-pill" data-at={mode} aria-hidden />
       </div>
       {/* One form for both tabs (user, 2026-10-31): switching to Create account, the password's
