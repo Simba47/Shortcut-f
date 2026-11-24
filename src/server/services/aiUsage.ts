@@ -255,12 +255,26 @@ export async function beginAiAction(userId: string, kind: AiActionKind, videoId:
 export const AI_PRICES: Record<string, { input: number; output: number }> = {
   'gemini-2.5-flash': { input: 0.30, output: 2.50 },
   'gemini-2.5-flash-lite': { input: 0.10, output: 0.40 },
+  // (the key's default model, and Vertex's with VERTEX_MODEL on the shortcutapp.in project: 2.5 Flash's price, gemini.ts)
+  'gemini-3.5-flash-lite': { input: 0.30, output: 2.50 },
+}
+
+/**
+ * Priority PayGo (gemini.ts: a Vertex answer served at priority, model "<model>:priority") costs more
+ * per token: 1.8x until the real price is known (VERTEX_PRIORITY_PRICE_FACTOR sets it), as in the worker
+ */
+const PRIORITY_FACTOR = Number(process.env.VERTEX_PRIORITY_PRICE_FACTOR) > 0 ? Number(process.env.VERTEX_PRIORITY_PRICE_FACTOR) : 1.8
+
+/** The cost in millionths of a dollar, or null for a model with no price listed */
+export function costMicroUsd(model: string, inputTokens: number, outputTokens: number): number | null {
+  const priority = model.endsWith(':priority')
+  const price = AI_PRICES[priority ? model.slice(0, -':priority'.length) : model]
+  return price ? Math.round((inputTokens * price.input + outputTokens * price.output) * (priority ? PRIORITY_FACTOR : 1)) : null
 }
 
 export async function recordAiUsage(u: { userId?: string | null; videoId?: string | null; purpose: string; model: string; inputTokens: number; outputTokens: number; via?: 'key' | 'vertex' }): Promise<void> {
   await ensureAiUsageSchema()
-  const price = AI_PRICES[u.model]
-  const cost = price ? Math.round(u.inputTokens * price.input + u.outputTokens * price.output) : null
+  const cost = costMicroUsd(u.model, u.inputTokens, u.outputTokens)
   await sql`
     INSERT INTO ai_usage (user_id, video_id, purpose, model, input_tokens, output_tokens, cost_micro_usd, via)
     VALUES (${u.userId ?? null}, ${u.videoId ?? null}, ${u.purpose}, ${u.model}, ${u.inputTokens}, ${u.outputTokens}, ${cost}, ${u.via ?? null})`

@@ -4,7 +4,8 @@
  *
  * With GOOGLE_CLOUD_PROJECT set the request goes to Vertex AI, billed to that Google Cloud
  * project; no Gemini API key is needed. Login: the service account key in GOOGLE_CREDENTIALS_JSON
- * (the key file's contents, as JSON or base64), else the Application Default Credentials file
+ * (the key file's contents, as JSON or base64) - or, where keys are forbidden, a
+ * `workload_identity_jwt` login (see WorkloadIdentityJwt below) - else the Application Default Credentials file
  * (`gcloud auth application-default login` on a developer PC). Without GOOGLE_CLOUD_PROJECT the
  * request goes to the Gemini API with GEMINI_API_KEY, as before.
  *
@@ -28,7 +29,7 @@ import { join } from 'node:path'
 export type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } }
 
 export interface AskOptions {
-  /** Default gemini-2.5-flash */
+  /** Default GEMINI_MODEL (gemini-2.5-flash, or VERTEX_MODEL) */
   model?: string
   /** The model on the Gemini key (GEMINI_FIRST=key) instead of GEMINI_KEY_MODEL; Vertex keeps `model` */
   keyModel?: string
@@ -74,7 +75,12 @@ export function audioTokensOf(details: { modality?: string; tokenCount?: number 
   return (details ?? []).filter(d => /audio/i.test(d.modality ?? '')).reduce((n, d) => n + (d.tokenCount ?? 0), 0)
 }
 
-export const GEMINI_MODEL = 'gemini-2.5-flash'
+/**
+ * The model on Vertex (and on a key's older generateContent path) when a call names none.
+ * VERTEX_MODEL sets it: a Google Cloud project made since late 2026 cannot use 2.5 (404), so a new
+ * project takes gemini-3.5-flash-lite (tested 2026-11-20: thinkingBudget, schema and Priority all work)
+ */
+export const GEMINI_MODEL = process.env.VERTEX_MODEL?.trim() || 'gemini-2.5-flash'
 // (gemini-3.5-flash-lite: on the 5 Nov six-language test, with finding moments at 'medium' thinking,
 // its moments matched 16/24 - as gemini-2.5-flash on Vertex - at 2.5 Flash's price ($0.30 / $2.50
 // per 1M tokens). gemini-3.6-flash matched 21/24 at ~2x the cost, ~4x from 2027: set it here for that)
@@ -318,11 +324,14 @@ async function askGenerate(input: string | GeminiPart[], opts: AskOptions, provi
     headers['x-goog-api-key'] = process.env.GEMINI_API_KEY!
   }
 
-  // Vertex answers 429 when shared capacity is briefly busy: wait and try again
+  // Vertex answers 429 when shared capacity is briefly busy: the next try goes as Priority PayGo
+  // (see vertexPriorityOn), else wait and try again
+  let priority = false
   for (let attempt = 1; ; attempt++) {
     let res: Response
     try {
-      res = await inTurn(() => fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(opts.timeoutMs ?? 120_000) }))
+      const sent = priority ? { ...headers, ...PRIORITY_HEADERS } : headers
+      res = await inTurn(() => fetch(url, { method: 'POST', headers: sent, body, signal: AbortSignal.timeout(opts.timeoutMs ?? 120_000) }))
     } catch (e) {
       // The connection dropped before an answer came: send it again, like a 5xx
       if (!isNetworkDrop(e) || attempt >= TRIES) throw e
@@ -332,16 +341,31 @@ async function askGenerate(input: string | GeminiPart[], opts: AskOptions, provi
     if (res.ok) {
       const data = await res.json() as {
         candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[]
-        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number; promptTokensDetails?: { modality?: string; tokenCount?: number }[] }
+        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number; promptTokensDetails?: { modality?: string; tokenCount?: number }[]; trafficType?: string }
       }
       const report = opts.onUsage ?? usageScope.getStore()
       if (report) {
         const u = data.usageMetadata ?? {}
-        try { report({ model, inputTokens: u.promptTokenCount ?? 0, outputTokens: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0), audioTokens: audioTokensOf(u.promptTokensDetails), via: provider === 'vertex' ? 'vertex' : 'key' }) } catch { /* recording never fails the answer */ }
+        // (an answer served at priority is priced higher: its model is recorded as "<model>:priority", aiUsage.ts)
+        const as = u.trafficType === 'ON_DEMAND_PRIORITY' ? `${model}${PRIORITY_SUFFIX}` : model
+        try { report({ model: as, inputTokens: u.promptTokenCount ?? 0, outputTokens: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0), audioTokens: audioTokensOf(u.promptTokensDetails), via: provider === 'vertex' ? 'vertex' : 'key' }) } catch { /* recording never fails the answer */ }
       }
       return (data.candidates?.[0]?.content?.parts ?? []).filter(p => !p.thought).map(p => p.text ?? '').join('')
     }
     const text = await res.text()
+    // Busy on Vertex: try again at once as Priority PayGo (paid more, only for this request)
+    if (provider === 'vertex' && res.status === 429 && !priority && vertexPriorityOn() && !noPriority.has(model) && attempt < TRIES) {
+      priority = true
+      await pause(200 + Math.random() * 800)
+      continue
+    }
+    // A model or place that does not take Priority PayGo: never ask for it again, and go on as before
+    if (priority && res.status === 400 && attempt < TRIES) {
+      noPriority.add(model)
+      priority = false
+      console.warn(`[gemini] ${model} refused Priority PayGo (${text.slice(0, 160)}): normal requests only`)
+      continue
+    }
     if ((res.status === 429 || res.status >= 500) && attempt < TRIES) {
       await new Promise(r => setTimeout(r, retryDelayMs(attempt, retryAfterMs(res.headers.get('retry-after')))))
       continue
@@ -350,6 +374,21 @@ async function askGenerate(input: string | GeminiPart[], opts: AskOptions, provi
     throw new GeminiError(`Gemini ${res.status} (${provider}): ${text.slice(0, 300)}`, res.status)
   }
 }
+
+// ── Priority PayGo (Vertex) ──────────────────────────────────────────────────
+// When Vertex says busy (429), the same request is sent again at once as Priority PayGo: a separate,
+// larger share of Google's capacity (about 50M tokens a minute per organisation for Flash models),
+// at a higher price per token, with no contract. Only refused requests go this way, so on a quiet day
+// it costs nothing more. Google serves it as normal (and bills it as normal) when it has no priority
+// room, or for an account without Priority PayGo (a free-trial billing account, seen 2026-11-19).
+// Not for the Transcribe models (they do not take it). VERTEX_PRIORITY=off turns it off.
+
+const PRIORITY_HEADERS = { 'X-Vertex-AI-LLM-Request-Type': 'shared', 'X-Vertex-AI-LLM-Shared-Request-Type': 'priority' }
+/** Added to the model's name in ai_usage when Google served the answer at priority */
+export const PRIORITY_SUFFIX = ':priority'
+export const vertexPriorityOn = (env: Env = process.env) => (env.VERTEX_PRIORITY ?? '').trim().toLowerCase() !== 'off'
+/** Models that answered "bad request" to a priority ask: asked normally from then on */
+const noPriority = new Set<string>()
 
 // ── Many users at once ───────────────────────────────────────────────────────
 // Every user's AI calls share one Google Cloud project's capacity. A burst from one process only
@@ -397,9 +436,27 @@ export function retryAfterMs(header: string | null): number {
 
 // ── Vertex AI login ──────────────────────────────────────────────────────────
 
+/**
+ * Workload Identity Federation with our own signing key, for a project whose organisation forbids
+ * service account keys (shortcutapp.in): we sign a short JWT, Google's STS swaps it for a federated
+ * token (the provider holds our public key), and that acts as `service_account` for an hour.
+ * Revoke by deleting the provider's key (gcloud iam workload-identity-pools providers update-oidc).
+ */
+export interface WorkloadIdentityJwt {
+  type: 'workload_identity_jwt'
+  /** //iam.googleapis.com/projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider> */
+  audience: string
+  issuer: string
+  subject: string
+  key_id: string
+  private_key: string
+  service_account: string
+}
+
 type Credentials =
   | { type: 'service_account'; client_email: string; private_key: string; token_uri?: string }
   | { type: 'authorized_user'; client_id: string; client_secret: string; refresh_token: string }
+  | WorkloadIdentityJwt
 
 let cached: { token: string; expires: number } | null = null
 
@@ -415,9 +472,13 @@ async function loadCredentials(): Promise<Credentials> {
 }
 
 /** An access token for Vertex AI, kept until 5 minutes before it expires */
-async function vertexToken(): Promise<string> {
+export async function vertexToken(): Promise<string> {
   if (cached && Date.now() < cached.expires) return cached.token
   const creds = await loadCredentials()
+  if (creds.type === 'workload_identity_jwt') {
+    cached = await federatedToken(creds)
+    return cached.token
+  }
   let form: URLSearchParams
   let tokenUrl = 'https://oauth2.googleapis.com/token'
   if (creds.type === 'service_account') {
@@ -436,19 +497,50 @@ async function vertexToken(): Promise<string> {
   } else {
     throw new Error(`Unsupported Google credentials type: ${(creds as { type?: string }).type}`)
   }
-  // (a dropped connection is tried again: the token is asked for about once an hour)
-  let res: Response
+  const res = await loginFetch(tokenUrl, { method: 'POST', body: form })
+  const data = await res.json().catch(() => ({})) as { access_token?: string; expires_in?: number; error_description?: string; error?: string }
+  if (!res.ok || !data.access_token) throw new Error(`Google Cloud login failed (${res.status}): ${data.error_description ?? data.error ?? 'no token'}`)
+  cached = { token: data.access_token, expires: Date.now() + ((data.expires_in ?? 3600) - 300) * 1000 }
+  return cached.token
+}
+
+/** A login request; a dropped connection is tried again (a token is asked for about once an hour) */
+async function loginFetch(url: string, init: RequestInit): Promise<Response> {
   for (let attempt = 1; ; attempt++) {
     try {
-      res = await fetch(tokenUrl, { method: 'POST', body: form, signal: AbortSignal.timeout(30_000) })
-      break
+      return await fetch(url, { ...init, signal: AbortSignal.timeout(30_000) })
     } catch (e) {
       if (!isNetworkDrop(e) || attempt >= 3) throw e
       await pause(retryDelayMs(attempt))
     }
   }
-  const data = await res.json().catch(() => ({})) as { access_token?: string; expires_in?: number; error_description?: string; error?: string }
-  if (!res.ok || !data.access_token) throw new Error(`Google Cloud login failed (${res.status}): ${data.error_description ?? data.error ?? 'no token'}`)
-  cached = { token: data.access_token, expires: Date.now() + ((data.expires_in ?? 3600) - 300) * 1000 }
-  return cached.token
+}
+
+/** Our signed JWT → Google STS (federated token) → an hour's access token as the service account */
+async function federatedToken(c: WorkloadIdentityJwt): Promise<{ token: string; expires: number }> {
+  const now = Math.floor(Date.now() / 1000)
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  const unsigned = `${b64({ alg: 'RS256', typ: 'JWT', kid: c.key_id })}.${b64({
+    iss: c.issuer, sub: c.subject, aud: `https:${c.audience}`, iat: now, exp: now + 600,
+  })}`
+  const jwt = `${unsigned}.${createSign('RSA-SHA256').update(unsigned).sign(c.private_key, 'base64url')}`
+  const json = { 'Content-Type': 'application/json' }
+  const sts = await loginFetch('https://sts.googleapis.com/v1/token', {
+    method: 'POST', headers: json, body: JSON.stringify({
+      grantType: 'urn:ietf:params:oauth:grant-type:token-exchange', audience: c.audience,
+      scope: 'https://www.googleapis.com/auth/cloud-platform',
+      requestedTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+      subjectToken: jwt, subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt',
+    }),
+  })
+  const s = await sts.json().catch(() => ({})) as { access_token?: string; error_description?: string; error?: string }
+  if (!sts.ok || !s.access_token) throw new Error(`Google Cloud login failed at STS (${sts.status}): ${s.error_description ?? s.error ?? 'no token'}`)
+  const gen = await loginFetch(`https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(c.service_account)}:generateAccessToken`, {
+    method: 'POST', headers: { ...json, Authorization: `Bearer ${s.access_token}` },
+    body: JSON.stringify({ scope: ['https://www.googleapis.com/auth/cloud-platform'] }),
+  })
+  const g = await gen.json().catch(() => ({})) as { accessToken?: string; expireTime?: string; error?: { message?: string } }
+  if (!gen.ok || !g.accessToken) throw new Error(`Google Cloud login failed acting as ${c.service_account} (${gen.status}): ${g.error?.message ?? 'no token'}`)
+  const expires = g.expireTime ? Date.parse(g.expireTime) : Date.now() + 3600_000
+  return { token: g.accessToken, expires: expires - 300_000 }
 }
