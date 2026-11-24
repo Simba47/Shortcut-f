@@ -5,7 +5,7 @@
 export const PUBLIC_PATHS = ['/', '/pricing', '/refunds', '/privacy', '/terms', '/support', '/delete-account']
 
 // The sign-in pages (a signed-in visitor is sent on to the dashboard from these)
-export const AUTH_PAGES = ['/login', '/signup', '/verify-otp', '/forgot-password', '/reset-password']
+export const AUTH_PAGES = ['/login', '/signup', '/verify-otp', '/forgot-password', '/reset-password', '/restore-account']
 
 // The parts of the site that need an account: a signed-out visitor is sent to sign in from these
 // only. Any other address that isn't a page (/abc, an old link) shows "Page not found", not the

@@ -7,6 +7,7 @@ import { authConfig } from './auth.config'
 import { verifyPassword } from './modules/auth/password'
 import { startSession, isCurrentSession, endSession } from './modules/auth/devices'
 import sql from './lib/db'
+import { accountLock } from './server/services/accountDeletion'
 import { clientIp, loginSucceeded, startLoginAttempt } from './modules/auth/limits'
 import { queueServerEvent } from './server/analytics'
 
@@ -28,6 +29,9 @@ export const googleOn = () => !!process.env.AUTH_GOOGLE_ID && !!process.env.AUTH
 class GoogleOnly extends CredentialsSignin { code = 'google_only' }
 /** Too many wrong passwords lately (modules/auth/limits.ts): the form says to wait */
 class TooManyTries extends CredentialsSignin { code = 'too_many' }
+/** Deleted or blocked by Shortcut's admin (server/services/accountDeletion.ts): no sign-in; the form says why */
+class AccountDeleted extends CredentialsSignin { code = 'deleted' }
+class AccountBlocked extends CredentialsSignin { code = 'blocked' }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
@@ -62,6 +66,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const ok = await verifyPassword(password, user.password_hash as string)
         if (!ok) return null
         await loginSucceeded(email, attempt)
+        const lock = await accountLock({ id: user.id as string })
+        if (lock.state === 'deleted') throw new AccountDeleted()
+        if (lock.state === 'blocked') throw new AccountBlocked()
 
         // (image: the profile photo's address — the same one photoUrl makes in server/services/account.ts)
         const photo = user.image as string | null
@@ -90,6 +97,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (account?.provider !== 'google') return true
       const email = profile?.email?.toLowerCase().trim()
       if (!email || profile?.email_verified !== true) return false
+      // Deleted or blocked by Shortcut's admin: back to the sign-in form, which says why (and, deleted, offers the restore link)
+      const lock = await accountLock({ email })
+      if (lock.state !== 'ok') return `/login?error=${lock.state}&email=${encodeURIComponent(email)}`
       // An account started with this email but never confirmed (a password chosen, its code never
       // entered): that password may not be this person's, so it goes — the account is theirs now
       await sql`UPDATE users SET password_hash = NULL, "emailVerified" = now() WHERE email = ${email} AND "emailVerified" IS NULL`
