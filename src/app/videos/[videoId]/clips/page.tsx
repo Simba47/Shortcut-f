@@ -7,6 +7,7 @@ import { requireUser } from '@/server/auth'
 import sql from '@/lib/db'
 import { r2, R2_BUCKET } from '@/lib/r2'
 import { rowsToLocal } from '@/modules/editor/utils'
+import { shownSegment } from '@/modules/editor/visibility'
 import { ClipsGallery, type GalleryClip } from './ClipsGallery'
 import { imageOverlaysFor } from '@/server/services/clipPreview'
 
@@ -75,10 +76,25 @@ export default async function AutoClipsPage({ params }: { params: Promise<{ vide
     imageOverlaysFor(ids),
   ])
 
-  // B-roll videos the clips show (only the owner's own videos, as the export uses)
+  // Each clip's parts as the export shows them (as the clip board's preview: clipPreview.ts) — a hidden
+  // added video gives way to the main video, hidden frame items go
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const segsOf = new Map(ids.map(id => [id, rowsToLocal((segRows as any[]).filter(s => s.clip_id === id)).map(s => shownSegment(s, videoId))]))
+  const allSegs = [...segsOf.values()].flat()
+  // B-roll videos the clips show (only the owner's own videos, as the export uses): full shots and the
+  // videos in frame slots — Make my clips' B-rolls are stock on top of a frame (user, 2026-11-24: the
+  // reels showed black there, only full shots were looked up)
   // (the video itself, named by borrowed reaction slots, is played from its own URL)
-  const brollIds = [...new Set((segRows as any[]).flatMap(s => (s.crop_boxes ?? []).map((b: { source_video_id?: string | null }) => b.source_video_id).filter((id: string | null | undefined) => !!id && id !== videoId)))] as string[]
+  const brollIds = [...new Set(allSegs.flatMap(s => [
+    ...s.crop_boxes.map(b => b.source_video_id),
+    ...(s.frame?.items ?? []).map(it => it.kind === 'video' ? it.source_video_id : null),
+  ]).filter((id): id is string => !!id && id !== videoId))]
+  // Photos in frame slots: signed, so the cards can draw them
+  await Promise.all(allSegs.flatMap(s => (s.frame?.items ?? []).map(async it => {
+    if (it.kind === 'photo' && it.image_path) {
+      it.image_url = await getSignedUrl(r2, new GetObjectCommand({ Bucket: R2_BUCKET, Key: it.image_path }), { expiresIn: 43200 }).catch(() => null)
+    }
+  })))
   const brollRows = brollIds.length
     ? await sql`SELECT id, storage_path FROM videos WHERE id = ANY(${brollIds}) AND user_id = ${user.id} AND storage_path IS NOT NULL`
     : []
@@ -94,8 +110,7 @@ export default async function AutoClipsPage({ params }: { params: Promise<{ vide
     output_url: c.status === 'done' && c.output_storage_path
       ? await getSignedUrl(r2, new GetObjectCommand({ Bucket: R2_BUCKET, Key: c.output_storage_path }), { expiresIn: 43200 }).catch(() => null)
       : null,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    segments: rowsToLocal((segRows as any[]).filter(s => s.clip_id === c.id)),
+    segments: segsOf.get(c.id as string) ?? [],
     words: allWords.filter(w => w.end_ms >= c.start_ms && w.start_ms <= c.end_ms),
     captionStyle: ((styles as unknown as CaptionStyle[]).find(s => s.clip_id === c.id)) ?? null,
     textOverlays: (overlays as unknown as TextOverlay[]).filter(o => o.clip_id === c.id).map(withSavedStyle),
