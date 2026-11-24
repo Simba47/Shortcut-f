@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import sql from '@/lib/db'
+import { accountLock } from '@/server/services/accountDeletion'
 import { hashPassword, validatePassword } from './password'
 import { generateOtp, hashOtp, verifyOtpHash } from './otp'
 import { sendOtpEmail } from './mailer'
@@ -51,10 +52,13 @@ export async function signupUser(email: string, password: string, ip = 'unknown'
  * password yet; 'none' — no account (or a signup whose code was never entered): the form turns
  * into "create your account". It says whether an email has an account — accepted by the user.
  */
-export async function accountStatus(email: string): Promise<'password' | 'google' | 'none'> {
+export async function accountStatus(email: string): Promise<'password' | 'google' | 'none' | 'deleted' | 'blocked'> {
   const norm = email.toLowerCase().trim()
   const [u] = await sql`SELECT "emailVerified", password_hash FROM users WHERE email = ${norm}`
   if (!u?.emailVerified) return 'none'
+  // Deleted or blocked by Shortcut's admin (accountDeletion.ts): the form says so instead of asking for the password
+  const lock = await accountLock({ email: norm })
+  if (lock.state !== 'ok') return lock.state
   return u.password_hash ? 'password' : 'google'
 }
 
