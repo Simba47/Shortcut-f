@@ -4622,3 +4622,136 @@ html.lenis, html.lenis body { height: auto; }
   background: linear-gradient(100deg, var(--logo, #c8ff00) 0%, var(--logo, #c8ff00) 35%, #eaffb0 100%);
   -webkit-background-clip: text; background-clip: text;
 }
+/* (the gallery panels smaller, user 2026-11-23) */
+.lp-root .fg-art { height: clamp(200px, 37vh, 420px); }
+.lp-root .fg-title { font-size: clamp(18px, 1.5vw, 23px); }
+.lp-root .fg-desc { font-size: clamp(13.5px, 1vw, 15.5px); }
+/* Framing with the studio shot: the frame glides from her on the left (9 %) to her on the right (55 %) */
+.lp-root .fa-steer-studio .fa-frame { animation: fa-steer2 6s cubic-bezier(.65,0,.35,1) infinite, fa-steer2-bg 6s cubic-bezier(.65,0,.35,1) infinite; }
+.lp-root .fa-steer-studio .fa-pan { animation: fa-pan2 6s cubic-bezier(.65,0,.35,1) infinite; }
+@keyframes fa-steer2 { 0%, 12% { left: 9%; } 45%, 62% { left: 55%; } 95%, 100% { left: 9%; } }
+@keyframes fa-steer2-bg { 0%, 12% { background-position: 13.2% 0; } 45%, 62% { background-position: 80.4% 0; } 95%, 100% { background-position: 13.2% 0; } }
+@keyframes fa-pan2 { 0%, 12% { background-position: 13% 50%; } 45%, 62% { background-position: 81% 50%; } 95%, 100% { background-position: 13% 50%; } }
+/* the phones shaped like a real phone (user 2026-11-23): the taller 9 : 19.5 body, corners rounded in proportion to its
+   size (not a capsule), a slimmer bezel and island; the render bars as wide as their phone */
+.lp-root .fa-phone { aspect-ratio: 9 / 19.5; border-radius: 17% / 7.8%; border-width: 2.5px; border-color: #2e2e2e; }
+.lp-root .fa-island { top: 2.6%; width: 32%; height: 2.4%; margin-left: -16%; }
+.lp-root .fa-render-clip { align-items: center; }
+.lp-root .fa-render-bar { width: 88%; height: 4px; }
+/* (text sized to the slimmer phones) */
+.lp-root .fa-cap { font-size: clamp(10px, .95vw, 14px); left: 5%; right: 5%; }
+.lp-root .fa-vt-title { font-size: clamp(9px, .8vw, 12px); }
+.lp-root .fa-hook { font-size: clamp(9px, .8vw, 13px); }
+/* (the panels smaller again, user 2026-11-23; the frame's tag on one line) */
+.lp-root .fg-art { height: clamp(180px, 32vh, 360px); }
+.lp-root .fg-body { gap: 16px; padding: clamp(12px, 2vh, 18px) 20px clamp(14px, 2.4vh, 20px); }
+.lp-root .fg-title { font-size: clamp(16px, 1.3vw, 20px); }
+.lp-root .fg-desc { font-size: clamp(13px, .92vw, 14.5px); }
+.lp-root .fa-frame-tag { white-space: nowrap; font-size: 9px; padding: 2px 6px; }
+.lp-root .fa-chip { font-size: 11px; padding: 4px 10px; }
+
+/* ── The final CTA button: the badge swaps ends on hover (user, 2026-11-23) ── the words make room on the left as the
+   round arrow badge slides from the right end to the left, turning 45°; the button stays put (no lift) */
+.lp-root .cta-section .cta-btn {
+  position: relative; overflow: hidden; gap: 0; height: 56px; padding: 0 64px 0 28px; box-sizing: border-box;
+  transition: padding .5s cubic-bezier(.65,0,.35,1), box-shadow .3s ease;
+}
+.lp-root .cta-section .cta-btn:hover, .lp-root .cta-section .cta-btn:focus-visible { transform: none; padding: 0 28px 0 64px; }
+.lp-root .cta-section .cta-btn .cta-btn-label { position: relative; z-index: 1; }
+.lp-root .cta-section .cta-btn .cta-btn-ico {
+  position: absolute; top: 8px; right: 8px; width: 40px; height: 40px; border-radius: 50%;
+  transition: right .5s cubic-bezier(.65,0,.35,1), transform .5s cubic-bezier(.65,0,.35,1);
+}
+.lp-root .cta-section .cta-btn:hover .cta-btn-ico, .lp-root .cta-section .cta-btn:focus-visible .cta-btn-ico {
+  width: 40px; right: calc(100% - 48px); transform: rotate(45deg);
+}
+.lp-root .cta-section .cta-btn:hover .cta-btn-ico svg { transform: none; }
+.lp-root .cta-section .cta-btn:active { transform: scale(.98); }
+@media (prefers-reduced-motion: reduce) { .lp-root .cta-section .cta-btn, .lp-root .cta-section .cta-btn .cta-btn-ico { transition: none; } }
+
+/* ── Who Is It For: each symbol acts out its own audience (user 2026-11-23) — once as its card comes in, and on a loop
+   while the card is hovered: mic talks, screen plays, sparkles twinkle, scissors snip, cap is tossed, megaphone shouts ── */
+.lp-root .lx-who-ico svg { transform-origin: 50% 50%; }
+.lp-root .lx-who-card.in .lx-who-ico svg { animation-duration: 1.1s; animation-timing-function: ease-in-out; animation-delay: calc(var(--d, 0s) + .5s); animation-iteration-count: 1; }
+.lp-root .lx-who-card:hover .lx-who-ico svg { animation-delay: 0s; animation-iteration-count: infinite; }
+.lp-root .lx-who-card.in .lx-who-ico-0 svg, .lp-root .lx-who-card:hover .lx-who-ico-0 svg { animation-name: who-mic; }
+.lp-root .lx-who-card.in .lx-who-ico-1 svg, .lp-root .lx-who-card:hover .lx-who-ico-1 svg { animation-name: who-play; }
+.lp-root .lx-who-card.in .lx-who-ico-2 svg, .lp-root .lx-who-card:hover .lx-who-ico-2 svg { animation-name: who-spark; }
+.lp-root .lx-who-card.in .lx-who-ico-3 svg, .lp-root .lx-who-card:hover .lx-who-ico-3 svg { animation-name: who-snip; }
+.lp-root .lx-who-card.in .lx-who-ico-4 svg, .lp-root .lx-who-card:hover .lx-who-ico-4 svg { animation-name: who-cap; }
+.lp-root .lx-who-card.in .lx-who-ico-5 svg, .lp-root .lx-who-card:hover .lx-who-ico-5 svg { animation-name: who-shout; }
+/* mic: a talking bob */
+@keyframes who-mic { 0%, 100% { transform: none; } 20% { transform: translateY(-2px) scale(1.06); } 40% { transform: translateY(0) scale(.97); } 60% { transform: translateY(-1.5px) scale(1.05); } 80% { transform: none; } }
+/* screen: a pulse, as if pressed play */
+@keyframes who-play { 0%, 100% { transform: none; } 30% { transform: scale(.86); } 55% { transform: scale(1.12); } 75% { transform: scale(.98); } }
+/* sparkles: a twinkle turn */
+@keyframes who-spark { 0%, 100% { transform: none; opacity: 1; } 35% { transform: rotate(18deg) scale(1.18); opacity: .7; } 65% { transform: rotate(-8deg) scale(.95); opacity: 1; } }
+/* scissors: two quick snips */
+@keyframes who-snip { 0%, 100% { transform: none; } 15% { transform: rotate(-14deg); } 30% { transform: rotate(6deg); } 45% { transform: rotate(-14deg); } 60% { transform: rotate(4deg); } 75% { transform: none; } }
+/* cap: tossed up, a spin, caught */
+@keyframes who-cap { 0%, 100% { transform: none; } 35% { transform: translateY(-6px) rotate(-14deg); } 60% { transform: translateY(-3px) rotate(10deg); } 80% { transform: translateY(1px); } }
+/* megaphone: a shout, shaking forward */
+@keyframes who-shout { 0%, 100% { transform: none; } 15% { transform: rotate(-10deg) scale(1.08); } 30% { transform: rotate(8deg) scale(1.08); } 45% { transform: rotate(-6deg) scale(1.05); } 60% { transform: rotate(4deg); } 75% { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .lp-root .lx-who-ico svg { animation: none !important; } }
+
+/* ── The phones as real phones (user 2026-11-23: "it doesn't even look like a phone") ── the screen with its own
+   rounded corners, a black bezel round it and a thin metal rim (drawn as rings outside the screen, so nothing inside
+   moves), the status bar (time, signal, battery), the dynamic island, the home bar, and a soft glass sheen */
+.lp-root .fa-phone {
+  border: 0; border-radius: 15% / 7%; overflow: hidden; isolation: isolate;
+  box-shadow:
+    0 0 0 5px #0b0b0b,                       /* the bezel */
+    0 0 0 6.5px #3b3b3e,                     /* the metal rim */
+    0 0 0 7px rgba(255,255,255,.08),
+    0 24px 44px -18px rgba(0,0,0,.95);
+  margin: 7px;
+}
+/* the status bar: the time on the left, signal and battery on the right */
+.lp-root .fa-phone::before {
+  content: "9:41"; position: absolute; z-index: 4; top: 2.4%; left: 9%; font-size: 7.5px; font-weight: 800; letter-spacing: .02em;
+  color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); line-height: 1;
+}
+.lp-root .fa-phone::after {
+  content: ""; position: absolute; z-index: 4; top: 2.7%; right: 8%; width: 17px; height: 6px;
+  background:
+    linear-gradient(#fff, #fff) 0 100% / 2px 40% no-repeat,
+    linear-gradient(#fff, #fff) 3px 100% / 2px 65% no-repeat,
+    linear-gradient(#fff, #fff) 6px 100% / 2px 100% no-repeat,
+    linear-gradient(#fff, #fff) 10px 50% / 6px 100% no-repeat;
+  border-radius: 1px; filter: drop-shadow(0 1px 1px rgba(0,0,0,.5));
+}
+.lp-root .fa-island { top: 2%; width: 30%; height: 3%; margin-left: -15%; border-radius: 99px; background: #000; z-index: 5; }
+/* the home bar, and the glass sheen over the screen */
+.lp-root .fa-phone-shot::after, .lp-root .fa-split::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 3;
+  background:
+    linear-gradient(#fff, #fff) 50% calc(100% - 3.5%) / 34% 3px no-repeat,
+    linear-gradient(125deg, rgba(255,255,255,.14) 0%, rgba(255,255,255,0) 32%);
+  border-radius: inherit;
+}
+.lp-root .fa-phone-shot { border-radius: inherit; }
+.lp-root .fa-split { position: relative; }
+.lp-root .fa-vt { box-shadow: 0 0 0 5px #0b0b0b, 0 0 0 6.5px #3b3b3e, 0 0 0 7px rgba(255,255,255,.08), 0 24px 44px -18px rgba(0,0,0,.95); }
+.lp-root .fa-pick .fa-phone { box-shadow: 0 0 0 5px #0b0b0b, 0 0 0 7px var(--logo, #c8ff00), 0 0 22px -2px color-mix(in srgb, var(--logo, #c8ff00) 55%, transparent), 0 24px 44px -18px rgba(0,0,0,.95); }
+.lp-root .fa-render .fa-chip { left: 5%; right: auto; }
+/* (chips sit above the phones, clear of them) */
+.lp-root .fg .fa-chip { top: 3.5%; }
+.lp-root .fg .fa-render, .lp-root .fg .fa-steer { padding-top: 9%; }
+
+/* the phones, simply phone-shaped (user 2026-11-23: "I didn't ask for the border — a perfect mobile shape"): no bezel
+   or rim rings and no status bar; just the tall 9 : 19.5 screen with phone-rounded corners, a hairline edge, the
+   island and the home bar */
+.lp-root .fa-phone, .lp-root .fa-vt { margin: 0; border: 0; border-radius: 16% / 7.4%; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12), 0 22px 40px -18px rgba(0,0,0,.95); }
+.lp-root .fa-phone::before, .lp-root .fa-phone::after { content: none; }
+.lp-root .fa-pick .fa-phone { box-shadow: 0 0 0 2px var(--logo, #c8ff00), 0 0 20px -4px color-mix(in srgb, var(--logo, #c8ff00) 55%, transparent), 0 22px 40px -18px rgba(0,0,0,.95); }
+.lp-root .fa-island { top: 2.2%; width: 28%; height: 2.6%; margin-left: -14%; }
+.lp-root .fa-vt { gap: 6%; padding: 0 9%; }
+.lp-root .fa-vt-title { font-size: clamp(8px, .7vw, 11px); line-height: 1.15; }
+.lp-root .fa-cap { font-size: clamp(9px, .78vw, 12.5px); left: 7%; right: 7%; }
+/* (the phones a little wider and a touch larger — user 2026-11-23: too narrow): 9 : 17, corners in proportion */
+.lp-root .fa-phone, .lp-root .fa-vt { aspect-ratio: 9 / 17; border-radius: 14% / 7.4%; }
+.lp-root .fg .fa-render-clip .fa-phone { height: 80%; }
+.lp-root .fg .fa-layouts .fa-phone { height: calc(100% - 22px); }
+.lp-root .fg .fa-layouts figure { height: 92%; }
+.lp-root .fg .fa-captions .fa-phone, .lp-root .fg .fa-hooks .fa-phone { height: 92%; }
+.lp-root .fa-island { width: 26%; margin-left: -13%; }
