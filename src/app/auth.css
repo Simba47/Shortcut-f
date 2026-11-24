@@ -711,6 +711,153 @@ a.auth-back, a.auth-submit { text-decoration: none; }
   @container (max-width: 299px) { .auth-short { display: none; } }
 }
 
+/* ── Sign in / sign up: the panda (components/auth/PandaStage.tsx) ──
+   Wide windows (user, 2026-11-24): one card — the panda on its left under one soft spotlight, the
+   form on its right; the bar and the footer outside it. The crowd, the stage lights and the floating
+   reactions are gone. The panda's clips are on black and its side of the card is black, their edges
+   fading out — no box round it. Phones: the card alone, as before (no panda). */
+.ap-stage, .ap-dust { display: none; }
+@media (min-width: 900px) {
+  .auth-root[data-panda] {
+    /* the panda's height (follows the window's, up to 470 px, so the card fits without scrolling) and its side's width */
+    --ap-h: clamp(300px, 100vh - 330px, 470px);
+    --ap-w: calc(var(--ap-h) * 640 / 720 + 45px);
+    background: radial-gradient(ellipse 60% 80% at 50% 45%, #070707, #000 75%);
+  }
+  /* the card: the panda's side, then the form's (a little more compact than the form alone) */
+  .auth-root[data-panda] .auth-card {
+    grid-template-columns: var(--ap-w) minmax(0, 1fr);
+    width: min(calc(var(--ap-w) + 400px), calc(100% - 48px));
+    /* the same size for sign in and sign up (user, 2026-11-24): sign-up's height, as much as the window
+       allows; sign-in's shorter form sits in the middle of its side */
+    height: min(calc(100% - clamp(12px, 4.5vh, 56px) - 10px), 660px);
+  }
+  .auth-root[data-panda] .auth-side { padding: clamp(12px, 2.4vh, 26px) 34px; }
+  .auth-root[data-panda] .auth-panel { max-width: 324px; }
+  /* compact (user, 2026-11-24: the whole sign-up form in view, no scrolling): smaller words, boxes and
+     gaps, following the window's height */
+  .auth-root[data-panda] { --auth-gap: clamp(6px, 1.05vh, 10px); --auth-box-h: clamp(36px, 4.4vh, 42px); }
+  .auth-root[data-panda] .auth-tabs { margin-bottom: clamp(8px, 1.5vh, 14px); }
+  .auth-root[data-panda] .auth-tabs button { min-height: clamp(30px, 3.8vh, 34px); font-size: 13.5px; }
+  .auth-root[data-panda] .auth-form h1 { font-size: clamp(20px, 2.8vh, 25px); }
+  .auth-root[data-panda] .auth-sub { margin: -3px 0 2px; font-size: 13px; }
+  .auth-root[data-panda] .auth-field { gap: 5px; }
+  .auth-root[data-panda] .auth-field-head label, .auth-root[data-panda] .auth-link { font-size: 12.5px; }
+  .auth-root[data-panda] .auth-form .auth-box input { font-size: 14px; }
+  .auth-root[data-panda] .auth-google { font-size: 14px; }
+  .auth-root[data-panda] .auth-google svg { width: 18px; height: 18px; }
+  .auth-root[data-panda] .auth-or { font-size: 11.5px; }
+  .auth-root[data-panda] .auth-rules li { font-size: 12px; }
+  .auth-root[data-panda] .auth-agree { font-size: 12.5px; line-height: 1.4; }
+  .auth-root[data-panda] .auth-agree input { width: 16px; height: 16px; }
+  .auth-root[data-panda] .auth-submit { margin-top: 2px; font-size: 14.5px; }
+  .auth-root[data-panda] .auth-legal { font-size: 11.5px; }
+
+  /* The panda's side: black, a spotlight from the top, the panda standing at the bottom */
+  .ap-stage {
+    display: flex; align-items: flex-end; justify-content: center;
+    position: relative; overflow: hidden;
+    padding: 28px 22px 14px;
+    background: #000;
+    border-inline-end: 1px solid rgb(255 255 255 / 0.07);
+    pointer-events: none; user-select: none;
+  }
+  .ap-box { position: relative; flex: none; height: var(--ap-h); aspect-ratio: 640 / 720; }
+  /* the clips, stacked: the playing one on top; the next fades in over it as it starts. The edges
+     fade out (the top most, so the cord comes down out of the dark) */
+  .ap-film {
+    position: absolute; inset: 0;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 9%, #000 97%, transparent), linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+            mask-image: linear-gradient(to bottom, transparent, #000 9%, #000 97%, transparent), linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+    -webkit-mask-composite: source-in;
+            mask-composite: intersect;
+  }
+  .ap-film > * { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .ap-film video { opacity: 0; }
+  .ap-film video[data-on="under"] { opacity: 1; z-index: 1; }
+  .ap-film video[data-on="top"] { opacity: 1; z-index: 2; animation: ap-in .14s linear; }
+  @keyframes ap-in { from { opacity: 0; } }
+  /* one soft spotlight from the top of the card, and its pool of light on the floor */
+  .ap-light, .ap-floor { position: absolute; z-index: 3; pointer-events: none; mix-blend-mode: screen; }
+  .ap-light {
+    left: 50%; top: 0; width: 100%; height: 100%; translate: -50% 0;
+    background: linear-gradient(to bottom, rgb(255 255 255 / 0.12), rgb(255 255 255 / 0.05) 55%, transparent 95%);
+    clip-path: polygon(40% 0, 60% 0, 100% 100%, 0 100%);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 32%, #000 68%, transparent);
+            mask-image: linear-gradient(90deg, transparent, #000 32%, #000 68%, transparent);
+  }
+  .ap-floor {
+    left: 50%; bottom: 0.5%; width: 78%; height: 9%; translate: -50% 0;
+    background: radial-gradient(closest-side, rgb(255 255 255 / 0.1), transparent);
+  }
+
+  /* The form drops into the card (motion on only; user, 2026-11-24: "make the falling look proper",
+     then "a little smoke when it lands"). Sign-up: it waits above the window until the panda tugs the
+     cord, then falls the whole way down, gathering speed (stretched a touch), lands with a squash, a
+     puff of dust out from under it and a jolt through the card (the spotlight dips), bounces twice,
+     rocking, and settles. Sign in ↔ Create account: it flies up out of the window and falls back the
+     same way. While it's out the card doesn't clip it (each half carries its own rounded corners),
+     and it passes behind the bar. (If the script never runs, it comes down by itself.) */
+  .auth-root[data-panda] > .auth-nav { z-index: 2; }
+  .auth-root[data-panda] .ap-stage { border-radius: 27px 0 0 27px; }
+  .auth-root[data-panda] .auth-side {
+    position: relative; z-index: 1;
+    border-radius: 0 27px 27px 0; transform-origin: 50% 100%;
+    /* (its own surface — the card's look — so it's whole while it falls outside the card) */
+    background: radial-gradient(ellipse 70% 45% at 50% 0%, rgb(255 255 255 / 0.05), transparent 70%), #0c0c0c;
+  }
+  /* the dust: soft grey clouds rolling out from under the form's bottom edge and up past its sides */
+  .ap-dust { display: block; position: absolute; z-index: 2; left: var(--ap-w); right: 0; bottom: 0; height: 0; pointer-events: none; }
+  .ap-dust span {
+    position: absolute; bottom: -34px; left: var(--x); width: var(--s, 160px); aspect-ratio: 1.7 / 1;
+    opacity: 0; translate: -50% 0;
+    /* (a lumpy cloud: three soft blobs) */
+    background:
+      radial-gradient(closest-side, rgb(206 206 212 / 0.5), rgb(196 196 202 / 0.2) 60%, transparent) 0 40% / 55% 70% no-repeat,
+      radial-gradient(closest-side, rgb(214 214 220 / 0.55), rgb(200 200 206 / 0.22) 60%, transparent) 50% 0 / 60% 85% no-repeat,
+      radial-gradient(closest-side, rgb(206 206 212 / 0.5), rgb(196 196 202 / 0.2) 60%, transparent) 100% 45% / 55% 70% no-repeat;
+    filter: blur(7px);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .auth-root[data-panda] .auth-card:has(> .auth-side[data-drop]) { overflow: visible; }
+    .auth-side[data-drop] { box-shadow: 0 40px 80px -20px rgb(0 0 0 / 0.85), inset 0 0 0 1px rgb(255 255 255 / 0.12); }
+    /* (its own fallback name: sharing ap-drop with "in" made the browser carry the waiting animation's
+       clock over, so on the first visit the real fall was already over and the form just appeared) */
+    .auth-side[data-drop="wait"] { translate: 0 -100vh; animation: ap-late .6s ease-out 8s both; }
+    .auth-side[data-drop="up"] { translate: 0 -100vh; rotate: 2deg; transition: translate .42s cubic-bezier(.5, 0, .9, .4), rotate .42s ease-in; }
+    .auth-side[data-drop="in"] { animation: ap-drop 1.4s both; }
+    /* at the landing (.53 s in): the card takes the hit, the spotlight dips, the dust puffs out */
+    .auth-root[data-panda] .auth-card:has(> .auth-side[data-drop="in"]) { animation: ap-jolt .45s .53s; }
+    .auth-card:has(> .auth-side[data-drop="in"]) .ap-light { animation: ap-dip .5s .53s; }
+    .auth-card:has(> .auth-side[data-drop="in"]) .ap-dust span { animation: ap-puff var(--d, 1.2s) cubic-bezier(.12, .75, .3, 1) .5s both; }
+  }
+  /* falling (gathering speed, stretched, a slight tilt) → lands (squash) → two bounces, rocking → rest */
+  @keyframes ap-drop {
+    0%   { translate: 0 -100vh; rotate: -2deg; scale: .99 1.04; animation-timing-function: cubic-bezier(.55, 0, 1, .5); }
+    38%  { translate: 0 0; rotate: .8deg; scale: 1.02 .95; animation-timing-function: cubic-bezier(.15, .6, .35, 1); }
+    50%  { translate: 0 -26px; rotate: -.8deg; scale: .995 1.015; animation-timing-function: cubic-bezier(.6, 0, .9, .45); }
+    62%  { translate: 0 0; rotate: .5deg; scale: 1.01 .975; animation-timing-function: cubic-bezier(.15, .6, .35, 1); }
+    72%  { translate: 0 -7px; rotate: -.25deg; scale: 1 1; animation-timing-function: cubic-bezier(.6, 0, .9, .45); }
+    82%  { translate: 0 0; rotate: .1deg; scale: 1.004 .992; animation-timing-function: ease-out; }
+    100% { translate: 0 0; rotate: 0deg; scale: 1 1; }
+  }
+  /* (only if the script never runs: the form comes down by itself) */
+  @keyframes ap-late { from { translate: 0 -100vh; } to { translate: 0 0; } }
+  @keyframes ap-jolt {
+    0%   { translate: 0 0; }
+    30%  { translate: 0 6px; }
+    65%  { translate: 0 -2px; }
+    100% { translate: 0 0; }
+  }
+  @keyframes ap-dip { 35% { opacity: .55; } }
+  @keyframes ap-puff {
+    0%   { opacity: 0; translate: -50% 6px; scale: .3; }
+    12%  { opacity: .8; }
+    45%  { opacity: .55; }
+    100% { opacity: 0; translate: calc(-50% + var(--dx)) var(--dy); scale: 1.9; }
+  }
+}
+
 /* ── phones and narrow windows: the brand side is a header, the page scrolls ── */
 @media (max-width: 899px) {
   .auth-root { display: block; height: auto; min-height: 100svh; overflow: visible; padding: 12px; }
