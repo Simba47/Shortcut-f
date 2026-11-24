@@ -158,7 +158,10 @@ test('expiry leaves a deleted account alone: no warning email, nothing deleted',
   const { sweepExpiry } = await import('./expiry')
   const gone = await user({ deletedDaysAgo: 3 })
   const v = await video(gone.id, -1)
-  // (the control: a live Starter account's video past its date does go)
+  // (the control: a live Starter account's video past its date does go — with expiry switched on long ago, so its
+  // 40-day-old video is due: expiry.test.ts's launchedDaysAgo)
+  await sql`INSERT INTO app_flags (key, at) VALUES ('video_expiry_launch', now() - interval '100 days') ON CONFLICT (key) DO UPDATE SET at = EXCLUDED.at`
+  ;(await import('./expiry')).forgetExpiryCaches()
   const live = await user({ plan: 'starter' })
   await sql`INSERT INTO subscriptions (user_id, razorpay_subscription_id, plan, status, expires_at) VALUES (${live.id}, ${`sub_ctl_${live.id}`}, 'starter', 'active', now() + interval '20 days')`
   const old = await video(live.id, -1)
