@@ -67,7 +67,9 @@
     ;(kids || []).forEach(function (c) { if (c) el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c) })
     return el
   }
-  function rupees(paise) { return '\u20B9' + (paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
+  // (the amount in its currency: rupees, or dollars for a payment from outside India)
+  var currency = 'INR'
+  function rupees(minor) { return currency === 'USD' ? '$' + (minor / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '\u20B9' + (minor / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
   function luhn(num) {
     var sum = 0, alt = false
     for (var i = num.length - 1; i >= 0; i--) { var n = +num[i]; if (alt) { n *= 2; if (n > 9) n -= 9 } sum += n; alt = !alt }
@@ -106,7 +108,7 @@
     // how much: asked from the fake Razorpay (the same way Razorpay's window knows its order or plan)
     var q = o.subscription_id ? 'subscription_id=' + encodeURIComponent(o.subscription_id) : 'order_id=' + encodeURIComponent(o.order_id || '')
     fetch('/api/dev/razorpay/pay?' + q).then(function (r) { return r.json() }).then(function (d) {
-      if (d && d.ok) { amount = d.amount; amtB.textContent = rupees(d.amount); render() }
+      if (d && d.ok) { amount = d.amount; currency = d.currency || 'INR'; amtB.textContent = rupees(d.amount); render() }
     }).catch(function () { amtB.textContent = '' })
 
     function renderNav() {

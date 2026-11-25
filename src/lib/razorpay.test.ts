@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import {
   verifyPaymentSignature, verifyWebhookSignature, rupeesToPaise, subscriptionChange,
-  razorpayMode, razorpayApiBase, checkoutScriptUrl, verifyOrderSignature, topupChange,
+  razorpayMode, razorpayApiBase, checkoutScriptUrl, verifyOrderSignature, topupChange, paidPayment,
 } from './razorpay.ts'
 
 const hmac = (secret: string, text: string) => createHmac('sha256', secret).update(text).digest('hex')
@@ -45,7 +45,19 @@ test('a charge carries the payment: id, amount in paise, when it was paid', () =
   const c = subscriptionChange(ev('subscription.charged',
     { id: 'sub_1', status: 'active', current_end: 1790000000, notes: { user_id: 'u1', plan: 'creator' } },
     { id: 'pay_9', amount: 99900, currency: 'INR', status: 'captured', created_at: 1787500000 }))
-  assert.deepEqual(c && 'payment' in c ? c.payment : null, { id: 'pay_9', amountPaise: 99900, paidAt: new Date(1787500000 * 1000) })
+  assert.deepEqual(c && 'payment' in c ? c.payment : null, { id: 'pay_9', amountPaise: 99900, currency: 'INR', paidAt: new Date(1787500000 * 1000) })
+})
+
+test('a payment in dollars carries its currency, in cents, and what Razorpay settled in rupees', () => {
+  const c = subscriptionChange(ev('subscription.charged',
+    { id: 'sub_1', status: 'active', current_end: 1790000000, notes: { user_id: 'u1', plan: 'starter' } },
+    { id: 'pay_us', amount: 900, currency: 'USD', status: 'captured', created_at: 1787500000, base_amount: 79200, base_currency: 'INR' }))
+  assert.deepEqual(c && 'payment' in c ? c.payment : null, { id: 'pay_us', amountPaise: 900, currency: 'USD', paidAt: new Date(1787500000 * 1000), baseAmountPaise: 79200 })
+})
+
+test('a payment with no currency is rupees (as before); one in a currency we do not sell in is not taken as paid', () => {
+  assert.equal(paidPayment({ id: 'p', amount: 100, status: 'captured', created_at: 1 })?.currency, 'INR')
+  assert.equal(paidPayment({ id: 'p', amount: 100, currency: 'EUR', status: 'captured', created_at: 1 }), undefined)
 })
 
 test('a payment that did not go through is not recorded', () => {
@@ -137,6 +149,30 @@ test('a paid top-up order becomes credits by its pack, never by the credits in t
   assert.equal(c.userId, 'u1'); assert.equal(c.pack, 'medium'); assert.equal(c.orderId, 'order_1')
   assert.equal(c.credits, 500)
   assert.equal(c.payment.id, 'pay_1'); assert.equal(c.payment.amountPaise, 49900)
+})
+
+const usdOrderPaid = (amount: number, orderCurrency = 'USD', paymentCurrency = 'USD', pack = 'medium') => ({
+  event: 'order.paid',
+  payload: {
+    order: { entity: { id: 'order_us', amount_paid: amount, currency: orderCurrency, notes: { kind: 'topup', user_id: 'u1', pack } } },
+    payment: { entity: { id: 'pay_us', amount, currency: paymentCurrency, status: 'captured', created_at: 1_700_000_000 } },
+  },
+})
+
+test('a pack paid in dollars: its dollar price is enough, and its credits are the same as in rupees', () => {
+  const c = topupChange(usdOrderPaid(700))
+  assert.ok(c)
+  assert.equal(c.credits, 500)
+  assert.equal(c.payment.currency, 'USD')
+  assert.equal(c.payment.amountPaise, 700)
+  assert.ok(topupChange(usdOrderPaid(199, 'USD', 'USD', 'trial')), 'the Trial pack at $1.99')
+})
+
+test('a dollar order paid short, or with currencies that do not match, changes nothing', () => {
+  assert.equal(topupChange(usdOrderPaid(600)), null, '$6 for a $7 pack')
+  assert.equal(topupChange(usdOrderPaid(700, 'USD', 'INR')), null, 'a dollar order with a rupee payment')
+  assert.equal(topupChange(usdOrderPaid(700, 'INR', 'INR')), null, '₹7 is not the ₹489 pack')
+  assert.equal(topupChange(usdOrderPaid(700, 'EUR', 'EUR')), null, 'a currency we do not sell in')
 })
 
 test('a top-up event that is not for a known pack, not paid in full, or not a top-up changes nothing', () => {

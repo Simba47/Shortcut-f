@@ -117,9 +117,11 @@ test('Unlimited given (user 2026-11-25): no storage or file limit worth the name
   await assert.rejects(ai.beginAiAction(p.id, 'rewrite'), /Too many AI requests/)
   await sql`DELETE FROM ai_actions WHERE user_id = ${p.id}`
   await assert.rejects(ai.beginAiAction(p.id, 'ask_ai', null, 150), /today's limit of 100/)
-  // reading: a 30-hour video (Pro: past the day's 20 hours)
+  // reading: a 30-hour video, 500 hours this month (Pro: 5 hours a month)
+  await reading.readingUse(u.id)
+  await sql`INSERT INTO reading_usage (user_id, video_id, duration_ms) VALUES (${u.id}, gen_random_uuid(), ${500 * 60 * MIN})`
   await reading.checkBeforeUpload(u.id, 30 * 60 * MIN)
-  await assert.rejects(reading.checkBeforeUpload(p.id, 30 * 60 * MIN), /20 hours/)
+  await assert.rejects(reading.checkBeforeUpload(p.id, 30 * 60 * MIN), /5 hours on your Pro plan this month/)
   // Make my clips: the day's safety limit and a run's size
   const [v] = await sql<{ id: string }[]>`INSERT INTO videos (user_id, source_type, storage_path, status, role, duration_ms, file_size) VALUES (${u.id}, 'upload', 'raw/z.mp4', 'ready', 'project', ${300 * MIN}, 1) RETURNING id`
   const al = await ai.clipAllowance(u.id, v.id)

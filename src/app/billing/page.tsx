@@ -6,12 +6,15 @@ import { AccountMenu } from '@/components/ui/account-menu'
 import { CreditsBadge } from '@/components/ui/credits-badge'
 import { BrandLoaderScreen } from '@/components/ui/brand-loader'
 import {
-  TOPUP_PACKS, TEST_PACK, TOPUP_CREDIT_DAYS, POPULAR_PACK, packSaving, packUses,
+  TOPUP_PACKS, TEST_PACK, TOPUP_CREDIT_DAYS, POPULAR_PACK, packUses,
   READING_CREDITS, CAPTION_CREDITS_PER_MINUTE, EXPORT_CREDITS_PER_MINUTE,
 } from '@/lib/credits'
 import { CLIP_CREDITS } from '@/lib/aiLimits'
 import { buyCreditPack } from '@/lib/razorpayCheckout'
 import type { CreditsState } from '@/components/billing/BillingCards'
+import { CurrencySwitch } from '@/components/billing/CurrencySwitch'
+import { useCurrency } from '@/lib/useCurrency'
+import { formatMoney, packPriceMinor, packSavingIn, type Currency } from '@/lib/currency'
 
 /**
  * Buy credits: where the credits button goes (user, 2026-11-19), only the Purchase credits card. The credit
@@ -26,15 +29,18 @@ const KIND_WORD: Record<string, string> = { plan: 'plan credits', topup: 'top-up
  * Purchase: the balance and the credit packs to buy right here. Packs are for paid plans (the server
  * refuses them on no plan or the Trial: topup.ts): those see the way to a plan instead.
  */
-function PurchaseCard({ c, plan, testPack, onBought }: { c: CreditsState; plan: string | null; testPack: boolean; onBought: () => void }) {
+function PurchaseCard({ c, plan, testPack, accountCurrency, onBought }: { c: CreditsState; plan: string | null; testPack: boolean; accountCurrency: Currency | null; onBought: () => void }) {
   const [busy, setBusy] = useState<string | null>(null)
+  // Rupees or dollars (2026-11-22): the account's once it has paid, else the time zone's guess or the switch
+  const { currency, setCurrency, locked, available } = useCurrency(accountCurrency)
+  const money = (minor: number | null) => (minor === null ? '' : formatMoney(minor, currency))
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function buy(pack: string) {
     setBusy(pack); setError(null); setNotice(null)
     try {
-      const out = await buyCreditPack(pack)
+      const out = await buyCreditPack(pack, currency)
       if (out) {
         setNotice(`${out.credits} credits added. You now have ${out.balance}.`)
         onBought()
@@ -78,19 +84,21 @@ function PurchaseCard({ c, plan, testPack, onBought }: { c: CreditsState; plan: 
           </p>
         ) : (
           <>
+            {!locked && available && <div style={{ marginBottom: 12 }}><CurrencySwitch currency={currency} onChange={setCurrency} locked={false} /></div>}
             {/* Each pack: the price first and biggest (what is paid), the plans' price struck beside it, then the
                 credits and what they make (user, 2026-11-19: so the credits are not read as rupees) */}
             <div className="st-packs">
               {packs.map(p => {
-                const saving = packSaving(p)
+                const saving = packSavingIn(p, currency)
+                const price = money(packPriceMinor(p.key, currency))
                 const uses = packUses(p.credits, CLIP_CREDITS)
                 const popular = p.key === POPULAR_PACK
                 return (
                   <div key={p.key} className={`st-pack${popular ? ' is-popular' : ''}`}>
                     {popular && <span className="st-pack-badge">Popular</span>}
                     <span className="st-pack-price">
-                      ₹{n(p.price)}
-                      {saving && <s className="st-pack-was" aria-label={`was ₹${n(saving.was)}`}>₹{n(saving.was)}</s>}
+                      {price}
+                      {saving && <s className="st-pack-was" aria-label={`was ${money(saving.was)}`}>{money(saving.was)}</s>}
                     </span>
                     {saving ? <span className="st-pack-save">Save {saving.percent}%</span> : <span className="st-pack-save" aria-hidden="true">&nbsp;</span>}
                     <span className="st-pack-credits">{n(p.credits)} credits</span>
@@ -100,7 +108,7 @@ function PurchaseCard({ c, plan, testPack, onBought }: { c: CreditsState; plan: 
                       <li><b>{n(uses.captionedMinutes)}</b> manual exports with captions</li>
                     </ul>
                     <button type="button" className={`st-btn ${popular ? 'st-btn-lime' : 'st-btn-ghost'} st-pack-buy`} disabled={!!busy || plan == null} onClick={() => buy(p.key)}>
-                      {busy === p.key ? 'Opening…' : `Buy for ₹${n(p.price)}`}
+                      {busy === p.key ? 'Opening…' : `Buy for ${price}`}
                     </button>
                   </div>
                 )
@@ -109,7 +117,9 @@ function PurchaseCard({ c, plan, testPack, onBought }: { c: CreditsState; plan: 
             <p className="st-hint" style={{ marginTop: 10 }}>
               An AI clip is {CLIP_CREDITS} credits with its export, from a video already read (reading is {READING_CREDITS} credits per 10 minutes of video). A manual export
               is a clip of up to a minute you cut yourself, with captions ({CAPTION_CREDITS_PER_MINUTE} credits) and the export ({EXPORT_CREDITS_PER_MINUTE}).
-              The struck price is the same credits at the plans&apos; rate of ₹1 a credit. Paid once, prices include GST. Pack credits last {Math.round(TOPUP_CREDIT_DAYS / 30.4)} months, and your plan&apos;s credits are used first.
+              {currency === 'INR'
+                ? <>The struck price is the same credits at the plans&apos; rate of ₹1 a credit. Paid once, prices include GST.</>
+                : <>The struck price is the same credits at the Starter plan&apos;s rate. Paid once, in US dollars.</>} Pack credits last {Math.round(TOPUP_CREDIT_DAYS / 30.4)} months, and your plan&apos;s credits are used first.
             </p>
           </>
         )}
@@ -124,13 +134,13 @@ function PurchaseCard({ c, plan, testPack, onBought }: { c: CreditsState; plan: 
 }
 
 export default function BillingPage() {
-  const [plan, setPlan] = useState<{ plan: string; testPack: boolean } | null>(null)
+  const [plan, setPlan] = useState<{ plan: string; testPack: boolean; currency: Currency | null } | null>(null)
   const [credits, setCredits] = useState<CreditsState | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/billing/plan', { cache: 'no-store' }).then(r => (r.ok ? r.json() : null))
-      .then(d => d && setPlan({ plan: d.plan, testPack: !!d.testPack })).catch(() => {})
+      .then(d => d && setPlan({ plan: d.plan, testPack: !!d.testPack, currency: d.currency ?? null })).catch(() => {})
   }, [])
   const loadCredits = useCallback(() => {
     fetch('/api/credits', { cache: 'no-store' })
@@ -155,7 +165,7 @@ export default function BillingPage() {
 
       <main className="st-billing flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-10 flex flex-col gap-6">
         {error && <div className="st-alert st-alert-red" role="alert">{error}</div>}
-        {credits && <PurchaseCard c={credits} plan={plan?.plan ?? null} testPack={!!plan?.testPack} onBought={loadCredits} />}
+        {credits && <PurchaseCard c={credits} plan={plan?.plan ?? null} testPack={!!plan?.testPack} accountCurrency={plan?.currency ?? null} onBought={loadCredits} />}
       </main>
     </div>
   )

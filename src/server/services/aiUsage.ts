@@ -251,19 +251,40 @@ export async function beginAiAction(userId: string, kind: AiActionKind, videoId:
 // ── What each Gemini call cost ────────────────────────────────────────────────
 
 /**
- * US dollars per million tokens (input, output; thinking is billed as output). From Google's
- * price list as we understood it; check before relying on the totals. A model not listed is
- * recorded with its tokens and no price.
+ * US dollars per million tokens (input, output; thinking counts as output), Google's Gemini API price
+ * page, Standard paid tier (2026-11-24). Not listed: tokens only. from2027: the price from 1 Jan 2027.
  */
-export const AI_PRICES: Record<string, { input: number; output: number }> = {
+export const AI_PRICES: Record<string, AiPrice & { from2027?: AiPrice }> = {
   'gemini-2.5-flash': { input: 0.30, output: 2.50 },
   'gemini-2.5-flash-lite': { input: 0.10, output: 0.40 },
+  // The key's default model, and Vertex's (VERTEX_MODEL) on the paid project
+  'gemini-3.5-flash-lite': { input: 0.30, output: 2.50 },
+  // The end check on clips being made (ai_edit): the introductory price to 31 Dec 2026, then double
+  'gemini-3.6-flash': { input: 0.75, output: 3.75, from2027: { input: 1.50, output: 7.50 } },
+  // Captions and readings, audio in (~$0.003 a minute of audio, ~$0.002 a minute of text out)
+  'gemini-3.5-transcribe': { input: 2.00, output: 12.00 },
+}
+interface AiPrice { input: number; output: number }
+const PRICES_2027 = Date.UTC(2027, 0, 1)
+
+/**
+ * Priority PayGo (gemini.ts: a Vertex answer served at priority, model "<model>:priority") costs more
+ * per token: 1.8x until the real price is known (VERTEX_PRIORITY_PRICE_FACTOR sets it), as in the worker
+ */
+const PRIORITY_FACTOR = Number(process.env.VERTEX_PRIORITY_PRICE_FACTOR) > 0 ? Number(process.env.VERTEX_PRIORITY_PRICE_FACTOR) : 1.8
+
+/** The cost in millionths of a dollar at the price on the day of the call, or null for a model with no price listed */
+export function costMicroUsd(model: string, inputTokens: number, outputTokens: number, at: Date = new Date()): number | null {
+  const priority = model.endsWith(':priority')
+  const listed = AI_PRICES[priority ? model.slice(0, -':priority'.length) : model]
+  if (!listed) return null
+  const price = listed.from2027 && at.getTime() >= PRICES_2027 ? listed.from2027 : listed
+  return Math.round((inputTokens * price.input + outputTokens * price.output) * (priority ? PRIORITY_FACTOR : 1))
 }
 
 export async function recordAiUsage(u: { userId?: string | null; videoId?: string | null; purpose: string; model: string; inputTokens: number; outputTokens: number; via?: 'key' | 'vertex' }): Promise<void> {
   await ensureAiUsageSchema()
-  const price = AI_PRICES[u.model]
-  const cost = price ? Math.round(u.inputTokens * price.input + u.outputTokens * price.output) : null
+  const cost = costMicroUsd(u.model, u.inputTokens, u.outputTokens)
   await sql`
     INSERT INTO ai_usage (user_id, video_id, purpose, model, input_tokens, output_tokens, cost_micro_usd, via)
     VALUES (${u.userId ?? null}, ${u.videoId ?? null}, ${u.purpose}, ${u.model}, ${u.inputTokens}, ${u.outputTokens}, ${cost}, ${u.via ?? null})`

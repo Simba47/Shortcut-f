@@ -2,22 +2,18 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import Link from 'next/link'
-import { Flame, Languages, Mail, MapPin, Menu, Phone, ScanFace, X } from 'lucide-react'
+import { Flame, Languages, Mail, MapPin, Menu, MousePointerClick, Move, Phone, ScanFace, Send, Upload, WandSparkles, X } from 'lucide-react'
 import { motion, useReducedMotion, useScroll } from 'framer-motion'
 import { PricingSection, type PricingPlan } from '@/components/ui/pricing'
 import { DotField } from '@/components/ui/dot-field'
-import { ClipForge } from '@/components/landing/clip-forge'
-import { ZoomFit } from '@/components/ui/zoom-fit'
-import { TiltCard } from '@/components/ui/tilt-card'
 import { FillButtonContent } from '@/components/ui/fill-button'
-import { EditorMockup } from '@/components/ui/editor-mockup'
 import { BrandLogo } from '@/components/ui/brand-logo'
 import { CircularCarousel, type CarouselItem } from '@/components/ui/circular-carousel'
 import { SectionTransition } from '@/components/ui/section-transition'
 import { FaqSection, type FaqItem } from '@/components/ui/faq-section'
 import { HeroSplit } from '@/components/landing/hero-split'
 import { HeroEditor } from '@/components/landing/hero-editor'
-import { FeatureTunnel } from '@/components/landing/feature-tunnel'
+import { FeatureShowcase } from '@/components/landing/feature-showcase'
 import { FlyIn } from '@/components/landing/fly-in'
 import { FooterWordmark } from '@/components/landing/footer-wordmark'
 import type Lenis from 'lenis'
@@ -29,6 +25,8 @@ import { teamSeats } from '@/lib/shared/brandTeam'
 import { canKeep } from '@/lib/expiry'
 import { TRIAL_PACK, TRIAL_DAYS } from '@/lib/credits'
 import { COMPANY } from '@/lib/company'
+import { formatMoney, planPriceMinor, type Currency } from '@/lib/currency'
+import { useCurrency } from '@/lib/useCurrency'
 import { GMAIL_COMPOSE, openMailAppOnPhones } from '@/components/ui/email-link'
 
 // (user, 2026-11-14) The landing page shows the real plans, read from lib/plans.ts — the same source as the
@@ -39,38 +37,43 @@ import { GMAIL_COMPOSE, openMailAppOnPhones } from '@/components/ui/email-link'
 const LANDING_PLANS = ['trial', 'starter', 'creator'] as const
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 function planFeatures(plan: (typeof PLANS)[keyof typeof PLANS]) {
-  // (plans v2, 2026-11-21: credits are the only limit, so no monthly counts to list)
+  // (plans v2, 2026-11-21: credits for what you do; the hours of video read are back since 2026-11-22)
+  const hours = plan.readingMinutes >= 60 ? count(plan.readingMinutes / 60, 'hour', 'hours') : `${plan.readingMinutes} minutes`
   return [
-    { text: 'Spend credits on anything, no monthly limits', included: true },
+    { text: `${hours} of video ${plan.allowancesOnce ? 'in total' : 'a month'}`, included: true },
+    { text: 'Spend credits on anything', included: true },
     ...(plan.uploadsLimit != null ? [{ text: `${count(plan.uploadsLimit, 'upload', 'uploads')} in total`, included: true }] : []),
     { text: 'Unlimited clips you cut yourself', included: !plan.maxClips },
     { text: `${plan.storageGb} GB of storage`, included: true },
     { text: count(plan.devices, 'device signed in at a time', 'devices signed in at a time'), included: true },
     { text: `Up to ${plan.maxFileSizeGb} GB per video`, included: true },
     { text: count(brandKitLimit(plan.key), 'brand kit', 'brand kits'), included: true },
-    { text: 'Share brand kits with your team', included: teamSeats(plan.key) > 0 },
     { text: canKeep(plan.key) ? `Videos kept ${plan.retentionDays} days, or for good with ★ Keep` : `Videos kept ${plan.retentionDays} days`, included: true },
     { text: 'Captions on AI clips', included: plan.autoCaption },
     { text: 'No watermark', included: !plan.watermark },
+    // (these two last on every card, user 2026-11-23)
+    { text: 'Share brand kits with your team', included: teamSeats(plan.key) > 0 },
     { text: 'Priority exports', included: plan.priorityExports },
   ]
 }
 
-const PRICING_PLANS: PricingPlan[] = LANDING_PLANS.map(key => {
+/** The plans for the landing page, in rupees or dollars (2026-11-22: dollars outside India) */
+const pricingPlans = (currency: Currency): PricingPlan[] => LANDING_PLANS.filter(key => planPriceMinor(key, currency) !== null).map(key => {
   const plan = PLANS[key]
   const once = plan.oneTime
+  const price = (planPriceMinor(key, currency) ?? 0) / 100
   return {
     name: plan.name,
-    price: plan.price,
+    price,
     // (user, 2026-11-14) Annual shown for now while the plans are discussed: 20% off the monthly price.
     // Billing is monthly only — the buttons still lead to the monthly plans.
-    yearlyPrice: Math.round(plan.price * 0.8),
+    yearlyPrice: currency === 'INR' ? Math.round(price * 0.8) : Math.round(price * 80) / 100,
     once,
     // (user's website copy, 2026-11-21)
     headline: once ? `${TRIAL_PACK.credits} credits to try everything.` : `${plan.monthlyCredits.toLocaleString('en-IN')} credits every month.`,
     subline: once ? `Lasts ${TRIAL_DAYS} days. No subscription.` : 'Unused credits roll over one month.',
     features: planFeatures(plan),
-    buttonText: once ? `Start for ₹${plan.price}` : `Choose ${plan.name}`,
+    buttonText: once ? `Start for ${formatMoney(planPriceMinor(key, currency) ?? 0, currency)}` : `Choose ${plan.name}`,
     // Sign up first (landing visitors are signed out), then straight to the Pricing page to pay
     // (lib/nextPath.ts keeps ?callbackUrl through the email code and Google)
     href: '/signup?callbackUrl=%2Fpricing',
@@ -417,6 +420,8 @@ function SquiggleArrow() {
 }
 
 export function LandingPage() {
+  // Prices in rupees in India and dollars elsewhere, by the visitor's time zone (or their pick on the Plans page)
+  const { currency } = useCurrency()
   // One progress value drives the whole hero → features transition:
   // 0 when the features sheet enters the bottom of the screen, 1 when it reaches the top.
   const sheetRef = useRef<HTMLDivElement>(null)
@@ -600,8 +605,9 @@ export function LandingPage() {
         <div className="hero-text" key={heroVisit}>
           {/* (user's website copy, 2026-11-20: the headline, "short form" the one lime highlight) */}
           <h1 className="hero-headline">
-            <span className="line"><span className="line-inner">The shortcut to</span></span>
-            <span className="line"><span className="line-inner"><span className="warm">short form</span></span></span>
+            {/* (two even lines, each a whole thought — user 2026-11-22: "The shortcut / to short form") */}
+            <span className="line"><span className="line-inner">The shortcut</span></span>
+            <span className="line"><span className="line-inner">to <span className="warm">short form</span></span></span>
           </h1>
           <div>
           {/* the subheadline, one centred line ending in "Faster." */}
@@ -666,60 +672,48 @@ export function LandingPage() {
         <IntroSection />
       </div>
 
-      {/* ── HOW IT WORKS ── */}
-      <Sec id="process" variant="tilt" className="section-wrap">
-        <FlyIn on={tunnel} pieces=".pw-stage, .fly-step, .lx-loop" pin={1.1} from="above">
+      {/* ── HOW IT WORKS (user 2026-11-22: no scroll animation here — the headline and the five cards simply sit on the
+          page: no fly-in, no section tilt, no fade-in) ── */}
+      <div id="process" className="section-wrap hiw-static">
         <section className="section-inner">
-          <div className="section-head reveal">
+          <div className="section-head">
             <p className="section-eyebrow">How it works</p>
             <h2 className="section-title hiw-title"><span>Five Simple Steps.</span> <span>One Ready-to-Post Short.</span></h2>
           </div>
-          {/* The process in motion: on the left, the clip forge (long video in, clips out) and the
-              editing board (steer the frame live); the right column is kept for cards */}
-          <div className="pw">
-            <div className="pw-left">
-              <figure className="pw-stage reveal">
-                <figcaption className="pw-label"><span>01</span>AI finds your best moments and cuts the clips</figcaption>
-                <ClipForge clips={10} />
-              </figure>
-              <figure className="pw-stage reveal">
-                <figcaption className="pw-label"><span>02</span>Steer any frame right while it plays</figcaption>
-                <ZoomFit width={880} className="editor-showcase pw-editor">
-                  <span className="lx-live" aria-hidden="true"><span className="lx-dot" />Steering live</span>
-                  <EditorMockup />
-                </ZoomFit>
-              </figure>
-            </div>
-            <div className="pw-right">
-              {/* TODO: cards go here */}
-            </div>
-          </div>
-          <div className="process-grid">
-            {STEPS.map((step, i) => (
-              // fly-step: what flies in on desktop (FlyIn), so the card keeps its own tilt and fade
-              <div key={step.title} className="fly-step">
-              <TiltCard className="process-step" index={i}>
-                <div className="tilt-card-inner">
-                  <div className="step-num"><div className="step-num-circle">{i + 1}</div> Step {i + 1}</div>
-                  <h3 className="step-title">{step.title}</h3>
-                  <p className="step-desc">{step.desc}</p>
-                </div>
-              </TiltCard>
-              </div>
-            ))}
-          </div>
-          <p className="lx-loop reveal">
+          {/* (user 2026-11-22: "design the cards and placement in a creative way", same words) the five steps as the
+              editor's own timeline: a track of five segments joined by "+", each step hanging under its segment; a
+              white playhead plays along the track and lights the step it is passing (a loop, not a scroll animation).
+              The last segment, the result, is lime. */}
+          <ol className="hiw-track">
+            {STEPS.map((step, i) => {
+              const Icon = [Upload, MousePointerClick, Move, WandSparkles, Send][i]
+              return (
+                <li key={step.title} className={`hiw-step${i === STEPS.length - 1 ? ' hiw-step-end' : ''}`} style={{ '--i': i } as React.CSSProperties}>
+                  <div className="hiw-seg">
+                    <span className="hiw-num">{String(i + 1).padStart(2, '0')}</span>
+                    <span className="hiw-ico" aria-hidden="true"><Icon strokeWidth={1.9} /></span>
+                    {i < STEPS.length - 1 && <span className="hiw-join" aria-hidden="true">+</span>}
+                  </div>
+                  <span className="hiw-stem" aria-hidden="true" />
+                  <h3 className="hiw-step-title">{step.title}</h3>
+                  <p className="hiw-desc">{step.desc}</p>
+                </li>
+              )
+            })}
+            <span className="hiw-head" aria-hidden="true" />
+          </ol>
+          <p className="lx-loop">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 11-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg>
             Every clip you post makes the next one smarter.
           </p>
         </section>
-        </FlyIn>
-      </Sec>
+      </div>
 
       {/* ── FEATURES: desktop flies through the cards; smaller screens get the carousel ── */}
       {tunnel ? (
-        <section id="features" className="section-wrap ft-wrap">
-          <FeatureTunnel eyebrow="Features" title={<span className="two-line-title"><span>Everything You Need.</span> <span>Without the Editing Hassle.</span></span>} items={FEATURES} />
+        <section id="features" className="section-wrap fs-wrap">
+          {/* (user 2026-11-22: a new style and a new scroll animation — the scroll showcase; was the 3D fly-through) */}
+          <FeatureShowcase eyebrow="Features" title={<span className="two-line-title"><span>Everything You Need.</span> <span>Without the Editing Hassle.</span></span>} items={FEATURES} onJump={y => scrollToY(y, true)} />
         </section>
       ) : (
       <SectionTransition id="features" variant="zoom" className="section-wrap">
@@ -750,7 +744,9 @@ export function LandingPage() {
       {/* ── PRICING ── */}
       <SectionTransition id="pricing" variant="zoom" className="section-wrap">
         <PricingSection
-          plans={PRICING_PLANS}
+          plans={pricingPlans(currency)}
+          currency={currency}
+          locale={currency === 'INR' ? 'en-IN' : 'en-US'}
           eyebrow="Pricing"
           title="Simple Plans. More Content. Less Editing."
           description="Choose a plan that matches how much content you create."
@@ -786,7 +782,9 @@ export function LandingPage() {
           ))}
         </div>
         {/* (user's website copy, 2026-11-21: the final CTA, word for word; same design) */}
-        <h2 className="reveal">Your Next <span className="accent">10 Shorts</span> Are Hiding Inside Your Last Video.</h2>
+        {/* (the headline, user 2026-11-23: "a catchy line" on no learning curve — two short beats, one per line) */}
+        {/* (one highlight: the payoff line in lime, the first line silver — user 2026-11-23) */}
+        <h2 className="reveal cta-h"><span>Zero Learning Curve.</span> <span className="cta-pay">Endless Shorts.</span></h2>
         <p className="cta-lines">
           <span>Stop spending hours editing. Start creating more.</span>
           <span>Upload one video. Create more content. Get back to what you do best.</span>
@@ -797,9 +795,12 @@ export function LandingPage() {
           <Link href="/signup" className="btn-nav-primary cta-btn">
             <span className="cta-btn-label">Get Started with Shortcut</span>
             <span className="cta-btn-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              {/* (an up-right arrow: on hover the badge slides to the button's start and turns 45° — user 2026-11-23) */}
+              <svg viewBox="0 0 24 24"><path d="M7 17L17 7M8 7h9v9" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </span>
           </Link>
+          {/* (the reassurance under the button, user 2026-11-22) */}
+          <p className="cta-note">Ready in minutes. No editing skills needed.</p>
         </div>
       </section>
 

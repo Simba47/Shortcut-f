@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { VelocityMarquee } from '@/components/ui/velocity-marquee'
 import { BrandLogo } from '@/components/ui/brand-logo'
-import { Check, GraduationCap, Megaphone, Mic, MonitorPlay, MousePointerClick, Move, Scissors, Sparkles, Upload, User } from 'lucide-react'
+import { GraduationCap, Megaphone, Mic, MonitorPlay, MousePointerClick, Move, Scissors, Sparkles, Upload, User } from 'lucide-react'
 import { LayoutGroup, motion } from 'framer-motion'
 
 /**
@@ -63,6 +63,54 @@ function useReplayReveal(ref: React.RefObject<HTMLElement | null>) {
     }), { threshold: [0, 0.2], rootMargin: '0px 0px -6% 0px' })
     els.forEach(e => io.observe(e))
     return () => io.disconnect()
+  }, [ref])
+}
+
+/**
+ * Scroll entrances that follow the scroll's direction (user 2026-11-22: "the same reverse as the Problem section"):
+ * scrolling down, each piece plays in as it comes on screen; arriving from below, it is simply there already; and
+ * scrolling back up past it, it closes (data-closing — a quick fade down, its list closing last item first) as it
+ * slides towards the foot of the screen — so a section folds away bottom-up — and plays in again if the visitor turns
+ * round. Fully off screen, everything resets at once (resetInstant). Reduced motion: shown, still.
+ */
+function useDirectionalReveal(ref: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const root = ref.current
+    if (!root) return
+    const els = Array.from(root.querySelectorAll<HTMLElement>('[data-anim]'))
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { els.forEach(e => e.classList.add('in')); return }
+    const playIn = (e: HTMLElement) => { delete e.dataset.closing; e.classList.add('in') }
+    const showNow = (e: HTMLElement) => { e.classList.add('lx-reset'); delete e.dataset.closing; e.classList.add('in'); void e.offsetWidth; e.classList.remove('lx-reset') }
+    const io = new IntersectionObserver(entries => entries.forEach(en => {
+      const e = en.target as HTMLElement
+      if (en.isIntersecting && en.intersectionRatio >= 0.2 && !e.classList.contains('in')) {
+        // (coming into view from the top of the screen = the visitor is scrolling up: already there)
+        if (en.boundingClientRect.top < 0) showNow(e); else playIn(e)
+      } else if (!en.isIntersecting && (e.classList.contains('in') || e.dataset.closing != null)) {
+        delete e.dataset.closing; resetInstant(e, [e])
+      }
+    }), { threshold: [0, 0.2], rootMargin: '0px 0px -6% 0px' })
+    els.forEach(e => io.observe(e))
+    let lastY = window.scrollY, raf = 0
+    const onScroll = () => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        const y = window.scrollY, up = y < lastY, line = window.innerHeight * 0.8
+        lastY = y
+        for (const e of els) {
+          const top = e.getBoundingClientRect().top
+          if (up && e.classList.contains('in') && e.dataset.closing == null && top > line) e.dataset.closing = ''
+          else if (!up && e.dataset.closing != null && top < line) {
+            // (turned round: it plays in again from the start)
+            resetInstant(e, [e]); delete e.dataset.closing
+            requestAnimationFrame(() => e.classList.add('in'))
+          }
+        }
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => { io.disconnect(); window.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf) }
   }, [ref])
 }
 
@@ -169,7 +217,7 @@ function useProblemTimeline(ref: React.RefObject<HTMLElement | null>) {
     const show = (els: HTMLElement[], on: boolean) => els.forEach(e => e.classList.toggle('in', on))
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { show(mainEls, true); show(turnEls, true); return }
 
-    let mainIn = false, mainDone = false, turnSeen = false, timer: ReturnType<typeof setTimeout> | null = null
+    let mainIn = false, mainDone = false, turnSeen = false, closed = false, timer: ReturnType<typeof setTimeout> | null = null
     const maybeShowTurn = () => {
       // (the problem screen has played, or it is already above the screen: the question may come)
       const passed = main.getBoundingClientRect().bottom < 0
@@ -179,14 +227,19 @@ function useProblemTimeline(ref: React.RefObject<HTMLElement | null>) {
       if (e.target === main) {
         if (e.isIntersecting && e.intersectionRatio >= 0.15 && !mainIn) {
           mainIn = true
-          show(mainEls, true)
-          // (arriving from below, or by a fast scroll that stopped with most of it already above the screen: the
-          // sequence still plays, and the question follows sooner)
-          const mostlyAbove = e.boundingClientRect.top < -0.5 * window.innerHeight
-          timer = setTimeout(() => { mainDone = true; maybeShowTurn() }, mostlyAbove ? 1200 : PB_SEQUENCE_MS)
+          // (user 2026-11-22) from above, everything plays in, the steps opening 01 → 02 → 03; from below, it is simply
+          // there already, all three steps open — they close 03 → 02 → 01 as the visitor carries on up past them
+          if (e.boundingClientRect.top < 0) {
+            root.classList.add('lx-reset'); show(mainEls, true); void root.offsetWidth; root.classList.remove('lx-reset')
+            mainDone = true; maybeShowTurn()
+          } else {
+            show(mainEls, true)
+            timer = setTimeout(() => { mainDone = true; maybeShowTurn() }, PB_SEQUENCE_MS)
+          }
         } else if (!e.isIntersecting && mainIn) {
-          mainIn = false; mainDone = false
+          mainIn = false; mainDone = false; closed = false
           if (timer) clearTimeout(timer)
+          delete main.dataset.closing
           resetInstant(main, mainEls)
           maybeShowTurn()
         }
@@ -196,7 +249,31 @@ function useProblemTimeline(ref: React.RefObject<HTMLElement | null>) {
       }
     }), { threshold: [0, 0.15, 0.3, 0.6] })
     io.observe(main); io.observe(turn)
-    return () => { io.disconnect(); if (timer) clearTimeout(timer) }
+
+    // the steps close 03 → 02 → 01 when the visitor scrolls back up past them (their list sliding down towards the
+    // foot of the screen), and open again 01 → 02 → 03 if they turn round and scroll down
+    const steps = main.querySelector<HTMLElement>('.lx-pb-steps')
+    const stepEls = steps ? Array.from(steps.querySelectorAll<HTMLElement>('li[data-anim]')) : []
+    let lastY = window.scrollY, raf = 0
+    const onScroll = () => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        const y = window.scrollY, up = y < lastY
+        lastY = y
+        if (!mainIn || !steps) return
+        const top = steps.getBoundingClientRect().top, vh = window.innerHeight
+        if (up && !closed && top > vh * 0.62) {
+          closed = true; main.dataset.closing = ''
+          stepEls.forEach(li => li.classList.remove('in'))
+        } else if (!up && closed && top < vh * 0.62) {
+          closed = false; delete main.dataset.closing
+          stepEls.forEach(li => li.classList.add('in'))
+        }
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => { io.disconnect(); if (timer) clearTimeout(timer); window.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf) }
   }, [ref])
 }
 
@@ -232,15 +309,15 @@ export function ProblemSection() {
 
       <div className="lx-pb-body">
         <ol className="lx-pb-steps">
-          <li data-anim="step" style={d(0.3)}>
+          <li data-anim="step" style={{ '--df': '0.3s', '--dc': '0.6s' } as React.CSSProperties}>
             <span className="lx-pb-num" aria-hidden="true">01</span>
             <p>You spend hours recording a podcast, interview or video.</p>
           </li>
-          <li data-anim="step" style={d(1.3)}>
+          <li data-anim="step" style={{ '--df': '1.3s', '--dc': '0.3s' } as React.CSSProperties}>
             <span className="lx-pb-num" aria-hidden="true">02</span>
             <p>{PROBLEM_LONG.split(CHORE_WORDS).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part))}</p>
           </li>
-          <li data-anim="step" className="lx-pb-point" style={d(2.3)}>
+          <li data-anim="step" className="lx-pb-point" style={{ '--df': '2.3s', '--dc': '0s' } as React.CSSProperties}>
             <span className="lx-pb-num" aria-hidden="true">03</span>
             <p>You have the content. You just don’t have the time to edit it all.</p>
           </li>
@@ -640,7 +717,7 @@ const YOU_DO = [
 const SHORTCUT_DOES = ['Cropping', 'Resizing', 'Adjusting frames', 'Adding captions', 'Exporting']
 export function IntroSection() {
   const ref = useRef<HTMLElement>(null)
-  useReplayReveal(ref)
+  useDirectionalReveal(ref)
   const d = (s: number) => ({ '--d': `${s}s` } as React.CSSProperties)
   return (
     <section ref={ref} className="section-inner lx-in" aria-labelledby="intro-title">
@@ -655,10 +732,22 @@ export function IntroSection() {
         <h2 className="lx-in-title" id="intro-title">
           {/* (its own entrance, user 2026-11-21): "Meet Shortcut." comes into focus word by word; then a lime light
               sweeps left to right and paints "Your Shortcut to Short-Form." in behind it */}
-          <span className="lx-in-line" data-anim="focus" style={d(0.1)}>
-            {['Meet', 'Shortcut.'].map((w, i) => <span key={w} className="lx-in-w" style={{ '--i': i } as React.CSSProperties}>{w}</span>)}
+          {/* (user 2026-11-22) "Meet" introduces itself — its letters drop in one by one with a small bounce; then
+              "Shortcut." is revealed in 3D (below) */}
+          <span className="lx-in-line lx-in-line-1" data-anim="focus" style={d(0.1)}>
+            <span className="lx-in-meet">
+              {'Meet'.split('').map((c, k) => <span key={k} style={{ '--k': k } as React.CSSProperties}>{c}</span>)}
+            </span>
+            {/* "Shortcut." — the frame reveal (user 2026-11-22: "something creative, it should look like revealing"):
+                the product's own vertical frame (white corner brackets, as in the hero's editor) appears over the start of
+                the word, only what is inside it showing; it glides across, settles in the middle, then opens out to the
+                full word — revealed — and its brackets fade */}
+            <span className="lx-in-cut" aria-label="Shortcut.">
+              <span className="lx-in-frame-word" aria-hidden="true">Shortcut.</span>
+              <i className="lx-in-frame" aria-hidden="true"><b /></i>
+            </span>
           </span>
-          <span className="lx-in-line lx-in-line-2" data-anim="wipe" style={d(0.55)}>
+          <span className="lx-in-line lx-in-line-2" data-anim="wipe" style={d(2.5)}>
             <span className="lx-in-paint">
               <span className="lx-in-title-2">Your Shortcut to Short-Form.</span>
               <i className="lx-in-beam" aria-hidden="true" />
@@ -677,8 +766,8 @@ export function IntroSection() {
       {/* (each line appears, then a red line strikes through it, it dims and its ✕ pops — one after the other;
           user 2026-11-21) */}
       <ul className="lx-in-gone" data-anim="seq" style={d(0.5)}>
-        {['No complicated editing.', 'No unnecessary waiting.'].map((t, i) => (
-          <li key={t} style={{ '--i': i } as React.CSSProperties}>
+        {['No complicated editing.', 'No unnecessary waiting.', 'No learning curve.'].map((t, i) => (
+          <li key={t} style={{ '--i': i, '--ri': 2 - i } as React.CSSProperties}>
             <span className="lx-in-gone-t">{t}</span>
           </li>
         ))}
@@ -691,7 +780,7 @@ export function IntroSection() {
           <h3>You decide what matters.</h3>
           <ul>
             {YOU_DO.map(({ Icon, text }, i) => (
-              <li key={text} style={{ '--i': i } as React.CSSProperties}>
+              <li key={text} style={{ '--i': i, '--ri': YOU_DO.length - 1 - i } as React.CSSProperties}>
                 <span className="lx-in-num" aria-hidden="true">{i + 1}</span>
                 <span className="lx-in-ico" aria-hidden="true"><Icon strokeWidth={1.9} /></span>{text}
               </li>
@@ -708,8 +797,8 @@ export function IntroSection() {
           <h3>Shortcut does the rest.</h3>
           <ul>
             {SHORTCUT_DOES.map((text, i) => (
-              <li key={text} style={{ '--i': i } as React.CSSProperties}>
-                <span className="lx-in-tick" aria-hidden="true"><Check strokeWidth={3} /></span>{text}
+              <li key={text} style={{ '--i': i, '--ri': SHORTCUT_DOES.length - 1 - i } as React.CSSProperties}>
+                <svg className="lx-in-mark" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4L16 6" /></svg>{text}
               </li>
             ))}
           </ul>
@@ -803,7 +892,7 @@ export function WhoSection() {
       <ul className="lx-who-grid">
         {WHO.map(({ Icon, name, line }, i) => (
           <li key={name} className="lx-who-card" data-anim="up" style={d(0.25 + (i % 3) * 0.12 + Math.floor(i / 3) * 0.22)}>
-            <span className="lx-who-ico" aria-hidden="true"><Icon strokeWidth={1.8} /></span>
+            <span className={`lx-who-ico lx-who-ico-${i}`} aria-hidden="true"><Icon strokeWidth={1.8} /></span>
             <h3>{name}</h3>
             <p>{line}</p>
           </li>

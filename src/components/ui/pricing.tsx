@@ -204,7 +204,8 @@ export function PricingSection({
           </div>
           <PricingToggle />
           {/* (a size smaller, user 2026-11-21: narrower row, tighter cards) */}
-          <div className={cn('mx-auto mt-8 grid max-w-6xl grid-cols-1 items-stretch gap-4', cols)}>
+          {/* (three plans since Agency left: a narrower row so each card keeps the size it had among four — user 2026-11-23) */}
+          <div className={cn('mx-auto mt-8 grid grid-cols-1 items-stretch gap-4', plans.length === 3 ? 'max-w-[1000px]' : 'max-w-6xl', cols)}>
             {plans.map((plan, index) => (
               <PricingCard key={plan.name} plan={plan} index={index} />
             ))}
@@ -310,8 +311,10 @@ function PricingCard({ plan, index }: { plan: PricingPlan; index: number }) {
   const annualTotal = plan.yearlyPrice * 12
   const fullYear = plan.price * 12
   const savings = fullYear - annualTotal
+  // (whole amounts without decimals, $1.99 with them: dollar prices, 2026-11-22)
+  const digits = (n: number) => (Number.isInteger(n) ? 0 : 2)
   const money = (n: number) =>
-    new Intl.NumberFormat(locale, { style: 'currency', currency, maximumFractionDigits: 0 }).format(n)
+    new Intl.NumberFormat(locale, { style: 'currency', currency, minimumFractionDigits: digits(n), maximumFractionDigits: digits(n) }).format(n)
   const symbol =
     new Intl.NumberFormat(locale, { style: 'currency', currency }).formatToParts(0).find(p => p.type === 'currency')?.value ?? currency
 
@@ -364,7 +367,7 @@ function PricingCard({ plan, index }: { plan: PricingPlan; index: number }) {
       <div className="mt-4 flex items-baseline gap-1.5">
         <span className="text-base font-semibold text-[var(--muted)]">{symbol}</span>
         <span className="text-4xl font-extrabold tracking-[-0.045em] text-[var(--text)]">
-          <NumberFlow value={showAnnual ? annualTotal : plan.price} locales={locale} format={{ maximumFractionDigits: 0 }} className="tabular-nums" />
+          <NumberFlow value={showAnnual ? annualTotal : plan.price} locales={locale} format={{ minimumFractionDigits: digits(showAnnual ? annualTotal : plan.price), maximumFractionDigits: digits(showAnnual ? annualTotal : plan.price) }} className="tabular-nums" />
         </span>
         {/* (the month, after a subscription's price — user, 2026-11-21: "₹599/month") */}
         {!plan.once && !isFree && !showAnnual && <span className="text-base font-semibold text-[var(--muted)]">/month</span>}

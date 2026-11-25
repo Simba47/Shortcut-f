@@ -22,7 +22,7 @@ export async function GET() {
     const invoiceDetails = PLANS[plan].gstInvoices
     return NextResponse.json({
       // (each payment's two papers: its tax invoice's number — null until it has one — and its receipt's)
-      payments: payments.map(p => ({ id: p.id, invoiceNo: p.invoiceNo, receiptNo: p.receiptNo, planName: p.planName, amountPaise: p.amountPaise, paidAt: p.paidAt })),
+      payments: payments.map(p => ({ id: p.id, invoiceNo: p.invoiceNo, receiptNo: p.receiptNo, planName: p.planName, amountPaise: p.amountPaise, currency: p.currency, paidAt: p.paidAt })),
       plan,
       // the ₹1 test pack, for an email in TEST_PACK_EMAILS only
       testPack: testPackAllowed(user.email),

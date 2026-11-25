@@ -27,7 +27,7 @@ const BOLT = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L4 14h7l-
 const TICK = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 const WAVE = Array.from({ length: 30 }, (_, i) => 0.25 + 0.7 * Math.abs(Math.sin(i * 1.9) * Math.cos(i * 0.37)))
 
-function Art({ id }: { id: string }) {
+export function Art({ id }: { id: string }) {
   switch (id) {
     case 'moments':      // the AI marks the best moments on the timeline, each with its score
       return (

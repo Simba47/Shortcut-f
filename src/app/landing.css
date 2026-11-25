@@ -3458,21 +3458,7 @@ html.lenis, html.lenis body { height: auto; }
 .lp-root .he-step span { overflow: hidden; text-overflow: ellipsis; }
 @media (prefers-reduced-motion: reduce) { .lp-root .he-step, .lp-root .he-step i { animation: none; } }
 
-/* ── Hero step 8 (user, 2026-11-21): the top bar lighter — the heavy black tab becomes a floating glass pill, level
-   with the logo and the button; it stays glass past the hero. Desktop. ── */
-@media (min-width: 1100px) {
-  .lp-root .nav-links,
-  .lp-root .nav-past-hero .nav-links {
-    top: 10px; height: 40px; padding: 0 24px; gap: 28px; border-radius: 999px;
-    background: color-mix(in srgb, var(--bg, #0a0a0a) 40%, rgba(255,255,255,.045));
-    border: 1px solid rgba(255,255,255,.09);
-    -webkit-backdrop-filter: blur(16px) saturate(1.3); backdrop-filter: blur(16px) saturate(1.3);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 10px 30px -18px rgba(0,0,0,.8);
-  }
-  .lp-root .nav-links::before, .lp-root .nav-links::after { display: none; }
-  .lp-root .nav-links a, .lp-root .nav-past-hero .nav-links a { font-size: 14.5px; color: color-mix(in srgb, var(--text) 72%, transparent); }
-  .lp-root .nav-links a:hover, .lp-root .nav-past-hero .nav-links a:hover { color: var(--text); }
-}
+/* (the top bar: the original black tab hanging from the top edge — the glass pill was removed, user 2026-11-22) */
 
 /* ── Hero polish 1–6 (user, 2026-11-21, from the screen recording) ── */
 @media (min-width: 961px) {
@@ -4125,3 +4111,647 @@ html.lenis, html.lenis body { height: auto; }
 .lp-root .cta-section .cta-btn:hover .cta-btn-ico { width: 52px; }
 .lp-root .cta-section .cta-btn:hover .cta-btn-ico svg { transform: translateX(3px); }
 @media (prefers-reduced-motion: reduce) { .lp-root .cta-section .cta-btn, .lp-root .cta-btn-ico, .lp-root .cta-btn-ico svg { transition: none; } }
+/* (the headline bigger — user 2026-11-22; its lines are shorter now, "The shortcut / to short form") */
+@media (min-width: 1100px) { .lp-root .hero-headline { font-size: clamp(56px, min(16cqi, 14.5vh), 150px); } }
+/* (the sub-line as wide as the headline: both start and end on the same lines — its size follows the headline's, user 2026-11-22) */
+@media (min-width: 1100px) { .lp-root .hero-text .hero-lead { font-size: clamp(16px, min(4.045cqi, 3.666vh), 38px); white-space: nowrap; } }
+/* (the editor ~10% smaller, user 2026-11-22) */
+@media (min-width: 1100px) { .lp-root .hero-visual .hl-fit.he-fit { width: min(45vw, 880px, calc((100vh - 270px) * 1.28)); } }
+/* the left side, set square with the editor (user 2026-11-22: "perfect place and alignment"): the headline's top on the
+   editor's top edge and the feature row's foot on its bottom edge — no longer hanging below it; the buttons just above
+   the feature row */
+@media (min-width: 1100px) {
+  .lp-root .hero-text > div { margin-bottom: 0; }
+  .lp-root .hero-text .hero-trust { margin-top: clamp(12px, 2vh, 20px); }
+}
+/* (user 2026-11-22) 2: the editor at the start of its half, closer to the words — the empty strip between them halved;
+   3: the whole group a little lower, in the screen's optical centre (a touch more room below than above) */
+@media (min-width: 1100px) {
+  .lp-root .hero-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .lp-root .hero-visual { justify-self: start; }
+  .lp-root .hero-stack .hero { padding-bottom: calc(clamp(10px, 2.5vh, 32px) + 2.5vh); }
+}
+/* final CTA: the small reassurance under the button */
+.lp-root .cta-section p.cta-note {
+  max-width: none; margin: clamp(14px, 2.2vh, 20px) auto 0; font-size: 13.5px; font-weight: 500; letter-spacing: .01em;
+  color: color-mix(in srgb, var(--text) 50%, transparent);
+}
+
+/* The three steps follow the scroll (user, 2026-11-22): scrolling down into the section they open 01 → 02 → 03, each
+   line drawing down; scrolling back up past them (data-closing, set by the Problem timeline) they close 03 → 02 → 01 —
+   each number and its words fade back, each line drawing back up into the number above. */
+.lp-root .lx-pb-steps li { --d: var(--df, 0s); }
+.lp-root .lx-pb-main[data-closing] .lx-pb-steps li { --d: var(--dc, 0s); }
+.lp-root .lx-pb-main[data-closing] .lx-pb-steps li p { transition-duration: .35s, .45s; transition-delay: var(--d), var(--d); }
+.lp-root .lx-pb-main[data-closing] .lx-pb-steps li .lx-pb-num { transition-duration: .3s, .35s; transition-delay: calc(var(--d) + .12s), calc(var(--d) + .12s); }
+.lp-root .lx-pb-main[data-closing] .lx-pb-steps li:not(:last-child)::after { transition-duration: .3s; transition-delay: calc(var(--d) - .1s); }
+.lp-root .lx-pb-main[data-closing] .lx-pb-steps li.lx-pb-point .lx-pb-num { animation: none; }
+
+/* ── The hero editor's timeline as segments (user, 2026-11-22, from the app's own timeline): coloured blocks — warm
+   and teal in turn — each with its layout (a green dot and "Vertical" / "Split") and its length; a "+" where two
+   join. They add up to the 7:12 clip. ── */
+.lp-root .he-segs { display: flex; gap: 3px; padding: 0; background: none; }
+.lp-root .he-seg {
+  position: relative; flex-basis: 0; min-width: 0; display: flex; flex-direction: column; justify-content: space-between;
+  padding: 4px 6px; border-radius: 5px; overflow: visible;
+  opacity: 0; transform: translateY(4px); transition: opacity .35s ease, transform .4s cubic-bezier(.2,.8,.2,1), box-shadow .3s ease, filter .3s ease;
+  transition-delay: calc(var(--i) * .09s);
+}
+.lp-root .he-segs[data-picked] .he-seg { opacity: 1; transform: none; }
+.lp-root .he-seg-a { background: linear-gradient(180deg, #7a5338, #5c3c27); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+.lp-root .he-seg-b { background: linear-gradient(180deg, #2f6470, #22474f); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+.lp-root .he-seg[data-on] { box-shadow: inset 0 0 0 1.5px var(--logo, #c8ff00); filter: brightness(1.15); }
+.lp-root .he-seg b {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 3px; max-width: 100%; padding: 1px 5px 1px 3px; border-radius: 4px;
+  font-size: 7px; font-weight: 800; color: #fff; background: rgba(0,0,0,.45); white-space: nowrap; overflow: hidden;
+}
+.lp-root .he-seg b i { width: 4px; height: 4px; flex: none; border-radius: 50%; background: #4ade80; }
+.lp-root .he-seg em { align-self: flex-end; font-style: normal; font-size: 7.5px; font-weight: 800; color: rgba(255,255,255,.92); font-variant-numeric: tabular-nums; }
+.lp-root .he-seg-join {
+  position: absolute; z-index: 2; right: -7px; top: 50%; width: 11px; height: 11px; margin-top: -5.5px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 8px; font-weight: 900; line-height: 1; color: #0a0a0a; background: #e9e9e9;
+}
+@media (prefers-reduced-motion: reduce) { .lp-root .he-seg { opacity: 1; transform: none; transition: none; } }
+/* the playhead: always full white (it no longer fades in the first step), above the clips and their labels */
+.lp-root .he[data-step="select"] .he-head { opacity: 1; }
+.lp-root .he-head { z-index: 6; box-shadow: 0 0 6px rgba(0,0,0,.6); }
+/* (the editor 8% bigger, user 2026-11-22; never wider than its half of the hero) */
+@media (min-width: 1100px) {
+  .lp-root .hero-visual { width: 100%; }
+  .lp-root .hero-visual .hl-fit.he-fit { width: min(48.6vw, 950px, calc((100vh - 270px) * 1.3824), 100%); }
+}
+
+/* ── "Meet Shortcut." (user, 2026-11-22): "Meet" introduces itself, "Shortcut." is revealed ── */
+.lp-root .lx-in-meet { display: inline-block; }
+.lp-root .lx-in-meet > span {
+  display: inline-block; opacity: 0; transform: translateY(-.55em) rotate(-10deg); transform-origin: 50% 100%;
+  transition: opacity .35s ease, transform .65s cubic-bezier(.2,1.55,.4,1);
+  transition-delay: calc(var(--d, 0s) + var(--k) * .08s);
+}
+.lp-root .lx-in-line-1.in .lx-in-meet > span { opacity: 1; transform: none; }
+/* "Shortcut." — the frame reveal. The word is clipped to a window; a bracket frame marks the same window. From the
+   line's start + .7 s (1.6 s in all):
+     0–12 %    the frame pops in over "Sho…", only those letters showing
+     12–45 %   it glides to the middle of the word (play-and-steer)
+     45–55 %   a beat
+     55–100 %  it opens out both ways to the whole word; then the brackets fade and the word lights up once */
+.lp-root .lx-in-cut { position: relative; display: inline-block; margin-left: .24em; }
+.lp-root .lx-in-frame-word { display: inline-block; clip-path: inset(-14% 100% -14% 0); }
+.lp-root .lx-in-frame { position: absolute; top: -.06em; bottom: .02em; left: 4%; right: 64%; opacity: 0; pointer-events: none; }
+.lp-root .lx-in-frame::before, .lp-root .lx-in-frame::after, .lp-root .lx-in-frame b::before, .lp-root .lx-in-frame b::after {
+  content: ""; position: absolute; width: .2em; height: .2em; border: 0 solid #fff; filter: drop-shadow(0 0 .08em rgba(0,0,0,.6));
+}
+.lp-root .lx-in-frame::before { left: 0; top: 0; border-left-width: .045em; border-top-width: .045em; }
+.lp-root .lx-in-frame::after { right: 0; top: 0; border-right-width: .045em; border-top-width: .045em; }
+.lp-root .lx-in-frame b::before { left: 0; bottom: 0; border-left-width: .045em; border-bottom-width: .045em; }
+.lp-root .lx-in-frame b::after { right: 0; bottom: 0; border-right-width: .045em; border-bottom-width: .045em; }
+.lp-root .lx-in-line-1.in .lx-in-frame-word { animation: lx-frame-clip 1.6s calc(var(--d, 0s) + .7s) both; }
+.lp-root .lx-in-line-1.in .lx-in-frame { animation: lx-frame-move 1.6s calc(var(--d, 0s) + .7s) both, lx-frame-out .4s ease calc(var(--d, 0s) + 2.35s) forwards; }
+@keyframes lx-frame-clip {
+  0%   { clip-path: inset(-14% 64% -14% 4%); animation-timing-function: ease-out; }
+  12%  { clip-path: inset(-14% 64% -14% 4%); animation-timing-function: cubic-bezier(.65,0,.35,1); }
+  45%  { clip-path: inset(-14% 34% -14% 34%); }
+  55%  { clip-path: inset(-14% 34% -14% 34%); animation-timing-function: cubic-bezier(.7,0,.2,1); }
+  100% { clip-path: inset(-14% -6% -14% -6%); }
+}
+@keyframes lx-frame-move {
+  0%   { left: 4%; right: 64%; opacity: 0; transform: scale(.7); animation-timing-function: cubic-bezier(.2,1.6,.4,1); }
+  12%  { left: 4%; right: 64%; opacity: 1; transform: none; animation-timing-function: cubic-bezier(.65,0,.35,1); }
+  45%  { left: 34%; right: 34%; opacity: 1; }
+  55%  { left: 34%; right: 34%; opacity: 1; animation-timing-function: cubic-bezier(.7,0,.2,1); }
+  100% { left: -4%; right: -4%; opacity: 1; transform: none; }
+}
+@keyframes lx-frame-out { to { opacity: 0; transform: scale(1.04); } }
+/* the lock: a brief light on the word once it stands revealed */
+.lp-root .lx-in-line-1.in .lx-in-cut { animation: lx-cut-lock .8s ease-out calc(var(--d, 0s) + 2.25s) both; }
+@keyframes lx-cut-lock {
+  0% { text-shadow: 0 0 0 transparent; }
+  35% { text-shadow: 0 0 .3em rgba(255,255,255,.55), 0 0 .6em color-mix(in srgb, var(--logo, #c8ff00) 35%, transparent); }
+  100% { text-shadow: 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-root .lx-in-meet > span { opacity: 1; transform: none; transition: none; }
+  .lp-root .lx-in-frame-word { clip-path: none; animation: none !important; }
+  .lp-root .lx-in-frame { display: none; }
+}
+
+/* Shortcut's part: no filled lime circles any more (user 2026-11-22: "keep it simple and creative") — just a fine lime
+   tick that draws itself, stroke by stroke, as its chore comes in */
+.lp-root .lx-in-mark { flex: none; width: 18px; height: 18px; overflow: visible; }
+.lp-root .lx-in-mark path {
+  fill: none; stroke: var(--logo, #c8ff00); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 20; stroke-dashoffset: 20;
+  transition: stroke-dashoffset .55s cubic-bezier(.65,0,.35,1) calc(var(--d, 0s) + .85s + var(--i) * .26s);
+}
+.lp-root .lx-in-sc.in .lx-in-mark path { stroke-dashoffset: 0; }
+@media (prefers-reduced-motion: reduce) { .lp-root .lx-in-mark path { stroke-dashoffset: 0; transition: none; } }
+
+/* Introducing Shortcut, closing on the way back up (data-closing, set by useDirectionalReveal): each piece fades down
+   and out quickly; the two lists and the "No …" row close last item first, then the rest of their part */
+.lp-root .lx-in [data-closing]:not(.lx-in-card):not(.lx-in-gone) {
+  opacity: 0 !important; transform: translateY(14px) !important; filter: none !important;
+  transition: opacity .35s ease, transform .45s ease !important; transition-delay: 0s !important;
+}
+.lp-root .lx-in-card[data-closing] li, .lp-root .lx-in-gone[data-closing] li {
+  opacity: 0 !important; transform: translateY(10px) !important;
+  transition: opacity .3s ease, transform .35s ease !important; transition-delay: calc(var(--ri, 0) * .09s) !important;
+}
+.lp-root .lx-in-card[data-closing] > :not(ul) {
+  opacity: 0; transform: translateY(10px); transition: opacity .3s ease .32s, transform .35s ease .32s;
+}
+
+/* ── How It Works as the editor's timeline (user, 2026-11-22; refined: one continuous track, clips not boxes) ──
+   The five segments join into one bar — warm and teal clips in turn, the last one lime, faint frame lines inside like
+   a strip of video, a "+" on each seam. A playhead with its knob crosses the bar (a loop, not a scroll animation) and
+   lights the clip it is over and its words. Under each clip: a stem with a dot, then the step's title and text. */
+.lp-root .hiw-track {
+  --seg-h: 42px; --cycle: 10s; --gut: 18px;
+  position: relative; list-style: none; margin: clamp(30px, 6vh, 64px) auto 0; padding: 0; max-width: 1180px;
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; text-align: left;
+}
+@media (max-width: 960px) { .lp-root .hiw-track { grid-template-columns: 1fr; gap: 28px; } .lp-root .hiw-head, .lp-root .hiw-join { display: none; } }
+.lp-root .hiw-step { position: relative; display: flex; flex-direction: column; min-width: 0; }
+/* the clip */
+.lp-root .hiw-seg {
+  position: relative; display: flex; align-items: center; gap: 10px; height: var(--seg-h); padding: 0 14px;
+  border-right: 2px solid #0b0b0b;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 34px, rgba(0,0,0,.16) 34px 36px),
+    linear-gradient(180deg, #74513a, #563b29);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.1), inset 0 -1px 0 rgba(0,0,0,.25);
+}
+.lp-root .hiw-step:nth-child(even) .hiw-seg {
+  background:
+    repeating-linear-gradient(90deg, transparent 0 34px, rgba(0,0,0,.16) 34px 36px),
+    linear-gradient(180deg, #2f6571, #214851);
+}
+.lp-root .hiw-step:first-child .hiw-seg { border-radius: 12px 0 0 12px; }
+.lp-root .hiw-step-end .hiw-seg {
+  border-right: 0; border-radius: 0 12px 12px 0;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 34px, rgba(0,0,0,.08) 34px 36px),
+    linear-gradient(180deg, color-mix(in srgb, var(--logo, #c8ff00) 78%, #fff), var(--logo, #c8ff00));
+}
+.lp-root .hiw-num {
+  padding: 3px 8px; border-radius: 6px; font-size: 13px; font-weight: 850; letter-spacing: .02em; font-variant-numeric: tabular-nums;
+  color: #fff; background: rgba(0,0,0,.42);
+}
+.lp-root .hiw-ico { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; color: #fff; background: rgba(0,0,0,.3); }
+.lp-root .hiw-ico svg { width: 14px; height: 14px; }
+.lp-root .hiw-step-end .hiw-num { color: var(--logo, #c8ff00); background: #0b0b0b; }
+.lp-root .hiw-step-end .hiw-ico { color: #0b0b0b; background: rgba(0,0,0,.12); }
+/* the "+" on each seam */
+.lp-root .hiw-join {
+  position: absolute; z-index: 2; right: -9px; top: 50%; width: 16px; height: 16px; margin-top: -8px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 12px; font-weight: 900; line-height: 1; color: #0a0a0a; background: #ececec;
+  box-shadow: 0 0 0 2px #0b0b0b;
+}
+/* the stem, with a dot, from the clip down to its words */
+.lp-root .hiw-stem { position: relative; width: 1px; height: clamp(20px, 3.2vh, 30px); margin-left: 22px; background: rgba(255,255,255,.2); }
+.lp-root .hiw-stem::after { content: ""; position: absolute; left: -3px; bottom: -3px; width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.55); }
+.lp-root .hiw-step-title, .lp-root .hiw-desc { padding-right: var(--gut); }
+.lp-root .hiw-step-title { margin: 12px 0 8px; font-size: clamp(18px, 1.45vw, 22px); font-weight: 800; letter-spacing: -.015em; line-height: 1.2; color: var(--text); }
+.lp-root .hiw-desc { margin: 0; font-size: clamp(14.5px, 1.05vw, 16px); line-height: 1.6; color: color-mix(in srgb, var(--text) 58%, transparent); }
+/* the playhead: a knob above the bar, its line through it and a little past */
+.lp-root .hiw-head {
+  position: absolute; z-index: 3; top: -12px; left: 0; width: 2px; height: calc(var(--seg-h) + 22px); margin-left: -1px; border-radius: 2px;
+  background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.35), 0 0 12px rgba(255,255,255,.45); pointer-events: none;
+  animation: hiw-play var(--cycle) linear infinite;
+}
+.lp-root .hiw-head::before { content: ""; position: absolute; top: -6px; left: -6px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
+@keyframes hiw-play { from { left: 0%; } to { left: 100%; } }
+/* the clip under the playhead (2 s each) lights: brighter, a white edge; its stem and text light with it */
+.lp-root .hiw-seg, .lp-root .hiw-desc, .lp-root .hiw-stem::after { animation: var(--cycle) linear infinite; animation-delay: calc(var(--i) * 2s); }
+.lp-root .hiw-seg { animation-name: hiw-clip-lit; }
+.lp-root .hiw-desc { animation-name: hiw-desc-lit; }
+.lp-root .hiw-stem::after { animation-name: hiw-dot-lit; }
+@keyframes hiw-clip-lit { 0%, 18% { filter: brightness(1.22) saturate(1.1); } 22%, 100% { filter: none; } }
+@keyframes hiw-desc-lit { 0%, 18% { color: color-mix(in srgb, var(--text) 90%, transparent); } 22%, 100% { color: color-mix(in srgb, var(--text) 58%, transparent); } }
+@keyframes hiw-dot-lit { 0%, 18% { background: #fff; box-shadow: 0 0 8px rgba(255,255,255,.8); } 22%, 100% { background: rgba(255,255,255,.55); box-shadow: none; } }
+/* the closing line: quiet, so the lime clip is the one lime thing here */
+.lp-root #process .lx-loop { color: color-mix(in srgb, var(--text) 62%, transparent); }
+.lp-root #process .lx-loop svg { color: var(--logo, #c8ff00); }
+@media (prefers-reduced-motion: reduce) { .lp-root .hiw-head { display: none; } .lp-root .hiw-seg, .lp-root .hiw-desc, .lp-root .hiw-stem::after { animation: none; } }
+/* (each clip above the one after it, so the "+" on its seam sits on top, whole) */
+.lp-root .hiw-step:nth-child(1) .hiw-seg { z-index: 5; } .lp-root .hiw-step:nth-child(2) .hiw-seg { z-index: 4; }
+.lp-root .hiw-step:nth-child(3) .hiw-seg { z-index: 3; } .lp-root .hiw-step:nth-child(4) .hiw-seg { z-index: 2; }
+.lp-root .hiw-step:nth-child(5) .hiw-seg { z-index: 1; }
+.lp-root .hiw-head { z-index: 6; }
+/* (the lime clip lights with a glow instead of brightness, which turned it yellow) */
+.lp-root .hiw-step-end .hiw-seg { animation-name: hiw-clip-lit-end; }
+@keyframes hiw-clip-lit-end { 0%, 18% { box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 0 22px -4px color-mix(in srgb, var(--logo, #c8ff00) 70%, transparent); } 22%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,.1), inset 0 -1px 0 rgba(0,0,0,.25); } }
+/* the last clip, calmer (user 2026-11-22: the neon block looked odd): a deep olive clip like the others, a thin lime edge,
+   lime only on its number and icon; a soft lime glow when the playhead reaches it */
+.lp-root .hiw-step-end .hiw-seg {
+  background:
+    repeating-linear-gradient(90deg, transparent 0 34px, rgba(0,0,0,.18) 34px 36px),
+    linear-gradient(180deg, #4a5a17, #33400c);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--logo, #c8ff00) 45%, transparent), inset 0 1px 0 rgba(255,255,255,.1);
+}
+.lp-root .hiw-step-end .hiw-num { color: var(--logo, #c8ff00); background: rgba(0,0,0,.42); }
+.lp-root .hiw-step-end .hiw-ico { color: var(--logo, #c8ff00); background: rgba(0,0,0,.3); }
+@keyframes hiw-clip-lit-end {
+  0%, 18% { box-shadow: inset 0 0 0 1px var(--logo, #c8ff00), inset 0 1px 0 rgba(255,255,255,.15), 0 8px 22px -10px color-mix(in srgb, var(--logo, #c8ff00) 55%, transparent); filter: brightness(1.12); }
+  22%, 100% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--logo, #c8ff00) 45%, transparent), inset 0 1px 0 rgba(255,255,255,.1); filter: none; }
+}
+
+/* ── Features as a scroll showcase (user, 2026-11-22; components/landing/feature-showcase.tsx) ── */
+.lp-root .fs-wrap { background: var(--sheet); }
+.lp-root .fs { position: relative; }
+.lp-root .fs-sticky { position: sticky; top: 0; height: 100vh; display: flex; align-items: center; overflow: hidden; }
+.lp-root .fs-grid {
+  width: 100%; max-width: 1240px; margin: 0 auto; padding: 60px 52px 0;
+  display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: clamp(36px, 5vw, 88px); align-items: center;
+}
+/* left: the headline and the list */
+.lp-root .fs-eyebrow { text-align: left; margin-bottom: 10px; }
+.lp-root .fs-title { text-align: left; margin: 0 0 clamp(18px, 3.4vh, 34px); font-size: clamp(30px, min(3.4vw, 6vh), 54px); line-height: 1.05; }
+.lp-root .fs-title .two-line-title > span { white-space: nowrap; }
+.lp-root .fs-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.lp-root .fs-item { position: relative; padding: clamp(9px, 1.6vh, 14px) 0 clamp(9px, 1.6vh, 14px); border-top: 1px solid rgba(255,255,255,.08); }
+.lp-root .fs-item:last-child { border-bottom: 1px solid rgba(255,255,255,.08); }
+.lp-root .fs-item-btn {
+  display: flex; align-items: baseline; gap: 14px; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
+  font: inherit; color: inherit;
+}
+.lp-root .fs-item-num { font-size: 12.5px; font-weight: 800; letter-spacing: .04em; color: rgba(255,255,255,.35); font-variant-numeric: tabular-nums; transition: color .3s ease; }
+.lp-root .fs-item-title { font-size: clamp(17px, 1.45vw, 21px); font-weight: 750; letter-spacing: -.015em; color: rgba(255,255,255,.45); transition: color .3s ease; }
+.lp-root .fs-item-btn:hover .fs-item-title { color: rgba(255,255,255,.75); }
+.lp-root .fs-item-btn:focus-visible { outline: 2px solid var(--logo, #c8ff00); outline-offset: 4px; border-radius: 6px; }
+.lp-root .fs-item[data-on] .fs-item-num { color: var(--logo, #c8ff00); }
+.lp-root .fs-item[data-on] .fs-item-title { color: var(--text); }
+/* the line opens under the active one */
+.lp-root .fs-item-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .45s cubic-bezier(.2,.8,.2,1); }
+.lp-root .fs-item-body > p { overflow: hidden; margin: 0; padding-left: 34px; font-size: clamp(14.5px, 1.05vw, 16px); line-height: 1.6; color: color-mix(in srgb, var(--text) 62%, transparent); opacity: 0; transition: opacity .35s ease, padding .45s ease; }
+.lp-root .fs-item[data-on] .fs-item-body { grid-template-rows: 1fr; }
+.lp-root .fs-item[data-on] .fs-item-body > p { opacity: 1; padding-top: 8px; }
+/* its progress: a thin bar along the top edge */
+.lp-root .fs-item-bar { position: absolute; left: 0; right: 0; top: -1px; height: 1px; overflow: hidden; }
+.lp-root .fs-item-bar i { display: block; height: 100%; background: var(--logo, #c8ff00); transform-origin: left center; transition: transform .12s linear; }
+/* right: the stage, the cards flipping through in 3D */
+.lp-root .fs-stage { position: relative; aspect-ratio: 5 / 4.3; max-height: 72vh; perspective: 1400px; perspective-origin: 50% 40%; }
+.lp-root .fs-card {
+  position: absolute; inset: 0; display: flex; flex-direction: column; border-radius: 24px; overflow: hidden; transform-style: preserve-3d;
+  background: linear-gradient(180deg, #161616, #0d0d0d); border: 1px solid rgba(255,255,255,.1);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 40px 90px -40px rgba(0,0,0,.95);
+  will-change: transform, opacity;
+}
+.lp-root .fs-art.ft-art { flex: 1; aspect-ratio: auto; margin: 10px 10px 0; border-radius: 16px; }
+.lp-root .fs-card-foot { display: flex; align-items: center; gap: 12px; padding: 14px 20px 16px; }
+.lp-root .fs-card-num { font-size: 13px; font-weight: 850; color: var(--logo, #c8ff00); font-variant-numeric: tabular-nums; }
+.lp-root .fs-card-tag { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.55); }
+.lp-root .fs-count { position: absolute; right: 6px; bottom: -34px; font-size: 13px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.lp-root .fs-count span { color: rgba(255,255,255,.4); }
+/* (the headline sized to its column: both lines whole) */
+.lp-root .fs-title { font-size: clamp(28px, min(2.85vw, 5.4vh), 50px); }
+/* (the headline measured against its own column, so both lines always fit whole) */
+.lp-root .fs-left { container-type: inline-size; min-width: 0; }
+.lp-root .fs-title { font-size: clamp(26px, 7cqi, 52px); }
+
+/* ── The Features stage art (components/landing/feature-stage-art.tsx; user 2026-11-22) ── */
+.lp-root .fs-art.fa-host { position: relative; overflow: hidden; background: radial-gradient(120% 90% at 50% 0%, #1c1d1b, #0d0d0d 70%); }
+.lp-root .fa { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 4%; padding: 6%; }
+/* a phone: rounded, its shot a 9:16 crop, a dynamic island */
+.lp-root .fa-phone {
+  position: relative; height: 82%; aspect-ratio: 9 / 18; border-radius: 1.4em; overflow: hidden; flex: none;
+  background: #000; border: 3px solid #2a2a2a; box-shadow: 0 30px 60px -30px rgba(0,0,0,.9), inset 0 0 0 1px rgba(255,255,255,.05);
+}
+.lp-root .fa-phone-shot { position: absolute; inset: 0; background-size: auto 100%; background-repeat: no-repeat; filter: brightness(1.08) contrast(1.04); }
+.lp-root .fa-island { position: absolute; top: 3.5%; left: 50%; width: 30%; height: 3.2%; margin-left: -15%; border-radius: 1em; background: #000; z-index: 3; }
+.lp-root .fa-chip {
+  position: absolute; left: 5%; top: 6%; display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; color: #fff; background: rgba(10,10,10,.75); border: 1px solid rgba(255,255,255,.14); backdrop-filter: blur(6px);
+}
+.lp-root .fa-chip-live i { width: 7px; height: 7px; border-radius: 50%; background: var(--logo, #c8ff00); box-shadow: 0 0 8px var(--logo, #c8ff00); animation: fa-blink 1.4s ease-in-out infinite; }
+@keyframes fa-blink { 50% { opacity: .35; } }
+
+/* 1 · steer: the wide shot with its frame; the preview beside it */
+.lp-root .fa-steer { justify-content: space-between; }
+.lp-root .fa-wide {
+  position: relative; flex: 1; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; background-size: cover; background-position: center;
+  box-shadow: 0 30px 60px -30px rgba(0,0,0,.9);
+}
+.lp-root .fa-frame {
+  position: absolute; top: 0; bottom: 0; width: 31.6%; left: 2%;
+  border: 2px solid #fff; box-shadow: 0 0 0 999px rgba(0,0,0,.5);
+  animation: fa-steer 6s cubic-bezier(.65,0,.35,1) infinite;
+}
+.lp-root .fa-frame-tag { position: absolute; top: 6px; left: 6px; padding: 2px 7px; border-radius: 5px; font-size: 10px; font-weight: 800; color: #0a0a0a; background: #fff; }
+.lp-root .fa-frame i, .lp-root .fa-frame b { position: absolute; width: 12px; height: 12px; border: 0 solid #fff; }
+.lp-root .fa-frame i { right: -2px; bottom: -2px; border-right-width: 4px; border-bottom-width: 4px; }
+.lp-root .fa-frame b { left: -2px; bottom: -2px; border-left-width: 4px; border-bottom-width: 4px; }
+@keyframes fa-steer { 0%, 12% { left: 2%; } 45%, 62% { left: 66.4%; } 95%, 100% { left: 2%; } }
+.lp-root .fa-steer-preview { height: 100%; display: flex; align-items: center; }
+.lp-root .fa-steer-preview .fa-phone { height: 74%; }
+.lp-root .fa-pan { animation: fa-pan 6s cubic-bezier(.65,0,.35,1) infinite; }
+@keyframes fa-pan { 0%, 12% { background-position: 4% 50%; } 45%, 62% { background-position: 99% 50%; } 95%, 100% { background-position: 4% 50%; } }
+
+/* 2 · render: three clips, each bar filling, then ready */
+.lp-root .fa-render { gap: 5%; }
+.lp-root .fa-render-clip { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+.lp-root .fa-render-clip .fa-phone { height: 66%; }
+.lp-root .fa-render-bar { width: 100%; height: 5px; border-radius: 999px; background: rgba(255,255,255,.1); overflow: hidden; }
+.lp-root .fa-render-bar i { display: block; height: 100%; background: var(--logo, #c8ff00); transform-origin: left center; animation: fa-fill 5s ease-in-out infinite; animation-delay: calc(var(--k) * .6s); }
+@keyframes fa-fill { 0% { transform: scaleX(0); } 55%, 100% { transform: scaleX(1); } }
+.lp-root .fa-render-state { position: relative; height: 16px; width: 100%; text-align: center; font-size: 11.5px; font-weight: 750; }
+.lp-root .fa-render-state em, .lp-root .fa-render-state strong { position: absolute; inset: 0; font-style: normal; }
+.lp-root .fa-render-state em { color: rgba(255,255,255,.55); animation: fa-show-a 5s linear infinite; animation-delay: calc(var(--k) * .6s); }
+.lp-root .fa-render-state strong { color: var(--logo, #c8ff00); opacity: 0; animation: fa-show-b 5s linear infinite; animation-delay: calc(var(--k) * .6s); }
+@keyframes fa-show-a { 0%, 54% { opacity: 1; } 56%, 100% { opacity: 0; } }
+@keyframes fa-show-b { 0%, 54% { opacity: 0; } 56%, 96% { opacity: 1; } 100% { opacity: 0; } }
+.lp-root .fa-render .fa-chip { left: auto; right: 5%; }
+
+/* 3 · captions: the words writing in, the current one lime; the style chips */
+.lp-root .fa-captions { gap: 6%; }
+.lp-root .fa-cap {
+  position: absolute; z-index: 2; left: 6%; right: 6%; bottom: 24%; margin: 0; text-align: center; line-height: 1.15;
+  font-size: clamp(14px, 1.5vw, 20px); font-weight: 900; text-transform: uppercase; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,.8);
+}
+.lp-root .fa-cap span { display: inline-block; margin: 0 .12em; opacity: 0; animation: fa-word 4.8s linear infinite; animation-delay: calc(var(--k) * .45s); }
+@keyframes fa-word {
+  0% { opacity: 0; transform: translateY(4px) scale(.9); color: var(--logo, #c8ff00); }
+  4% { opacity: 1; transform: none; color: var(--logo, #c8ff00); }
+  10% { color: #fff; }
+  80% { opacity: 1; color: #fff; }
+  86%, 100% { opacity: 0; color: #fff; }
+}
+.lp-root .fa-styles { display: flex; flex-direction: column; gap: 10px; }
+.lp-root .fa-styles span {
+  padding: 9px 16px; border-radius: 12px; font-size: 13px; font-weight: 750; color: rgba(255,255,255,.6);
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+}
+.lp-root .fa-styles span[data-on] { color: #0a0a0a; background: var(--logo, #c8ff00); border-color: transparent; }
+
+/* 4 · hooks: the title pops on; a toolbar */
+.lp-root .fa-hooks { gap: 6%; }
+.lp-root .fa-hook {
+  position: absolute; z-index: 2; left: 50%; top: 22%; padding: 8px 14px; border-radius: 12px; white-space: nowrap;
+  font-size: clamp(14px, 1.45vw, 19px); font-weight: 900; color: #0a0a0a; background: #fff; box-shadow: 0 10px 24px -8px rgba(0,0,0,.6);
+  transform: translateX(-50%) rotate(-4deg); animation: fa-hook 4s cubic-bezier(.2,1.6,.4,1) infinite;
+}
+@keyframes fa-hook { 0% { opacity: 0; transform: translateX(-50%) rotate(-4deg) scale(.4); } 12%, 85% { opacity: 1; transform: translateX(-50%) rotate(-4deg) scale(1); } 95%, 100% { opacity: 0; transform: translateX(-50%) rotate(-4deg) scale(.9); } }
+.lp-root .fa-toolbar { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 10px; border-radius: 16px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); }
+.lp-root .fa-toolbar > span { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; font-size: 14px; font-weight: 800; color: #fff; }
+.lp-root .fa-tb-font, .lp-root .fa-tb-b { background: rgba(255,255,255,.08); }
+.lp-root .fa-tb-b { font-weight: 900; }
+.lp-root .fa-tb-sw { width: 22px !important; height: 22px !important; border-radius: 50% !important; }
+.lp-root .fa-tb-on { box-shadow: 0 0 0 2px #0d0d0d, 0 0 0 4px var(--logo, #c8ff00); }
+
+/* 5 · layouts: three phones, the chosen one outlined */
+.lp-root .fa-layouts { gap: 4%; }
+.lp-root .fa-layouts figure { margin: 0; height: 88%; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.lp-root .fa-layouts .fa-phone { height: calc(100% - 28px); }
+.lp-root .fa-layouts figcaption { font-size: 12.5px; font-weight: 750; color: rgba(255,255,255,.55); }
+.lp-root .fa-pick .fa-phone { border-color: var(--logo, #c8ff00); box-shadow: 0 0 0 3px color-mix(in srgb, var(--logo, #c8ff00) 25%, transparent), 0 30px 60px -30px rgba(0,0,0,.9); }
+.lp-root .fa-pick figcaption { color: var(--logo, #c8ff00); }
+.lp-root .fa-split { display: flex; flex-direction: column; gap: 2px; background: #000; }
+.lp-root .fa-split-half { flex: 1; background-size: auto 150%; background-repeat: no-repeat; filter: brightness(1.08); }
+.lp-root .fa-vt { display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 8%; padding: 0 8%; background: #0f0f0f; }
+.lp-root .fa-vt-title { font-size: clamp(11px, 1vw, 14px); font-weight: 900; color: #fff; text-align: center; line-height: 1.1; }
+.lp-root .fa-vt-shot { aspect-ratio: 16 / 9; border-radius: 8px; background-size: cover; background-position: center; }
+.lp-root .fa-vt-line { height: 6px; border-radius: 3px; background: rgba(255,255,255,.25); }
+.lp-root .fa-vt-line-2 { width: 60%; align-self: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-root .fa *, .lp-root .fa *::before { animation: none !important; }
+  .lp-root .fa-cap span { opacity: 1; }
+  .lp-root .fa-hook { opacity: 1; }
+}
+/* the stage card's art area */
+.lp-root .fs-art { flex: 1; margin: 10px 10px 0; border-radius: 16px; }
+.lp-root .fa-cap { font-size: clamp(12px, 1.15vw, 16px); bottom: 22%; }
+
+/* ── Features as a horizontal gallery (user, 2026-11-23; components/landing/feature-showcase.tsx) ── */
+.lp-root .fg { position: relative; }
+.lp-root .fg-sticky { position: sticky; top: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column; padding-top: 60px; box-sizing: border-box; }
+.lp-root .fg-head {
+  width: 100%; max-width: 1240px; margin: 0 auto; padding: clamp(18px, 4vh, 44px) 52px 0; box-sizing: border-box;
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 32px;
+}
+.lp-root .fg-eyebrow { text-align: left; margin: 0 0 8px; }
+.lp-root .fg-h { text-align: left; margin: 0; font-size: clamp(28px, min(3.4vw, 6vh), 56px); line-height: 1.04; }
+.lp-root .fg-h .two-line-title > span { display: block; white-space: nowrap; }
+.lp-root .fg-nav { display: flex; align-items: center; gap: 18px; flex: none; }
+.lp-root .fg-count { display: flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; }
+.lp-root .fg-count b { font-size: 28px; font-weight: 850; letter-spacing: -.02em; color: var(--text); }
+.lp-root .fg-count span { font-size: 14px; font-weight: 700; color: rgba(255,255,255,.4); }
+.lp-root .fg-progress { width: clamp(90px, 10vw, 160px); height: 2px; border-radius: 2px; background: rgba(255,255,255,.12); overflow: hidden; }
+.lp-root .fg-progress i { display: block; height: 100%; background: var(--logo, #c8ff00); transform-origin: left center; }
+.lp-root .fg-arrows { display: flex; gap: 8px; }
+.lp-root .fg-arrows button {
+  display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; cursor: pointer;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.14); color: var(--text);
+  transition: background .2s ease, border-color .2s ease, opacity .2s ease;
+}
+.lp-root .fg-arrows button:hover:not(:disabled) { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.3); }
+.lp-root .fg-arrows button:disabled { opacity: .3; cursor: default; }
+.lp-root .fg-arrows button:focus-visible { outline: 2px solid var(--logo, #c8ff00); outline-offset: 3px; }
+.lp-root .fg-arrows svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* the stage and the moving track */
+.lp-root .fg-stage { position: relative; flex: 1; display: flex; align-items: center; perspective: 1600px; perspective-origin: 50% 45%; min-height: 0; }
+.lp-root .fg-track { display: flex; align-items: center; will-change: transform; transform-style: preserve-3d; }
+.lp-root .fg-panel {
+  flex: none; display: flex; flex-direction: column; border-radius: 26px; overflow: hidden; transform-style: preserve-3d; will-change: transform, opacity;
+  background: linear-gradient(180deg, #171717, #0e0e0e); border: 1px solid rgba(255,255,255,.1);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 50px 100px -50px rgba(0,0,0,.95);
+}
+.lp-root .fg-art { flex: none; height: clamp(220px, 46vh, 470px); margin: 10px 10px 0; border-radius: 18px; }
+.lp-root .fg-body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 22px; align-items: start; padding: clamp(16px, 2.6vh, 24px) 26px clamp(18px, 3vh, 26px); }
+.lp-root .fg-meta { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }
+.lp-root .fg-num { font-size: 13px; font-weight: 850; color: var(--logo, #c8ff00); font-variant-numeric: tabular-nums; }
+.lp-root .fg-tag { font-size: 11px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; color: rgba(255,255,255,.45); }
+.lp-root .fg-title { margin: 0 0 6px; font-size: clamp(20px, 1.7vw, 26px); font-weight: 850; letter-spacing: -.02em; color: var(--text); }
+.lp-root .fg-desc { margin: 0; font-size: clamp(14.5px, 1.1vw, 16.5px); line-height: 1.55; color: color-mix(in srgb, var(--text) 62%, transparent); }
+@media (prefers-reduced-motion: reduce) { .lp-root .fg-panel { transform: none !important; } }
+
+/* (Framing scene: the shot outside the frame dimmed — the dim layer is the frame's own shadow, kept inside the shot) */
+.lp-root .fa-wide { isolation: isolate; }
+.lp-root .fa-frame { box-shadow: 0 0 0 1600px rgba(0,0,0,.55) !important; z-index: 1; }
+/* (Framing, rebuilt: the shot is dimmed everywhere; the frame carries the shot at full brightness, sized and placed so
+   it lines up exactly with the shot beneath, and the two move together) */
+.lp-root .fa-wide::after { content: ""; position: absolute; inset: 0; background: rgba(0,0,0,.55); z-index: 0; }
+.lp-root .fa-frame {
+  box-shadow: none !important; z-index: 1; background-repeat: no-repeat; background-size: 316.5% 100%;
+  animation: fa-steer 6s cubic-bezier(.65,0,.35,1) infinite, fa-steer-bg 6s cubic-bezier(.65,0,.35,1) infinite;
+}
+@keyframes fa-steer-bg { 0%, 12% { background-position: 2.9% 0; } 45%, 62% { background-position: 97.1% 0; } 95%, 100% { background-position: 2.9% 0; } }
+/* (Framing: a clearer dim outside the frame; the wide shot sized to fit the card whole, the preview beside it) */
+.lp-root .fa-wide::after { background: rgba(0,0,0,.68); }
+.lp-root .fa-steer { justify-content: center; gap: 5%; }
+.lp-root .fa-steer .fa-wide { flex: none; height: 74%; width: auto; aspect-ratio: 16 / 9; }
+.lp-root .fa-steer-preview .fa-phone { height: 74%; }
+/* (the scenes fill their panel: taller art, bigger phones and shot; the hook title fits inside its phone) */
+.lp-root .fg-art { height: clamp(250px, 52vh, 520px); }
+.lp-root .fg .fa { padding: 5% 6%; }
+.lp-root .fg .fa-phone { height: 90%; }
+.lp-root .fg .fa-render-clip .fa-phone, .lp-root .fg .fa-layouts .fa-phone { height: 76%; }
+.lp-root .fg .fa-layouts .fa-phone { height: calc(100% - 26px); }
+.lp-root .fg .fa-steer .fa-wide { height: 80%; }
+.lp-root .fg .fa-steer-preview .fa-phone { height: 80%; }
+.lp-root .fa-hook { font-size: clamp(11px, 1vw, 15px); padding: 7px 11px; max-width: 88%; white-space: normal; text-align: center; }
+/* (the hook on one line; the panel a little shorter so it sits clear of the headline and the screen's foot) */
+.lp-root .fa-hook { white-space: nowrap; max-width: none; font-size: clamp(10px, .9vw, 14px); padding: 6px 10px; }
+.lp-root .fg-art { height: clamp(220px, 44vh, 500px); }
+.lp-root .fg-stage { padding-top: clamp(8px, 2vh, 20px); }
+/* pricing cards, a size smaller (user 2026-11-23: "too big"): tighter padding, price and list */
+@media (min-width: 1024px) {
+  .lp-root #pricing .price-card, .lp-root #pricing [class*="rounded-2xl"][class*="border"][class*="p-6"] { padding: 20px 22px; }
+  .lp-root #pricing .text-4xl { font-size: 32px; }
+  .lp-root #pricing ul[role="list"] { margin-top: 16px; font-size: 13.5px; }
+  .lp-root #pricing ul[role="list"] > li + li { margin-top: 8px; }
+}
+/* the CTA headline: one beat per line */
+.lp-root .cta-section .cta-h > span { display: block; white-space: nowrap; }
+/* the CTA headline in the section-title style (user 2026-11-23: like "Questions"): heavy, a little looser, each line
+   lit top-to-bottom white → silver; no lime */
+.lp-root .cta-section h2.cta-h { background: none; color: inherit; font-weight: 900; letter-spacing: -0.025em; line-height: 1.05; }
+.lp-root .cta-section .cta-h > span {
+  padding-bottom: .08em;
+  background: linear-gradient(180deg, var(--title-top) 0%, var(--title-bottom) 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
+}
+/* the two lit words: lime running into pale lime, as the hero's "short form" */
+.lp-root .cta-section .cta-h .cta-hl {
+  font-style: normal; display: inline-block; padding-right: .04em;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--logo, #c8ff00) 70%, #fff) 0%, var(--logo, #c8ff00) 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--logo, #c8ff00) 22%, transparent));
+}
+/* the payoff line: lime running into pale lime, no glow */
+.lp-root .cta-section .cta-h > span.cta-pay {
+  background: linear-gradient(100deg, var(--logo, #c8ff00) 0%, var(--logo, #c8ff00) 35%, #eaffb0 100%);
+  -webkit-background-clip: text; background-clip: text;
+}
+/* (the gallery panels smaller, user 2026-11-23) */
+.lp-root .fg-art { height: clamp(200px, 37vh, 420px); }
+.lp-root .fg-title { font-size: clamp(18px, 1.5vw, 23px); }
+.lp-root .fg-desc { font-size: clamp(13.5px, 1vw, 15.5px); }
+/* Framing with the studio shot: the frame glides from her on the left (9 %) to her on the right (55 %) */
+.lp-root .fa-steer-studio .fa-frame { animation: fa-steer2 6s cubic-bezier(.65,0,.35,1) infinite, fa-steer2-bg 6s cubic-bezier(.65,0,.35,1) infinite; }
+.lp-root .fa-steer-studio .fa-pan { animation: fa-pan2 6s cubic-bezier(.65,0,.35,1) infinite; }
+@keyframes fa-steer2 { 0%, 12% { left: 9%; } 45%, 62% { left: 55%; } 95%, 100% { left: 9%; } }
+@keyframes fa-steer2-bg { 0%, 12% { background-position: 13.2% 0; } 45%, 62% { background-position: 80.4% 0; } 95%, 100% { background-position: 13.2% 0; } }
+@keyframes fa-pan2 { 0%, 12% { background-position: 13% 50%; } 45%, 62% { background-position: 81% 50%; } 95%, 100% { background-position: 13% 50%; } }
+/* the phones shaped like a real phone (user 2026-11-23): the taller 9 : 19.5 body, corners rounded in proportion to its
+   size (not a capsule), a slimmer bezel and island; the render bars as wide as their phone */
+.lp-root .fa-phone { aspect-ratio: 9 / 19.5; border-radius: 17% / 7.8%; border-width: 2.5px; border-color: #2e2e2e; }
+.lp-root .fa-island { top: 2.6%; width: 32%; height: 2.4%; margin-left: -16%; }
+.lp-root .fa-render-clip { align-items: center; }
+.lp-root .fa-render-bar { width: 88%; height: 4px; }
+/* (text sized to the slimmer phones) */
+.lp-root .fa-cap { font-size: clamp(10px, .95vw, 14px); left: 5%; right: 5%; }
+.lp-root .fa-vt-title { font-size: clamp(9px, .8vw, 12px); }
+.lp-root .fa-hook { font-size: clamp(9px, .8vw, 13px); }
+/* (the panels smaller again, user 2026-11-23; the frame's tag on one line) */
+.lp-root .fg-art { height: clamp(180px, 32vh, 360px); }
+.lp-root .fg-body { gap: 16px; padding: clamp(12px, 2vh, 18px) 20px clamp(14px, 2.4vh, 20px); }
+.lp-root .fg-title { font-size: clamp(16px, 1.3vw, 20px); }
+.lp-root .fg-desc { font-size: clamp(13px, .92vw, 14.5px); }
+.lp-root .fa-frame-tag { white-space: nowrap; font-size: 9px; padding: 2px 6px; }
+.lp-root .fa-chip { font-size: 11px; padding: 4px 10px; }
+
+/* ── The final CTA button: the badge swaps ends on hover (user, 2026-11-23) ── the words make room on the left as the
+   round arrow badge slides from the right end to the left, turning 45°; the button stays put (no lift) */
+.lp-root .cta-section .cta-btn {
+  position: relative; overflow: hidden; gap: 0; height: 56px; padding: 0 64px 0 28px; box-sizing: border-box;
+  transition: padding .5s cubic-bezier(.65,0,.35,1), box-shadow .3s ease;
+}
+.lp-root .cta-section .cta-btn:hover, .lp-root .cta-section .cta-btn:focus-visible { transform: none; padding: 0 28px 0 64px; }
+.lp-root .cta-section .cta-btn .cta-btn-label { position: relative; z-index: 1; }
+.lp-root .cta-section .cta-btn .cta-btn-ico {
+  position: absolute; top: 8px; right: 8px; width: 40px; height: 40px; border-radius: 50%;
+  transition: right .5s cubic-bezier(.65,0,.35,1), transform .5s cubic-bezier(.65,0,.35,1);
+}
+.lp-root .cta-section .cta-btn:hover .cta-btn-ico, .lp-root .cta-section .cta-btn:focus-visible .cta-btn-ico {
+  width: 40px; right: calc(100% - 48px); transform: rotate(45deg);
+}
+.lp-root .cta-section .cta-btn:hover .cta-btn-ico svg { transform: none; }
+.lp-root .cta-section .cta-btn:active { transform: scale(.98); }
+@media (prefers-reduced-motion: reduce) { .lp-root .cta-section .cta-btn, .lp-root .cta-section .cta-btn .cta-btn-ico { transition: none; } }
+
+/* ── Who Is It For: each symbol acts out its own audience (user 2026-11-23) — once as its card comes in, and on a loop
+   while the card is hovered: mic talks, screen plays, sparkles twinkle, scissors snip, cap is tossed, megaphone shouts ── */
+.lp-root .lx-who-ico svg { transform-origin: 50% 50%; }
+.lp-root .lx-who-card.in .lx-who-ico svg { animation-duration: 1.1s; animation-timing-function: ease-in-out; animation-delay: calc(var(--d, 0s) + .5s); animation-iteration-count: 1; }
+.lp-root .lx-who-card:hover .lx-who-ico svg { animation-delay: 0s; animation-iteration-count: infinite; }
+.lp-root .lx-who-card.in .lx-who-ico-0 svg, .lp-root .lx-who-card:hover .lx-who-ico-0 svg { animation-name: who-mic; }
+.lp-root .lx-who-card.in .lx-who-ico-1 svg, .lp-root .lx-who-card:hover .lx-who-ico-1 svg { animation-name: who-play; }
+.lp-root .lx-who-card.in .lx-who-ico-2 svg, .lp-root .lx-who-card:hover .lx-who-ico-2 svg { animation-name: who-spark; }
+.lp-root .lx-who-card.in .lx-who-ico-3 svg, .lp-root .lx-who-card:hover .lx-who-ico-3 svg { animation-name: who-snip; }
+.lp-root .lx-who-card.in .lx-who-ico-4 svg, .lp-root .lx-who-card:hover .lx-who-ico-4 svg { animation-name: who-cap; }
+.lp-root .lx-who-card.in .lx-who-ico-5 svg, .lp-root .lx-who-card:hover .lx-who-ico-5 svg { animation-name: who-shout; }
+/* mic: a talking bob */
+@keyframes who-mic { 0%, 100% { transform: none; } 20% { transform: translateY(-2px) scale(1.06); } 40% { transform: translateY(0) scale(.97); } 60% { transform: translateY(-1.5px) scale(1.05); } 80% { transform: none; } }
+/* screen: a pulse, as if pressed play */
+@keyframes who-play { 0%, 100% { transform: none; } 30% { transform: scale(.86); } 55% { transform: scale(1.12); } 75% { transform: scale(.98); } }
+/* sparkles: a twinkle turn */
+@keyframes who-spark { 0%, 100% { transform: none; opacity: 1; } 35% { transform: rotate(18deg) scale(1.18); opacity: .7; } 65% { transform: rotate(-8deg) scale(.95); opacity: 1; } }
+/* scissors: two quick snips */
+@keyframes who-snip { 0%, 100% { transform: none; } 15% { transform: rotate(-14deg); } 30% { transform: rotate(6deg); } 45% { transform: rotate(-14deg); } 60% { transform: rotate(4deg); } 75% { transform: none; } }
+/* cap: tossed up, a spin, caught */
+@keyframes who-cap { 0%, 100% { transform: none; } 35% { transform: translateY(-6px) rotate(-14deg); } 60% { transform: translateY(-3px) rotate(10deg); } 80% { transform: translateY(1px); } }
+/* megaphone: a shout, shaking forward */
+@keyframes who-shout { 0%, 100% { transform: none; } 15% { transform: rotate(-10deg) scale(1.08); } 30% { transform: rotate(8deg) scale(1.08); } 45% { transform: rotate(-6deg) scale(1.05); } 60% { transform: rotate(4deg); } 75% { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .lp-root .lx-who-ico svg { animation: none !important; } }
+
+/* ── The phones as real phones (user 2026-11-23: "it doesn't even look like a phone") ── the screen with its own
+   rounded corners, a black bezel round it and a thin metal rim (drawn as rings outside the screen, so nothing inside
+   moves), the status bar (time, signal, battery), the dynamic island, the home bar, and a soft glass sheen */
+.lp-root .fa-phone {
+  border: 0; border-radius: 15% / 7%; overflow: hidden; isolation: isolate;
+  box-shadow:
+    0 0 0 5px #0b0b0b,                       /* the bezel */
+    0 0 0 6.5px #3b3b3e,                     /* the metal rim */
+    0 0 0 7px rgba(255,255,255,.08),
+    0 24px 44px -18px rgba(0,0,0,.95);
+  margin: 7px;
+}
+/* the status bar: the time on the left, signal and battery on the right */
+.lp-root .fa-phone::before {
+  content: "9:41"; position: absolute; z-index: 4; top: 2.4%; left: 9%; font-size: 7.5px; font-weight: 800; letter-spacing: .02em;
+  color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); line-height: 1;
+}
+.lp-root .fa-phone::after {
+  content: ""; position: absolute; z-index: 4; top: 2.7%; right: 8%; width: 17px; height: 6px;
+  background:
+    linear-gradient(#fff, #fff) 0 100% / 2px 40% no-repeat,
+    linear-gradient(#fff, #fff) 3px 100% / 2px 65% no-repeat,
+    linear-gradient(#fff, #fff) 6px 100% / 2px 100% no-repeat,
+    linear-gradient(#fff, #fff) 10px 50% / 6px 100% no-repeat;
+  border-radius: 1px; filter: drop-shadow(0 1px 1px rgba(0,0,0,.5));
+}
+.lp-root .fa-island { top: 2%; width: 30%; height: 3%; margin-left: -15%; border-radius: 99px; background: #000; z-index: 5; }
+/* the home bar, and the glass sheen over the screen */
+.lp-root .fa-phone-shot::after, .lp-root .fa-split::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 3;
+  background:
+    linear-gradient(#fff, #fff) 50% calc(100% - 3.5%) / 34% 3px no-repeat,
+    linear-gradient(125deg, rgba(255,255,255,.14) 0%, rgba(255,255,255,0) 32%);
+  border-radius: inherit;
+}
+.lp-root .fa-phone-shot { border-radius: inherit; }
+.lp-root .fa-split { position: relative; }
+.lp-root .fa-vt { box-shadow: 0 0 0 5px #0b0b0b, 0 0 0 6.5px #3b3b3e, 0 0 0 7px rgba(255,255,255,.08), 0 24px 44px -18px rgba(0,0,0,.95); }
+.lp-root .fa-pick .fa-phone { box-shadow: 0 0 0 5px #0b0b0b, 0 0 0 7px var(--logo, #c8ff00), 0 0 22px -2px color-mix(in srgb, var(--logo, #c8ff00) 55%, transparent), 0 24px 44px -18px rgba(0,0,0,.95); }
+.lp-root .fa-render .fa-chip { left: 5%; right: auto; }
+/* (chips sit above the phones, clear of them) */
+.lp-root .fg .fa-chip { top: 3.5%; }
+.lp-root .fg .fa-render, .lp-root .fg .fa-steer { padding-top: 9%; }
+
+/* the phones, simply phone-shaped (user 2026-11-23: "I didn't ask for the border — a perfect mobile shape"): no bezel
+   or rim rings and no status bar; just the tall 9 : 19.5 screen with phone-rounded corners, a hairline edge, the
+   island and the home bar */
+.lp-root .fa-phone, .lp-root .fa-vt { margin: 0; border: 0; border-radius: 16% / 7.4%; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12), 0 22px 40px -18px rgba(0,0,0,.95); }
+.lp-root .fa-phone::before, .lp-root .fa-phone::after { content: none; }
+.lp-root .fa-pick .fa-phone { box-shadow: 0 0 0 2px var(--logo, #c8ff00), 0 0 20px -4px color-mix(in srgb, var(--logo, #c8ff00) 55%, transparent), 0 22px 40px -18px rgba(0,0,0,.95); }
+.lp-root .fa-island { top: 2.2%; width: 28%; height: 2.6%; margin-left: -14%; }
+.lp-root .fa-vt { gap: 6%; padding: 0 9%; }
+.lp-root .fa-vt-title { font-size: clamp(8px, .7vw, 11px); line-height: 1.15; }
+.lp-root .fa-cap { font-size: clamp(9px, .78vw, 12.5px); left: 7%; right: 7%; }
+/* (the phones a little wider and a touch larger — user 2026-11-23: too narrow): 9 : 17, corners in proportion */
+.lp-root .fa-phone, .lp-root .fa-vt { aspect-ratio: 9 / 17; border-radius: 14% / 7.4%; }
+.lp-root .fg .fa-render-clip .fa-phone { height: 80%; }
+.lp-root .fg .fa-layouts .fa-phone { height: calc(100% - 22px); }
+.lp-root .fg .fa-layouts figure { height: 92%; }
+.lp-root .fg .fa-captions .fa-phone, .lp-root .fg .fa-hooks .fa-phone { height: 92%; }
+.lp-root .fa-island { width: 26%; margin-left: -13%; }

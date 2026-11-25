@@ -12,13 +12,14 @@
     "test:brand": "npx tsx --test src/lib/brandWords.test.ts src/lib/shared/brandTeam.test.ts src/modules/brand/engine.test.ts src/modules/brand/endCard.test.ts src/modules/brand/bookends.test.ts src/modules/brand/kitHistory.test.ts",
     "test:credits": "npx tsx --test src/lib/credits.test.ts src/server/services/credits.test.ts src/server/services/creditsHooks.test.ts src/server/services/subjectsCredits.test.ts src/server/services/readingUsage.test.ts src/server/services/topup.test.ts src/lib/aiLimits.test.ts src/server/services/aiUsage.test.ts src/server/services/aiLimitsHooks.test.ts src/lib/planFeatures.test.ts src/server/services/grantsSummary.test.ts src/server/services/storage.test.ts src/server/services/expiry.test.ts src/lib/expiry.test.ts",
     "test:devices": "npx tsx --test src/modules/auth/devices.test.ts",
-    "test:razorpay": "npx tsx --test src/lib/razorpay.test.ts src/lib/invoice.test.ts src/server/dev/razorpayMock.test.ts src/server/services/invoiceDetails.test.ts src/server/services/invoicePapers.test.ts",
+    "test:razorpay": "npx tsx --test src/lib/currency.test.ts src/lib/razorpay.test.ts src/lib/invoice.test.ts src/server/dev/razorpayMock.test.ts src/server/services/invoiceDetails.test.ts src/server/services/invoicePapers.test.ts",
     "test:brand-style": "npx tsx --test src/server/services/brandStyle.test.ts",
     "test:brand-link": "npx tsx --test src/server/services/brandFromLink.test.ts",
     "test:email": "npx tsx --test src/lib/shared/email.test.ts",
     "test:routes": "npx tsx --test src/lib/publicPaths.test.ts",
     "test:analytics": "npx tsx --test src/lib/analytics.test.ts",
-    "test:editor-words": "npx tsx --test src/modules/editor/transcriptWindow.test.ts"
+    "test:editor-words": "npx tsx --test src/modules/editor/transcriptWindow.test.ts",
+    "test:gemini": "npx tsx --test src/lib/aiPrices.test.mts src/lib/geminiPriority.test.mts src/lib/geminiVertexModel.test.mts src/lib/geminiWif.test.mts src/lib/geminiUsage.test.ts src/lib/geminiKey.test.ts"
   },
   "dependencies": {
     "@auth/pg-adapter": "^1.11.3",

@@ -5,9 +5,10 @@ import { planFeatureRows, creditUses } from './planFeatures'
 
 const labels = (key: keyof typeof PLANS) => planFeatureRows(PLANS[key]).map(r => (r.included ? '' : 'x ') + r.label)
 
-test('a paid plan lists every limit the server applies, with the numbers from plans.ts (no monthly limits since 2026-11-21)', () => {
+test('a paid plan lists every limit the server applies, with the numbers from plans.ts (its hours a month: back 2026-11-22)', () => {
   assert.deepEqual(labels('starter'), [
-    'Spend your credits on anything, no monthly limits',
+    '3 hours of video a month',
+    'Spend your credits on anything',
     '15 GB of storage',
     'Up to 5 GB per video',
     '2 devices signed in at a time',
@@ -27,7 +28,8 @@ test('a paid plan lists every limit the server applies, with the numbers from pl
 
 test('the Trial lists its 2 uploads in total, and how long it lasts', () => {
   assert.deepEqual(labels('trial'), [
-    'Spend your credits on anything, no monthly limits',
+    '30 minutes of video in total',
+    'Spend your credits on anything',
     '2 uploads in total',
     '5 GB of storage',
     'Up to 2 GB per video',
@@ -52,7 +54,8 @@ test('Pro (and Agency, not sold) get priority exports, GST invoice details and t
   for (const key of Object.keys(PLANS) as (keyof typeof PLANS)[]) {
     const rows = planFeatureRows(PLANS[key])
     assert.ok(!rows.some(r => r.label === 'Unlimited clips'), key)
-    assert.ok(!rows.some(r => /a month/.test(r.label)), `${key}: no monthly limit listed`)
+    // the hours of video are the only monthly limit listed (back 2026-11-22)
+    assert.deepEqual(rows.filter(r => /a month/.test(r.label)).map(r => r.label), PLANS[key].allowancesOnce ? [] : [`${PLANS[key].readingMinutes / 60} hours of video a month`], key)
     assert.equal(rows.find(r => r.label === 'Priority exports')?.included, top(key), key)
     assert.equal(rows.find(r => r.label === 'GST invoices with your company details')?.included, top(key), key)
     assert.equal(rows.find(r => r.label === 'Share your brand kits with your team')?.included, top(key), key)
@@ -85,15 +88,15 @@ test('what a credit buys does not call AI features free without limits', () => {
 test('the pricing cards show only what differs, the same rows in the same order on every plan', async () => {
   const { planCompareRows, everyPlanIncludes, creditPrices } = await import('./planFeatures')
   const rows = (key: keyof typeof PLANS) => planCompareRows(PLANS[key]).map(r => `${r.label}: ${r.value === false ? '—' : r.value}${r.strong ? ' *' : ''}`)
-  assert.deepEqual(rows('trial'), ['Uploads: 2 in total', 'Storage: 5 GB', 'One video up to: 2 GB', 'Videos kept: 7 days', 'Signed in on: 1 device',
+  assert.deepEqual(rows('trial'), ['Video: 30 minutes in total', 'Uploads: 2 in total', 'Storage: 5 GB', 'One video up to: 2 GB', 'Videos kept: 7 days', 'Signed in on: 1 device',
     'Brand kits: 1', 'Clips per Make my clips: Up to 3', 'Priority exports: —', 'GST invoice with your company: —'])
-  assert.deepEqual(rows('starter'), ['Uploads: No limit', 'Storage: 15 GB', 'One video up to: 5 GB', 'Videos kept: 30 days', 'Signed in on: 2 devices',
+  assert.deepEqual(rows('starter'), ['Video: 3 hours a month', 'Uploads: No limit', 'Storage: 15 GB', 'One video up to: 5 GB', 'Videos kept: 30 days', 'Signed in on: 2 devices',
     'Brand kits: 2', 'Clips per Make my clips: Up to 10', 'Priority exports: —', 'GST invoice with your company: —'])
-  assert.deepEqual(rows('creator'), ['Uploads: No limit', 'Storage: 30 GB', 'One video up to: 8 GB', 'Videos kept: 30 days, or ★ Keep for good *', 'Signed in on: 3 devices',
+  assert.deepEqual(rows('creator'), ['Video: 5 hours a month', 'Uploads: No limit', 'Storage: 30 GB', 'One video up to: 8 GB', 'Videos kept: 30 days, or ★ Keep for good *', 'Signed in on: 3 devices',
     'Brand kits: 4, shared with your team *', 'Clips per Make my clips: Up to 15', 'Priority exports: Yes *', 'GST invoice with your company: Yes *'])
   const labels = (key: keyof typeof PLANS) => planCompareRows(PLANS[key]).map(r => r.label)
   assert.deepEqual(labels('trial'), labels('creator'))
-  assert.ok(everyPlanIncludes().some(t => /no monthly limits/i.test(t)))
+  assert.ok(everyPlanIncludes().some(t => /up to your plan's hours of video/i.test(t)))
   assert.ok(creditPrices().some(p => p.price === '7 credits'))
 })
 

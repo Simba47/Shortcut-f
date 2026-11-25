@@ -1,7 +1,8 @@
 import type { InvoiceRow } from '@/server/services/invoices'
 import { type Purchase, renewalNote } from '@/lib/purchase'
 import { COMPANY } from '@/lib/company'
-import { amountInRupees, rupeesInWords, stateName } from '@/lib/invoice'
+import { amountInWords, stateName } from '@/lib/invoice'
+import { formatMoney } from '@/lib/currency'
 
 // The Shortcut mark (components/ui/brand-logo.tsx BRAND_TOP / BRAND_BOTTOM; copied: that file is a client module),
 // lime on a black tile like the app icon (public/apple-icon.png) and the PDF (server/services/invoicePdf.ts)
@@ -9,7 +10,6 @@ const MARK_TOP = 'M36 2H92Q98 2 94 6L34 66A32 32 0 0 1 36 2Z'
 const MARK_BOTTOM = 'M66 116H10Q4 116 8 112L68 52A32 32 0 0 1 66 116Z'
 
 const day = (d: Date) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' })
-const money = (p: number) => `₹${amountInRupees(p)}`
 
 /**
  * One invoice / receipt as a sheet of paper (user, 2026-11-18: designed). The same on screen and on
@@ -22,6 +22,9 @@ export function InvoiceSheet({ inv, purchase }: { inv: InvoiceRow; purchase: Pur
   const note = renewalNote(purchase)
   const linePrice = taxed ? inv.taxablePaise : inv.amountPaise
   const customer = inv.customer
+  const money = (p: number) => formatMoney(p, inv.currency, { cents: true })
+  // A payment in dollars: an export of services under the LUT, no GST (2026-11-22)
+  const exported = inv.currency !== 'INR'
 
   return (
     <article className="iv-sheet">
@@ -90,7 +93,7 @@ export function InvoiceSheet({ inv, purchase }: { inv: InvoiceRow; purchase: Pur
       <section className="iv-sum">
         <div className="iv-words">
           <h2>Amount in words</h2>
-          <p>{rupeesInWords(inv.amountPaise)}</p>
+          <p>{amountInWords(inv.amountPaise, inv.currency)}</p>
         </div>
         <dl className="iv-totals">
           {taxed && <div><dt>Taxable value</dt><dd>{money(inv.taxablePaise)}</dd></div>}
@@ -104,7 +107,8 @@ export function InvoiceSheet({ inv, purchase }: { inv: InvoiceRow; purchase: Pur
 
       <section className="iv-notes">
         {note && <p>{note}</p>}
-        <p>Payment ID <span className="iv-mono">{inv.razorpayPaymentId}</span>{taxed ? ' · The price includes GST.' : ''}</p>
+        <p>Payment ID <span className="iv-mono">{inv.razorpayPaymentId}</span>{taxed && !exported ? ' · The price includes GST.' : ''}</p>
+        {exported && taxed && <p>Supply meant for export under LUT without payment of IGST{s?.lut ? <> (LUT ARN <span className="iv-mono">{s.lut}</span>)</> : ''}.</p>}
         {inv.seeAlso && <p>For this payment there is also: {inv.seeAlso}</p>}
         <p>This is a computer-generated {taxed ? 'invoice' : 'receipt'} and needs no signature.</p>
       </section>

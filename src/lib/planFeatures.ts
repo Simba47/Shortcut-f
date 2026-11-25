@@ -21,8 +21,9 @@ export function planFeatureRows(plan: Plan): FeatureRow[] {
   const ai = plan.ai
   const kits = brandKitLimit(plan.key)
   return [
-    // (user, 2026-11-21, plans v2) credits are the only limit: no monthly hours, uploads, AI clips or Ask AI
-    { label: 'Spend your credits on anything, no monthly limits', included: true },
+    // (user, 2026-11-21, plans v2) credits are the limit for what you do; the hours of video read are back (2026-11-22)
+    { label: `${readingLabel(plan.readingMinutes)} of video ${plan.allowancesOnce ? 'in total' : 'a month'}`, included: true },
+    { label: 'Spend your credits on anything', included: true },
     ...(plan.uploadsLimit != null ? [{ label: `${plural(plan.uploadsLimit, 'upload', 'uploads')} in total`, included: true }] : []),
     // Held at once: deleting a video frees its space (server/services/storage.ts)
     { label: `${plan.storageGb} GB of storage`, included: true },
@@ -49,7 +50,7 @@ export function planFeatureRows(plan: Plan): FeatureRow[] {
 export function creditUses(): { name: string; price: string; note: string }[] {
   return [
     { name: 'Reading your video', price: `${READING_CREDITS} credits per 10 minutes`,
-      note: `Taken when you upload. A video that fails gives them back.` },
+      note: `Taken when you upload, up to your plan's hours of video. A video that fails gives them back.` },
     { name: 'AI clips', price: `${plural(CLIP_CREDITS, 'credit', 'credits')} per AI clip`,
       note: `Captions, title, framing and the export included. Ask AI costs ${plural(ASK_AI_CREDITS, 'credit', 'credits')} per Ask AI search (a long video: per started hour), a new moment search after the included one 5 credits per 10 minutes of video, and rewrites 1 credit per ${REWRITES_PER_CREDIT} rewrites.` },
     { name: 'Manual edit', price: `${plural(CAPTION_CREDITS_PER_MINUTE, 'credit', 'credits')} per clip minute`,
@@ -72,6 +73,8 @@ export function planCompareRows(plan: Plan): CompareRow[] {
   const team = teamSeats(plan.key) > 0
   const keep = canKeep(plan.key)
   return [
+    // (back 2026-11-22, user) the hours of video a plan reads: a month, the Trial's in total
+    { label: 'Video', value: `${readingLabel(plan.readingMinutes)}${plan.allowancesOnce ? ' in total' : ' a month'}` },
     { label: 'Uploads', value: plan.uploadsLimit != null ? `${plan.uploadsLimit} in total` : 'No limit' },
     { label: 'Storage', value: `${plan.storageGb} GB` },
     { label: 'One video up to', value: `${plan.maxFileSizeGb} GB` },
@@ -87,7 +90,7 @@ export function planCompareRows(plan: Plan): CompareRow[] {
 /** What every plan has, said once under the cards (not repeated on each) */
 export function everyPlanIncludes(): string[] {
   return [
-    'No monthly limits: spend credits on anything',
+    'Spend credits on anything, up to your plan\'s hours of video',
     'Unlimited clips you cut yourself',
     'First AI moment search included with every video',
     'Captions on AI clips, 1080p exports, no watermark',

@@ -72,24 +72,34 @@ test('deleting a video gives no reading or credits back', opts, async () => {
   assert.equal(await left(u), 80)
 })
 
-test('no monthly hours since 2026-11-21: past the old 3 hours a Starter still uploads, paying credits', opts, async () => {
+test('the plan\'s hours are back (2026-11-22): past Starter\'s 3 hours this month, refused even with credits, saying upgrade', opts, async () => {
   const u = await user('starter', 5000)
-  await reading.recordReading(u, await video(u, 300 * MIN), 300 * MIN)
+  await reading.recordReading(u, await video(u, 150 * MIN), 150 * MIN)
+  await reading.checkBeforeUpload(u, 30 * MIN)                               // exactly what is left: fine
+  await assert.rejects(reading.checkBeforeUpload(u, 40 * MIN), (e: { status?: number; message?: string }) =>
+    e.status === 403 && /40 min/.test(e.message ?? '') && /only 30 min of the 3 hours on your Starter plan this month/.test(e.message ?? '') && /upgrade/.test(e.message ?? ''))
+  await reading.recordReading(u, await video(u, 30 * MIN), 30 * MIN)
+  await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number; message?: string }) =>
+    e.status === 403 && /used the 3 hours of video on your Starter plan this month/.test(e.message ?? ''))
+  await assert.rejects(reading.checkBeforeUpload(u, null), (e: { status?: number }) => e.status === 403)
+  // last month's reading doesn't count for this month
+  await sql`UPDATE reading_usage SET created_at = now() - interval '40 days' WHERE user_id = ${u}`
   await reading.checkBeforeUpload(u, 60 * MIN)
-  assert.equal(await left(u), 5000 - 450)
 })
 
-test('past today\'s 20 hours (the safety limit): refused even with credits, and told it comes back at midnight', opts, async () => {
-  const u = await user('starter', 5000)
-  await reading.recordReading(u, await video(u, 1195 * MIN), 1195 * MIN)
-  await assert.rejects(reading.checkBeforeUpload(u, 20 * MIN), (e: { status?: number; message?: string }) =>
-    e.status === 429 && /20 min/.test(e.message ?? '') && /only 5 min/.test(e.message ?? '') && /midnight/.test(e.message ?? ''))
-  await reading.recordReading(u, await video(u, 5 * MIN), 5 * MIN)
-  await assert.rejects(reading.checkBeforeUpload(u, MIN), (e: { status?: number }) => e.status === 429)
-  await assert.rejects(reading.checkBeforeUpload(u, null), (e: { status?: number }) => e.status === 429)
-  // yesterday's reading doesn't count for today
-  await sql`UPDATE reading_usage SET created_at = now() - interval '2 days' WHERE user_id = ${u}`
-  await reading.checkBeforeUpload(u, 60 * MIN)
+test('the Trial\'s 30 minutes are in total, and past them it says to choose a plan', opts, async () => {
+  const u = await user('trial', 95)
+  await reading.recordReading(u, await video(u, 25 * MIN), 25 * MIN)
+  await assert.rejects(reading.checkBeforeUpload(u, 10 * MIN), (e: { status?: number; message?: string }) =>
+    e.status === 403 && /only 5 min of the 30 minutes on your Trial/.test(e.message ?? '') && /Choose a plan/.test(e.message ?? ''))
+  await reading.checkBeforeUpload(u, 5 * MIN)
+})
+
+test('Pro reads 5 hours a month', opts, async () => {
+  const u = await user('creator', 5000)
+  await reading.recordReading(u, await video(u, 280 * MIN), 280 * MIN)
+  await reading.checkBeforeUpload(u, 20 * MIN)
+  await assert.rejects(reading.checkBeforeUpload(u, 21 * MIN), (e: { status?: number; message?: string }) => e.status === 403 && /5 hours on your Pro plan/.test(e.message ?? ''))
 })
 
 test('not enough credits for a video inside the hours: refused, saying what it needs and what there is', opts, async () => {
@@ -156,14 +166,14 @@ test('a link or unreadable file needs at least one 10-minute price in credits', 
   await assert.rejects(reading.checkBeforeUpload(u, null), (e: { status?: number; message?: string }) => e.status === 402 && /15 credits/.test(e.message ?? ''))
 })
 
-test('a length not known yet: the lower of today\'s safety limit and what the credits buy is written on the video, for the worker to check', opts, async () => {
+test('a length not known yet: the lower of the plan\'s hours left and what the credits buy is written on the video, for the worker to check', opts, async () => {
   const a = await user('starter', 40)                                      // 40 credits buy 2 × 10 minutes
   const v = await video(a, null)
   await reading.recordReading(a, v, null)
   const [row] = await sql<{ reading_limit_ms: string }[]>`SELECT reading_limit_ms FROM videos WHERE id = ${v}`
   assert.equal(Number(row.reading_limit_ms), 20 * MIN)
-  const b = await user('starter', 5000)                                     // plenty of credits, 5 minutes of today's 20 hours left
-  await reading.recordReading(b, await video(b, 1195 * MIN), 1195 * MIN)
+  const b = await user('starter', 5000)                                     // plenty of credits, 5 minutes of the plan's 3 hours left
+  await reading.recordReading(b, await video(b, 175 * MIN), 175 * MIN)
   const w = await video(b, null)
   await reading.recordReading(b, w, null)
   const [row2] = await sql<{ reading_limit_ms: string }[]>`SELECT reading_limit_ms FROM videos WHERE id = ${w}`
