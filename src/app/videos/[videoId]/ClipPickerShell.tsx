@@ -2,6 +2,7 @@
 
 // The brand on the clip board: a tag per clip, "Put on all" (brand kit Phase 2: components/brand/ClipBoardBrand.tsx)
 import { Spinner } from '@/components/ui/spinner'
+import { askPriceWords } from '@/lib/askPrice'
 import { BrandTagIcon, BRAND_TAG } from '@/components/brand/BrandTagIcon'
 import { useClipBrands, BrandAllBar, BrandTag } from '@/components/brand/ClipBoardBrand'
 import { preloadMascot } from '@/components/ui/mascot'
@@ -901,6 +902,27 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   useEffect(() => { if (allowance) refreshCredits() }, [allowance, refreshCredits])
   // A price asked about in the site's own dialog
   const { confirm, dialog: confirmDialog } = useConfirm()
+  /**
+   * Ask AI: before every search that costs credits (typed or a one-tap suggestion; user, 2026-11-25), the video's
+   * length and the price — with "Don't ask again on this video" (kept in this browser, per video)
+   */
+  const askOkKey = `clipboard.askok.${video.id}`
+  const [askNoMore, setAskNoMore] = useState(false)
+  useEffect(() => { try { setAskNoMore(localStorage.getItem(askOkKey) === '1') } catch { /* storage blocked */ } }, [askOkKey])
+  function setAskOk(on: boolean) {
+    setAskNoMore(on)
+    try { if (on) localStorage.setItem(askOkKey, '1'); else localStorage.removeItem(askOkKey) } catch { /* storage blocked */ }
+  }
+  function confirmSearch(price: number): Promise<boolean> {
+    const countsAs = Math.max(1, Math.ceil((video.duration_ms ?? 0) / 3_600_000))
+    const have = credits ? ` You have ${credits.balance} credits.` : ''
+    return new Promise(resolve => confirm({
+      title: `Ask AI for ${price} credits?`,
+      body: `${askPriceWords(video.duration_ms, countsAs, price).popup}${have}`,
+      confirmLabel: `Search for ${price} credits`, cancelLabel: 'Not now', tone: 'warning',
+      checkLabel: "Don't ask again on this video", onCancel: () => resolve(false),
+    }, checked => { if (checked) setAskOk(true); resolve(true) }))
+  }
   function askPrice(title: string, body: string | undefined, confirmLabel: string): Promise<boolean> {
     const have = credits ? ` You have ${credits.balance} credits.` : ''
     return new Promise(resolve => confirm({
@@ -1336,6 +1358,11 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       setAskFrom(q)
       return
     }
+    // A new search costs credits: asked about first (not when "Don't ask again" was ticked for this video)
+    if (!pay && allowance?.askAi && allowance.askAi.nextCredits > 0) {
+      if (!askNoMore && !(await confirmSearch(allowance.askAi.nextCredits))) return
+      pay = true
+    }
     askAbort.current?.abort()
     const ctl = new AbortController()
     askAbort.current = ctl
@@ -1350,12 +1377,13 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         signal: ctl.signal,
       })
       // The video is still being read: this search runs by itself when it's done
-      if (res.status === 409) { waitForReading('Ask AI', () => findByCriteria(q, true)); return }
+      if (res.status === 409) { waitForReading('Ask AI', () => findByCriteria(q, true, pay)); return }
       // Past the month it costs credits: the price is asked about first
       if (res.status === 402) {
         const d = await res.json() as { error?: string; code?: string; credits?: number }
         if (d.code !== 'ask_costs') throw new Error(d.error ?? 'Not enough credits')
-        if (await askPrice(`Ask AI for ${d.credits} credits?`, allowance ? `On this video one search counts as ${allowance.askAi.countsAs}.` : undefined, 'Continue')) await findByCriteria(q, true, true)
+        // (the server asks too, e.g. before the price had loaded here)
+        if (askNoMore || await confirmSearch(d.credits ?? 0)) await findByCriteria(q, true, true)
         return
       }
       if (!res.ok) throw new Error((await res.json()).error ?? 'Could not find clips')
@@ -2237,15 +2265,27 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
               </span>
             )}
           </div>
-          <button type="submit" disabled={loadingAi || !aiCriteria.trim()} aria-label="Find matching clips"
+          {(() => {
+            // The price on the button itself (user, 2026-11-25): what this search costs, or free when the same
+            // words were asked here before (their saved answer shows, no new request)
+            const savedHere = !!aiCriteria.trim() && !!askSaved[searchKey(aiCriteria)]
+            const price = allowance?.askAi ? allowance.askAi.nextCredits : null
+            const tag = savedHere ? 'Show saved' : price ? `${price} credits` : null
+            return (
+          <button type="submit" disabled={loadingAi || !aiCriteria.trim()}
+            aria-label={savedHere ? 'Show the saved results of this search' : `Find matching clips${price ? ` for ${price} credits` : ''}`}
+            title={savedHere ? 'You searched this before on this video: shows those results again (no new search, no credits)' : price ? `This search costs ${price} credits` : undefined}
             data-busy={loadingAi || undefined}
-            className="ai-btn ai-find shrink-0 w-10 flex items-center justify-center rounded-lg disabled:opacity-40"
+            className={`ai-btn ai-find shrink-0 ${tag ? 'px-2.5 gap-1.5' : 'w-10'} flex items-center justify-center rounded-lg disabled:opacity-40`}
             style={{ background: 'rgb(var(--cb-fg) / 0.1)', color: 'var(--cb-text)', boxShadow: 'inset 0 0 0 1px rgb(var(--cb-fg) / 0.14)' }}>
             <span key={findPulse} className={`ai-scan${findPulse ? ' is-on' : ''}`} aria-hidden="true" />
             {loadingAi ? <Spinner /> : (
               <svg key={`p${findPulse}`} className={`ai-ping${findPulse ? ' is-on' : ''}`} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
             )}
+            {tag && <span className="text-[11px] font-bold whitespace-nowrap" style={{ color: savedHere ? 'var(--cb-text)' : '#c8ff00' }}>{tag}</span>}
           </button>
+            )
+          })()}
         </form>
         {/* One-tap searches */}
         <div className="shrink-0 flex flex-wrap gap-1.5">
@@ -2278,10 +2318,19 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           )
         })()}
         {allowance && (
-          <p className="shrink-0 text-[11px]" style={{ color: 'rgb(var(--cb-fg) / 0.45)' }}>
+          <p className="shrink-0 text-[11.5px] leading-snug" style={{ color: 'rgb(var(--cb-fg) / 0.72)' }}>
             {allowance.askAi.usedToday + allowance.askAi.countsAs > allowance.askAi.perDay
               ? `You've reached today's limit of ${allowance.askAi.perDay} searches. More after midnight.`
-              : `${allowance.askAi.nextCredits} credits a search${allowance.askAi.countsAs > 1 ? ` (this video is long: one search counts ${allowance.askAi.countsAs} hours)` : ''}`}
+              : aiCriteria.trim() && askSaved[searchKey(aiCriteria)]
+                // (the same words as an earlier search here: its results again, no new search — never called free)
+                ? "You searched this before on this video — showing those results again doesn't cost credits."
+                : <>
+                  {askPriceWords(video.duration_ms, allowance.askAi.countsAs, allowance.askAi.nextCredits).line}
+                  {askNoMore
+                    ? <> · <span style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}>not asking before each search on this video</span>{' '}
+                      <button type="button" onClick={() => setAskOk(false)} className="underline underline-offset-2 hover:opacity-100" style={{ color: 'inherit', opacity: 0.8 }}>Ask me again</button></>
+                    : <span style={{ color: 'rgb(var(--cb-fg) / 0.5)' }}> · asked before each search</span>}
+                </>}
           </p>
         )}
         {/* The results under the rest: the card is the one thing that scrolls — title, search, chips and results

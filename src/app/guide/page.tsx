@@ -109,6 +109,7 @@ const TOOLS: { id: HintId; name: string; keys?: string[]; line: string }[] = [
   { id: 'group', name: 'Group', keys: ['Ctrl', 'G'], line: 'Move items together' },
   { id: 'ungroup', name: 'Ungroup', line: 'Each on its own again' },
   { id: 'detach', name: 'Detach audio', line: 'Sound on its own bar' },
+  { id: 'record', name: 'Record voice', line: 'Talk over the clip — dub or voiceover' },
   { id: 'undo', name: 'Undo', keys: ['Ctrl', 'Z'], line: 'Take back the last change' },
   { id: 'redo', name: 'Redo', line: 'Do it again' },
   { id: 'reset', name: 'Reset all', line: 'Back to the original clip' },

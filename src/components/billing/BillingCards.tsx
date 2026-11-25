@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { formatMoney } from '@/lib/currency'
-import { ledgerLabel } from '@/lib/credits'
+import { ledgerDetail, ledgerLabel } from '@/lib/credits'
 
 // The account's money cards (user, 2026-11-19): Credit history in a popup from the account menu, Payment
 // history and the Pro invoice details on Plans & billing (its Payments & invoices tab). The Purchase credits card is the billing page (/billing), where the credits button goes.
 // Styles: .st-* in globals.css; wrap them in .st-billing for the bigger text.
 
-type CreditRow = { id: string; delta: number; reason: string; refType: string | null; shadow: boolean; createdAt: string }
+type CreditRow = { id: string; delta: number; reason: string; refType: string | null; shadow: boolean; createdAt: string; note?: string | null; refName?: string | null }
 export type CreditsState = {
   balance: number; held: number; nextExpiry: { amount: number; at: string } | null; ledger: CreditRow[]
   /** What the credits still in force came as ("450 / 599"), and when what is left runs out */
@@ -43,17 +43,28 @@ export function CreditHistory() {
           <table style={TABLE}>
             <thead>
               <tr style={HEAD}>
-                <th style={{ padding: '8px 8px 8px 0' }}>Date</th><th style={{ padding: 8 }}>What</th><th style={{ padding: 8, textAlign: 'right' }}>Credits</th>
+                <th style={{ padding: '8px 8px 8px 0' }}>When</th><th style={{ padding: 8 }}>What</th><th style={{ padding: 8, textAlign: 'right' }}>Credits</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
+              {rows.map(r => {
+                // (user, 2026-11-25) when, to the minute, and what it was on: "Searched “funny moments” · “Podcast ep 12”"
+                const at = new Date(r.createdAt)
+                const detail = ledgerDetail(r.note, r.refName, r.refType)
+                return (
                 <tr key={r.id} style={ROW}>
-                  <td style={{ padding: '10px 8px 10px 0', whiteSpace: 'nowrap' }}>{new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</td>
-                  <td style={{ padding: 10 }}>{ledgerLabel(r.reason, r.refType)}</td>
-                  <td style={{ padding: 10, textAlign: 'right', whiteSpace: 'nowrap', color: r.delta > 0 ? '#c8ff00' : undefined }}>{r.delta > 0 ? `+${r.delta}` : r.delta}</td>
+                  <td style={{ padding: '10px 8px 10px 0', whiteSpace: 'nowrap', verticalAlign: 'top' }}>
+                    {at.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                    <div className="st-ch-time">{at.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</div>
+                  </td>
+                  <td style={{ padding: 10, verticalAlign: 'top' }}>
+                    {ledgerLabel(r.reason, r.refType)}
+                    {detail && <div className="st-ch-detail">{detail}</div>}
+                  </td>
+                  <td style={{ padding: 10, textAlign: 'right', whiteSpace: 'nowrap', verticalAlign: 'top', color: r.delta > 0 ? '#c8ff00' : undefined }}>{r.delta > 0 ? `+${r.delta}` : r.delta}</td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>

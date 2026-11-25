@@ -5,6 +5,8 @@ import { BRAND_TAG } from '@/components/brand/BrandTagIcon'
 import { useFrameAt } from '@/modules/clips/thumbs'
 import { InfoTip } from '@/components/ui/info-tip'
 import { musicGainAt, speechRangesInVideo, speechRanges, heardSpeech, type Range as SpeechRange } from '@/modules/editor/musicGain'
+import { isVoiceTrack, mainQuietRanges, voiceRanges, inRanges, voiceName, makeRoomForTake } from '@/modules/editor/voice'
+import { VoiceRecorder, type VoiceTake } from '@/components/editor/VoiceRecorder'
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react'
 import type { Clip, Segment, CropBox, BoxKeyframe, CaptionStyle, TextOverlay, AudioTrack, Transition, TranscriptWord, LayoutType, Overlay } from '@chai-cut/shared'
 import { VideoPreview, OutputCanvas, buildCaptionChunks, captionWordsPerLine, captionDefaultY } from '@/components/editor/VideoPreview'
@@ -999,6 +1001,13 @@ export function EditorShell({
   const [musicUrls, setMusicUrls] = useState<Record<string, string>>(initialMusicUrls ?? {})
   const [musicUploads, setMusicUploads] = useState<Record<string, 'uploading' | 'failed'>>({})
   const [musicNotice, setMusicNotice] = useState<string | null>(null)
+  // Record voice (user, 2026-11-25): the recorder is open; its "Mute the original" switch (on: a dub);
+  // a take being recorded (the original goes quiet meanwhile when the switch is on, older voices always)
+  const [voiceRecOpen, setVoiceRecOpen] = useState(false)
+  const [voiceMutes, setVoiceMutes] = useState(true)
+  const [voiceRecording, setVoiceRecording] = useState<{ on: boolean; mutes: boolean }>({ on: false, mutes: false })
+  const voiceRecRef = useRef(voiceRecording)
+  voiceRecRef.current = voiceRecording
   /** Stores a picked song (any audio, or a video's sound; up to 20 MB) */
   async function uploadMusicFile(f: File): Promise<{ storage_path: string; url: string }> {
     const form = new FormData()
@@ -1022,8 +1031,11 @@ export function EditorShell({
   function sendMusic(id: string, f: File) {
     setMusicUploads(u => ({ ...u, [id]: 'uploading' }))
     uploadMusicFile(f).then(({ storage_path, url }) => {
-      setAudioTracks(prev => prev.map(t => t.id === id ? { ...t, storage_path } : t))
-      setMusicUrls(m => ({ ...m, [id]: url }))
+      // (a recorded voice split while it uploaded: its parts all get the stored file — a take's name is its own)
+      const same = (t: AudioTrack) => t.id === id || (isVoiceTrack(t) && t.storage_path === f.name)
+      const ids = useMediaStore.getState().audioTracks.filter(same).map(t => t.id)
+      setAudioTracks(prev => prev.map(t => same(t) ? { ...t, storage_path } : t))
+      setMusicUrls(m => ({ ...m, [id]: url, ...Object.fromEntries(ids.map(x => [x, url])) }))
       setMusicUploads(u => { const n = { ...u }; delete n[id]; return n })
     }).catch((e: unknown) => {
       setMusicUploads(u => ({ ...u, [id]: 'failed' }))
@@ -1070,6 +1082,43 @@ export function EditorShell({
       }
     }
   }
+  /**
+   * Record voice: a finished take goes on the audio lane where it was recorded, the original quiet
+   * under it when its switch was on. Older voices there make room (a retake replaces them; Retake
+   * re-does the last take, so that one goes whole). The take is picked, as an added song is.
+   */
+  function addVoiceTake(take: VoiceTake, replaceId?: string): string | null {
+    const id = crypto.randomUUID()
+    const f = new File([take.blob], `Voice-${id.slice(0, 8)}.wav`, { type: 'audio/wav' })
+    if (musicTooBig(f)) return null
+    setMusicNotice(null)
+    const len = clip.end_ms - clip.start_ms
+    const a = Math.max(0, Math.round(take.startMs)), b = Math.min(len, a + take.lenMs)
+    if (b - a < 100) return null
+    const now = useMediaStore.getState().audioTracks
+    const old = replaceId ? now.find(t => t.id === replaceId) : undefined
+    const splits: Array<[string, string]> = []
+    const rest = makeRoomForTake(now.filter(t => t.id !== replaceId), a, b, musicDurations, len, from => {
+      const nid = crypto.randomUUID(); splits.push([from, nid]); return nid
+    })
+    // (the right part of a voice split around the take plays the same recording, as splitMusicAt)
+    for (const [from, nid] of splits) {
+      const el = musicEls.current.get(from)
+      if (el) { const copy = new Audio(); copy.preload = 'auto'; copy.src = el.src; musicEls.current.set(nid, copy) }
+      if (musicUrls[from]) setMusicUrls(m => ({ ...m, [nid]: m[from] }))
+      if (musicDurations[from] != null) setMusicDurations(d => ({ ...d, [nid]: d[from] }))
+    }
+    setAudioTracks([...rest, {
+      id, clip_id: clip.id, storage_path: f.name, start_ms: a, end_ms: b, volume: 1,
+      duck_under_speech: false, fade_in: false, fade_out: false, voice: true, mutes_original: take.mutesOriginal,
+      ...(old?.track != null ? { track: old.track } : {}),
+    }])
+    setMusicDurations(d => ({ ...d, [id]: take.lenMs }))
+    sendMusic(id, f)
+    attachMusicEl(id, URL.createObjectURL(f))
+    pickMusic(id)
+    return id
+  }
   // Stored songs (a saved clip, or after "Re-add") play from storage
   useEffect(() => {
     for (const t of audioTracks) {
@@ -1077,6 +1126,14 @@ export function EditorShell({
       attachMusicEl(t.id, musicUrls[t.id])
     }
   }, [audioTracks, musicUrls]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The recorder's teleprompter: the captions' words on the timeline (as they are shown)
+  const teleprompterWords = useMemo(() => voiceRecOpen
+    ? words.map(w => ({ word: (romanize && w.word_roman) || w.word, start_ms: w.start_ms - clip.start_ms, end_ms: w.end_ms - clip.start_ms }))
+    : [], [voiceRecOpen, words, romanize, clip.start_ms])
+  // Recorded voices: where they play (speech: music dips under them) and where they mute the original
+  const voiceClipLen = clip.end_ms - clip.start_ms
+  const voiceQuiet = useMemo(() => mainQuietRanges(audioTracks, musicDurations, voiceClipLen), [audioTracks, musicDurations, voiceClipLen])
+  const voiceSpeech = useMemo(() => voiceRanges(audioTracks, musicDurations, voiceClipLen), [audioTracks, musicDurations, voiceClipLen])
   // Where the voice is actually heard (clip time): music dips only there, as in the export — not
   // while the original sound is muted, in muted sections, under a B-roll's own sound, in a frame
   // whose main video is silent; with the sound detached, where its bars play
@@ -1094,8 +1151,9 @@ export function EditorShell({
       quietSections: playParts.filter(s => isFrameLayout(s.layout)
         ? mainAudioVolume(frameOf(s)) <= 0
         : addedVideoBox(s, mainVideoId)?.muted === false).map(span),
+      mainQuiet: voiceQuiet, voices: voiceSpeech,
     })
-  }, [words, sourceWords, trimmed, hasInserts, piecesOn, clip.start_ms, clip.end_ms, audioTracks, originalMuted, originalVolume, playParts, mainVideoId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [words, sourceWords, trimmed, hasInserts, piecesOn, clip.start_ms, clip.end_ms, audioTracks, originalMuted, originalVolume, playParts, mainVideoId, voiceQuiet, voiceSpeech]) // eslint-disable-line react-hooks/exhaustive-deps
   // Keep every track's audio in step with the playhead: play while the playhead is inside it,
   // re-sync if it drifts, pause otherwise; follow each track's volume
   // (every frame while playing, from the live time: the editor itself redraws only now and then)
@@ -1109,7 +1167,8 @@ export function EditorShell({
         continue
       }
       // Volume, fades and the dip under speech — the same rules as the export's mix
-      el.volume = isMainAudio(tr) && muteHere ? 0 : musicGainAt(tr, t, musicDurations[id], speech, clipLengthMs)
+      // (while a take is recorded the older voices are silent: it may replace them)
+      el.volume = (isMainAudio(tr) && muteHere) || (voiceRecRef.current.on && isVoiceTrack(tr)) ? 0 : musicGainAt(tr, t, musicDurations[id], speech, clipLengthMs)
       const local = (t - tr.start_ms + (tr.offset_ms ?? 0)) / 1000
       const stop = tr.end_ms ?? Infinity
       const inside = t >= tr.start_ms && t < stop && (!isFinite(el.duration) || local < el.duration)
@@ -1123,7 +1182,7 @@ export function EditorShell({
   }
   const syncMusicRef = useRef(syncMusic)
   syncMusicRef.current = syncMusic
-  useEffect(() => { syncMusic(liveTime.get(), playing) }, [playing, currentTimeMs, audioTracks, sectionMuted, musicDurations, speech]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { syncMusic(liveTime.get(), playing) }, [playing, currentTimeMs, audioTracks, sectionMuted, musicDurations, speech, voiceRecording]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => liveTime.subscribe(() => { if (usePlayerStore.getState().playing) syncMusicRef.current(liveTime.get(), true) }), [])
   useEffect(() => () => { for (const el of musicEls.current.values()) { el.pause(); URL.revokeObjectURL(el.src) } }, [])
   // Format panel: sections whose "what's in it" list is open, the kind of item shown, and the list
@@ -1270,20 +1329,26 @@ export function EditorShell({
   const playingSection = useMemo(() => partAt(sections, currentTimeMs), [sections, currentTimeMs, clipLengthMs]) // eslint-disable-line react-hooks/exhaustive-deps
   const playingAdded = playingSegment ? addedVideoBox(playingSegment, mainVideoId) : null
   const brollSoundOn = !!playingAdded && playingAdded.muted === false
-  useEffect(() => { setSectionMuted(!!playingSegment?.muted || brollSoundOn) }, [playingSegment?.muted, brollSoundOn])
+  // (a recorded voice that mutes the original, or a take being recorded with the switch on, silences it too)
+  const voiceQuietHere = inRanges(voiceQuiet, currentTimeMs) || (voiceRecording.on && voiceRecording.mutes)
+  useEffect(() => { setSectionMuted(!!playingSegment?.muted || brollSoundOn || voiceQuietHere) }, [playingSegment?.muted, brollSoundOn, voiceQuietHere])
   // The editor redraws ~10 times a second (the player store): the main video's sound switches
   // exactly where a muted section (or a video with its own sound) starts, from the live time
-  const liveMuteRef = useRef({ parts: playParts, original: originalMuted, partAt })
-  liveMuteRef.current = { parts: playParts, original: originalMuted, partAt }
+  const liveMuteRef = useRef({ parts: playParts, original: originalMuted, partAt, quiet: voiceQuiet })
+  liveMuteRef.current = { parts: playParts, original: originalMuted, partAt, quiet: voiceQuiet }
   useEffect(() => liveTime.subscribe(() => {
     const v = videoRef.current
     if (!v) return
     const m = liveMuteRef.current.original || sectionMutedAt(liveTime.get())
     if (v.muted !== m) v.muted = m
   }), [mainVideoId]) // eslint-disable-line react-hooks/exhaustive-deps
-  /** The main video's own sound is off at clip time `t`: its section is muted, or a video on top plays its own sound there */
+  /**
+   * The main video's own sound is off at clip time `t`: its section is muted, a video on top plays its own
+   * sound there, or a recorded voice replaces it (its "Mute the original": audio.py main_quiet_ranges)
+   */
   function sectionMutedAt(t: number): boolean {
-    const { parts, partAt: at } = liveMuteRef.current
+    const { parts, partAt: at, quiet } = liveMuteRef.current
+    if (inRanges(quiet, t) || (voiceRecRef.current.on && voiceRecRef.current.mutes)) return true
     const part = at(parts, t)
     const added = part ? addedVideoBox(part, mainVideoId) : null
     return !!part?.muted || (!!added && added.muted === false)
@@ -2151,8 +2216,9 @@ export function EditorShell({
     }
   }
 
-  const musicName = (t: { storage_path: string }) => {
+  const musicName = (t: AudioTrack) => {
     if (isMainAudio(t)) return 'Original sound'
+    if (isVoiceTrack(t)) return voiceName(t, audioTracks)
     // Stored as "<id>--<the file's name>": just the name (older files have only the id)
     const file = (t.storage_path.split('/').pop() ?? '').replace(/\.[a-z0-9]+$/i, '')
     const name = file.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(--)?/i, '')
@@ -8537,6 +8603,7 @@ export function EditorShell({
                 selectedId={pickedMusicId} onSelect={pickMusic}
                 currentTimeMs={currentTimeMs} clipLengthMs={clipLengthMs} durations={musicDurations}
                 onAddTrack={addMusicTrack} onAddSound={addLibrarySound}
+                onRecord={() => setVoiceRecOpen(true)}
                 uploads={musicUploads}
                 missing={t => !isMainAudio(t) && !t.storage_path.startsWith('audio/') && !musicEls.current.has(t.id)}
                 onReadd={readdMusic}
@@ -8990,6 +9057,20 @@ export function EditorShell({
         </aside>
       </div>
 
+      {/* Record voice: the recorder floats over the timeline (the picture stays in view) */}
+      {voiceRecOpen && (
+        <VoiceRecorder
+          onClose={() => setVoiceRecOpen(false)}
+          getTime={liveTime.get} subscribe={liveTime.subscribe}
+          isPlaying={() => usePlayerStore.getState().playing}
+          play={() => { if (!usePlayerStore.getState().playing) togglePlay() }}
+          pause={pause} seek={seekToMs}
+          clipLengthMs={clipLengthMs}
+          words={teleprompterWords}
+          muteOriginal={voiceMutes} onMuteOriginal={setVoiceMutes}
+          onRecording={on => setVoiceRecording({ on, mutes: on && voiceMutes })}
+          onTake={addVoiceTake} />
+      )}
       {/* The line between the video and the play bar: drag to resize (double-click resets) */}
       {!timelineHidden && (
         <div className="ed-row-wrap relative shrink-0" style={{ height: 0, zIndex: 30, transform: 'translateY(4px)' }}>
@@ -9140,6 +9221,14 @@ export function EditorShell({
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M9 17V5l10-2v6" /><circle cx="6.5" cy="17" r="2.5" />
                     <path d="M15 14v7M12 18l3 3 3-3" stroke="#c084fc" />
+                  </svg>
+                </button>
+                {/* Record voice: talk over the clip while it plays — a dub or a voiceover (VoiceRecorder) */}
+                <button onClick={() => setVoiceRecOpen(o => !o)} aria-pressed={voiceRecOpen}
+                  aria-label={voiceRecOpen ? 'Close the voice recorder' : 'Record your voice over the clip'}
+                  data-hint="record" className="ed-tl-btn" data-active={voiceRecOpen || undefined}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="9" y="2.5" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" />
                   </svg>
                 </button>
                 {/* (hide / mute / lock: beside each row on the timeline, not here) */}

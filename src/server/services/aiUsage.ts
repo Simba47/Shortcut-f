@@ -218,7 +218,7 @@ export interface AiActionHandle {
  * day's safety limit, counts it, and takes its credits (402 if there are not enough).
  * Call done() when the AI answered, fail() when it did not.
  */
-export async function beginAiAction(userId: string, kind: AiActionKind, videoId: string | null = null, units = 1): Promise<AiActionHandle> {
+export async function beginAiAction(userId: string, kind: AiActionKind, videoId: string | null = null, units = 1, note: string | null = null): Promise<AiActionHandle> {
   const mode = creditsMode()
   const noop: AiActionHandle = { credits: 0, done: async () => {}, fail: async () => {} }
   if (mode === 'off') return noop
@@ -236,7 +236,8 @@ export async function beginAiAction(userId: string, kind: AiActionKind, videoId:
   const price = kind === 'ask_ai' ? askAiCredits(units) : rewriteCredits(counts.rewritesThisMonth)
 
   let hold: Hold | null = null
-  if (enforce && price > 0) hold = await charge(userId, { amount: price, refType: kind, refId: videoId ?? undefined })
+  // (`note`: what the credit history says it was, "Searched “funny moments”")
+  if (enforce && price > 0) hold = await charge(userId, { amount: price, refType: kind, refId: videoId ?? undefined, note })
   const [row] = await sql<{ id: string }[]>`INSERT INTO ai_actions (user_id, kind, video_id, credits, units) VALUES (${userId}, ${kind}, ${videoId}, ${hold ? price : 0}, ${units}) RETURNING id`
   return {
     credits: hold ? price : 0,

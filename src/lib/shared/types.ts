@@ -450,6 +450,10 @@ export interface AudioTrack {
   locked?: boolean
   /** Editor: the audio track it is on (tracks.ts). Saved in clips.layers. */
   track?: number
+  /** Recorded in the editor (Record voice): named "Voice", never dips under speech (it is the speech) */
+  voice?: boolean
+  /** A recorded voice that replaces the main video's own sound under it (a dub): preview + export (audio.py) */
+  mutes_original?: boolean
 }
 
 export interface Transition {

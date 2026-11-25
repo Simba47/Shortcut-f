@@ -171,7 +171,7 @@ test('Ask AI past the daily cap is refused before any AI call', opts, async () =
   assert.equal((await credits.balance(userId)).balance, 10)
 })
 
-test('Ask AI on a long video asks its price first; one hour or less just shows it', opts, async () => {
+test('Ask AI asks its price first on any video (user, 2026-11-25: one-tap suggestions charged at once)', opts, async () => {
   const { apiError } = await import('@/lib/api-error')
   const { userId, videoId } = await setup('starter', 150 * MIN, 50)
   const asked = await videos.getVideoSuggestionsByCriteria(userId, videoId, 'funny moments').catch(e => e)
@@ -183,9 +183,11 @@ test('Ask AI on a long video asks its price first; one hour or less just shows i
   const went = await videos.getVideoSuggestionsByCriteria(userId, videoId, 'funny moments', { pay: true }).catch(e => e)
   assert.notEqual(went.code, 'ask_costs')
   assert.equal((await credits.balance(userId)).balance, 50)
+  // An hour or less is asked about too (7 credits), and nothing is taken for asking
   const short = await setup('starter', 20 * MIN, 50)
-  const noAsk = await videos.getVideoSuggestionsByCriteria(short.userId, short.videoId, 'funny moments').catch(e => e)
-  assert.notEqual(noAsk.code, 'ask_costs')
+  const shortAsk = await videos.getVideoSuggestionsByCriteria(short.userId, short.videoId, 'funny moments').catch(e => e)
+  assert.equal(shortAsk.code, 'ask_costs'); assert.equal(shortAsk.credits, 7)
+  assert.equal((await credits.balance(short.userId)).balance, 50)
 })
 
 test('a rewrite with no credits is refused (402)', opts, async () => {

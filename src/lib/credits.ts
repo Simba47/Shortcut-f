@@ -168,8 +168,27 @@ export function findTopupPack(key: unknown, { test }: { test: boolean }): TopupP
 }
 
 const SPENT_ON: Record<string, string> = {
-  render: 'Export', caption: 'Captions', transcribe: 'Captions', subjects: 'Subjects', ask_ai: 'Ask AI', rewrite: 'Rewrites',
-  search: 'New moment search', ai_clips: 'AI clips', reading: 'Reading past your plan',
+  render: 'Export', caption: 'Captions', transcribe: 'Captions', subjects: 'Subjects (follow people)', ask_ai: 'Ask AI', rewrite: 'Rewrite',
+  search: 'New moment search', ai_clips: 'AI clips (Make my clips)', reading: 'Reading a video',
+}
+
+/** A length in words for the credit history: "40 s", "3 min", "1 hr 20 min" */
+export function minutesNote(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `${s} s`
+  const min = Math.round(s / 60)
+  if (min < 60) return `${min} min`
+  return `${Math.floor(min / 60)} hr${min % 60 ? ` ${min % 60} min` : ''}`
+}
+
+/**
+ * The line under a credit history row (user, 2026-11-25): what the action was and what it was on —
+ * "Searched “funny moments” · Podcast ep 12", "5 clips · Podcast ep 12", "2 min · Why I quit". Null: nothing to add.
+ */
+export function ledgerDetail(note: string | null | undefined, refName: string | null | undefined, refType: string | null | undefined): string | null {
+  const name = refName?.trim() ? `“${refName.trim()}”` : refType && ['reading', 'search', 'ai_clips', 'ask_ai', 'rewrite'].includes(refType) ? 'a deleted video' : null
+  const parts = [note?.trim() || null, name].filter(Boolean)
+  return parts.length ? parts.join(' · ') : null
 }
 const GRANTED: Record<string, string> = {
   plan: 'Monthly plan credits', topup: 'Top-up', trial: 'Trial pack', free: 'Free credits', bonus: 'Bonus credits', refund: 'Credits refunded',
