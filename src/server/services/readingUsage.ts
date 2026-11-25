@@ -1,6 +1,6 @@
 import type postgres from 'postgres'
 import sql from '@/lib/db'
-import { creditsMode, PLAN_CREDIT_DAYS, READING_CREDITS, readingCredits } from '@/lib/credits'
+import { creditsMode, PLAN_CREDIT_DAYS, READING_CREDITS, readingCredits, minutesNote } from '@/lib/credits'
 import { allowanceSince, istDayStart, readingQuote, safetyFor, SAFETY_NOTE } from '@/lib/aiLimits'
 import { PLANS } from '@/lib/plans'
 import { readingLabel } from '@/lib/planFeatures'
@@ -67,13 +67,13 @@ export async function payFoundReadings(userId: string): Promise<void> {
       if (!taken) return
       const credits = readingCredits(Number(row.duration_ms))
       // The video is already being read: if this cannot be paid, it stays, and what is used up stops the next upload
-      if (credits > 0) await chargeReading(userId, row.video_id, row.id, credits, tx).catch(e => { if (e?.status !== 402) throw e })
+      if (credits > 0) await chargeReading(userId, row.video_id, row.id, credits, tx, Number(row.duration_ms)).catch(e => { if (e?.status !== 402) throw e })
     })
   }
 }
 
-async function chargeReading(userId: string, videoId: string, rowId: string, credits: number, tx: postgres.TransactionSql) {
-  const hold = await charge(userId, { amount: credits, refType: 'reading', refId: videoId }, tx)
+async function chargeReading(userId: string, videoId: string, rowId: string, credits: number, tx: postgres.TransactionSql, durationMs?: number | null) {
+  const hold = await charge(userId, { amount: credits, refType: 'reading', refId: videoId, note: durationMs ? `${minutesNote(durationMs)} of video` : null }, tx)
   if (hold) await settle(hold.id, tx)
   await tx`UPDATE reading_usage SET credits = ${credits} WHERE id = ${rowId}`
 }
@@ -193,7 +193,7 @@ export async function recordReading(userId: string, videoId: string, durationMs:
     if (!row) return
     // (uploads don't matter here: checkBeforeUpload refused already)
     const { credits, msLeft } = readingQuote(PLANS[plan], { uploads: 0, usedMs: Number(u.used), todayMs: Number(u.today) }, durationMs)
-    if (credits > 0) await chargeReading(userId, videoId, row.id, credits, tx)
+    if (credits > 0) await chargeReading(userId, videoId, row.id, credits, tx, durationMs)
     if (durationMs == null && creditsMode() === 'on') {
       const bought = Math.floor((await balance(userId, tx)).balance / READING_CREDITS) * 10 * 60_000
       await tx`UPDATE videos SET reading_limit_ms = ${Math.min(msLeft, bought)} WHERE id = ${videoId}`

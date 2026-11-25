@@ -1,5 +1,5 @@
 import sql from '@/lib/db'
-import { captionCredits, captionSpan } from '@/lib/credits'
+import { captionCredits, captionSpan, minutesNote } from '@/lib/credits'
 import { charge, linkJob } from './credits'
 
 // renderAfter: when set, the worker queues this render job once transcription finishes
@@ -66,7 +66,7 @@ export async function queueRetranscribe(
   // Captions for this clip alone, its main video: per started minute of what is read. The hold and
   // the job are made together, so a clip that cannot be paid for queues nothing.
   const job = await sql.begin(async tx => {
-    const hold = free ? null : await charge(userId, { amount: captionCredits(span.end_ms - span.start_ms), refType: 'caption', refId: clipId }, tx)
+    const hold = free ? null : await charge(userId, { amount: captionCredits(span.end_ms - span.start_ms), refType: 'caption', refId: clipId, note: minutesNote(span.end_ms - span.start_ms) }, tx)
     const [made] = await tx`INSERT INTO jobs (type, payload, status) VALUES ('transcribe', ${tx.json(payload)}, 'queued') RETURNING id`
     if (hold && made) await linkJob(hold.id, made.id, tx)
     return made

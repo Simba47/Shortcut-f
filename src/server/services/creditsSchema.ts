@@ -62,6 +62,11 @@ export function ensureCreditsSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`
     await sql`CREATE INDEX IF NOT EXISTS credit_ledger_user_idx ON credit_ledger (user_id, id DESC)`
+    // (user, 2026-11-25) the credit history says what each spend was: `note` the action in words ("Searched
+    // “funny moments”", "5 clips"), `ref_name` the video's or clip's name as it was then (kept when it is deleted).
+    // On the hold too, so credits given back say the same.
+    await sql`ALTER TABLE credit_ledger ADD COLUMN IF NOT EXISTS note TEXT, ADD COLUMN IF NOT EXISTS ref_name TEXT`
+    await sql`ALTER TABLE credit_holds ADD COLUMN IF NOT EXISTS note TEXT, ADD COLUMN IF NOT EXISTS ref_name TEXT`
     // Top-up orders we made at Razorpay: a payment is credited only for an order that is ours, for this user and pack
     await sql`
       CREATE TABLE IF NOT EXISTS topup_orders (

@@ -457,12 +457,13 @@ export async function getVideoSuggestionsByCriteria(
   // Checked before any AI call, and given back if the AI does not answer.
   const { askAiPrice, beginAiAction } = await import('./aiUsage')
   const units = askAiUnits(durationMs)
-  // The page shows the price of a search. On a long video it is more, so that is asked about first.
+  // Every search that costs credits is agreed to first (user, 2026-11-25: a one-tap suggestion searched and
+  // charged at once): the page asks with the video's length and the price, and sends pay once agreed
   const price = await askAiPrice(userId, units)
-  if (price > 0 && units > 1 && !opts.pay) {
+  if (price > 0 && !opts.pay) {
     throw Object.assign(new Error(`This Ask AI search costs ${price} credits: on this video one search counts as ${units}.`), { status: 402, expose: true, code: 'ask_costs', credits: price })
   }
-  const action = await beginAiAction(userId, 'ask_ai', videoId, units)
+  const action = await beginAiAction(userId, 'ask_ai', videoId, units, `Searched “${trimmedCriteria.slice(0, 80)}”`)
   if (!aiProvider()) { await action.fail(); throw Object.assign(new Error('AI clip detection is not configured'), { status: 500 }) }
 
   try {
@@ -702,7 +703,7 @@ export async function createAutoClips(userId: string, videoId: string, clipCount
   const hold = price > 0 ? await charge(userId, { amount: price, refType: 'search', refId: videoId }) : null
   let clipHold: Awaited<ReturnType<typeof charge>> | null = null
   try {
-    clipHold = clipCost > 0 ? await charge(userId, { amount: clipCost, refType: 'ai_clips', refId: videoId }) : null
+    clipHold = clipCost > 0 ? await charge(userId, { amount: clipCost, refType: 'ai_clips', refId: videoId, note: `${count} clip${count === 1 ? '' : 's'}` }) : null
     const [aiJob] = await sql`
       INSERT INTO ai_edit_jobs (video_id, clip_count, status) VALUES (${videoId}, ${count}, 'queued') RETURNING id
     `
