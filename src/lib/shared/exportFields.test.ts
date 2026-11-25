@@ -36,6 +36,8 @@ const FIELDS: Record<string, Record<string, How>> = {
   AudioTrack: {
     id: 'saved', clip_id: 'saved', storage_path: 'saved', start_ms: 'saved', volume: 'saved', duck_under_speech: 'saved',
     offset_ms: 'saved', end_ms: 'saved', fade_in: 'saved', fade_out: 'saved', muted: 'saved', locked: 'editor', track: 'layers',
+    // (Record voice, 2026-11-25: audio_tracks.voice / mutes_original, mixed by the worker's audio.py)
+    voice: 'saved', mutes_original: 'saved',
   },
   Transition: { id: 'saved', clip_id: 'saved', after_segment_id: 'saved', type: 'saved', duration_ms: 'saved' },
   CaptionStyle: {

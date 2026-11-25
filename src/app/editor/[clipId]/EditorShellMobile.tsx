@@ -15,6 +15,8 @@ import { CaptionStyler } from '@/components/editor/CaptionStyler'
 import { useAutoKeyWords } from '@/components/editor/CaptionKeyWords'
 import { TextOverlayPanel } from '@/components/editor/TextOverlayPanel'
 import { AudioMixerPanel } from '@/components/editor/AudioMixerPanel'
+import { VoiceRecorder, type VoiceTake } from '@/components/editor/VoiceRecorder'
+import { makeRoomForTake } from '@/modules/editor/voice'
 import { FilterPanel } from '@/components/editor/FilterPanel'
 import { TranscriptPanel } from '@/components/editor/TranscriptPanel'
 import { useConfirm } from '@/components/editor/ConfirmDialog'
@@ -109,6 +111,38 @@ export function EditorShellMobile({
         setMusicUploads(u => ({ ...u, [id]: 'failed' }))
         setMusicNotice(e instanceof Error ? e.message : 'The song could not be uploaded')
       })
+  }
+
+  // ── Record voice (as the desktop editor: VoiceRecorder). The take goes on the clip where it was
+  //    recorded and is in the export; this editor's preview plays no music, so takes aren't heard here ──
+  const [voiceRecOpen, setVoiceRecOpen] = useState(false)
+  const [voiceMutes, setVoiceMutes] = useState(true)
+  function addVoiceTake(take: VoiceTake, replaceId?: string): string | null {
+    const id = crypto.randomUUID()
+    const f = new File([take.blob], `Voice-${id.slice(0, 8)}.wav`, { type: 'audio/wav' })
+    if (f.size > 20 * 1024 * 1024) { setMusicNotice('A take can be up to 20 MB. Record a shorter one.'); return null }
+    setMusicNotice(null)
+    const len = usePlayerStore.getState().durationMs || clip.end_ms - clip.start_ms
+    const a = Math.max(0, Math.round(take.startMs)), b = Math.min(len, a + take.lenMs)
+    if (b - a < 100) return null
+    setAudioTracks(prev => [...makeRoomForTake(prev.filter(t => t.id !== replaceId), a, b, {}, len, () => crypto.randomUUID()), {
+      id, clip_id: clip.id, storage_path: f.name, start_ms: a, end_ms: b, volume: 1,
+      duck_under_speech: false, fade_in: false, fade_out: false, voice: true, mutes_original: take.mutesOriginal,
+    }])
+    setMusicUploads(u => ({ ...u, [id]: 'uploading' }))
+    const form = new FormData()
+    form.append('file', f)
+    fetch('/api/audio/upload', { method: 'POST', body: form })
+      .then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error ?? 'The recording could not be uploaded'); return d as { storage_path: string } })
+      .then(({ storage_path }) => {
+        setAudioTracks(prev => prev.map(t => t.id === id || (t.voice && t.storage_path === f.name) ? { ...t, storage_path } : t))
+        setMusicUploads(u => { const n = { ...u }; delete n[id]; return n })
+      })
+      .catch((e: unknown) => {
+        setMusicUploads(u => ({ ...u, [id]: 'failed' }))
+        setMusicNotice(e instanceof Error ? e.message : 'The recording could not be uploaded')
+      })
+    return id
   }
 
   // ── Video player ─────────────────────────────────────────────────────────────
@@ -934,6 +968,19 @@ export function EditorShellMobile({
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', background: '#0d0d0d', overflow: 'hidden' }}>
       {confirmDialog}
       {headerJSX}
+      {voiceRecOpen && (
+        <VoiceRecorder
+          onClose={() => setVoiceRecOpen(false)}
+          getTime={liveTime.get} subscribe={liveTime.subscribe}
+          isPlaying={() => usePlayerStore.getState().playing}
+          play={() => { if (!usePlayerStore.getState().playing) togglePlay() }}
+          pause={pause} seek={seekToMs}
+          clipLengthMs={usePlayerStore.getState().durationMs || clip.end_ms - clip.start_ms}
+          words={words.map(w => ({ word: (romanize && w.word_roman) || w.word, start_ms: w.start_ms - clip.start_ms, end_ms: w.end_ms - clip.start_ms }))}
+          muteOriginal={voiceMutes} onMuteOriginal={setVoiceMutes}
+          onRecording={on => { const v = videoRef.current; if (v) v.muted = on && voiceMutes }}
+          onTake={addVoiceTake} />
+      )}
 
       {/* ══ LANDSCAPE: exactly like the desktop — video left, sidebar right ══ */}
       <div className="chai-landscape" style={{ flex: 1, minHeight: 0, flexDirection: 'row', overflow: 'hidden' }}>
@@ -1126,6 +1173,8 @@ export function EditorShellMobile({
               <div style={{ padding: 12 }}>
                 <AudioMixerPanel tracks={audioTracks}
                   onAddTrack={addMusic} uploads={musicUploads} notice={musicNotice}
+                  onRecord={() => setVoiceRecOpen(true)}
+                  nameOf={t => (t.voice ? 'Voice' : t.storage_path.split('/').pop()?.replace(/^[0-9a-f-]{36}(--)?/i, '') || 'Music')}
                   missing={t => !t.storage_path.startsWith('audio/') && !t.storage_path.startsWith('main-video:') && !musicUploads[t.id]}
                   onReadd={(id, f) => addMusic(f, id)}
                   onRemoveTrack={askRemoveTrack}

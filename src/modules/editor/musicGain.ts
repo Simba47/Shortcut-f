@@ -57,6 +57,10 @@ export function heardSpeech(o: {
   mainVolume: number
   mutedSections: Range[]
   quietSections: Range[]
+  /** Recorded voices that mute the original there (voice.ts mainQuietRanges): no original voice heard */
+  mainQuiet?: Range[]
+  /** Recorded voices (voice.ts voiceRanges): speech too — the music dips under them */
+  voices?: Range[]
 }): Range[] {
   let heard: Range[]
   if (o.originals) {
@@ -66,11 +70,23 @@ export function heardSpeech(o: {
       return o.speechInVideo.map(([a, b]) => [Math.max(start, start + a - off), Math.min(end, start + b - off)] as Range)
     })
   } else {
-    if (o.mainVolume <= 0) return []
-    const inClip = o.speechInClip ?? o.speechInVideo.map(([a, b]) => [a - o.clipStartMs, b - o.clipStartMs] as Range)
+    // (the original at 0%: none of its voice is heard — a recorded voice still is, below)
+    const inClip = o.mainVolume <= 0 ? [] : o.speechInClip ?? o.speechInVideo.map(([a, b]) => [a - o.clipStartMs, b - o.clipStartMs] as Range)
     heard = subtract(inClip.map(([a, b]) => [Math.max(0, a), Math.min(o.clipLenMs, b)] as Range), o.quietSections)
   }
-  return subtract(heard, o.mutedSections).sort((p, q) => p[0] - q[0])
+  heard = subtract(subtract(heard, o.mutedSections), o.mainQuiet ?? [])
+  return mergeRanges([...heard, ...(o.voices ?? [])])
+}
+
+/** Sorted, overlapping or touching stretches joined (as audio.py heard_speech_ranges returns them) */
+export function mergeRanges(ranges: Range[]): Range[] {
+  const out: Range[] = []
+  for (const [a, b] of [...ranges].filter(([x, y]) => y > x).sort((p, q) => p[0] - q[0])) {
+    const last = out[out.length - 1]
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b)
+    else out.push([a, b])
+  }
+  return out
 }
 
 /** Where a track stops: its bar end, the song's end, or the clip's end — whichever comes first */

@@ -214,6 +214,14 @@
 @keyframes th-det-mute { 0%, 50% { opacity: 0; transform: scale(.4); } 56%, 100% { opacity: 1; transform: none; } }
 @keyframes th-det-sel { 0%, 68% { opacity: 0; } 74%, 100% { opacity: 1; } }
 
+/* ── Record voice: the playhead runs while a voice bar grows under it, a red dot blinking ── */
+.th-rec-take { transform-origin: left center; animation-name: th-rec-take; }
+.th-rec-ph { animation-name: th-rec-ph; animation-timing-function: linear; }
+.th-rec-dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; animation-name: th-rec-dot; }
+@keyframes th-rec-take { 0%, 18% { transform: scaleX(0); } 86%, 100% { transform: scaleX(1); } }
+@keyframes th-rec-ph { 0%, 18% { transform: none; } 86%, 100% { transform: translateX(150px); } }
+@keyframes th-rec-dot { 0%, 17% { opacity: 0; } 18%, 30%, 42%, 54%, 66%, 78% { opacity: 1; } 24%, 36%, 48%, 60%, 72%, 84% { opacity: .25; } 86%, 100% { opacity: 0; } }
+
 /* ── Reset all edits: the cut parts and extras go, one plain clip again ── */
 .th-rs-p1 { animation-name: th-rs-p1; }
 .th-rs-p2 { animation-name: th-rs-p2; }
