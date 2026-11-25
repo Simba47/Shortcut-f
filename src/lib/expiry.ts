@@ -8,9 +8,9 @@ export function warnDays(plan: string | null | undefined): number {
   return plan === 'trial' ? 2 : 3
 }
 
-/** "★ Keep" (the video never expires, still counted in the storage): Pro (and Agency, no longer sold) */
+/** "★ Keep" (the video never expires, still counted in the storage): Pro (and Agency, no longer sold; Unlimited, testing only) */
 export function canKeep(plan: string | null | undefined): boolean {
-  return plan === 'creator' || plan === 'agency'
+  return plan === 'creator' || plan === 'agency' || plan === 'unlimited'
 }
 
 /** Days left (whole days, rounded up: 0 when it is past), null when it never expires */
