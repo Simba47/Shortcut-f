@@ -60,6 +60,14 @@ export const AI_REQUESTS_PER_MINUTE = 10
 export const SAFETY_PER_DAY = { aiClips: 300, askAi: 100, rewrites: 300, readingMinutes: 20 * 60 } as const
 export const SAFETY_NOTE = 'It comes back at midnight (India time). Need more? Write to us.'
 
+export interface Safety { aiClips: number; askAi: number; rewrites: number; readingMinutes: number; requestsPerMinute: number }
+/** Unlimited (Shortcut's own test accounts, plans.ts): numbers no test reaches (kept as numbers: what is left is written down) */
+const NO_SAFETY: Safety = { aiClips: 1_000_000, askAi: 1_000_000, rewrites: 1_000_000, readingMinutes: 1_000_000 * 60, requestsPerMinute: 1_000_000 }
+/** The day's safety limits and the AI requests a minute for this plan: the same on every plan but Unlimited */
+export function safetyFor(plan: string | null | undefined): Safety {
+  return plan === 'unlimited' ? NO_SAFETY : { ...SAFETY_PER_DAY, requestsPerMinute: AI_REQUESTS_PER_MINUTE }
+}
+
 export type LimitedBy = null | 'run' | 'day' | 'video'
 /** How many clips a run makes: the lowest of what was asked, the plan's per-run limit, what is left for this video, and today's safety limit */
 export function clipsAllowed(a: { requested: number; perRun: number; dayLeft: number; videoLeft: number }): { count: number; limitedBy: LimitedBy } {
@@ -106,12 +114,12 @@ export function allowanceSince(plan: string | null | undefined, now: Date = new 
  * priced when the worker has found it.
  */
 export function readingQuote(
-  plan: { uploadsLimit: number | null; readingMinutes: number },
+  plan: { uploadsLimit: number | null; readingMinutes: number; key?: string },
   used: { uploads: number; usedMs: number; todayMs: number },
   durationMs: number | null | undefined,
 ): { uploadsLeft: number | null; msLeft: number; overMs: number; credits: number; limitedBy: 'plan' | 'day' } {
   const planLeft = Math.max(0, plan.readingMinutes * MINUTE - used.usedMs)
-  const dayLeft = Math.max(0, SAFETY_PER_DAY.readingMinutes * MINUTE - used.todayMs)
+  const dayLeft = Math.max(0, safetyFor(plan.key).readingMinutes * MINUTE - used.todayMs)
   // (the plan's before the day: when both are used up the refusal names the one that lasts)
   const limitedBy = planLeft <= dayLeft ? 'plan' : 'day'
   const msLeft = Math.min(planLeft, dayLeft)
