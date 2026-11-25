@@ -11,7 +11,7 @@ import { pickKeyWords } from '@/lib/keyWords'
  * line with no key word: caption_styles.line_keys); a clip that has them keeps them, unless
  * `fresh` (the Key words tab's "Pick again with AI") — then the new picks replace them.
  */
-export async function clipEmphasis(userId: string, clipId: string, opts: { fresh?: boolean } = {}): Promise<{ emphasis: Record<string, true> | null; line_keys?: Record<string, true> | null }> {
+export async function clipEmphasis(userId: string, clipId: string, opts: { fresh?: boolean } = {}): Promise<{ emphasis: Record<string, true> | null; line_keys?: Record<string, true> | null; saved?: boolean }> {
   const [clip] = await sql`
     SELECT c.id, c.start_ms, c.end_ms, c.video_id, v.user_id, v.title AS video_title
     FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.id = ${clipId}
@@ -24,7 +24,7 @@ export async function clipEmphasis(userId: string, clipId: string, opts: { fresh
   const savesLine = saves && await hasColumn('caption_styles', 'line_keys')
   if (saves && !opts.fresh) {
     const [style] = await sql`SELECT * FROM caption_styles WHERE clip_id = ${clipId} LIMIT 1`
-    if (style?.emphasis) return { emphasis: style.emphasis as Record<string, true>, line_keys: (style.line_keys as Record<string, true> | null) ?? null }
+    if (style?.emphasis) return { emphasis: style.emphasis as Record<string, true>, line_keys: (style.line_keys as Record<string, true> | null) ?? null, saved: true }
   }
 
   const { aiProvider, askGemini } = await import('@/lib/gemini')
@@ -52,12 +52,17 @@ export async function clipEmphasis(userId: string, clipId: string, opts: { fresh
   }
   // Kept for the export too (only where none were picked yet: never over the user's own — unless
   // they asked for new ones)
+  // `saved`: they are on the clip's saved caption style now — the editor then takes them in without
+  // counting them as the user's edit (no "Edited after export"; useAutoKeyWords). A clip with no
+  // caption style saved yet keeps them only once the editor saves.
+  let saved = false
   if (picked && saves) {
     const set = savesLine ? { emphasis: sql.json(picked.emphasis), line_keys: sql.json(picked.line_keys) } : { emphasis: sql.json(picked.emphasis) }
-    await (opts.fresh
+    const res = await (opts.fresh
       ? sql`UPDATE caption_styles SET ${sql(set)} WHERE clip_id = ${clipId}`
       : sql`UPDATE caption_styles SET ${sql(set)} WHERE clip_id = ${clipId} AND emphasis IS NULL`)
-      .catch(e => console.warn('[emphasis] could not save:', e))
+      .catch(e => { console.warn('[emphasis] could not save:', e); return null })
+    saved = !!res && res.count > 0
   }
-  return picked ?? { emphasis: null }
+  return picked ? { ...picked, saved } : { emphasis: null }
 }

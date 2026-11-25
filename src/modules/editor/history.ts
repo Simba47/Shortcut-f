@@ -145,6 +145,21 @@ export function redo() {
   sync()
 }
 
+/**
+ * A change to the caption style that isn't the user's edit (AI's key words, picked by themselves
+ * when the clip has captions: useAutoKeyWords) — not an undo step, and every step keeps it, so an
+ * undo never takes them off.
+ */
+export function addToCaptionStyleQuietly(patch: Partial<Snapshot['captionStyle']>) {
+  const add = (s: Snapshot): Snapshot => ({ ...s, captionStyle: { ...s.captionStyle, ...patch } })
+  restoring = true
+  useCaptionStore.setState(s => ({ captionStyle: { ...s.captionStyle, ...patch } }))
+  restoring = false
+  past = past.map(add)
+  future = future.map(add)
+  if (committed) committed = inBurst ? add(committed) : take()
+}
+
 /** Start recording (call once the stores hold the loaded clip). Returns a stop function. */
 export function startHistory(): () => void {
   past = []; future = []; inBurst = false; committed = take()

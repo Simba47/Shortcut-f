@@ -772,7 +772,9 @@ export function CaptionStyler({
 
       {/* ── Key words: what a Creator style makes stand out (AI picks them; tap to change) ── */}
       {/* (every style that draws them: a Creator one, any caption style, an animated preset) */}
-      {shows('keywords') && usesKeyWords(style) && <CaptionKeyWords style={style} tpl={tpl} onChange={onChange} />}
+      {/* (any style in a clip with captions — the clip's key words are kept here: user, 2026-11-24; the
+          brand kit and Make my clips' choices, with no captions of a clip, only with a style that draws them) */}
+      {shows('keywords') && (usesKeyWords(style) || hasWords) && <CaptionKeyWords style={style} tpl={tpl} onChange={onChange} />}
 
       {/* ── Look: colours, font, size and capitals ── */}
       {(shows('look') || section === 'colours' || section === 'font') && <section className="flex flex-col gap-4">

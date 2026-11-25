@@ -1,15 +1,16 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useMemo, type MutableRefObject } from 'react'
 import { useParams } from 'next/navigation'
 import type { CaptionStyle } from '@chai-cut/shared'
 import { useCaptionStore } from '@/modules/captions/store'
 import { creatorKeyIndex, creatorKeys } from '@/modules/captions/creator'
-import type { CaptionTemplate, CreatorLook } from '@/modules/captions/templates'
+import { usesKeyWords, type CaptionTemplate, type CreatorLook } from '@/modules/captions/templates'
+import { addToCaptionStyleQuietly, editableSnapshot, sameEditable, type EditableSnapshot } from '@/modules/editor/history'
 
 type Marks = Record<string, boolean>
 /** What the emphasis route answers: the key words, and the line words (a Creator line's big word when it has no key word) */
-type Picks = { emphasis?: Marks | null; line_keys?: Marks | null } | null
+type Picks = { emphasis?: Marks | null; line_keys?: Marks | null; saved?: boolean } | null
 /** The picks as a style change (line words only when there are some: an older server has none) */
 const picksChange = (d: NonNullable<Picks>): Partial<CaptionStyle> => ({ emphasis: d.emphasis ?? {}, ...(d.line_keys ? { line_keys: d.line_keys } : {}) })
 
@@ -42,6 +43,38 @@ export function useKeyWordsPick(clipId: string | undefined, style: Partial<Capti
 }
 
 /**
+ * Every clip's key words, ready when the Key words tab is opened (user, 2026-11-24: "when we cut a
+ * clip — by hand or AI — and go to Key words, its key words are picked"): AI picks them as soon as
+ * the clip has captions (opened with them, or right after they're made), whatever its style.
+ * Not the user's edit: once the server has saved them on the clip's caption style they go in
+ * quietly — no undo step, no "Edited after export", no auto-save. (Not saved there — no caption
+ * style saved yet — they go in as a change, so the next save keeps them.)
+ */
+export function useAutoKeyWords(clipId: string | undefined, on: boolean, loadedRef: MutableRefObject<EditableSnapshot | null>) {
+  const emphasis = useCaptionStore(s => s.captionStyle.emphasis ?? null)
+  useEffect(() => {
+    if (!on || emphasis || !clipId || askedFor.has(clipId)) return
+    askedFor.add(clipId)
+    useCaptionStore.getState().setKeyWordsAsking(true)
+    fetch(`/api/clips/${clipId}/emphasis`, { method: 'POST' })
+      .then(r => (r.ok ? r.json() : null))
+      .then((d: Picks) => {
+        // (only if nothing was picked meanwhile)
+        if (!d?.emphasis || useCaptionStore.getState().captionStyle.emphasis) return
+        const change = picksChange(d)
+        if (!d.saved) { useCaptionStore.getState().updateCaptionStyle(change); return }
+        const loaded = loadedRef.current
+        const untouched = !!loaded && sameEditable(editableSnapshot(), loaded)
+        addToCaptionStyleQuietly(change)
+        // (the clip as loaded has them too: the auto-save stays quiet)
+        if (untouched) loadedRef.current = editableSnapshot()
+      })
+      .catch(() => {})
+      .finally(() => useCaptionStore.getState().setKeyWordsAsking(false))
+  }, [on, emphasis, clipId, loadedRef])
+}
+
+/**
  * Key words for the Creator caption styles: the words they make big, coloured or underlined.
  * AI picks them when a Creator style is first chosen (useKeyWordsPick); here the line playing on
  * the preview is shown and a tap makes a word a key word or takes it off. In a Creator style a line
@@ -57,6 +90,7 @@ export function CaptionKeyWords({ style, tpl, onChange }: {
 }) {
   const line = useCaptionStore(s => s.liveLine)
   const asking = useCaptionStore(s => s.keyWordsAsking)
+  const allWords = useCaptionStore(s => s.words)
   const { clipId } = useParams<{ clipId?: string }>() ?? {}
   const emphasis = style.emphasis ?? null
   const lineKeys = style.line_keys ?? null
@@ -73,6 +107,16 @@ export function CaptionKeyWords({ style, tpl, onChange }: {
   /** The word the line shows big when it has no key word: its line word, else its longest */
   const lineBig = words.length && look ? creatorKeyIndex(texts, words.map(() => false), look, lineWord) : -1
   const hasKey = emph.some(Boolean)
+  /** All the clip's key words, in the order they're said (user, 2026-11-24: the clip's key words kept in this tab) */
+  const clipKeys = useMemo(() => {
+    if (!emphasis) return []
+    const seen = new Set<number>()
+    return allWords
+      .filter(w => emphasis[String(w.start_ms)] && !seen.has(w.start_ms) && !!seen.add(w.start_ms))
+      .sort((a, b) => a.start_ms - b.start_ms)
+  }, [allWords, emphasis])
+  /** The style draws them (else they're only kept here, for when one that does is picked) */
+  const drawn = usesKeyWords(style)
 
   /** "Pick again with AI": new key words for the whole clip, in place of these (taps too; Undo brings them back) */
   const pickAgain = () => {
@@ -107,10 +151,39 @@ export function CaptionKeyWords({ style, tpl, onChange }: {
         {asking ? <span className="cap-value">AI is picking…</span> : clipId && (
           <button type="button" onClick={pickAgain} className="cap-apply-chip"
             title={`AI reads the whole clip and picks its key words${lineWords ? ' and line words' : ''} again (your own picks are replaced; Undo brings them back)`}>
-            Pick again with AI
+            {clipKeys.length ? 'Pick again with AI' : 'Pick with AI'}
           </button>
         )}
       </div>
+      {!drawn && (
+        <p className="text-[11.5px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.6)' }}>
+          This caption style shows every word the same, so these don’t change your captions. Pick a style that makes key words stand out (Style) to show them.
+        </p>
+      )}
+
+      {/* ── The whole clip's key words (a tap takes one off) ── */}
+      <div className="flex flex-col gap-1.5">
+        <h4 className="cap-label">In this clip{clipKeys.length ? ` · ${clipKeys.length}` : ''}</h4>
+        {clipKeys.length ? (
+          <div className="flex flex-wrap gap-1.5" data-clip-keys>
+            {clipKeys.map((w, j) => (
+              <button key={`${w.start_ms}-${j}`} type="button" aria-label={`${w.word}: take it off the key words`}
+                onClick={() => toggle(w.start_ms, false)}
+                className="h-7 rounded-full pl-2.5 pr-2 text-[12px] font-semibold inline-flex items-center gap-1"
+                style={{ background: '#c8ff00', color: '#0a0a0a' }}>
+                {w.word}
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[11.5px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
+            {asking ? 'AI is reading the captions for the words that matter…' : 'None yet. Pick with AI, or tap words in a line below.'}
+          </p>
+        )}
+      </div>
+
+      <h4 className="cap-label pt-2">This line</h4>
       {words.length === 0 ? (
         <p className="text-[11.5px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.5)' }}>
           Play the clip or move the playhead to a caption, then tap its words to make them stand out.
@@ -140,7 +213,9 @@ export function CaptionKeyWords({ style, tpl, onChange }: {
           <p className="text-[11px] leading-snug" style={{ color: 'rgb(var(--ed-fg) / 0.45)' }}>
             {look
               ? <>The caption on the preview now. Lime = key word{look === 'scribble' ? ' (underlined)' : ''}; a dashed one is {lineWords ? 'the line word (below), used when the line has no key word' : 'picked for you'}.</>
-              : <>The caption on the preview now. Lime = key word: drawn bigger{tpl?.box ? '' : ', in the highlight colour'}.</>}
+              : drawn
+                ? <>The caption on the preview now. Lime = key word: drawn bigger{tpl?.box ? '' : ', in the highlight colour'}.</>
+                : <>The caption on the preview now. Lime = key word: tap a word to add it or take it off.</>}
           </p>
         </>
       )}
