@@ -20,6 +20,9 @@ const FIELDS: Record<string, Record<string, How>> = {
     // (which track it sits on: clips.layers.lanes; the export stacks by it)
     track: 'layers',
     ...Object.fromEntries(TEXT_STYLE_KEYS.map(k => [k, 'style' as const])),
+    // (a template's marks: saved inside the text's look, read only by the editor — the export draws the text as
+    // any other: lib/shared/templates.ts, 2026-11-22)
+    tpl_id: 'editor', tpl: 'editor',
   },
   Overlay: {
     id: 'saved', clip_id: 'saved', type: 'saved', storage_path: 'saved', source_video_id: 'saved', source_offset_ms: 'saved',

@@ -30,6 +30,7 @@ import { drawWatermark } from './watermark'
 import { isBrandFont } from '@/lib/shared/brandKit'
 import { VIDEO_FONTS } from '@/lib/shared/videoFonts'
 import { ensureBrandFont } from './brandFonts'
+import type { PartMove } from '@/lib/shared/templates'
 import { CaptionScan } from './CaptionScan'
 import { gradientOf, gradientContext, emptyBox, type TextBox } from '@/modules/captions/gradient'
 
@@ -2277,7 +2278,24 @@ interface OutputCanvasProps {
   onFrameMainRectChange?: (slot: number, rect: { x: number; y: number; w: number; h: number } | null) => void
   /** The main video's view in a frame slot, moved in the preview (its crop box; from the playhead on, as any view change) */
   onFrameMainViewChange?: (slot: number, boxId: string, pos: BoxPosition) => void
+  /**
+   * Templates (lib/shared/templates.ts) on the clip: each one box round all its parts, moved and resized as one
+   * (user, 2026-11-23: "every thing should be single element"). Their texts get no box of their own; their
+   * photos are shown but not picked on their own (`templatePhotoIds`)
+   */
+  templates?: TemplateOnPreview[]
+  templatePhotoIds?: ReadonlySet<string>
+  activeTemplateId?: string | null
+  onSelectTemplate?: (id: string) => void
+  /** Moved / resized: `m` from where it was when the drag began (phase 'start' first, 'end' last) */
+  onTemplateMove?: (id: string, m: PartMove, phase: 'start' | 'move' | 'end') => void
+  onDeleteTemplate?: (id: string) => void
+  /** Double-clicked: its settings open */
+  onOpenTemplate?: (id: string) => void
 }
+
+/** A template on the preview: the box round its parts (shares of the frame), over its time */
+export interface TemplateOnPreview { id: string; label: string; box: { x: number; y: number; w: number; h: number }; start_ms: number; end_ms: number; locked?: boolean }
 
 export function OutputCanvas({
   videoRef, currentTimeMs: timeProp, live = false, clipStartMs = 0, videoToTimeline, activeSegment: segmentProp, getPositionAt, segmentAt, hardCuts = false, sourceFor, slotSourceFor,
@@ -2286,6 +2304,7 @@ export function OutputCanvas({
   words, captionStyle, captionParts, captionTextCase: textCaseProp, showCaptions = false, captionsOffAt,
   textOverlays = [], activeTextOverlayId, onTextOverlayChange, onSelectTextOverlay, onDeleteTextOverlay, editTextOverlayId, onEditTextDone,
   onCaptionPositionChange, onCaptionSizeChange, onCaptionTap, transitionCuts, watermark, timelineToVideo, clock, frameMedia, onFrameLaneClick, onFrameItemClick, activeFrameItemId, onFrameItemChange, onDeleteFrameItem, onFrameRowsChange, onFrameRowsSwap, onFrameBarChange, onFrameFaceChange, onFrameMainRectChange, onFrameMainViewChange,
+  templates = [], templatePhotoIds, activeTemplateId, onSelectTemplate, onTemplateMove, onDeleteTemplate, onOpenTemplate,
 }: OutputCanvasProps) {
   // The fonts texts and frame texts are in, as soon as the picture shows (the export always has its
   // own): they used to load only with the Text, Captions or Brand kit panel, so a clip opened on
@@ -2960,14 +2979,15 @@ export function OutputCanvas({
         <OverlayBox
           key={ov.id}
           overlay={ov}
+          passive={!!templatePhotoIds?.has(ov.id)}
           isActive={ov.id === activeOverlayId}
           onChange={updates => onOverlayChange?.(ov.id, updates)}
           onSelect={() => onSelectOverlay?.(ov.id)}
           onDelete={() => onDeleteOverlay?.(ov.id)}
         />
       ))}
-      {/* Text overlay boxes — drag to reposition */}
-      {activeTextOverlays.map(o => (
+      {/* Text overlay boxes — drag to reposition (a template's texts: its one box, below) */}
+      {activeTextOverlays.filter(o => !o.tpl_id).map(o => (
         <TextOverlayBox
           key={o.id}
           overlay={o}
@@ -2979,6 +2999,12 @@ export function OutputCanvas({
           onStartEdit={() => { onSelectTextOverlay?.(o.id); setEditingTextId(o.id) }}
           onEndEdit={() => { setEditingTextId(null); onEditTextDone?.() }}
         />
+      ))}
+      {/* Templates: one box each, round all their parts */}
+      {templates.filter(t => currentTimeMs >= t.start_ms && currentTimeMs < t.end_ms).map(t => (
+        <TemplateBox key={t.id} t={t} isActive={t.id === activeTemplateId}
+          onSelect={() => onSelectTemplate?.(t.id)} onMove={(m, phase) => onTemplateMove?.(t.id, m, phase)}
+          onDelete={() => onDeleteTemplate?.(t.id)} onOpen={() => onOpenTemplate?.(t.id)} />
       ))}
       {/* The captions' box: drag to move them anywhere, the corners to make them bigger or smaller (its size: the part playing's) */}
       {showCaptions && onCaptionPositionChange && (
@@ -3526,13 +3552,16 @@ function PipVideo({ overlay }: { overlay: Overlay }) {
 
 interface OverlayBoxProps {
   overlay: Overlay
+  /** Only shown (a template's photo: its template's box picks and moves it) */
+  passive?: boolean
   isActive: boolean
   onChange: (updates: Partial<Overlay>) => void
   onSelect: () => void
   onDelete: () => void
 }
 
-function OverlayBox({ overlay, isActive, onChange, onSelect, onDelete }: OverlayBoxProps) {
+function OverlayBox({ overlay, passive = false, isActive: picked, onChange, onSelect, onDelete }: OverlayBoxProps) {
+  const isActive = picked && !passive
   const ref = useRef<HTMLDivElement>(null)
   const setGuides = useContext(GuideContext)
   const [hover, setHover] = useState(false)
@@ -3601,6 +3630,7 @@ function OverlayBox({ overlay, isActive, onChange, onSelect, onDelete }: Overlay
         width: `${overlay.w * 100}%`, height: `${overlay.h * 100}%`,
         boxSizing: 'border-box', cursor: 'move', userSelect: 'none',
         boxShadow: isActive ? `0 0 0 1px ${color}55` : 'none',
+        ...(passive ? { pointerEvents: 'none' as const } : {}),
         // Above a frame's own draggable boxes (main video: 18, bars: 25, face cam: 26) so a logo or
         // photo over them can be grabbed; under the captions' box (30)
         zIndex: 28,
@@ -3628,7 +3658,7 @@ function OverlayBox({ overlay, isActive, onChange, onSelect, onDelete }: Overlay
       {/* Not picked: just the picture (a faint outline when pointed at); picked: its frame, ✕ and handles.
           The frame is drawn over the picture, never round it: a border of the box itself took 2 px off
           each side of the picture, so a logo showed about a tenth smaller than the export draws it */}
-      <div aria-hidden="true" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', border: `2px solid ${isActive ? color : hover ? `${color}66` : 'transparent'}` }} />
+      <div aria-hidden="true" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', border: `2px solid ${isActive ? color : hover && !passive ? `${color}66` : 'transparent'}` }} />
       {isActive && (
         <RotateHandle boxRef={ref} rotation={overlay.rotation ?? 0} onRotate={deg => onChange({ rotation: deg || null })} />
       )}
@@ -3663,6 +3693,117 @@ function OverlayBox({ overlay, isActive, onChange, onSelect, onDelete }: Overlay
           onMouseDown={e => startResize(e, dir)}
         />
       ))}
+    </div>
+  )
+}
+
+// ── TemplateBox — a template on the preview, as one thing ────
+
+/**
+ * A box round all of a template's parts. Dragged: they all move together (snapping its middle to the frame's);
+ * a corner dragged: they all grow or shrink together, the opposite corner staying put. ✕ takes the template off;
+ * a double-click opens its settings. Its parts are only drawn (the canvas, and their photos' boxes, passive)
+ */
+export function TemplateBox({ t, isActive, onSelect, onMove, onDelete, onOpen }: {
+  t: TemplateOnPreview; isActive: boolean; onSelect: () => void
+  onMove: (m: PartMove, phase: 'start' | 'move' | 'end') => void; onDelete: () => void; onOpen: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const setGuides = useContext(GuideContext)
+  const [hover, setHover] = useState(false)
+  const b = t.box
+  const cRect = () => {
+    const r = ref.current?.parentElement?.getBoundingClientRect()
+    return r ? { w: r.width, h: r.height } : { w: 1, h: 1 }
+  }
+  /** Pointer moves → a move from where it began; nothing sent until it really moves */
+  function follow(sx: number, sy: number, toMove: (ev: MouseEvent) => PartMove) {
+    let last: PartMove | null = null
+    function move(ev: MouseEvent) {
+      if (!last && Math.abs(ev.clientX - sx) < 2 && Math.abs(ev.clientY - sy) < 2) return
+      const m = toMove(ev)
+      onMove(m, last ? 'move' : 'start')
+      last = m
+    }
+    function up() {
+      window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); setGuides(null)
+      if (last) onMove(last, 'end')
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  function startDrag(e: React.MouseEvent) {
+    if ((e.target as HTMLElement).dataset.handle || e.button !== 0) return
+    e.stopPropagation(); e.preventDefault()
+    onSelect()
+    if (t.locked) return
+    follow(e.clientX, e.clientY, ev => {
+      const { w, h } = cRect()
+      // (kept on the frame; one bigger than the frame just moves)
+      let x = b.x + (ev.clientX - e.clientX) / w, y = b.y + (ev.clientY - e.clientY) / h
+      if (b.w <= 1) x = Math.max(0, Math.min(1 - b.w, x))
+      if (b.h <= 1) y = Math.max(0, Math.min(1 - b.h, y))
+      const [cx, onV] = snapTo(x + b.w / 2, 0.5), [cy, onH] = snapTo(y + b.h / 2, 0.5)
+      if (onV) x = cx - b.w / 2
+      if (onH) y = cy - b.h / 2
+      setGuides(onV || onH ? { ...(onV ? { v: 0.5 } : {}), ...(onH ? { h: 0.5 } : {}) } : null)
+      return { r: 1, ox: 0, oy: 0, dx: x - b.x, dy: y - b.y }
+    })
+  }
+  function startScale(e: React.MouseEvent, dir: 'nw' | 'ne' | 'sw' | 'se') {
+    e.stopPropagation(); e.preventDefault()
+    if (t.locked) return
+    // (the opposite corner stays put; the size follows the pointer along the box's diagonal)
+    const ox = dir.includes('w') ? b.x + b.w : b.x, oy = dir.includes('n') ? b.y + b.h : b.y
+    const cx = dir.includes('w') ? b.x : b.x + b.w, cy = dir.includes('n') ? b.y : b.y + b.h
+    follow(e.clientX, e.clientY, ev => {
+      const parent = ref.current?.parentElement?.getBoundingClientRect()
+      const w = parent?.width || 1, h = parent?.height || 1
+      // (in the preview's pixels: the pointer's reach along the diagonal from the corner that stays)
+      const px = ev.clientX - (parent?.left ?? 0) - ox * w, py = ev.clientY - (parent?.top ?? 0) - oy * h
+      const vx = (cx - ox) * w, vy = (cy - oy) * h, len2 = vx * vx + vy * vy || 1
+      let r = (px * vx + py * vy) / len2
+      // (between a third as big and as big as the frame lets it: the corner dragged stays on the frame)
+      const roomX = dir.includes('w') ? ox : 1 - ox, roomY = dir.includes('n') ? oy : 1 - oy
+      const most = Math.min(b.w > 0 ? roomX / b.w : 4, b.h > 0 ? roomY / b.h : 4, 4)
+      r = Math.max(0.35, Math.min(Math.max(1, most), r))
+      return { r, ox, oy, dx: 0, dy: 0 }
+    })
+  }
+  const accent = '#c8ff00'
+  const corner = (dir: 'nw' | 'ne' | 'sw' | 'se'): React.CSSProperties => ({
+    position: 'absolute', width: 10, height: 10, background: '#fff', border: '2px solid #111', borderRadius: 3, boxSizing: 'border-box',
+    cursor: `${dir}-resize`, pointerEvents: 'auto',
+    ...(dir.includes('n') ? { top: -5 } : { bottom: -5 }), ...(dir.includes('w') ? { left: -5 } : { right: -5 }),
+  })
+  return (
+    <div ref={ref} data-template-id={t.id}
+      onMouseDown={startDrag}
+      onClick={e => e.stopPropagation()}
+      onDoubleClick={e => { e.stopPropagation(); onOpen() }}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      title={`${t.label}: drag to move, a corner to resize · double-click to edit`}
+      style={{
+        position: 'absolute', left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, height: `${b.h * 100}%`,
+        cursor: t.locked ? 'default' : 'move', userSelect: 'none', zIndex: 29, boxSizing: 'border-box', borderRadius: 4,
+        border: `1.5px ${isActive ? 'solid' : 'dashed'} ${isActive ? '#ffffff' : hover ? 'rgba(255,255,255,0.55)' : 'transparent'}`,
+        background: isActive ? 'rgba(255,255,255,0.06)' : 'transparent',
+      }}>
+      {isActive && (
+        <span style={{ position: 'absolute', left: -1.5, bottom: '100%', marginBottom: 4, padding: '1px 6px', borderRadius: 4, background: accent, color: '#0a0a0a', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+          {t.label}
+        </span>
+      )}
+      {isActive && !t.locked && (['nw', 'ne', 'sw', 'se'] as const).map(dir => (
+        <div key={dir} data-handle="1" style={corner(dir)} onMouseDown={e => startScale(e, dir)} />
+      ))}
+      {isActive && !t.locked && (
+        <button type="button" data-handle="1" aria-label={`Remove ${t.label}`}
+          onMouseDown={e => { e.stopPropagation(); onDelete() }}
+          style={{ position: 'absolute', top: -26, right: -10, width: 20, height: 20, borderRadius: '50%', background: '#ef4444', border: '2px solid #1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', pointerEvents: 'auto', boxSizing: 'border-box' }}>
+          <svg width="7" height="7" viewBox="0 0 8 8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="white" strokeWidth="1.4" strokeLinecap="round"/></svg>
+        </button>
+      )}
     </div>
   )
 }

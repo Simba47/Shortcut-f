@@ -12,6 +12,7 @@ import { useCredits } from '@/lib/useCredits'
 import { track } from '@/lib/analytics'
 import { SegmentTimeline } from '@/components/editor/SegmentTimeline'
 import { CaptionStyler } from '@/components/editor/CaptionStyler'
+import { useAutoKeyWords } from '@/components/editor/CaptionKeyWords'
 import { TextOverlayPanel } from '@/components/editor/TextOverlayPanel'
 import { AudioMixerPanel } from '@/components/editor/AudioMixerPanel'
 import { FilterPanel } from '@/components/editor/FilterPanel'
@@ -154,6 +155,8 @@ export function EditorShellMobile({
   // start auto-saving once the state differs from it (opening a clip must not write anything)
   const loadedStateRef = useRef<EditableSnapshot | null>(null)
   const editedSinceLoadRef = useRef(false)
+  // The clip's key words, picked by AI as soon as it has captions (as the desktop editor)
+  useAutoKeyWords(clip.id, showCaptions && words.length > 0, loadedStateRef)
 
   // ── Hydrate stores from server props ─────────────────────────────────────────
   useEffect(() => {
