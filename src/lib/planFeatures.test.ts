@@ -47,7 +47,8 @@ test('the Trial lists its 2 uploads in total, and how long it lasts', () => {
 })
 
 test('Pro (and Agency, not sold) get priority exports, GST invoice details and team sharing; Pro has 4 brand kits', () => {
-  const top = (key: string) => key === 'creator' || key === 'agency'
+  // (and Unlimited, Shortcut's own test accounts: never sold)
+  const top = (key: string) => key === 'creator' || key === 'agency' || key === 'unlimited'
   for (const key of Object.keys(PLANS) as (keyof typeof PLANS)[]) {
     const rows = planFeatureRows(PLANS[key])
     assert.ok(!rows.some(r => r.label === 'Unlimited clips'), key)

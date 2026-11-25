@@ -101,3 +101,26 @@ test('the rewrite note says what the next one costs (no monthly limit)', () => {
   assert.equal(rewriteNote(5), 'Next rewrite: 1 credit, and it covers 5')
   assert.equal(rewriteNote(300), 'Next rewrite: 1 credit, and it covers 5')
 })
+
+test('Unlimited (testing, user 2026-11-25): no daily safety limits or speed limit, 100 clips a run; every other plan keeps them; never sold', async () => {
+  const { safetyFor, AI_REQUESTS_PER_MINUTE } = await import('./aiLimits')
+  for (const p of ['free', 'trial', 'starter', 'creator', 'agency', 'nonsense', null]) {
+    assert.deepEqual(safetyFor(p), { ...SAFETY_PER_DAY, requestsPerMinute: AI_REQUESTS_PER_MINUTE })
+  }
+  const none = safetyFor('unlimited')
+  assert.ok(none.aiClips >= 1_000_000 && none.askAi >= 1_000_000 && none.rewrites >= 1_000_000 && none.requestsPerMinute >= 1_000_000)
+  assert.ok(none.readingMinutes >= 1_000_000 * 60)
+  // a 100-hour upload after 50 hours today: let through (Pro: refused past 20 hours)
+  const q = readingQuote(PLANS.unlimited, { uploads: 999, todayMs: 50 * 60 * MIN }, 100 * 60 * MIN)
+  assert.deepEqual([q.uploadsLeft, q.overMs], [null, 0])
+  assert.ok(readingQuote(PLANS.creator, { uploads: 0, todayMs: 50 * 60 * MIN }, 100 * 60 * MIN).overMs > 0)
+  assert.deepEqual(aiLimitsFor('unlimited'), { clipsPerRun: 100, searchesPerVideo: 1000 })
+  const { isTopPlan } = await import('./plans')
+  const { canKeep } = await import('./expiry')
+  assert.equal(PLANS.unlimited.sold, false)
+  assert.equal(PLANS.unlimited.price, 0)
+  assert.deepEqual([isTopPlan('unlimited'), canKeep('unlimited')], [true, true])
+  assert.ok(PLANS.unlimited.storageGb >= 10_000 && PLANS.unlimited.maxFileSizeGb === 75 && PLANS.unlimited.devices >= 100)
+  // 75 GB fits the upload's 10,000 parts of 8 MB
+  assert.ok(PLANS.unlimited.maxFileSizeBytes <= 10_000 * 8 * 1024 * 1024)
+})

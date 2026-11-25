@@ -149,12 +149,42 @@ export const PLANS = {
     ai: { clipsPerRun: 20, searchesPerVideo: 1 },
     sold: false,
   },
+  // (user, 2026-11-25: "full access without any limits to developer@shortcutapp.in so that he can test very
+  // large") Shortcut's own test accounts: never sold, only given from the admin (on the live site only to
+  // @shortcutapp.in accounts). Everything a plan limits is set past any test: storage, one file's size (75 GB:
+  // uploads go in 8 MB parts and storage takes at most 10,000 of them), devices, clips per Make my clips run,
+  // free moment searches, how long videos are kept, and no daily safety limits (aiLimits.ts safetyFor).
+  // Credits are still counted, so tests see real prices: the admin gives 1,000,000 with it.
+  // Left as they are for everyone: 1 AI clip per minute of video, 500 MB for a video added inside the editor,
+  // and the worker's fair share per person (its jobs wait, they are never refused).
+  unlimited: {
+    key: 'unlimited' as const,
+    name: 'Unlimited (testing)',
+    price: 0,
+    monthlyCredits: 0,
+    uploadsLimit: null,
+    allowancesOnce: false,
+    oneTime: false,
+    storageGb: 10_000,
+    storageBytes: 10_000 * 1024 * 1024 * 1024,
+    devices: 100,
+    maxFileSizeBytes: 75 * 1024 * 1024 * 1024,
+    maxFileSizeGb: 75,
+    maxClips: null,
+    autoCaption: true,
+    watermark: false,
+    priorityExports: true,
+    gstInvoices: true,
+    retentionDays: 3650,
+    ai: { clipsPerRun: 100, searchesPerVideo: 1000 },
+    sold: false,
+  },
 } as const
 
 export type PlanKey = keyof typeof PLANS
 export type Plan = typeof PLANS[PlanKey]
 
-/** The top plan sold: Pro (key 'creator', since 2026-11-21), and Agency, no longer sold. Nothing to upgrade to from these. */
+/** The top plan sold: Pro (key 'creator', since 2026-11-21), and Agency, no longer sold (and Unlimited, testing only). Nothing to upgrade to from these. */
 export function isTopPlan(plan: string | null | undefined): boolean {
-  return plan === 'creator' || plan === 'agency'
+  return plan === 'creator' || plan === 'agency' || plan === 'unlimited'
 }

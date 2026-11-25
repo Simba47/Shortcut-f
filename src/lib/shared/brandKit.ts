@@ -165,7 +165,7 @@ export interface BrandKit {
 
 /** How many brand kits each plan can have (user, 2026-10-17); a plan not listed gets the Free count */
 // (plans v2, user 2026-11-21: Trial 1, Starter 2, Pro 4; Agency, not sold, keeps its 15)
-export const BRAND_KIT_LIMITS: Record<string, number> = { free: 1, student: 1, trial: 1, starter: 2, creator: 4, agency: 15 }
+export const BRAND_KIT_LIMITS: Record<string, number> = { free: 1, student: 1, trial: 1, starter: 2, creator: 4, agency: 15, unlimited: 100 }
 export const brandKitLimit = (plan: string | null | undefined) => BRAND_KIT_LIMITS[plan ?? 'free'] ?? BRAND_KIT_LIMITS.free
 
 export const LOGO_SIZE: [number, number] = [0.06, 0.5]

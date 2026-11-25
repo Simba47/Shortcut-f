@@ -1,7 +1,7 @@
 import type postgres from 'postgres'
 import sql from '@/lib/db'
 import { creditsMode, PLAN_CREDIT_DAYS, READING_CREDITS, readingCredits } from '@/lib/credits'
-import { allowanceSince, istDayStart, readingQuote, SAFETY_PER_DAY, SAFETY_NOTE } from '@/lib/aiLimits'
+import { allowanceSince, istDayStart, readingQuote, safetyFor, SAFETY_NOTE } from '@/lib/aiLimits'
 import { PLANS } from '@/lib/plans'
 import { balance, charge, ensureCreditsSchema, ensureFreeGrant, grant, settle } from './credits'
 import { getUserPlan, NO_PLAN_MESSAGE } from './quota'
@@ -144,7 +144,7 @@ export async function checkBeforeUpload(userId: string, durationMs: number | nul
   if (quote.uploadsLeft != null && quote.uploadsLeft <= 0) {
     throw fail(`You've used the ${plan.uploadsLimit} upload${plan.uploadsLimit === 1 ? '' : 's'} on your ${plan.name}. Choose a plan to upload more.`, 403)
   }
-  const day = `${SAFETY_PER_DAY.readingMinutes / 60} hours`
+  const day = `${safetyFor(planKey).readingMinutes / 60} hours`
   if (quote.msLeft <= 0) throw fail(`You've uploaded ${day} of video today, the most for one day. ${SAFETY_NOTE}`, 429)
   if (quote.overMs > 0) throw fail(`This video is ${minutes(durationMs ?? 0)} min, and only ${minutes(quote.msLeft)} min of today's ${day} are left. ${SAFETY_NOTE}`, 429)
   await ensureFreeGrant(userId)
