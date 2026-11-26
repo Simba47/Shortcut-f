@@ -773,6 +773,7 @@ a.auth-back, a.auth-submit { text-decoration: none; }
             mask-composite: intersect;
   }
   .ap-film > * { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .ap-film picture img { display: block; width: 100%; height: 100%; object-fit: contain; }
   .ap-film video { opacity: 0; }
   .ap-film video[data-on="under"] { opacity: 1; z-index: 1; }
   .ap-film video[data-on="top"] { opacity: 1; z-index: 2; animation: ap-in .14s linear; }
@@ -869,6 +870,76 @@ a.auth-back, a.auth-submit { text-decoration: none; }
   .auth-pitch p, .auth-pitch ul, .auth-fine { display: none; }
   .auth-side { overflow: visible; padding: 24px 20px 32px; }
   .auth-panel { margin: 0 auto; }
+}
+
+/* ── Sign in / sign up on phones: the panda in the header (user, 2026-11-26, phase 1 — a still panda) ──
+   The header is the logo, then the panda under a soft spotlight, in place of the words (kept for screen
+   readers); the form below is as before. The lime glow stays round the logo, now on the card, so it runs on
+   behind the panda; the panda's black background blends into the dark (lighten), so there's no box. Its
+   height follows the screen's, so the Sign in button stays in view on a normal phone. */
+@media (max-width: 899px) {
+  .auth-root[data-panda] .auth-card {
+    background:
+      radial-gradient(ellipse 260px 190px at 0% 0%, var(--auth-lime) 0%, #B4E600 16%, rgba(154,204,0,0.45) 38%, rgba(20,20,20,0) 72%) no-repeat,
+      #121213;
+  }
+  .auth-root[data-panda] .auth-brand { padding: 18px 20px 0; background: none; }
+  .auth-root[data-panda] .auth-brand .auth-stage {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  .auth-root[data-panda] .ap-stage {
+    display: flex; justify-content: center; align-items: flex-end; position: relative; overflow: hidden;
+    /* (svh: the height actually visible with the browser's bars showing — vh let the Sign in button slip below it on a real phone) */
+    /* (it shrinks faster on short screens, so the Sign in button stays in view down to 360 x 640; tall phones get the full 190) */
+    height: clamp(112px, 79svh - 382px, 190px); margin-top: -8px; padding-bottom: 8px;
+    pointer-events: none; user-select: none;
+  }
+  .auth-root[data-panda] .ap-box { position: relative; flex: none; height: 100%; aspect-ratio: 640 / 720; }
+  /* (the blend is on the whole panda, not on each layer: the clip playing covers the still and the others
+     normally, and only the finished picture is lightened onto the page — so its black background disappears.
+     Per layer, the brightest of every layer showed through: the still's open eyes through the covering paws) */
+  .auth-root[data-panda] .ap-film { position: absolute; inset: 0; mix-blend-mode: lighten; }
+  .auth-root[data-panda] .ap-film > * {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+  }
+  .auth-root[data-panda] .ap-film picture img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  /* (the clips stacked as on desktop: the playing one on top; a clip that ran to its end is swapped at once, the
+     first one fades in over the still, leaving a loop the next fades in held on its first frame) */
+  .auth-root[data-panda] .ap-film video { opacity: 0; }
+  .auth-root[data-panda] .ap-film video[data-on="under"] { opacity: 1; z-index: 1; }
+  .auth-root[data-panda] .ap-film video[data-on="top"] { opacity: 1; z-index: 2; animation: ap-in .14s linear; }
+  .auth-root[data-panda] .ap-film video[data-on="top"][data-fade="slow"] { animation-duration: .2s; animation-timing-function: ease-in-out; }
+  .auth-root[data-panda] .ap-film video[data-on="top"][data-fade="none"] { animation: none; }
+  @keyframes ap-in { from { opacity: 0; } }   /* (also here: the desktop one lives in the wide-window section) */
+  /* Typing (phase 4): the keyboard pushed the header out of view — the panda moves into a small box pinned at the
+     top right of the visible screen (PandaStage: dockWhileTyping sets --dock-top); the header keeps its height.
+     Its own dark backing, so the panda blends into the box, not into the form under it. */
+  .auth-root[data-panda] .ap-box[data-dock] {
+    position: fixed; z-index: 40; top: var(--dock-top, 10px); right: 12px;
+    height: 76px; padding: 4px 4px 0; border-radius: 18px; overflow: hidden;
+    background: radial-gradient(ellipse 70% 55% at 50% 100%, rgb(255 255 255 / 0.07), transparent 70%), #0d0d0e;
+    border: 1px solid rgb(255 255 255 / 0.12);
+    box-shadow: 0 12px 30px -10px rgb(0 0 0 / 0.8);
+    animation: ap-dock .22s cubic-bezier(.2,.8,.2,1);
+  }
+  .auth-root[data-panda] .ap-box[data-dock] .ap-film { inset: 4px 4px 0; }
+  .auth-root[data-panda] .ap-box[data-dock] .ap-floor { display: none; }
+  @keyframes ap-dock { from { opacity: 0; scale: .85; } }
+  .auth-root[data-panda] .ap-light, .auth-root[data-panda] .ap-floor { position: absolute; pointer-events: none; mix-blend-mode: screen; }
+  .auth-root[data-panda] .ap-light {
+    /* (sized by the panda's height, not the card's width — sideways and on tablets it stays a cone) */
+    left: 50%; top: 0; height: 100%; aspect-ratio: 1.3 / 1; translate: -50% 0;
+    background: linear-gradient(to bottom, rgb(255 255 255 / 0.10), rgb(255 255 255 / 0.04) 60%, transparent 96%);
+    clip-path: polygon(42% 0, 58% 0, 100% 100%, 0 100%);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 34%, #000 66%, transparent);
+            mask-image: linear-gradient(90deg, transparent, #000 34%, #000 66%, transparent);
+  }
+  .auth-root[data-panda] .ap-floor {
+    left: 50%; bottom: 2px; width: 46%; height: 12%; translate: -50% 0;
+    background: radial-gradient(closest-side, rgb(255 255 255 / 0.10), transparent);
+  }
+  /* (a thin line between the header and the form) */
+  .auth-root[data-panda] .auth-side { border-top: 1px solid rgb(255 255 255 / 0.06); }
 }
 
 @media (prefers-reduced-motion: reduce) {

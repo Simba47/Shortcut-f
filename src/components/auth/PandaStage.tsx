@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   CLIPS, CLIP_NAMES, CUT_IN_AFTER, LOOP_OF, PANDA_POSTER, PANDA_POSTER_INTRO, RATE, TUG_AT,
-  clipSrc, onPandaCue, type ClipName, type OnceClip, type Pose,
+  clipSrc, onPandaCue, phoneClipSrc, type ClipName, type OnceClip, type Pose,
 } from './panda'
 
 /**
@@ -23,26 +23,48 @@ import {
  */
 /** Where the panda shows (and moves): wide windows, motion not turned down */
 const SHOW_MEDIA = '(min-width: 900px) and (prefers-reduced-motion: no-preference)'
+/** Phones (the panda in the header), motion not turned down */
+const PHONE_MEDIA = '(max-width: 899px) and (prefers-reduced-motion: no-preference)'
 
 export function PandaStage({ intro }: { intro: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
   const [live, setLive] = useState(false)
   /** No show (motion turned down): the still faces you, not away */
   const [still, setStill] = useState(false)
+  /** Phones: the lighter clips and the reactions, once the page has shown */
+  const [phone, setPhone] = useState(false)
 
   useEffect(() => {
     if (window.matchMedia(SHOW_MEDIA).matches) { setLive(true); return }
     // (no show: the card is simply there)
     setStill(true)
+    // Phones: the panda starts breathing once the page has fully shown — never before the form — and not at all
+    // when the phone asks to save data (it stays the still picture)
+    const saveData = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData
+    if (window.matchMedia(PHONE_MEDIA).matches && !saveData) {
+      let t = 0
+      const go = () => { t = window.setTimeout(() => setPhone(true), 300) }
+      if (document.readyState === 'complete') go(); else window.addEventListener('load', go, { once: true })
+      return () => { window.clearTimeout(t); window.removeEventListener('load', go) }
+    }
     ref.current?.closest('.auth-root')?.querySelector('.auth-side')?.removeAttribute('data-drop')
   }, [])
 
   useEffect(() => {
     const stage = ref.current
-    if (!live || !stage) return
-    const player = new Player(stage, intro)
+    if (!(live || phone) || !stage) return
+    const player = new Player(stage, intro, phone)
     return () => player.stop()
-  }, [live, intro])
+  }, [live, phone, intro])
+
+  // Phones, typing: the keyboard takes half the screen and the header scrolls out of view — the panda (the same one,
+  // still playing and reacting) moves into a small box pinned at the top of what's visible, and goes back when the
+  // keyboard closes. The header keeps its height meanwhile, so the form never moves.
+  useEffect(() => {
+    const stage = ref.current
+    if (!phone || !stage) return
+    return dockWhileTyping(stage)
+  }, [phone])
 
   const firstClip: ClipName = intro ? 'greet' : 'hello'
   return (
@@ -55,9 +77,14 @@ export function PandaStage({ intro }: { intro: boolean }) {
         <div className="ap-film">
           {/* (shown until the first clip plays, and the whole panda when motion is turned down) */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="ap-still" src={intro && !still ? PANDA_POSTER_INTRO : PANDA_POSTER} alt="" width={640} height={720} />
-          {/* (the Player loads each clip into memory and gives it its source) */}
-          {live && CLIP_NAMES.map(name => (
+          {/* (sign-up's opening frame, looking away, only where the greeting plays — wide windows, motion on; elsewhere
+              the standing panda from the first moment, chosen by the browser, so nothing swaps as the page starts) */}
+          <picture className="ap-still">
+            {intro && !still && <source media={SHOW_MEDIA} srcSet={PANDA_POSTER_INTRO} />}
+            <img src={PANDA_POSTER} alt="" width={640} height={720} />
+          </picture>
+          {/* (the Player loads each clip into memory and gives it its source; phones: no cord pull) */}
+          {(live || phone) && CLIP_NAMES.filter(name => !(phone && name === 'tug')).map(name => (
             <video key={name} data-clip={name} muted playsInline disablePictureInPicture preload="auto" />
           ))}
         </div>
@@ -66,6 +93,65 @@ export function PandaStage({ intro }: { intro: boolean }) {
       <span className="ap-light" />
     </div>
   )
+}
+
+/** The mini panda's box: its height, and its gap from the top of the visible screen (px) — matches auth.css */
+const DOCK_H = 76
+const DOCK_GAP = 10
+
+/**
+ * Phones: while a form box has the focus and the panda's header is mostly out of view (the keyboard pushed the
+ * page up), the panda's box is pinned at the top right of the visible screen (the visual viewport — with the
+ * keyboard open it is a part of the page, scrolled down). If the box being typed in would sit under it, the page
+ * moves down just enough to clear it. Returns the way to stop.
+ */
+function dockWhileTyping(stage: HTMLElement) {
+  const box = stage.querySelector<HTMLElement>('.ap-box')
+  const root = stage.closest('.auth-root')
+  const vv = window.visualViewport
+  if (!box || !root) return () => {}
+  let raf = 0
+  const typing = () => {
+    const a = document.activeElement as HTMLElement | null
+    return !!a && root.contains(a) && a.matches('input:not([type="checkbox"]):not([type="radio"]), textarea')
+  }
+  const update = () => {
+    raf = 0
+    const top = vv ? vv.offsetTop : 0
+    const r = stage.getBoundingClientRect()
+    // (docked when typing and more than half the panda's header is above the visible screen)
+    const dock = typing() && r.bottom - r.height / 2 < top
+    if (dock) {
+      box.style.setProperty('--dock-top', `${Math.round(top + DOCK_GAP)}px`)
+      if (!box.hasAttribute('data-dock')) box.setAttribute('data-dock', '')
+      // (the box being typed in stays clear of the mini panda)
+      const a = document.activeElement as HTMLElement
+      const ar = a.getBoundingClientRect()
+      const clear = top + DOCK_GAP + DOCK_H + 8
+      const right = (vv ? vv.width : window.innerWidth) - 12 - DOCK_H
+      if (ar.top < clear && ar.right > right) window.scrollBy(0, ar.top - clear)
+    } else if (box.hasAttribute('data-dock')) {
+      box.removeAttribute('data-dock')
+      box.style.removeProperty('--dock-top')
+    }
+  }
+  const schedule = () => { if (!raf) raf = requestAnimationFrame(update) }
+  // (the keyboard opens a moment after the focus: check again as the visible screen settles)
+  const soon = () => { schedule(); window.setTimeout(schedule, 350); window.setTimeout(schedule, 800) }
+  root.addEventListener('focusin', soon)
+  root.addEventListener('focusout', soon)
+  window.addEventListener('scroll', schedule, { passive: true })
+  vv?.addEventListener('resize', schedule)
+  vv?.addEventListener('scroll', schedule)
+  return () => {
+    cancelAnimationFrame(raf)
+    root.removeEventListener('focusin', soon)
+    root.removeEventListener('focusout', soon)
+    window.removeEventListener('scroll', schedule)
+    vv?.removeEventListener('resize', schedule)
+    vv?.removeEventListener('scroll', schedule)
+    box.removeAttribute('data-dock')
+  }
 }
 
 /** From each pose, the clips the form can call for next (kept running in the background) */
@@ -103,7 +189,13 @@ class Player {
   private off: (() => void)[] = []
   private timers = new Set<number>()
 
-  constructor(private stage: HTMLElement, intro: boolean) {
+  /** The clip's file: the phone set on phones (lighter, no cord pull) */
+  private src: (name: ClipName) => string
+  /** A clip has played (on a phone that refuses video — Low Power Mode — none ever does, and the still stays) */
+  private played = false
+
+  constructor(private stage: HTMLElement, intro: boolean, private phone = false) {
+    this.src = phone ? (name: ClipName) => phoneClipSrc(name as Exclude<ClipName, 'tug'>) : clipSrc
     this.root = stage.closest('.auth-root') ?? document.body
     this.card = this.root.querySelector<HTMLElement>('.auth-side')
     stage.querySelectorAll<HTMLVideoElement>('video[data-clip]').forEach(v => {
@@ -121,22 +213,54 @@ class Player {
     //    to sleep; waking it took up to 0.7 s), checked every couple of seconds
     //  - the next clip is started a frame before the current one ends, and shown on its first frame
     const urls: string[] = []
-    const first: ClipName = intro ? 'greet' : 'hello'
+    // (phones: the panda appears once the page has shown, from the standing still — so it waves, on both pages; the
+    // sign-up greeting starts looking away, and would jump from the still)
+    const first: ClipName = intro && !phone ? 'greet' : 'hello'
     const load = (name: ClipName) => {
       const v = this.vids.get(name)
       if (!v || v.getAttribute('src')) return
       // (the same request the page's preload made, so the first two come straight from it)
-      fetch(clipSrc(name), { mode: 'cors', credentials: 'same-origin' }).then(r => (r.ok ? r.blob() : Promise.reject())).then(b => {
+      fetch(this.src(name), { mode: 'cors', credentials: 'same-origin' }).then(r => (r.ok ? r.blob() : Promise.reject())).then(b => {
         if (this.stopped || v.getAttribute('src')) return
         const url = URL.createObjectURL(b); urls.push(url)
         v.src = url; v.load()
         v.addEventListener('loadedmetadata', () => { this.prime(v); this.warm() }, { once: true })
-      }).catch(() => { if (!this.stopped && !v.getAttribute('src')) { v.src = clipSrc(name); v.load() } })
+      }).catch(() => { if (!this.stopped && !v.getAttribute('src')) { v.src = this.src(name); v.load() } })
     }
     load(first); load('idle')
     this.later(() => CLIP_NAMES.forEach(load), 150)
     const keepAwake = window.setInterval(() => this.vids.forEach(v => { if (!v.dataset.on) this.prime(v) }), 2000)
     this.off.push(() => { window.clearInterval(keepAwake); urls.forEach(u => URL.revokeObjectURL(u)) })
+
+    // Back on screen (the phone unlocked, back from another app): the clip that should be playing plays on
+    const back = () => {
+      if (document.visibilityState !== 'visible' || this.stopped || !this.cur) return
+      const v = this.vids.get(this.cur)
+      if (v && v.paused && !v.ended) v.play().then(() => { this.played = true }, () => {})
+    }
+    document.addEventListener('visibilitychange', back)
+    this.off.push(() => document.removeEventListener('visibilitychange', back))
+
+    // A safety net for stalls (a phone that put the video to sleep in the background — seen on Android: back on
+    // screen it said "playing" but stood still): once a second, the clip on screen that should be playing and
+    // isn't moving is nudged (a seek to where it is, and play); still stuck a second later, it is reloaded and
+    // carries on from the same point
+    let lastT = -1, stuck = 0
+    const watchdog = window.setInterval(() => {
+      if (this.stopped || document.visibilityState !== 'visible' || !this.cur) { stuck = 0; return }
+      const v = this.vids.get(this.cur)
+      if (!v || v.paused || v.ended || v.seeking || !v.dataset.on) { lastT = -1; stuck = 0; return }
+      if (v.currentTime !== lastT) { lastT = v.currentTime; stuck = 0; return }
+      stuck++
+      if (stuck === 1) { v.currentTime = v.currentTime; v.play().catch(() => {}) }
+      else if (stuck >= 2) {
+        const at = v.currentTime
+        v.load()
+        v.addEventListener('loadedmetadata', () => { v.currentTime = at; v.play().catch(() => {}) }, { once: true })
+        stuck = 0
+      }
+    }, 1000)
+    this.off.push(() => window.clearInterval(watchdog))
 
     // the form: where the focus is, the eye buttons
     let t = 0
@@ -160,6 +284,8 @@ class Player {
         this.queue = this.queue.filter(q => q !== 'oops' && q !== 'oops-small')
         this.enqueue(pick)
       } else if (cue.type === 'switch') {
+        // (phones: no cord pull, no falling form — on a small screen it would move the form while someone types)
+        if (this.phone) return
         this.liftCard()
         if (this.cur !== 'tug' && !this.queue.includes('tug')) this.enqueue('tug')
         else if (this.cur === 'tug' && this.time() > (TUG_AT.tug ?? 0)) this.dropCard()
@@ -175,7 +301,7 @@ class Player {
 
     // (the form is there from the start — user, 2026-11-25: the cord and the fall only for Sign in ↔ Create account)
     this.card?.removeAttribute('data-drop')
-    this.play(intro ? 'greet' : 'hello')
+    this.play(first)
   }
 
   stop() {
@@ -198,7 +324,8 @@ class Player {
    * could take over a second to wake). The rest pause.
    */
   private warm() {
-    const next = new Set<ClipName>([this.decide(), ...NEXT_FROM[this.pose]])
+    // (phones: only the most likely next one, to spare the battery)
+    const next = new Set<ClipName>(this.phone ? [this.decide()] : [this.decide(), ...NEXT_FROM[this.pose]])
     this.vids.forEach((v, name) => {
       if (v.dataset.on || name === this.cur) return   // (on screen, or just starting)
       if (next.has(name)) { if (v.paused && v.getAttribute('src') && v.readyState >= 1) { v.loop = true; v.play().catch(() => {}) } }
@@ -357,7 +484,13 @@ class Player {
       }
       const play = () => {
         this.started = token
-        v.play().catch(() => this.dropCard())
+        v.play().then(() => { this.played = true }, () => {
+          // (the page hidden — the phone locked, another app — the browser won't play: it starts when the page is
+          // back on screen; refused while on screen (an iPhone in Low Power Mode): the still panda stays)
+          if (document.visibilityState === 'hidden') return
+          if (this.phone && !this.played) { this.stop(); this.vids.forEach(o => o.removeAttribute('data-on')); return }
+          this.dropCard()
+        })
         // (it comes up on its first frame actually shown — never on a frame from before the jump back)
         if (typeof v.requestVideoFrameCallback === 'function') v.requestVideoFrameCallback(() => reveal())
         else v.addEventListener('playing', reveal, { once: true })

@@ -46,6 +46,8 @@ export type ClipName = keyof typeof CLIPS
 export type OnceClip = 'greet' | 'hello' | 'tug' | 'oops' | 'oops-small' | 'celebrate'
 export const CLIP_NAMES = Object.keys(CLIPS) as ClipName[]
 export const clipSrc = (name: ClipName) => `${DIR}/${name}.mp4`
+/** The phone set (public/auth/panda/m): the same clips at 448 x 504, lighter — no cord pull on phones */
+export const phoneClipSrc = (name: Exclude<ClipName, 'tug'>) => `${DIR}/m/${name}.mp4`
 
 /** The loop each pose rests in */
 export const LOOP_OF: Record<Pose, ClipName> = { neutral: 'idle', watch: 'watch-loop', cover: 'cover-hold', peek: 'peek-hold' }
