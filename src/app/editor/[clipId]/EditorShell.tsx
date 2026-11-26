@@ -5,6 +5,8 @@ import { BRAND_TAG } from '@/components/brand/BrandTagIcon'
 import { useFrameAt } from '@/modules/clips/thumbs'
 import { InfoTip } from '@/components/ui/info-tip'
 import { musicGainAt, speechRangesInVideo, speechRanges, heardSpeech, type Range as SpeechRange } from '@/modules/editor/musicGain'
+import { isVoiceTrack, mainQuietRanges, voiceRanges, inRanges, voiceName, makeRoomForTake } from '@/modules/editor/voice'
+import { VoiceRecorder, type VoiceTake } from '@/components/editor/VoiceRecorder'
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useSyncExternalStore } from 'react'
 import type { Clip, Segment, CropBox, BoxKeyframe, CaptionStyle, TextOverlay, AudioTrack, Transition, TranscriptWord, LayoutType, Overlay } from '@chai-cut/shared'
 import { VideoPreview, OutputCanvas, buildCaptionChunks, captionWordsPerLine, captionDefaultY } from '@/components/editor/VideoPreview'
@@ -32,9 +34,11 @@ import { LAYOUT_COLORS, MAX_ZOOM, MIN_ZOOM, zoomStep, zoomLabel, STOCK_DRAG_TYPE
 import { useVideoUpload } from '@/modules/upload/useVideoUpload'
 import { TranscriptPanel } from '@/components/editor/TranscriptPanel'
 import { CaptionStyler, type FontTry } from '@/components/editor/CaptionStyler'
-import { useKeyWordsPick } from '@/components/editor/CaptionKeyWords'
+import { useAutoKeyWords } from '@/components/editor/CaptionKeyWords'
 import { CaptionPreview } from '@/components/editor/CaptionPreview'
 import { TextOverlayPanel, type FrameTextEdit } from '@/components/editor/TextOverlayPanel'
+import { TemplatesPanel, type TemplateOnClip } from '@/components/editor/TemplatesPanel'
+import { anchorOf, buildTemplate, defaultAnchor, iconOf, kindDef, movedPart, newTemplate, partsBox, templatePartChanged, wholeClip, TEMPLATE_MS, type PartMove, type TemplateData, type TemplateKind, type TemplatePic } from '@/lib/shared/templates'
 import { AudioMixerPanel } from '@/components/editor/AudioMixerPanel'
 import { MediaPickerModal } from '@/components/editor/MediaPickerModal'
 import { shownSegment, addedVideoBox, isGapPart, isMainShot, STAND_IN_SUFFIX } from '@/modules/editor/visibility'
@@ -81,7 +85,7 @@ import { trackPresentedFrame } from '@/modules/player/presentedFrame'
 import { useVideoSync } from '@/modules/player/useSync'
 import { useCaptionStore } from '@/modules/captions/store'
 import { cleanParts, playedParts, playedPartAt, applyLook, lookOf, isLookChange, LOOK_KEYS, partsAfterCut, partsAfterInsert, type CaptionPart } from '@/modules/captions/parts'
-import { CAPTION_TEMPLATES, usesKeyWords } from '@/modules/captions/templates'
+import { CAPTION_TEMPLATES } from '@/modules/captions/templates'
 import { useMediaStore } from '@/modules/media/store'
 import { rowsToLocal, normalizeCoverage, uncoveredRanges, defaultCropForSlot, msToLabel } from '@/modules/editor/utils'
 import { isShot, flattenShots, toSaved, asMainPart } from '@/modules/editor/shots'
@@ -111,7 +115,7 @@ import { ToolHints } from '@/components/editor/ToolHints'
 import { TransitionsPanel, TRANSITION_DEFAULT_MS, TRANSITION_KINDS, playedTransitionMs, type TransitionJoin } from '@/components/editor/TransitionsPanel'
 import { transcriptWindowQuery } from '@/modules/editor/transcriptWindow'
 
-type Tool = 'format' | 'subjects' | 'frames' | 'captions' | 'transitions' | 'text' | 'media' | 'music' | 'cleanup' | 'post' | 'brand'
+type Tool = 'format' | 'subjects' | 'frames' | 'captions' | 'transitions' | 'text' | 'templates' | 'media' | 'music' | 'cleanup' | 'post' | 'brand'
 /** Media: the user's imported media, or Library (stock footage) */
 type MediaFilter = 'all' | 'video' | 'audio' | 'image'
 /** 'retrying': no answer (the connection); 'refused': the server answered with a failure — both tried again */
@@ -179,7 +183,9 @@ const OPTIONS_W = 320
 const TRANSITIONS_W = 320
 /** The Transitions preview screen's two pictures: this wide (px), or the video's own width if less */
 const TR_FRAME_W = 1024
-const toolDefaultW = (t: string) => (t === 'transitions' ? TRANSITIONS_W : OPTIONS_W)
+// Templates opens wider (user, 2026-11-23): its own mini sidebar of templates sits beside the one being edited
+const TEMPLATES_W = 420
+const toolDefaultW = (t: string) => (t === 'transitions' ? TRANSITIONS_W : t === 'templates' ? TEMPLATES_W : OPTIONS_W)
 // The Preview column's smallest width; it opens as wide as the 9:16 preview needs to fill its height (user,
 // 2026-10-31: "so much gap above and below, increase the size"), until its edge is dragged
 const PREVIEW_W = 260
@@ -234,6 +240,12 @@ const TOOLS: { id: Tool; label: string; title: string; hint: string; icon: React
     id: 'text', label: 'Text', title: 'Text',
     hint: 'Add titles, hooks or call-outs on top of the video.',
     icon: <path d="M5 6V4h14v2M12 4v16M9 20h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />,
+  },
+  // (user, 2026-11-22: ready-made Follow and Contact card pieces)
+  {
+    id: 'templates', label: 'Templates', title: 'Templates',
+    hint: 'Ready-made Follow, Subscribe and Contact card pieces, filled from your brand kit. Add one, then change its words, colours and photo here.',
+    icon: <><rect x="3" y="13" width="18" height="7" rx="3.5" stroke="currentColor" strokeWidth="1.8" fill="none" /><circle cx="7" cy="16.5" r="1.6" fill="currentColor" /><path d="M11 16.5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /><rect x="6" y="3.5" width="12" height="6.5" rx="2" stroke="currentColor" strokeWidth="1.8" fill="none" /></>,
   },
   {
     id: 'media', label: 'Media', title: 'Media',
@@ -635,11 +647,12 @@ export function EditorShell({
   function resetColumn(which: 'options' | 'preview') {
     if (which === 'options') setOptionsW(toolDefaultW(tool)); else setPreviewFit(true)
   }
-  // Each kind of tool keeps its own width this visit: Transitions one, the rest another (TRANSITIONS_W)
+  // Each kind of tool keeps its own width this visit: Transitions one, Templates one, the rest another (TRANSITIONS_W)
   const toolWidths = useRef<Record<string, number>>({})
-  const widthOwner = useRef<string>(tool === 'transitions' ? 'transitions' : 'other')
+  const widthKind = (t: string) => (t === 'transitions' || t === 'templates' ? t : 'other')
+  const widthOwner = useRef<string>(widthKind(tool))
   useEffect(() => {
-    const next = tool === 'transitions' ? 'transitions' : 'other'
+    const next = widthKind(tool)
     if (next === widthOwner.current) return
     toolWidths.current[widthOwner.current] = optionsW
     widthOwner.current = next
@@ -988,6 +1001,13 @@ export function EditorShell({
   const [musicUrls, setMusicUrls] = useState<Record<string, string>>(initialMusicUrls ?? {})
   const [musicUploads, setMusicUploads] = useState<Record<string, 'uploading' | 'failed'>>({})
   const [musicNotice, setMusicNotice] = useState<string | null>(null)
+  // Record voice (user, 2026-11-25): the recorder is open; its "Mute the original" switch (on: a dub);
+  // a take being recorded (the original goes quiet meanwhile when the switch is on, older voices always)
+  const [voiceRecOpen, setVoiceRecOpen] = useState(false)
+  const [voiceMutes, setVoiceMutes] = useState(true)
+  const [voiceRecording, setVoiceRecording] = useState<{ on: boolean; mutes: boolean }>({ on: false, mutes: false })
+  const voiceRecRef = useRef(voiceRecording)
+  voiceRecRef.current = voiceRecording
   /** Stores a picked song (any audio, or a video's sound; up to 20 MB) */
   async function uploadMusicFile(f: File): Promise<{ storage_path: string; url: string }> {
     const form = new FormData()
@@ -1011,8 +1031,11 @@ export function EditorShell({
   function sendMusic(id: string, f: File) {
     setMusicUploads(u => ({ ...u, [id]: 'uploading' }))
     uploadMusicFile(f).then(({ storage_path, url }) => {
-      setAudioTracks(prev => prev.map(t => t.id === id ? { ...t, storage_path } : t))
-      setMusicUrls(m => ({ ...m, [id]: url }))
+      // (a recorded voice split while it uploaded: its parts all get the stored file — a take's name is its own)
+      const same = (t: AudioTrack) => t.id === id || (isVoiceTrack(t) && t.storage_path === f.name)
+      const ids = useMediaStore.getState().audioTracks.filter(same).map(t => t.id)
+      setAudioTracks(prev => prev.map(t => same(t) ? { ...t, storage_path } : t))
+      setMusicUrls(m => ({ ...m, [id]: url, ...Object.fromEntries(ids.map(x => [x, url])) }))
       setMusicUploads(u => { const n = { ...u }; delete n[id]; return n })
     }).catch((e: unknown) => {
       setMusicUploads(u => ({ ...u, [id]: 'failed' }))
@@ -1059,6 +1082,43 @@ export function EditorShell({
       }
     }
   }
+  /**
+   * Record voice: a finished take goes on the audio lane where it was recorded, the original quiet
+   * under it when its switch was on. Older voices there make room (a retake replaces them; Retake
+   * re-does the last take, so that one goes whole). The take is picked, as an added song is.
+   */
+  function addVoiceTake(take: VoiceTake, replaceId?: string): string | null {
+    const id = crypto.randomUUID()
+    const f = new File([take.blob], `Voice-${id.slice(0, 8)}.wav`, { type: 'audio/wav' })
+    if (musicTooBig(f)) return null
+    setMusicNotice(null)
+    const len = clip.end_ms - clip.start_ms
+    const a = Math.max(0, Math.round(take.startMs)), b = Math.min(len, a + take.lenMs)
+    if (b - a < 100) return null
+    const now = useMediaStore.getState().audioTracks
+    const old = replaceId ? now.find(t => t.id === replaceId) : undefined
+    const splits: Array<[string, string]> = []
+    const rest = makeRoomForTake(now.filter(t => t.id !== replaceId), a, b, musicDurations, len, from => {
+      const nid = crypto.randomUUID(); splits.push([from, nid]); return nid
+    })
+    // (the right part of a voice split around the take plays the same recording, as splitMusicAt)
+    for (const [from, nid] of splits) {
+      const el = musicEls.current.get(from)
+      if (el) { const copy = new Audio(); copy.preload = 'auto'; copy.src = el.src; musicEls.current.set(nid, copy) }
+      if (musicUrls[from]) setMusicUrls(m => ({ ...m, [nid]: m[from] }))
+      if (musicDurations[from] != null) setMusicDurations(d => ({ ...d, [nid]: d[from] }))
+    }
+    setAudioTracks([...rest, {
+      id, clip_id: clip.id, storage_path: f.name, start_ms: a, end_ms: b, volume: 1,
+      duck_under_speech: false, fade_in: false, fade_out: false, voice: true, mutes_original: take.mutesOriginal,
+      ...(old?.track != null ? { track: old.track } : {}),
+    }])
+    setMusicDurations(d => ({ ...d, [id]: take.lenMs }))
+    sendMusic(id, f)
+    attachMusicEl(id, URL.createObjectURL(f))
+    pickMusic(id)
+    return id
+  }
   // Stored songs (a saved clip, or after "Re-add") play from storage
   useEffect(() => {
     for (const t of audioTracks) {
@@ -1066,6 +1126,14 @@ export function EditorShell({
       attachMusicEl(t.id, musicUrls[t.id])
     }
   }, [audioTracks, musicUrls]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The recorder's teleprompter: the captions' words on the timeline (as they are shown)
+  const teleprompterWords = useMemo(() => voiceRecOpen
+    ? words.map(w => ({ word: (romanize && w.word_roman) || w.word, start_ms: w.start_ms - clip.start_ms, end_ms: w.end_ms - clip.start_ms }))
+    : [], [voiceRecOpen, words, romanize, clip.start_ms])
+  // Recorded voices: where they play (speech: music dips under them) and where they mute the original
+  const voiceClipLen = clip.end_ms - clip.start_ms
+  const voiceQuiet = useMemo(() => mainQuietRanges(audioTracks, musicDurations, voiceClipLen), [audioTracks, musicDurations, voiceClipLen])
+  const voiceSpeech = useMemo(() => voiceRanges(audioTracks, musicDurations, voiceClipLen), [audioTracks, musicDurations, voiceClipLen])
   // Where the voice is actually heard (clip time): music dips only there, as in the export — not
   // while the original sound is muted, in muted sections, under a B-roll's own sound, in a frame
   // whose main video is silent; with the sound detached, where its bars play
@@ -1083,8 +1151,9 @@ export function EditorShell({
       quietSections: playParts.filter(s => isFrameLayout(s.layout)
         ? mainAudioVolume(frameOf(s)) <= 0
         : addedVideoBox(s, mainVideoId)?.muted === false).map(span),
+      mainQuiet: voiceQuiet, voices: voiceSpeech,
     })
-  }, [words, sourceWords, trimmed, hasInserts, piecesOn, clip.start_ms, clip.end_ms, audioTracks, originalMuted, originalVolume, playParts, mainVideoId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [words, sourceWords, trimmed, hasInserts, piecesOn, clip.start_ms, clip.end_ms, audioTracks, originalMuted, originalVolume, playParts, mainVideoId, voiceQuiet, voiceSpeech]) // eslint-disable-line react-hooks/exhaustive-deps
   // Keep every track's audio in step with the playhead: play while the playhead is inside it,
   // re-sync if it drifts, pause otherwise; follow each track's volume
   // (every frame while playing, from the live time: the editor itself redraws only now and then)
@@ -1098,7 +1167,8 @@ export function EditorShell({
         continue
       }
       // Volume, fades and the dip under speech — the same rules as the export's mix
-      el.volume = isMainAudio(tr) && muteHere ? 0 : musicGainAt(tr, t, musicDurations[id], speech, clipLengthMs)
+      // (while a take is recorded the older voices are silent: it may replace them)
+      el.volume = (isMainAudio(tr) && muteHere) || (voiceRecRef.current.on && isVoiceTrack(tr)) ? 0 : musicGainAt(tr, t, musicDurations[id], speech, clipLengthMs)
       const local = (t - tr.start_ms + (tr.offset_ms ?? 0)) / 1000
       const stop = tr.end_ms ?? Infinity
       const inside = t >= tr.start_ms && t < stop && (!isFinite(el.duration) || local < el.duration)
@@ -1112,7 +1182,7 @@ export function EditorShell({
   }
   const syncMusicRef = useRef(syncMusic)
   syncMusicRef.current = syncMusic
-  useEffect(() => { syncMusic(liveTime.get(), playing) }, [playing, currentTimeMs, audioTracks, sectionMuted, musicDurations, speech]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { syncMusic(liveTime.get(), playing) }, [playing, currentTimeMs, audioTracks, sectionMuted, musicDurations, speech, voiceRecording]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => liveTime.subscribe(() => { if (usePlayerStore.getState().playing) syncMusicRef.current(liveTime.get(), true) }), [])
   useEffect(() => () => { for (const el of musicEls.current.values()) { el.pause(); URL.revokeObjectURL(el.src) } }, [])
   // Format panel: sections whose "what's in it" list is open, the kind of item shown, and the list
@@ -1151,7 +1221,11 @@ export function EditorShell({
     window.addEventListener('pointerdown', away, true)
     return () => window.removeEventListener('pointerdown', away, true)
   }, [activeOverlayId]) // eslint-disable-line react-hooks/exhaustive-deps
-  function pickText(id: string, open = true) { setActiveTextOverlayId(id); setActiveOverlayId(null); setPickedSegIdState(null); setPickedMusicId(null); setLastPick('text'); if (open) openSettings('text') }
+  function pickText(id: string, open = true) {
+    setActiveTextOverlayId(id); setActiveOverlayId(null); setPickedSegIdState(null); setPickedMusicId(null); setLastPick('text')
+    // (a template's: the Templates tool edits it)
+    if (open) openSettings(useMediaStore.getState().textOverlays.find(t => t.id === id)?.tpl_id ? 'templates' : 'text')
+  }
   function pickMusicTrack(id: string, open = true) { pickMusic(id); if (open) openSettings('music') }
   // Timeline clicks select; the same thing clicked again quickly (a double tap) opens its settings
   const lastTapRef = useRef<{ key: string; at: number } | null>(null)
@@ -1255,20 +1329,26 @@ export function EditorShell({
   const playingSection = useMemo(() => partAt(sections, currentTimeMs), [sections, currentTimeMs, clipLengthMs]) // eslint-disable-line react-hooks/exhaustive-deps
   const playingAdded = playingSegment ? addedVideoBox(playingSegment, mainVideoId) : null
   const brollSoundOn = !!playingAdded && playingAdded.muted === false
-  useEffect(() => { setSectionMuted(!!playingSegment?.muted || brollSoundOn) }, [playingSegment?.muted, brollSoundOn])
+  // (a recorded voice that mutes the original, or a take being recorded with the switch on, silences it too)
+  const voiceQuietHere = inRanges(voiceQuiet, currentTimeMs) || (voiceRecording.on && voiceRecording.mutes)
+  useEffect(() => { setSectionMuted(!!playingSegment?.muted || brollSoundOn || voiceQuietHere) }, [playingSegment?.muted, brollSoundOn, voiceQuietHere])
   // The editor redraws ~10 times a second (the player store): the main video's sound switches
   // exactly where a muted section (or a video with its own sound) starts, from the live time
-  const liveMuteRef = useRef({ parts: playParts, original: originalMuted, partAt })
-  liveMuteRef.current = { parts: playParts, original: originalMuted, partAt }
+  const liveMuteRef = useRef({ parts: playParts, original: originalMuted, partAt, quiet: voiceQuiet })
+  liveMuteRef.current = { parts: playParts, original: originalMuted, partAt, quiet: voiceQuiet }
   useEffect(() => liveTime.subscribe(() => {
     const v = videoRef.current
     if (!v) return
     const m = liveMuteRef.current.original || sectionMutedAt(liveTime.get())
     if (v.muted !== m) v.muted = m
   }), [mainVideoId]) // eslint-disable-line react-hooks/exhaustive-deps
-  /** The main video's own sound is off at clip time `t`: its section is muted, or a video on top plays its own sound there */
+  /**
+   * The main video's own sound is off at clip time `t`: its section is muted, a video on top plays its own
+   * sound there, or a recorded voice replaces it (its "Mute the original": audio.py main_quiet_ranges)
+   */
   function sectionMutedAt(t: number): boolean {
-    const { parts, partAt: at } = liveMuteRef.current
+    const { parts, partAt: at, quiet } = liveMuteRef.current
+    if (inRanges(quiet, t) || (voiceRecRef.current.on && voiceRecRef.current.mutes)) return true
     const part = at(parts, t)
     const added = part ? addedVideoBox(part, mainVideoId) : null
     return !!part?.muted || (!!added && added.muted === false)
@@ -2136,8 +2216,9 @@ export function EditorShell({
     }
   }
 
-  const musicName = (t: { storage_path: string }) => {
+  const musicName = (t: AudioTrack) => {
     if (isMainAudio(t)) return 'Original sound'
+    if (isVoiceTrack(t)) return voiceName(t, audioTracks)
     // Stored as "<id>--<the file's name>": just the name (older files have only the id)
     const file = (t.storage_path.split('/').pop() ?? '').replace(/\.[a-z0-9]+$/i, '')
     const name = file.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(--)?/i, '')
@@ -2209,6 +2290,16 @@ export function EditorShell({
     if (p.kind === 'music') { const tr = audioTracks.find(x => x.id === p.id); if (tr) splitMusicAt(tr, t); return }
     if (p.kind === 'photo') {
       setOverlays(prev => prev.flatMap(o => (o.id === p.id ? [{ ...o, end_ms: t }, { ...o, id: crypto.randomUUID(), start_ms: t }] : [o])))
+      return
+    }
+    // (a template: the whole of it, in two — the second half a template of its own)
+    const me = useMediaStore.getState().textOverlays.find(o => o.id === p.id)
+    const root = me?.tpl_id ? useMediaStore.getState().textOverlays.find(o => o.tpl_id === me.tpl_id && o.tpl) : null
+    if (root?.tpl) {
+      if (t <= root.start_ms + 100 || t >= root.end_ms - 100) return
+      const end = root.end_ms
+      updateTextOrTemplate(root.id, { end_ms: t })
+      placeTemplate(root.tpl, crypto.randomUUID(), { x: root.x ?? 0, y: root.y ?? 0 }, t, end)
       return
     }
     setTextOverlays(prev => prev.flatMap(o => (o.id === p.id ? [{ ...o, end_ms: t }, { ...o, id: crypto.randomUUID(), start_ms: t }] : [o])))
@@ -5102,6 +5193,9 @@ export function EditorShell({
   /** Delete a text straight away, no question (Ctrl+Z brings it back) */
   function askDeleteTextOverlay(id: string) {
     if (blocked({ kind: 'text', id })) return
+    // (a template's: the whole template)
+    const tid = useMediaStore.getState().textOverlays.find(t => t.id === id)?.tpl_id
+    if (tid) { removeTemplate(tid); setActiveTextOverlayId(null); cutEmptyEdges(); return }
     deleteTextOverlay(id)
     setActiveTextOverlayId(cur => cur === id ? null : cur)
     // (an empty space it kept at the clip's end or start goes too)
@@ -5178,6 +5272,8 @@ export function EditorShell({
   /** Delete a photo (or video on top) straight away, no question (Ctrl+Z brings it back) */
   function askDeleteOverlay(id: string) {
     if (blocked({ kind: 'photo', id })) return
+    const tid = tplOfPhoto(id)
+    if (tid) { removeTemplate(tid); cutEmptyEdges(); return }
     deleteOverlay(id)
     if (activeOverlayId === id) setActiveOverlayId(null)
     // (an empty space it kept at the clip's end or start goes too)
@@ -5244,9 +5340,10 @@ export function EditorShell({
     return [
       ...useEditorStore.getState().segments.filter(s => isShot(s, mainVideoId))
         .map(s => ({ id: s.id, start_ms: s.start_ms, end_ms: s.end_ms, track: s.track ?? 0, ref: { kind: 'shot' as const, id: s.id } })),
-      ...m.overlays.filter(o => o.type === 'image' && o.track != null)
+      ...m.overlays.filter(o => o.type === 'image' && o.track != null && !tplPhotoSet(m.textOverlays).has(o.id))
         .map(o => ({ id: o.id, start_ms: o.start_ms, end_ms: o.end_ms, track: o.track, ref: { kind: 'photo' as const, id: o.id } })),
-      ...m.textOverlays.filter(o => o.track != null)
+      // (a template takes room once, as its one bar: its first text)
+      ...m.textOverlays.filter(o => o.track != null && !(o.tpl_id && !o.tpl))
         .map(o => ({ id: o.id, start_ms: o.start_ms, end_ms: o.end_ms, track: o.track, ref: { kind: 'text' as const, id: o.id } })),
     ]
   }
@@ -5332,7 +5429,7 @@ export function EditorShell({
   function setTrackOf(ref: TrackRef, track: number) {
     if (ref.kind === 'shot') updateSegment(ref.id, { track })
     else if (ref.kind === 'photo') updateOverlay(ref.id, { track })
-    else if (ref.kind === 'text') updateTextOverlay(ref.id, { track })
+    else if (ref.kind === 'text') updateTextOrTemplate(ref.id, { track })
     else setAudioTracks(prev => prev.map(t => (t.id === ref.id ? { ...t, track } : t)))
   }
   /**
@@ -5531,6 +5628,203 @@ export function EditorShell({
     addPhotoPathAt(data.storage_path, data.preview_url, atMs)
     loadLibrary()
   }
+  // ── Templates (user, 2026-11-22: lib/shared/templates.ts) ──
+  // On the clip: each template's first text carries its settings
+  const templatesOnClip: TemplateOnClip[] = textOverlays.flatMap(t => (t.tpl && t.tpl_id ? [{ id: t.tpl_id, data: t.tpl, start_ms: t.start_ms, end_ms: t.end_ms }] : []))
+  const [tplPicked, setTplPicked] = useState<string | null>(null)
+  const [tplAdding, setTplAdding] = useState(false)
+  // A template is ONE thing in the editor (user, 2026-11-23: "every thing should be single element … usefull to
+  // move around"): one box on the preview, one bar on the timeline; its parts (texts and photos, which the export
+  // draws) are only moved, timed, hidden, locked and removed all together
+  /** Texts of templates that aren't its first (its bar): hidden from the timeline */
+  const tplFollowers = useMemo(() => new Set(textOverlays.filter(t => t.tpl_id && !t.tpl).map(t => t.id)), [textOverlays])
+  const tplPhotos = useMemo(() => tplPhotoSet(textOverlays), [textOverlays])
+  /** The template a photo is one of, if any */
+  function tplOfPhoto(id: string): string | null {
+    return useMediaStore.getState().textOverlays.find(t => t.tpl_id && t.tpl?.images.includes(id))?.tpl_id ?? null
+  }
+  /**
+   * A text changed. A template's: its time (moved, or an end trimmed), row, hidden and locked go for all its
+   * parts, a move on the frame too (the parts' entrances keep their delays); the rest just that text
+   */
+  function updateTextOrTemplate(id: string, u: Partial<TextOverlay>) {
+    const m = useMediaStore.getState()
+    const next = templatePartChanged(m.textOverlays, m.overlays, id, u)
+    if (!next) { updateTextOverlay(id, u); return }
+    useMediaStore.setState({ textOverlays: next.texts, overlays: next.photos })
+  }
+  /** A template moved or resized on the preview: every part, from where they all were when the drag began */
+  const tplDrag = useRef<{ id: string; texts: Map<string, TextOverlay>; photos: Map<string, Overlay> } | null>(null)
+  function moveTemplate(id: string, mv: PartMove, phase: 'start' | 'move' | 'end') {
+    const st = useMediaStore.getState()
+    const root = st.textOverlays.find(t => t.tpl_id === id && t.tpl)
+    if (!root || blocked({ kind: 'text', id: root.id })) return
+    if (phase === 'start' || tplDrag.current?.id !== id) {
+      const parts = new Set(templateParts(id))
+      tplDrag.current = { id, texts: new Map(st.textOverlays.filter(t => parts.has(t.id)).map(t => [t.id, t])), photos: new Map(st.overlays.filter(o => parts.has(o.id)).map(o => [o.id, o])) }
+    }
+    const snap = tplDrag.current
+    setTextOverlays(prev => prev.map(t => {
+      const was = snap.texts.get(t.id)
+      if (!was) return t
+      const now = movedPart(was, mv)
+      // (its size kept with its settings: made again — Apply changes — it stays this big)
+      return was.tpl && mv.r !== 1 ? { ...now, tpl: { ...was.tpl, scale: (was.tpl.scale ?? 1) * mv.r } } : now
+    }))
+    setOverlays(prev => prev.map(o => { const was = snap.photos.get(o.id); return was ? movedPart(was, mv) : o }))
+    if (phase === 'end') tplDrag.current = null
+  }
+  /** A template picked on the preview (its bar on the timeline with it); `open`: its settings too */
+  function pickTemplate(id: string, open = false) {
+    const root = useMediaStore.getState().textOverlays.find(t => t.tpl_id === id && t.tpl)
+    if (!root) return
+    pickText(root.id, false)
+    setTplPicked(id)
+    // (the Text tool open: it can't edit a template — the Templates tool takes its place)
+    if (open || (optionsOpen && tool === 'text')) openSettings('templates')
+  }
+  // Kept whole whatever happens to its bar: its parts on its row, a part left without its first text taken off,
+  // its first text copied (Duplicate, Copy / Paste) made a whole template of its own, its parts out of any group
+  const tplImagesSeen = useRef(new Map<string, string[]>())
+  useEffect(() => {
+    const roots = new Map<string, TextOverlay>(), copies: TextOverlay[] = []
+    for (const t of textOverlays) if (t.tpl_id && t.tpl) { if (roots.has(t.tpl_id)) copies.push(t); else roots.set(t.tpl_id, t) }
+    // (a copy of its bar: made again in full where the copy is, as a template of its own)
+    for (const c of copies) placeTemplate(c.tpl!, crypto.randomUUID(), { x: c.x ?? 0, y: c.y ?? 0 }, c.start_ms, c.end_ms, [c.id])
+    if (copies.length) return
+    const seen = tplImagesSeen.current
+    const lostPhotos = [...seen].filter(([tid]) => !roots.has(tid)).flatMap(([, ids]) => ids)
+    tplImagesSeen.current = new Map([...roots].map(([tid, r]) => [tid, r.tpl!.images]))
+    const lostTexts = textOverlays.some(t => t.tpl_id && !roots.has(t.tpl_id))
+    if (lostTexts) setTextOverlays(prev => prev.filter(t => !t.tpl_id || roots.has(t.tpl_id)))
+    if (lostPhotos.length) setOverlays(prev => prev.filter(o => !lostPhotos.includes(o.id)))
+    // (on its bar's row, hidden and locked as it is)
+    const rowOf = (tid: string | undefined) => (tid ? roots.get(tid) : undefined)
+    const photoTpl = new Map([...roots].flatMap(([tid, r]) => r.tpl!.images.map(i => [i, tid] as const)))
+    const off = (p: { track?: number | null; hidden?: boolean; locked?: boolean }, r: TextOverlay | undefined) =>
+      !!r && ((p.track ?? null) !== (r.track ?? null) || !!p.hidden !== !!r.hidden || !!p.locked !== !!r.locked)
+    if (textOverlays.some(t => t.tpl_id && !t.tpl && off(t, rowOf(t.tpl_id)))) {
+      setTextOverlays(prev => prev.map(t => { const r = t.tpl_id && !t.tpl ? rowOf(t.tpl_id) : undefined; return r && off(t, r) ? { ...t, track: r.track, hidden: r.hidden, locked: r.locked } : t }))
+    }
+    if (overlays.some(o => off(o, rowOf(photoTpl.get(o.id))))) {
+      setOverlays(prev => prev.map(o => { const r = rowOf(photoTpl.get(o.id)); return r && off(o, r) ? { ...o, track: r.track, hidden: r.hidden, locked: r.locked } : o }))
+    }
+    const loose = new Set([...tplFollowers, ...tplPhotos])
+    if (groups.some(g => g.some(x => loose.has(x)))) useGroupStore.setState(st => ({ groups: splitGroups(st.groups, [...loose]) }))
+  }, [textOverlays, overlays]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A template's text picked (the preview, the timeline): it's the one the panel edits
+  useEffect(() => {
+    const t = activeTextOverlayId ? textOverlays.find(x => x.id === activeTextOverlayId) : null
+    if (t?.tpl_id) setTplPicked(t.tpl_id)
+  }, [activeTextOverlayId]) // eslint-disable-line react-hooks/exhaustive-deps
+  /** A line's width, px at 1080 wide, in the font the preview draws the template's text in */
+  const tplMeasure = useMemo(() => {
+    const ctx = typeof document !== 'undefined' ? document.createElement('canvas').getContext('2d') : null
+    return (text: string, size: number, weight: number) => {
+      if (!ctx) return text.length * size * 0.55
+      ctx.font = `${weight} ${size}px "CC Roboto", Roboto, Arial, sans-serif`
+      return ctx.measureText(text).width
+    }
+  }, [])
+  /** Each template on the preview: the box round its parts */
+  const templatesOnPreview = useMemo(() => {
+    const out: { id: string; label: string; box: { x: number; y: number; w: number; h: number }; start_ms: number; end_ms: number; locked?: boolean }[] = []
+    for (const r of textOverlays) {
+      if (!r.tpl_id || !r.tpl || r.hidden) continue
+      const texts = textOverlays.filter(t => t.tpl_id === r.tpl_id)
+      const imgs = r.tpl.images, photos = overlays.filter(o => imgs.includes(o.id))
+      const box = partsBox(texts, photos, tplMeasure)
+      if (box) out.push({ id: r.tpl_id, label: kindDef(r.tpl.kind).name, box, start_ms: r.start_ms, end_ms: r.end_ms, locked: !!r.locked || isLocked({ kind: 'text', id: r.id }) })
+    }
+    return out
+  }, [textOverlays, overlays]) // eslint-disable-line react-hooks/exhaustive-deps
+  /** A template's parts on the clip: its texts and its photos */
+  function templateParts(id: string): string[] {
+    const { textOverlays: texts } = useMediaStore.getState()
+    const root = texts.find(t => t.tpl_id === id && t.tpl)
+    return [...texts.filter(t => t.tpl_id === id).map(t => t.id), ...(root?.tpl?.images ?? [])]
+  }
+  /** The template made (again) at `at` over [start, end], in place of `replace` (its old parts), as one group */
+  function placeTemplate(d: TemplateData, id: string, at: { x: number; y: number }, start: number, end: number, replace: string[] = []) {
+    const { texts, photos } = buildTemplate(d, id, at, start, end, tplMeasure)
+    const data: TemplateData = { ...d, images: photos.map(p => p.id) }
+    const gone = new Set(replace)
+    const { textOverlays: nowTexts, overlays: nowPhotos } = useMediaStore.getState()
+    // (made again: its parts keep the rows they were on)
+    const oldTexts = nowTexts.filter(t => gone.has(t.id))
+    // (all its parts on one row: the one its bar was on, else the lowest with room)
+    const row = oldTexts.find(t => t.tpl)?.track ?? oldTexts[0]?.track ?? freeTrack(start, end, undefined, false, visualItems().filter(i => !gone.has(i.id)))
+    const now = new Date().toISOString()
+    const z = Math.max(0, ...nowPhotos.filter(o => !gone.has(o.id)).map(o => o.z_index))
+    // (a photo's link saved with the template expires: the one the editor signed when it opened is used)
+    const fresh = new Map(nowPhotos.filter(o => o.storage_path && o.preview_url).map(o => [o.storage_path!, o.preview_url!]))
+    for (const p of photos) if (p.storage_path && fresh.has(p.storage_path)) p.preview_url = fresh.get(p.storage_path)
+    setTextOverlays(prev => [...prev.filter(t => !gone.has(t.id)), ...texts.map((t, i) => ({
+      ...t, clip_id: clip.id, ...(i === 0 ? { tpl: data } : {}), track: row,
+    }))])
+    setOverlays(prev => [...prev.filter(o => !gone.has(o.id)), ...photos.map((p, i) => ({
+      ...p, clip_id: clip.id, z_index: z + 1 + i, created_at: now, track: row,
+    }))])
+    // (not a timeline group: a template is one thing by its mark — its old parts out of any group)
+    if (replace.length) useGroupStore.setState(st => ({ groups: splitGroups(st.groups, replace) }))
+    return texts[0]?.id ?? null
+  }
+  /** A picture for a template (a platform's icon, a logo cut round); failing just leaves it out */
+  async function templatePic(body: object): Promise<TemplatePic | null> {
+    try {
+      const res = await fetch('/api/templates/assets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const r = await res.json().catch(() => ({})) as { storage_path?: string; preview_url?: string }
+      return res.ok && r.storage_path ? { path: r.storage_path, url: r.preview_url ?? null } : null
+    } catch { return null }
+  }
+  /** The icon a template's style shows, fetched when it hasn't got that one yet */
+  async function withTemplateIcon(d: TemplateData): Promise<TemplateData> {
+    const name = iconOf(d)
+    if (!name) return d.icon ? { ...d, icon: null } : d
+    if (d.icon?.path.includes(`/${name}-`)) return d
+    return { ...d, icon: await templatePic({ icon: name }) }
+  }
+  /**
+   * A template put on (the panel's Apply, its words as set there): at the playhead for 4 s (ending at the clip's
+   * end when the playhead is too near it), or over the whole clip for the kinds that go there (a handle tag, a
+   * disclaimer…). `kitLogo`: its photo is the kit's logo, cut round now
+   */
+  async function addTemplate(base: TemplateData, kitLogo: boolean) {
+    const kit = kitOn ?? paletteKit ?? null
+    setTplAdding(true)
+    try {
+      // (its platform's icon, and the kit's logo cut round when asked; either failing just leaves it out)
+      const [withIcon, logo] = await Promise.all([
+        withTemplateIcon(base),
+        kitLogo && kindDef(base.kind).photo && kit?.data.logo.path ? templatePic({ from: kit.data.logo.path, fit: 'contain' }) : null,
+      ])
+      const d: TemplateData = { ...withIcon, photo: logo ?? base.photo }
+      const whole = wholeClip(d)
+      const len = whole ? clipLengthMs : Math.min(TEMPLATE_MS, clipLengthMs)
+      const start = whole ? 0 : Math.max(0, Math.min(Math.round(currentTimeMs), clipLengthMs - len))
+      const id = crypto.randomUUID()
+      const first = placeTemplate(d, id, defaultAnchor(d), start, start + len)
+      setTplPicked(id)
+      if (first) setActiveTextOverlayId(first)
+      if (!whole) seekToMs(start + Math.min(1500, len - 100))
+    } finally { setTplAdding(false) }
+  }
+  /** New settings for a template on the clip: made again where its first text is now, over its time */
+  async function changeTemplate(id: string, d0: TemplateData) {
+    // (another style can show another platform's icon)
+    const d = await withTemplateIcon(d0)
+    const a = anchorOf(useMediaStore.getState().textOverlays, id)
+    if (!a) return
+    placeTemplate(d, id, { x: a.x, y: a.y }, a.start, a.end, templateParts(id))
+  }
+  function removeTemplate(id: string) {
+    const parts = new Set(templateParts(id))
+    setTextOverlays(prev => prev.filter(t => !parts.has(t.id)))
+    setOverlays(prev => prev.filter(o => !parts.has(o.id)))
+    useGroupStore.setState(st => ({ groups: splitGroups(st.groups, [...parts]) }))
+    if (tplPicked === id) setTplPicked(null)
+  }
+
   /** A stored photo put in at `atMs` for 5 s (its settings open) */
   function addPhotoPathAt(storagePath: string, previewUrl: string | null, atMs: number) {
     const at = Math.max(0, Math.min(atMs, clipLengthMs - 500))
@@ -6342,7 +6636,7 @@ export function EditorShell({
   /** The one text picked whose look Copy style takes: a text on the timeline, or a frame's text (not captions) */
   function lookSource(): { look: CopiedLook } | null {
     if (groupLive.length > 1 || !selTarget) return null
-    if (selTarget.kind === 'text') { const o = textOverlays.find(x => x.id === selTarget.id); return o ? { look: textLook(o) } : null }
+    if (selTarget.kind === 'text') { const o = textOverlays.find(x => x.id === selTarget.id); return o && !o.tpl_id ? { look: textLook(o) } : null }
     if (selTarget.kind === 'frameItem' && selTarget.segId) {
       const seg = segments.find(x => x.id === selTarget.segId)
       const it = seg ? frameOf(seg).items?.find(x => x.id === selTarget.id) : undefined
@@ -6355,8 +6649,9 @@ export function EditorShell({
     .flatMap(s => (frameOf(s).items ?? []).filter(it => it.kind === 'text' && !it.captions).map(it => ({ segId: s.id, id: it.id })))
   /** The texts Paste style puts the look on: those picked together, else the one picked */
   function lookTargets(): { texts: string[]; frame: { segId: string; id: string }[] } {
-    if (groupLive.length > 1) return { texts: groupLive.filter(id => textOverlays.some(t => t.id === id)), frame: [] }
-    if (selTarget?.kind === 'text') return { texts: [selTarget.id], frame: [] }
+    // (a template's texts keep their own looks: its settings are the Templates tool's)
+    if (groupLive.length > 1) return { texts: groupLive.filter(id => textOverlays.some(t => t.id === id && !t.tpl_id)), frame: [] }
+    if (selTarget?.kind === 'text') return { texts: textOverlays.some(t => t.id === selTarget.id && t.tpl_id) ? [] : [selTarget.id], frame: [] }
     if (selTarget?.kind === 'frameItem' && selTarget.segId && frameTexts().some(f => f.id === selTarget.id)) return { texts: [], frame: [{ segId: selTarget.segId, id: selTarget.id }] }
     return { texts: [], frame: [] }
   }
@@ -7142,13 +7437,13 @@ export function EditorShell({
   const panelCaptionStyle = playedCaptionParts && selectedLines.length
     ? playedPartAt(playedCaptionParts, selectedLines[0].start + 1).style
     : captionStyle
-  /** The style in the panel draws key words (a Creator one, any caption style, an animated preset): their tab */
-  const keyWordsOn = usesKeyWords(panelCaptionStyle)
-  /** The sub-tab shown: captions off, only Captions; Key words only with a style that draws them */
-  const captionTab: CaptionTab = !showCaptions ? 'captions' : captionTabPicked === 'keywords' && !keyWordsOn ? 'style' : captionTabPicked
-  // (AI picks the key words as soon as such a style is on, whichever tab is open — so the preview
-  // shows them before the first export, which picks them for the same styles: render.ts pickEmphasis)
-  useKeyWordsPick(clip.id, panelCaptionStyle, captionsPanelOpen && showCaptions && keyWordsOn, changeCaptionStyle)
+  /** The sub-tab shown: captions off, only Captions. (Key words is there with every style since
+   *  2026-11-24: the clip's key words are kept there whatever its style draws) */
+  const captionTab: CaptionTab = !showCaptions ? 'captions' : captionTabPicked
+  // AI picks the clip's key words as soon as it has captions — opened with them or right after
+  // they're made, any style, whatever is open — so Key words has them when it's opened (user,
+  // 2026-11-24) and the preview shows them before the first export (render.ts pickEmphasis)
+  useAutoKeyWords(clip.id, showCaptions && words.length > 0, loadedStateRef)
   /** A change in the Captions panel: a look change goes to the selected lines (none selected: every caption); anything else is the whole clip's */
   function changeCaptionStyle(updates: Partial<CaptionStyle>) {
     const st = useCaptionStore.getState()
@@ -7353,7 +7648,7 @@ export function EditorShell({
       } else if (t.segId) updateFrameItem(t.segId, t.id, patch)
     }
     else if (t.kind === 'photo') updateOverlay(t.id, patch)
-    else if (t.kind === 'text') updateTextOverlay(t.id, patch)
+    else if (t.kind === 'text') updateTextOrTemplate(t.id, patch)
     else setAudioTracks(prev => prev.map(x => x.id === t.id ? { ...x, ...patch } : x))
   }
 
@@ -8072,10 +8367,10 @@ export function EditorShell({
                   {/* The captions' style on a sample line, over every sub-tab (the selected lines' style, as the panel shows); dimmed while off */}
                   <CaptionPreview style={shownPanelCaptionStyle} textCase={captionTextCase} dim={!showCaptions} />
                   {/* Sub-bar: the Captions tool one kind of setting at a time (user, 2026-11-06; one long
-                      scroll before). Captions off: only Captions; Key words only with a style that draws them */}
+                      scroll before). Captions off: only Captions; Key words with every style (2026-11-24) */}
                   {/* (user, 2026-11-09: as the Text panel's) each tab its icon, a raised pill sliding under the open one, a lime bar under its name */}
                   {(() => {
-                    const shownTabs = CAPTION_TABS.filter(t => t.id !== 'keywords' || keyWordsOn)
+                    const shownTabs = CAPTION_TABS
                     return (
                       <div role="tablist" aria-label="Caption settings" className="ed-subtabs mt-2"
                         style={{ '--n': shownTabs.length, '--i': Math.max(0, shownTabs.findIndex(t => t.id === captionTab)) } as React.CSSProperties}>
@@ -8308,6 +8603,7 @@ export function EditorShell({
                 selectedId={pickedMusicId} onSelect={pickMusic}
                 currentTimeMs={currentTimeMs} clipLengthMs={clipLengthMs} durations={musicDurations}
                 onAddTrack={addMusicTrack} onAddSound={addLibrarySound}
+                onRecord={() => setVoiceRecOpen(true)}
                 uploads={musicUploads}
                 missing={t => !isMainAudio(t) && !t.storage_path.startsWith('audio/') && !musicEls.current.has(t.id)}
                 onReadd={readdMusic}
@@ -8316,6 +8612,27 @@ export function EditorShell({
                 onUpdateTrack={(id, u) => { if (!blocked({ kind: 'music', id })) setAudioTracks(prev => prev.map(t => t.id === id ? { ...t, ...u } : t)) }} />
               </>
             )}
+
+            {tool === 'templates' && (() => {
+              const k = kitOn ?? paletteKit ?? null
+              return (
+                <TemplatesPanel
+                  onClip={templatesOnClip}
+                  selectedId={tplPicked}
+                  onSelect={id => {
+                    setTplPicked(id)
+                    const t = id ? textOverlays.find(x => x.tpl_id === id && x.tpl) : null
+                    if (t) { setActiveTextOverlayId(t.id); seekToMs(Math.min(t.end_ms - 100, t.start_ms + 1500)) }
+                  }}
+                  onAdd={(d, kitLogo) => { void addTemplate(d, kitLogo) }}
+                  onChange={(id, d) => { void changeTemplate(id, d) }}
+                  onRemove={removeTemplate}
+                  adding={tplAdding}
+                  measure={tplMeasure}
+                  kit={k ? { name: k.data.card_title?.trim() || k.name, handle: k.data.handle, main: k.data.colors.main, accent: k.data.colors.accent, logoPath: k.data.logo.path ?? null } : null}
+                />
+              )
+            })()}
 
             {/* Media: Import · B-roll · Photos (the switch on its own row: the names don't fit beside the header's buttons)
                 (Memes hidden 2026-11-13 until KLIPY/GIPHY approve: was grid-cols-4 with 'memes' last) */}
@@ -8475,7 +8792,7 @@ export function EditorShell({
                     onFontTry: t => setFrameFontTry(t ? { itemId: it.id, font: t.family } : null),
                   }
                 })()}
-                onUpdate={(id, patch) => { if (!blocked({ kind: 'text', id })) updateTextOverlay(id, patch) }}
+                onUpdate={(id, patch) => { if (!blocked({ kind: 'text', id })) updateTextOrTemplate(id, patch) }}
                 onRemove={askDeleteTextOverlay}
                 brand={styleKit && brandTextStyles ? { name: styleKit.name, styles: brandTextStyles, lines: styleKit.data.words?.lines ?? [], onFontAll: styleKit.data.title.font ? brandFontOnAll : undefined } : null}
                 // Copy style: off until a text is picked / a style copied
@@ -8676,6 +8993,10 @@ export function EditorShell({
                     if (Object.keys(v).length) updateTextOverlay(id, v)
                   }} onSelectTextOverlay={id => { if (id) pickText(id, false); else setActiveTextOverlayId(null) }}
                   editTextOverlayId={previewOpen ? editTextId : null} onEditTextDone={() => setEditTextId(null)} onDeleteTextOverlay={askDeleteTextOverlay}
+                  templates={templatesOnPreview} templatePhotoIds={tplPhotos}
+                  activeTemplateId={textOverlays.find(t => t.id === activeTextOverlayId)?.tpl_id ?? null}
+                  onSelectTemplate={id => pickTemplate(id)} onOpenTemplate={id => pickTemplate(id, true)}
+                  onTemplateMove={moveTemplate} onDeleteTemplate={id => { const r = textOverlays.find(t => t.tpl_id === id && t.tpl); if (r) askDeleteTextOverlay(r.id) }}
                   onCaptionPositionChange={(y, x) => updateCaptionStyle({ position_y: y, position_x: x })}
                   // (no resize handles while the kit's caption look is in charge — moving them stays free)
                   onCaptionSizeChange={captionsFromKit ? undefined : size => changeCaptionStyle({ size })}
@@ -8736,6 +9057,20 @@ export function EditorShell({
         </aside>
       </div>
 
+      {/* Record voice: the recorder floats over the timeline (the picture stays in view) */}
+      {voiceRecOpen && (
+        <VoiceRecorder
+          onClose={() => setVoiceRecOpen(false)}
+          getTime={liveTime.get} subscribe={liveTime.subscribe}
+          isPlaying={() => usePlayerStore.getState().playing}
+          play={() => { if (!usePlayerStore.getState().playing) togglePlay() }}
+          pause={pause} seek={seekToMs}
+          clipLengthMs={clipLengthMs}
+          words={teleprompterWords}
+          muteOriginal={voiceMutes} onMuteOriginal={setVoiceMutes}
+          onRecording={on => setVoiceRecording({ on, mutes: on && voiceMutes })}
+          onTake={addVoiceTake} />
+      )}
       {/* The line between the video and the play bar: drag to resize (double-click resets) */}
       {!timelineHidden && (
         <div className="ed-row-wrap relative shrink-0" style={{ height: 0, zIndex: 30, transform: 'translateY(4px)' }}>
@@ -8888,6 +9223,14 @@ export function EditorShell({
                     <path d="M15 14v7M12 18l3 3 3-3" stroke="#c084fc" />
                   </svg>
                 </button>
+                {/* Record voice: talk over the clip while it plays — a dub or a voiceover (VoiceRecorder) */}
+                <button onClick={() => setVoiceRecOpen(o => !o)} aria-pressed={voiceRecOpen}
+                  aria-label={voiceRecOpen ? 'Close the voice recorder' : 'Record your voice over the clip'}
+                  data-hint="record" className="ed-tl-btn" data-active={voiceRecOpen || undefined}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="9" y="2.5" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" />
+                  </svg>
+                </button>
                 {/* (hide / mute / lock: beside each row on the timeline, not here) */}
               </>
             )
@@ -8960,7 +9303,7 @@ export function EditorShell({
         <StableTimeline
           onBaseHeight={setTimelineBaseH}
           selectedMusicId={pickedMusicId} onSelectMusic={id => pickMusicTrack(id, doubleTap(`m${id}`))}
-          photos={overlays.filter(o => o.type === 'image' || (o.type === 'video' && o.source_video_id)).map(o => ({
+          photos={overlays.filter(o => (o.type === 'image' && !tplPhotos.has(o.id)) || (o.type === 'video' && o.source_video_id)).map(o => ({
             id: o.id, start_ms: o.start_ms, end_ms: o.end_ms, url: o.preview_url, hidden: o.hidden, locked: isLocked({ kind: 'photo', id: o.id }), track: o.track, full: o.x <= 0.001 && o.y <= 0.001 && o.w >= 0.999 && o.h >= 0.999,
             ...(o.type === 'video' ? { video: { url: videoUrls[o.source_video_id!] ?? o.preview_url, offset: o.source_offset_ms ?? 0, muted: !!o.muted } } : {}),
           }))}
@@ -9015,11 +9358,15 @@ export function EditorShell({
           clipEndRoomMs={piecesOn ? undefined : clipEdgeLimits.endLater}
           pickedSegmentId={pickedSegId}
           groupSel={groupLive} onGroupSel={setGroupPick}
-          groups={groups} onGroup={groupPicked} onUngroup={ungroupPicked} onGroupRows={moveGroupRows} onGroupParts={moveGroupParts} onGroupPartsToRow={liftParts}
+          groups={groups.map(g => g.filter(x => !tplFollowers.has(x) && !tplPhotos.has(x))).filter(g => g.length > 1)} onGroup={groupPicked} onUngroup={ungroupPicked} onGroupRows={moveGroupRows} onGroupParts={moveGroupParts} onGroupPartsToRow={liftParts}
           onPickSegment={id => (!id ? clearPicksRef.current() : shots.some(x => x.id === id) ? pickShot(id, doubleTap(`s${id}`)) : pickSection(id, doubleTap(`s${id}`)))}
-          textOverlays={textOverlays.map(o => o.locked || !isLocked({ kind: 'text', id: o.id }) ? o : { ...o, locked: true })} activeTextOverlayId={activeTextOverlayId}
+          // (a template: one bar, its name on it — its other parts ride along)
+          textOverlays={textOverlays.filter(o => !tplFollowers.has(o.id)).map(o => {
+            const t = o.tpl ? { ...o, text: kindDef(o.tpl.kind).name, opacity: 1 } : o
+            return t.locked || !isLocked({ kind: 'text', id: t.id }) ? t : { ...t, locked: true }
+          })} activeTextOverlayId={activeTextOverlayId}
           onSelectTextOverlay={id => { if (id) pickText(id, doubleTap(`t${id}`)); else setActiveTextOverlayId(null) }}
-          onTextOverlayUpdate={(id, u) => { if (!blocked({ kind: 'text', id })) updateTextOverlay(id, u) }}
+          onTextOverlayUpdate={(id, u) => { if (!blocked({ kind: 'text', id })) updateTextOrTemplate(id, u) }}
           frameSeg={frameSeg}
           activeFrameItemId={activeFrameItemId}
           laneHighlight={laneHighlight}
@@ -9275,6 +9622,11 @@ function withExportMark<L extends object>(layers: L | null, edited: boolean): L 
   return { ...(layers ?? { v: 1 as const, rows: [], cut: [], parts: [] }), editedSinceExport: true } as L & { editedSinceExport: true }
 }
 
+/** The photos that are templates' parts (each template's first text lists them) */
+function tplPhotoSet(texts: TextOverlay[]): Set<string> {
+  return new Set(texts.flatMap(t => (t.tpl_id && t.tpl ? t.tpl.images : [])))
+}
+
 /** The timeline's groups saved beside the rows (clips.layers.groups: groups.ts); none: left out */
 function withGroupsSaved<L extends object>(layers: L | null, groups: Groups): L | { v: 1; rows: string[]; cut: never[]; parts: string[]; groups: Groups } | null {
   if (!groups.length) return layers
@@ -9310,7 +9662,7 @@ const CAPTION_TABS: { id: CaptionTab; label: string; tip: string }[] = [
   { id: 'captions', label: 'Captions', tip: 'Captions on or off, their language, and their words' },
   { id: 'style', label: 'Style', tip: 'How the captions look and move' },
   { id: 'look', label: 'Look', tip: 'Colours, font, size and capitals' },
-  { id: 'keywords', label: 'Key words', tip: 'The words the style makes stand out' },
+  { id: 'keywords', label: 'Key words', tip: 'The clip’s important words, picked by AI' },
 ]
 
 /** Each Captions sub-tab's icon (24-unit paths): a CC box, a wand with sparks, a palette, a highlighted word */

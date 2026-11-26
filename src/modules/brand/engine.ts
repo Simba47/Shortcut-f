@@ -288,14 +288,15 @@ function logoOverlay(t: BrandTarget, kit: Pick<BrandKit, 'data' | 'logo_url'>, r
  */
 /** A kit's title look on a clip's texts: its font (for Latin text), colour and size; locked ones stay as they are */
 export function kitTitleOnTexts(texts: TextOverlay[], d: BrandKitData): TextOverlay[] {
-  return texts.map(x => (x.locked ? x : { ...x, font: textFontOf(d, x), color: d.title.color, size: d.title.size }))
+  // (a template's texts keep their own look: lib/shared/templates.ts)
+  return texts.map(x => (x.locked || x.tpl_id ? x : { ...x, font: textFontOf(d, x), color: d.title.color, size: d.title.size }))
 }
 
 export function putBrandOn(t: BrandTarget, kit: BrandKit): { target: BrandTarget; before: BrandBefore; applied: BrandKitData; note?: string } {
   const d = kit.data
   const before: BrandBefore = {
     ...NO_BEFORE,
-    texts: Object.fromEntries(t.texts.filter(x => !x.locked).map(x => [x.id, { font: x.font ?? null, color: x.color ?? null, size: x.size ?? null }])),
+    texts: Object.fromEntries(t.texts.filter(x => !x.locked && !x.tpl_id).map(x => [x.id, { font: x.font ?? null, color: x.color ?? null, size: x.size ?? null }])),
     // (capitals are yes or no — never empty: a clip with no caption style yet had them off. An empty one
     // put back made every save fail, user 2026-11-04: "Connection lost" with the internet fine)
     caption: d.captions.on ? Object.fromEntries(Object.keys(brandCaptionStyle(d.captions)).map(k => [k, (t.caption as unknown as Record<string, unknown>)[k] ?? (k === 'uppercase' ? false : null)])) as Partial<CaptionStyle> : null,
@@ -481,7 +482,7 @@ export function updateBrand(t: BrandTarget, old: BrandKitData, kit: BrandKit, be
 
   // Text on the clip
   const texts = t.texts.map(x => {
-    if (x.locked) return x
+    if (x.locked || x.tpl_id) return x
     if (n.title.on === false || old.title.on === false) return x
     const font = x.font === titleFont(old) && isLatinText(x.text ?? '') ? titleFont(n) : x.font
     const color = x.color === old.title.color ? n.title.color : x.color

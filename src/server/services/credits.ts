@@ -23,7 +23,23 @@ export interface Hold { id: string; amount: number }
  * gives them back.
  */
 export const RENDER_CANCELLED = 'Cancelled by the user'
-export interface ReserveArgs { amount: number; refType: 'transcribe' | 'caption' | 'render' | 'search' | 'ai_clips' | 'ask_ai' | 'rewrite' | 'subjects' | 'reading'; refId?: string; jobId?: string | null }
+export interface ReserveArgs {
+  amount: number; refType: 'transcribe' | 'caption' | 'render' | 'search' | 'ai_clips' | 'ask_ai' | 'rewrite' | 'subjects' | 'reading'; refId?: string; jobId?: string | null
+  /** The action in a few words, for the credit history ("Searched “funny moments”", "5 clips", "2 min") */
+  note?: string | null
+}
+
+/** Spends whose ref_id is a clip; the rest name a video */
+const CLIP_REFS = new Set(['render', 'caption', 'transcribe', 'subjects'])
+const VIDEO_REFS = new Set(['reading', 'search', 'ai_clips', 'ask_ai', 'rewrite'])
+/** What a spend was for, by name, as it is now: a clip's own title, else its video's; a video's title */
+function refName(db: postgres.Sql | postgres.TransactionSql, refType: string, refId: string | null | undefined) {
+  if (!refId) return db`NULL::text`
+  if (CLIP_REFS.has(refType)) return db`(SELECT COALESCE(NULLIF(c.title, ''), v.title) FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.id::text = ${refId})`
+  if (VIDEO_REFS.has(refType)) return db`(SELECT title FROM videos WHERE id::text = ${refId})`
+  return db`NULL::text`
+}
+const cleanNote = (n: string | null | undefined) => (n ? n.replace(/\s+/g, ' ').trim().slice(0, 140) || null : null)
 
 type GrantRow = { id: string; remaining: number; expires_at: Date | null; kind: GrantKind; created_at: Date }
 const toSpendable = (r: GrantRow): SpendableGrant => ({ id: r.id, remaining: r.remaining, expiresAt: r.expires_at, kind: r.kind, createdAt: r.created_at })
@@ -129,10 +145,10 @@ export async function reserve(userId: string, a: ReserveArgs, db: Db = sql): Pro
   await ensureCreditsSchema()
   return inTx(db, async tx => {
     if (mode === 'shadow') {
-      const [hold] = await tx<{ id: string }[]>`
-        INSERT INTO credit_holds (user_id, amount, ref_type, ref_id, job_id, status, shadow, settled_at)
-        VALUES (${userId}, ${a.amount}, ${a.refType}, ${a.refId ?? null}, ${a.jobId ?? null}, 'settled', true, now()) RETURNING id`
-      await tx`INSERT INTO credit_ledger (user_id, delta, reason, ref_type, ref_id, hold_id, shadow) VALUES (${userId}, ${-a.amount}, 'spend', ${a.refType}, ${a.refId ?? null}, ${hold.id}, true)`
+      const [hold] = await tx<{ id: string; ref_name: string | null }[]>`
+        INSERT INTO credit_holds (user_id, amount, ref_type, ref_id, job_id, status, shadow, settled_at, note, ref_name)
+        VALUES (${userId}, ${a.amount}, ${a.refType}, ${a.refId ?? null}, ${a.jobId ?? null}, 'settled', true, now(), ${cleanNote(a.note)}, ${refName(tx, a.refType, a.refId)}) RETURNING id, ref_name`
+      await tx`INSERT INTO credit_ledger (user_id, delta, reason, ref_type, ref_id, hold_id, shadow, note, ref_name) VALUES (${userId}, ${-a.amount}, 'spend', ${a.refType}, ${a.refId ?? null}, ${hold.id}, true, ${cleanNote(a.note)}, ${hold.ref_name})`
       return { id: hold.id, amount: a.amount }
     }
     await lockUser(tx, userId)
@@ -145,10 +161,10 @@ export async function reserve(userId: string, a: ReserveArgs, db: Db = sql): Pro
       throw Object.assign(new Error(`This needs ${a.amount} credit${a.amount === 1 ? '' : 's'} and you have ${have}. Top up or upgrade to continue.`), { status: 402, expose: true, needed: a.amount, balance: have })
     }
     for (const p of plan) await tx`UPDATE credit_grants SET remaining = remaining - ${p.take} WHERE id = ${p.grantId}`
-    const [hold] = await tx<{ id: string }[]>`
-      INSERT INTO credit_holds (user_id, amount, ref_type, ref_id, job_id, allocations)
-      VALUES (${userId}, ${a.amount}, ${a.refType}, ${a.refId ?? null}, ${a.jobId ?? null}, ${tx.json(plan as never)}) RETURNING id`
-    await tx`INSERT INTO credit_ledger (user_id, delta, reason, ref_type, ref_id, hold_id) VALUES (${userId}, ${-a.amount}, 'spend', ${a.refType}, ${a.refId ?? null}, ${hold.id})`
+    const [hold] = await tx<{ id: string; ref_name: string | null }[]>`
+      INSERT INTO credit_holds (user_id, amount, ref_type, ref_id, job_id, allocations, note, ref_name)
+      VALUES (${userId}, ${a.amount}, ${a.refType}, ${a.refId ?? null}, ${a.jobId ?? null}, ${tx.json(plan as never)}, ${cleanNote(a.note)}, ${refName(tx, a.refType, a.refId)}) RETURNING id, ref_name`
+    await tx`INSERT INTO credit_ledger (user_id, delta, reason, ref_type, ref_id, hold_id, note, ref_name) VALUES (${userId}, ${-a.amount}, 'spend', ${a.refType}, ${a.refId ?? null}, ${hold.id}, ${cleanNote(a.note)}, ${hold.ref_name})`
     return { id: hold.id, amount: a.amount }
   })
 }
@@ -173,13 +189,13 @@ export async function settle(holdId: string, db: Db = sql): Promise<void> {
 /** The job did not work: the credits go back to the grants they came from (once, however often it is called) */
 export async function release(holdId: string, db: Db = sql): Promise<void> {
   await inTx(db, async tx => {
-    const [hold] = await tx<{ user_id: string; amount: number; allocations: { grantId: string; take: number }[]; ref_type: string; ref_id: string | null }[]>`
+    const [hold] = await tx<{ user_id: string; amount: number; allocations: { grantId: string; take: number }[]; ref_type: string; ref_id: string | null; note: string | null; ref_name: string | null }[]>`
       UPDATE credit_holds SET status = 'released', settled_at = now()
-      WHERE id = ${holdId} AND status = 'held' RETURNING user_id, amount, allocations, ref_type, ref_id`
+      WHERE id = ${holdId} AND status = 'held' RETURNING user_id, amount, allocations, ref_type, ref_id, note, ref_name`
     if (!hold) return
     await lockUser(tx, hold.user_id)
     for (const p of hold.allocations) await tx`UPDATE credit_grants SET remaining = remaining + ${p.take} WHERE id = ${p.grantId}`
-    await tx`INSERT INTO credit_ledger (user_id, delta, reason, ref_type, ref_id, hold_id) VALUES (${hold.user_id}, ${hold.amount}, 'release', ${hold.ref_type}, ${hold.ref_id}, ${holdId})`
+    await tx`INSERT INTO credit_ledger (user_id, delta, reason, ref_type, ref_id, hold_id, note, ref_name) VALUES (${hold.user_id}, ${hold.amount}, 'release', ${hold.ref_type}, ${hold.ref_id}, ${holdId}, ${hold.note}, ${hold.ref_name})`
   })
 }
 
@@ -225,10 +241,21 @@ export async function sweep(userId?: string): Promise<void> {
   await Promise.all([holds, reading])
 }
 
-export interface LedgerRow { id: string; delta: number; reason: string; refType: string | null; refId: string | null; shadow: boolean; createdAt: Date }
+export interface LedgerRow {
+  id: string; delta: number; reason: string; refType: string | null; refId: string | null; shadow: boolean; createdAt: Date
+  /** The action in words ("Searched “funny moments”"), and the video's or clip's name (credit history, user 2026-11-25) */
+  note: string | null; refName: string | null
+}
 export async function recentLedger(userId: string, limit = 30): Promise<LedgerRow[]> {
   await ensureCreditsSchema()
-  const rows = await sql<{ id: string; delta: number; reason: string; ref_type: string | null; ref_id: string | null; shadow: boolean; created_at: Date }[]>`
-    SELECT id, delta, reason, ref_type, ref_id, shadow, created_at FROM credit_ledger WHERE user_id = ${userId} ORDER BY id DESC LIMIT ${limit}`
-  return rows.map(r => ({ id: r.id, delta: r.delta, reason: r.reason, refType: r.ref_type, refId: r.ref_id, shadow: r.shadow, createdAt: r.created_at }))
+  // (a row from before names were kept: its video's or clip's name now, when it is still there)
+  const rows = await sql<{ id: string; delta: number; reason: string; ref_type: string | null; ref_id: string | null; shadow: boolean; created_at: Date; note: string | null; ref_name: string | null }[]>`
+    SELECT l.id, l.delta, l.reason, l.ref_type, l.ref_id, l.shadow, l.created_at, l.note,
+      COALESCE(l.ref_name,
+        CASE WHEN l.ref_type IN ('render', 'caption', 'transcribe', 'subjects')
+          THEN (SELECT COALESCE(NULLIF(c.title, ''), v.title) FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.id::text = l.ref_id)
+        WHEN l.ref_type IN ('reading', 'search', 'ai_clips', 'ask_ai', 'rewrite')
+          THEN (SELECT v.title FROM videos v WHERE v.id::text = l.ref_id) END) AS ref_name
+    FROM credit_ledger l WHERE l.user_id = ${userId} ORDER BY l.id DESC LIMIT ${limit}`
+  return rows.map(r => ({ id: r.id, delta: r.delta, reason: r.reason, refType: r.ref_type, refId: r.ref_id, shadow: r.shadow, createdAt: r.created_at, note: r.note, refName: r.ref_name }))
 }

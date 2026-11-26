@@ -425,6 +425,10 @@ export interface TextOverlay {
   animation?: 'none' | 'fade' | 'pop' | 'zoom-in' | 'zoom-out' | 'blur'
     | 'slide' | 'slide-down' | 'slide-left' | 'slide-right' | 'drop' | 'bounce'
     | 'typewriter' | 'wipe' | 'spin' | 'flicker' | 'glitch'
+  /** Part of a template (Templates tool: lib/shared/templates.ts): its id, and on its first text its settings.
+   *  Kept with the text's look (textStyle.ts savedTextStyle); the export ignores them */
+  tpl_id?: string
+  tpl?: import('./templates').TemplateData
 }
 
 export interface AudioTrack {
@@ -446,6 +450,10 @@ export interface AudioTrack {
   locked?: boolean
   /** Editor: the audio track it is on (tracks.ts). Saved in clips.layers. */
   track?: number
+  /** Recorded in the editor (Record voice): named "Voice", never dips under speech (it is the speech) */
+  voice?: boolean
+  /** A recorded voice that replaces the main video's own sound under it (a dub): preview + export (audio.py) */
+  mutes_original?: boolean
 }
 
 export interface Transition {

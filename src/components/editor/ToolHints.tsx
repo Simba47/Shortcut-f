@@ -23,7 +23,7 @@ import './toolHints.css'
 
 export type HintId =
   | 'fold' | 'unfold' | 'split' | 'duplicate' | 'mirror' | 'rotate' | 'freeze' | 'delete'
-  | 'group' | 'ungroup' | 'detach' | 'undo' | 'redo' | 'prev' | 'play' | 'next' | 'reset'
+  | 'group' | 'ungroup' | 'detach' | 'record' | 'undo' | 'redo' | 'prev' | 'play' | 'next' | 'reset'
   | 'zoomout' | 'fit' | 'zoomin'
 
 type Hint = { name: string; keys?: (mod: string) => string[]; note?: string }
@@ -42,6 +42,7 @@ const HINTS: Record<HintId, Hint> = {
   group:     { name: 'Group', keys: m => [m, 'G'] },
   ungroup:   { name: 'Ungroup', keys: m => [m, 'Shift', 'G'] },
   detach:    { name: 'Detach audio' },
+  record:    { name: 'Record voice', note: 'The clip plays while you talk' },
   undo:      { name: 'Undo', keys: m => [m, 'Z'] },
   redo:      { name: 'Redo', keys: m => [m, 'Shift', 'Z'] },
   prev:      { name: 'Previous section' },
@@ -245,6 +246,7 @@ const ICON: Record<HintId, React.ReactNode> = {
   group: <><path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7" /><path d="M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.7-1.7" /></>,
   ungroup: <><path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7" /><path d="M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.7-1.7" /><path d="M4 4l16 16" /></>,
   detach: <><path d="M9 17V5l10-2v6" /><circle cx="6.5" cy="17" r="2.5" /><path d="M15 14v7M12 18l3 3 3-3" stroke="#c084fc" /></>,
+  record: <><rect x="9" y="2.5" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5" /></>,
   undo: <><path d="M9 14L4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 010 11H11" /></>,
   redo: <><path d="M15 14l5-5-5-5" /><path d="M20 9H9.5a5.5 5.5 0 000 11H13" /></>,
   prev: <><rect x="5" y="5" width="2.4" height="14" rx="1" fill="currentColor" stroke="none" /><path d="M19 5.8v12.4a.8.8 0 01-1.2.7L9.5 12.7a.8.8 0 010-1.4l8.3-6.2a.8.8 0 011.2.7z" fill="currentColor" stroke="none" /></>,
@@ -277,7 +279,7 @@ function Mini({ id, cls, x, y }: { id: HintId; cls: string; x: number; y: number
 const TIMING: Partial<Record<HintId, { at?: number; d?: number }>> = {
   fold: { at: 0.36 }, unfold: { at: 0.44 }, split: { at: 0.44 }, duplicate: { at: 0.44 }, mirror: { at: 0.4 },
   rotate: { at: 0.4 }, freeze: { at: 0.2, d: 3.8 }, delete: { at: 0.44 }, group: { at: 0.42 }, ungroup: { at: 0.3 },
-  detach: { at: 0.36 }, undo: { at: 0.56, d: 3.4 }, redo: { at: 0.66, d: 4.2 }, play: { at: 0.2 }, reset: { at: 0.44 },
+  detach: { at: 0.36 }, record: { at: 0.16 }, undo: { at: 0.56, d: 3.4 }, redo: { at: 0.66, d: 4.2 }, play: { at: 0.2 }, reset: { at: 0.44 },
   zoomout: { at: 0.36 }, fit: { at: 0.36 }, zoomin: { at: 0.36 },
 }
 
@@ -367,6 +369,14 @@ function scene(id: HintId): React.ReactNode {
           <Mini id="detach" cls="th-det-mute" x={156} y={1} />
         </Bar>
         <Bar k="music" x={16} w={184} {...ROW2} cls="th-det-music" sel="th-det-sel" />
+      </>)
+    case 'record':
+      return (<>
+        <i className="th-ruler" />
+        <Bar x={16} w={184} />
+        <Bar k="music" x={30} w={150} {...ROW2} cls="th-rec-take" />
+        <i className="th-rec-dot" style={{ left: 22, top: 10 }} />
+        <i className="th-ph th-rec-ph" style={{ left: 30 }} />
       </>)
     case 'reset':
       return (<>

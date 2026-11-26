@@ -20,6 +20,9 @@ const FIELDS: Record<string, Record<string, How>> = {
     // (which track it sits on: clips.layers.lanes; the export stacks by it)
     track: 'layers',
     ...Object.fromEntries(TEXT_STYLE_KEYS.map(k => [k, 'style' as const])),
+    // (a template's marks: saved inside the text's look, read only by the editor — the export draws the text as
+    // any other: lib/shared/templates.ts, 2026-11-22)
+    tpl_id: 'editor', tpl: 'editor',
   },
   Overlay: {
     id: 'saved', clip_id: 'saved', type: 'saved', storage_path: 'saved', source_video_id: 'saved', source_offset_ms: 'saved',
@@ -33,6 +36,8 @@ const FIELDS: Record<string, Record<string, How>> = {
   AudioTrack: {
     id: 'saved', clip_id: 'saved', storage_path: 'saved', start_ms: 'saved', volume: 'saved', duck_under_speech: 'saved',
     offset_ms: 'saved', end_ms: 'saved', fade_in: 'saved', fade_out: 'saved', muted: 'saved', locked: 'editor', track: 'layers',
+    // (Record voice, 2026-11-25: audio_tracks.voice / mutes_original, mixed by the worker's audio.py)
+    voice: 'saved', mutes_original: 'saved',
   },
   Transition: { id: 'saved', clip_id: 'saved', after_segment_id: 'saved', type: 'saved', duration_ms: 'saved' },
   CaptionStyle: {

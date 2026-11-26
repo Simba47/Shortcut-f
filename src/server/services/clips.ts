@@ -244,6 +244,8 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
   const transitionKindOk = await transitionKindsAllowed()
   const hasRemoveFillers = typeof body.removeFillers === 'boolean' && await clipsHasRemoveFillers()
   const hasFades = await hasColumn('audio_tracks', 'fade_in')
+  // Record voice: a recorded bar and its "Mute the original", once the worker has added the fields
+  const hasVoice = await hasColumn('audio_tracks', 'mutes_original')
   const hasTextW = await hasColumn('text_overlays', 'w')
   const hasTextH = await hasColumn('text_overlays', 'h')
   // How far a text / photo is turned (its rotate handle on the preview), once the worker has added the field
@@ -417,9 +419,10 @@ export async function saveClip(userId: string, clipId: string, input: SaveClipIn
 
     q.push(tx`DELETE FROM audio_tracks WHERE clip_id = ${clipId}`)
     if (audioTracks.length > 0) {
-      q.push(tx`INSERT INTO audio_tracks ${tx(audioTracks.map(({ id, storage_path, start_ms, volume, duck_under_speech, offset_ms, end_ms, muted, locked, fade_in, fade_out }) => ({
+      q.push(tx`INSERT INTO audio_tracks ${tx(audioTracks.map(({ id, storage_path, start_ms, volume, duck_under_speech, offset_ms, end_ms, muted, locked, fade_in, fade_out, voice, mutes_original }) => ({
         id, clip_id: clipId, storage_path, start_ms: ms(start_ms), volume, duck_under_speech,
         ...(hasFades ? { fade_in: !!fade_in, fade_out: !!fade_out } : {}),
+        ...(hasVoice ? { voice: !!voice, mutes_original: !!voice && !!mutes_original } : {}),
         ...(hasControls ? {
           offset_ms: offset_ms == null ? null : ms(offset_ms), end_ms: end_ms == null ? null : ms(end_ms),
           muted: !!muted, locked: !!locked,
@@ -801,7 +804,7 @@ export async function regenerateClipText(userId: string, clipId: string) {
   // A rewrite counts against the month's allowance, then costs credits (services/aiUsage.ts):
   // checked before any AI call, and given back if the AI does not answer
   const { beginAiAction, recordAiUsage } = await import('./aiUsage')
-  const action = await beginAiAction(userId, 'rewrite', clip.video_id)
+  const action = await beginAiAction(userId, 'rewrite', clip.video_id, 1, 'New hook and title')
   const { aiProvider, askGemini } = await import('@/lib/gemini')
   if (!aiProvider()) { await action.fail(); throw Object.assign(new Error('AI text is not configured'), { status: 500 }) }
   const onUsage = (u: { model: string; inputTokens: number; outputTokens: number; via?: 'key' | 'vertex' }) => {

@@ -1,6 +1,6 @@
 import sql from '@/lib/db'
 import type { RenderQuality } from '@chai-cut/shared'
-import { creditsMode, exportCredits } from '@/lib/credits'
+import { creditsMode, exportCredits, minutesNote } from '@/lib/credits'
 import { charge, ensureCreditsSchema, linkJob, release, RENDER_CANCELLED, type Hold } from './credits'
 
 // retranscribe: regenerate this clip's captions first (Gemini), then render —
@@ -23,9 +23,10 @@ export async function queueRender(userId: string, clipId: string, quality: Rende
   let hold: Hold | null = null
   if (creditsMode() !== 'off') {
     const { playLength } = await import('./clipLength')
-    const amount = exportCredits(await playLength({ id: clipId, start_ms: row.start_ms, end_ms: row.end_ms }))
+    const length = await playLength({ id: clipId, start_ms: row.start_ms, end_ms: row.end_ms })
+    const amount = exportCredits(length)
     // (a Make my clips clip's first export is in its price: user, 2026-11-21)
-    if (!(await freeExports([clipId])).has(clipId)) hold = await charge(userId, { amount, refType: 'render', refId: clipId })
+    if (!(await freeExports([clipId])).has(clipId)) hold = await charge(userId, { amount, refType: 'render', refId: clipId, note: minutesNote(length) })
   }
   try {
     return await startRender(userId, clipId, row.storage_path as string, quality, retranscribe, removeFillers, hold)

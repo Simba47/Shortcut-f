@@ -2,7 +2,9 @@
 
 import { Spinner } from '@/components/ui/spinner'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CaptionStyle, Overlay, SegmentLocal, TextOverlay, TranscriptWord } from '@chai-cut/shared'
+import type { CaptionStyle, FrameItem, Overlay, SegmentLocal, TextOverlay, TranscriptWord } from '@chai-cut/shared'
+import type { BoxPosition } from '@/lib/interpolation'
+import { isFrameLayout } from '@/modules/editor/frames'
 import { OutputCanvas } from '@/components/editor/VideoPreview'
 import { getBoxPositionAtLerp } from '@/lib/interpolation'
 import { BorrowedPool, isBorrowedSlot } from '@/modules/editor/brollSources'
@@ -148,7 +150,12 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
     for (const s of segments) for (const b of s.crop_boxes) map[b.id] = b.keyframes
     return map
   }, [segments])
-  const getPositionAt = useMemo(() => (boxId: string, t: number) => getBoxPositionAtLerp(t, keyframes[boxId] ?? []), [keyframes])
+  /** The speaker's view a B-roll part shows while its stock video is still loading (speakerWhileLoading), by box id */
+  const waitViews = useRef<Record<string, BoxPosition>>({})
+  const getPositionAt = useMemo(() => (boxId: string, t: number) => {
+    const wait = waitViews.current[boxId]
+    return wait ?? getBoxPositionAtLerp(t, keyframes[boxId] ?? [])
+  }, [keyframes])
   const bySegmentTime = useMemo(() => [...segments].sort((a, b) => a.start_ms - b.start_ms), [segments])
   const segmentAt = useMemo(() => (t: number) =>
     bySegmentTime.find(s => t >= s.start_ms && t < s.end_ms) ?? bySegmentTime[bySegmentTime.length - 1] ?? null,
@@ -159,6 +166,63 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
   stockUrlsRef.current = stockUrls
   const framePool = useMemo(() => createFrameMediaPool(id => stockUrlsRef.current[id]), [])
   useEffect(() => () => framePool.dispose(), [framePool])
+
+  // Make my clips' B-roll (stock on top of a frame, the speaker below: lib/broll.ts). Its video starts
+  // loading with the card (in a gallery: once played) — not only 2 s before its shot, as the frame
+  // pool does by itself: over a real connection the top stayed black for seconds (user, 2026-11-25).
+  // Until its first picture is in, the part shows the speaker full screen, as the talking around it.
+  const brollItems = useMemo(() => bySegmentTime.flatMap(sg => isFrameLayout(sg.layout)
+    ? (sg.frame?.items ?? []).filter(it => it.kind === 'video' && it.broll && !it.hidden && it.source_video_id) : []), [bySegmentTime])
+  const loadsNow = near && (!waitForPlay || local || asked)
+  useEffect(() => {
+    if (loadsNow) for (const it of brollItems) framePool.video(it)
+  }, [loadsNow, brollItems, framePool])
+  const brollReady = useRef(new Set<string>())
+  const drawnSegmentAt = useMemo(() => {
+    const speakerOnly = new WeakMap<SegmentLocal, SegmentLocal | null>()
+    /** A B-roll's video has its first picture (once it has, a seek's short wait never sends it back) */
+    const ready = (it: FrameItem) => {
+      if (brollReady.current.has(it.id)) return true
+      const el = framePool.video(it)
+      if (!el || el.readyState < 2) return false
+      brollReady.current.add(it.id)
+      return true
+    }
+    /** The part as the speaker alone, full screen: the view of the talking part next to it, else the
+     *  frame's own view of the speaker widened to 9:16 (null: no speaker in it to show) */
+    const speaker = (seg: SegmentLocal): SegmentLocal | null => {
+      const box = seg.crop_boxes.find(b => !b.source_video_id || b.source_video_id === mainVideoId)
+      if (!box || !box.keyframes.length) return null
+      const i = bySegmentTime.indexOf(seg)
+      const talk = (s: SegmentLocal | undefined) => !!s && s.layout === 'vertical' && s.crop_boxes.length === 1
+        && (!s.crop_boxes[0].source_video_id || s.crop_boxes[0].source_video_id === mainVideoId) && s.crop_boxes[0].keyframes.length > 0
+      const before = bySegmentTime[i - 1], after = bySegmentTime[i + 1]
+      let view: BoxPosition
+      if (talk(before) && before!.end_ms === seg.start_ms) view = getBoxPositionAtLerp(before!.end_ms - 1, before!.crop_boxes[0].keyframes)
+      else if (talk(after) && after!.start_ms === seg.end_ms) view = getBoxPositionAtLerp(after!.start_ms, after!.crop_boxes[0].keyframes)
+      else {
+        const v = videoRef.current
+        const ar = v?.videoWidth && v.videoHeight ? v.videoWidth / v.videoHeight : 16 / 9
+        const p = getBoxPositionAtLerp(seg.start_ms, box.keyframes)
+        const w = Math.min(1, (p.h * 9) / 16 / ar)
+        view = { x: Math.max(0, Math.min(1 - w, p.x + p.w / 2 - w / 2)), y: p.y, w, h: p.h }
+      }
+      const id = `${box.id}~speaker`
+      waitViews.current[id] = view
+      return { ...seg, layout: 'vertical', frame: null, crop_boxes: [{ ...box, id, keyframes: [{ t_ms: seg.start_ms, ...view }] }] }
+    }
+    return (t: number) => {
+      const seg = segmentAt(t)
+      if (!seg || !isFrameLayout(seg.layout)) return seg
+      const waiting = (seg.frame?.items ?? []).some(it => it.kind === 'video' && it.broll && !it.hidden && it.source_video_id
+        && t >= it.start_ms && t < it.end_ms && !ready(it))
+      if (!waiting) return seg
+      if (!speakerOnly.has(seg)) speakerOnly.set(seg, speaker(seg))
+      return speakerOnly.get(seg) ?? seg
+    }
+  }, [segmentAt, bySegmentTime, framePool, mainVideoId])
+  /** The videos of full B-roll shots (a frame's B-roll is the frame pool's own element) */
+  const shotIds = useMemo(() => new Set(segments.map(s => s.crop_boxes[0]?.source_video_id).filter((id): id is string => !!id && id !== mainVideoId)), [segments, mainVideoId])
 
   // B-roll: the stock videos, drawn in place of the source during their shots (muted: the
   // speaker keeps talking, as in the export)
@@ -398,7 +462,7 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
         style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
       />
       {/* (B-roll: only its first picture until the clip plays, then all of it) */}
-      {near && Object.entries(stockUrls).map(([id, url]) => (
+      {near && Object.entries(stockUrls).filter(([id]) => shotIds.has(id)).map(([id, url]) => (
         <video key={id} ref={el => { stockRefs.current[id] = el }} src={url} muted playsInline preload={playing ? 'auto' : 'metadata'}
           style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }} />
       ))}
@@ -411,7 +475,7 @@ export function ClipPlayer({ videoUrl, mainVideoId, stockUrls = {}, startMs, end
           timelineToVideo: (t: number) => startMs + videoAtPieces(pieces, t),
         } : {})}
         activeSegment={activeSegment} getPositionAt={getPositionAt}
-        segmentAt={segmentAt} hardCuts sourceFor={sourceFor} slotSourceFor={slotSourceFor} frameMedia={framePool}
+        segmentAt={drawnSegmentAt} hardCuts sourceFor={sourceFor} slotSourceFor={slotSourceFor} frameMedia={framePool}
         words={shownWords} captionStyle={captionStyle ?? {}} showCaptions={showCaptions}
         textOverlays={textOverlays}
         style={{ width: '100%', height: '100%', display: 'block' }}

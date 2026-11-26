@@ -17,23 +17,26 @@ export interface ConfirmOptions {
   /** A second, gentler thing to do instead (a quiet link under the text) */
   extraLabel?: string
   onExtra?: () => void
+  /** A tick box above the buttons (e.g. "Don't ask again on this video"); its state goes to onConfirm */
+  checkLabel?: string
 }
 
-type Pending = ConfirmOptions & { onConfirm: () => void }
+type Pending = ConfirmOptions & { onConfirm: (checked: boolean) => void }
 
 /**
  * "Are you sure?" before anything is deleted. `confirm(options, onConfirm)` opens the dialog and
  * runs `onConfirm` only if the user confirms; render `dialog` once in the page.
  */
-export function useConfirm(): { confirm: (options: ConfirmOptions, onConfirm: () => void) => void; dialog: React.ReactNode } {
+export function useConfirm(): { confirm: (options: ConfirmOptions, onConfirm: (checked: boolean) => void) => void; dialog: React.ReactNode } {
   const [pending, setPending] = useState<Pending | null>(null)
-  const confirm = useCallback((options: ConfirmOptions, onConfirm: () => void) => setPending({ ...options, onConfirm }), [])
+  const confirm = useCallback((options: ConfirmOptions, onConfirm: (checked: boolean) => void) => setPending({ ...options, onConfirm }), [])
   const dialog = pending ? <ConfirmDialog {...pending} onClose={() => setPending(null)} /> : null
   return { confirm, dialog }
 }
 
-function ConfirmDialog({ title, body, confirmLabel = 'Delete', cancelLabel = 'Cancel', onCancel, cancelIsAction, tone = 'danger', extraLabel, onExtra, onConfirm, onClose }: Pending & { onClose: () => void }) {
+function ConfirmDialog({ title, body, confirmLabel = 'Delete', cancelLabel = 'Cancel', onCancel, cancelIsAction, tone = 'danger', extraLabel, onExtra, checkLabel, onConfirm, onClose }: Pending & { onClose: () => void }) {
   const confirmRef = useRef<HTMLButtonElement>(null)
+  const [checked, setChecked] = useState(false)
   // Esc and a click outside are the same answer as the cancel button, unless that button is an action of its own
   const dismissRef = useRef(() => {})
   dismissRef.current = () => { onClose(); if (!cancelIsAction) onCancel?.() }
@@ -81,11 +84,17 @@ function ConfirmDialog({ title, body, confirmLabel = 'Delete', cancelLabel = 'Ca
             {extraLabel}
           </button>
         )}
+        {checkLabel && (
+          <label className="flex items-center justify-center gap-2 text-[12.5px] cursor-pointer select-none" style={{ marginTop: -2, marginBottom: 12, opacity: 0.85 }}>
+            <input type="checkbox" checked={checked} onChange={e => setChecked(e.target.checked)} className="accent-[#c8ff00]" style={{ width: 15, height: 15 }} />
+            {checkLabel}
+          </label>
+        )}
         <div className="cfm-actions">
           <button onClick={() => { onClose(); onCancel?.() }} className="cfm-btn cfm-cancel">
             {cancelLabel}<kbd className="cfm-kbd">Esc</kbd>
           </button>
-          <button ref={confirmRef} onClick={() => { onClose(); onConfirm() }} className="cfm-btn cfm-confirm">
+          <button ref={confirmRef} onClick={() => { onClose(); onConfirm(checked) }} className="cfm-btn cfm-confirm">
             <span className="cfm-shine" aria-hidden="true" />
             {confirmLabel}<kbd className="cfm-kbd">↵</kbd>
           </button>

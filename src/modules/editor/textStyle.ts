@@ -26,6 +26,9 @@ export const TEXT_STYLE_KEYS = [
 export function savedTextStyle(t: Partial<TextOverlay>): Record<string, unknown> | null {
   const out: Record<string, unknown> = {}
   for (const k of TEXT_STYLE_KEYS) if (t[k] !== undefined && t[k] !== null) out[k] = t[k]
+  // A template's marks ride along (not a look: Copy style and the export leave them)
+  if (t.tpl_id) out.tpl_id = t.tpl_id
+  if (t.tpl) out.tpl = t.tpl
   return Object.keys(out).length ? out : null
 }
 

@@ -14,14 +14,15 @@ const nextConfig: NextConfig = {
     return [
       { source: '/mascot/:path*', headers: [{ key: 'Cache-Control', value: 'public, max-age=604800, stale-while-revalidate=2592000' }] },
       // Every page: no other site may show ours inside a frame (clickjacking), HTTPS only, files
-      // read as the type they say they are, and no camera, microphone or location
+      // read as the type they say they are, and no camera or location; the microphone only for our own
+      // pages (the editor's Record voice, 2026-11-25), never for a site shown inside ours
       { source: '/:path*', headers: [
         { key: 'Content-Security-Policy', value: "frame-ancestors 'self'; base-uri 'self'; object-src 'none'" },
         { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
         { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
         { key: 'X-Content-Type-Options', value: 'nosniff' },
         { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-        { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+        { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=()' },
       ] },
     ]
   },
