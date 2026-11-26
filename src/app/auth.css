@@ -776,7 +776,8 @@ a.auth-back, a.auth-submit { text-decoration: none; }
   .ap-film video { opacity: 0; }
   .ap-film video[data-on="under"] { opacity: 1; z-index: 1; }
   .ap-film video[data-on="top"] { opacity: 1; z-index: 2; animation: ap-in .14s linear; }
-  .ap-film video[data-on="top"][data-fade="slow"] { animation-duration: .28s; animation-timing-function: ease-in-out; }
+  .ap-film video[data-on="top"][data-fade="slow"] { animation-duration: .2s; animation-timing-function: ease-in-out; }
+  .ap-film video[data-on="top"][data-fade="none"] { animation: none; }
   @keyframes ap-in { from { opacity: 0; } }
   /* one soft spotlight from the top of the card, and its pool of light on the floor */
   .ap-light, .ap-floor { position: absolute; z-index: 3; pointer-events: none; mix-blend-mode: screen; }

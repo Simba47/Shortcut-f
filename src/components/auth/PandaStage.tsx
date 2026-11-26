@@ -71,14 +71,14 @@ export function PandaStage({ intro }: { intro: boolean }) {
 /** From each pose, the clips the form can call for next (kept running in the background) */
 const NEXT_FROM: Record<Pose, ClipName[]> = {
   neutral: ['watch-in', 'cover-in', 'idle'],
-  watch: ['watch-out', 'watch-loop'],
+  watch: ['watch-out', 'watch-cover', 'watch-loop'],
   cover: ['cover-out', 'peek-open', 'cover-hold'],
   peek: ['peek-close', 'peek-hold'],
 }
 
 /** The fade between two clips (ms) — matches .ap-film video[data-on="top"]; leaving a loop partway: FADE_SLOW */
 const FADE = 140
-const FADE_SLOW = 280
+const FADE_SLOW = 200
 
 class Player {
   private vids = new Map<ClipName, HTMLVideoElement>()
@@ -273,7 +273,11 @@ class Player {
     if (v && this.decide() !== LOOP_OF[this.pose]) v.playbackRate = 1.6
   }
 
+  /** The clip before ran to its own end (so it meets the next on the same frame) — set by advance() */
+  private natural = false
+
   private advance() {
+    this.natural = true
     if (this.cur === 'celebrate') { this.celebrateDone?.(); this.celebrateDone = null }
     this.play(this.decide())
   }
@@ -284,7 +288,7 @@ class Player {
     switch (this.pose) {
       case 'peek': return goal === 'peek' ? 'peek-hold' : 'peek-close'
       case 'cover': return goal === 'cover' ? 'cover-hold' : goal === 'peek' ? 'peek-open' : 'cover-out'
-      case 'watch': return goal === 'watch' ? 'watch-loop' : 'watch-out'
+      case 'watch': return goal === 'watch' ? 'watch-loop' : goal === 'neutral' ? 'watch-out' : 'watch-cover'
       case 'neutral':
         if (this.queue.length) return this.queue[0]
         return goal === 'watch' ? 'watch-in' : goal === 'neutral' ? 'idle' : 'cover-in'
@@ -298,7 +302,11 @@ class Player {
     const prev = prevName ? this.vids.get(prevName) : undefined
     // (leaving a loop partway through — the panda a little off its shared pose — the blend is longer;
     // a clip that ran to its end meets the next on the very same frame)
-    const slow = !!prevName && 'loop' in CLIPS[prevName] && prevName !== name
+    const natural = this.natural
+    this.natural = false
+    // (leaving a loop, or a reaction cut short by the form: the panda is off its shared frame — a short
+    // blend, the new clip held on its first frame meanwhile; a clip that ran to its end: an instant swap)
+    const slow = !!prevName && prevName !== name && ('loop' in CLIPS[prevName] || !natural)
     const token = ++this.token
     if (this.queue[0] === name) this.queue.shift()
     this.cur = name
@@ -314,7 +322,10 @@ class Player {
     const reveal = () => {
       if (token !== this.token || this.shown === token) return
       this.shown = token
-      if (slow) v.dataset.fade = 'slow'; else delete v.dataset.fade
+      // (a clip that ran to its end meets the next on the very same frame: swapped at once, no blend —
+      // a blend there only showed the next one's first movement over the held frame; leaving a loop:
+      // a short blend, the new clip held on its first frame meanwhile)
+      v.dataset.fade = slow ? 'slow' : prevName && prevName !== name ? 'none' : 'quick'
       v.dataset.on = 'top'
       this.stage.dataset.playing = ''
       // every other clip still on screen goes under it and then away — not only the one before in the
@@ -335,6 +346,16 @@ class Player {
       v.playbackRate = RATE[name] ?? (passing ? 1.6 : 1)
       const go = () => {
         if (token !== this.token) return
+        if (slow) {
+          // (leaving a loop: it comes up holding its first frame — the shared pose — and only moves
+          // once it is fully over the loop; moving during the fade showed two poses at once)
+          reveal()
+          this.later(() => { if (token === this.token) play() }, FADE_SLOW)
+          return
+        }
+        play()
+      }
+      const play = () => {
         this.started = token
         v.play().catch(() => this.dropCard())
         // (it comes up on its first frame actually shown — never on a frame from before the jump back)
@@ -344,7 +365,9 @@ class Player {
         this.later(reveal, 400)
         if (!('loop' in CLIPS[name])) this.watchEnd(name, v, token)
       }
-      // (a clip kept running in the background jumps back to its start first)
+      // (a clip kept running in the background jumps back to its start first — and, to come up held on
+      // its first frame, stops there)
+      if (slow && !v.paused) v.pause()
       if (v.currentTime > 0.001 || !v.paused) { v.addEventListener('seeked', go, { once: true }); v.currentTime = 0 }
       else go()
       this.warm()

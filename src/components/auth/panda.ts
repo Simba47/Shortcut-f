@@ -30,6 +30,8 @@ export const CLIPS = {
   'watch-in': { pose: 'watch' },
   'watch-loop': { pose: 'watch', loop: true },
   'watch-out': { pose: 'neutral' },
+  // the email box to a password box: the head comes round as the paws rise (no stop at standing)
+  'watch-cover': { pose: 'cover' },
   // the password boxes
   'cover-in': { pose: 'cover' },
   'cover-hold': { pose: 'cover', loop: true },
@@ -51,7 +53,7 @@ export const LOOP_OF: Record<Pose, ClipName> = { neutral: 'idle', watch: 'watch-
 /** Seconds into a clip (its own time) when the cord is tugged — the form starts to fall then */
 export const TUG_AT: Partial<Record<ClipName, number>> = { tug: 1.8 }
 /** How fast a clip plays (the tug a little quicker, so the form is back in about a second and a half) */
-export const RATE: Partial<Record<ClipName, number>> = { tug: 1.35, oops: 1.1 }
+export const RATE: Partial<Record<ClipName, number>> = { tug: 1.35, oops: 1.1, 'watch-cover': 1.25 }
 /** Seconds into a once-clip after which something new may cut in (the cord let go, the reaction read) */
 export const CUT_IN_AFTER: Record<OnceClip, number> = { greet: 1.5, hello: 1.2, tug: 3.4, oops: 2.2, 'oops-small': 1.2, celebrate: Infinity }
 
