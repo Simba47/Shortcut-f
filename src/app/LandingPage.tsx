@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import Link from 'next/link'
-import { Flame, Languages, Mail, MapPin, Menu, MousePointerClick, Move, Phone, ScanFace, Send, Upload, WandSparkles, X } from 'lucide-react'
+import { Flame, Languages, LogIn, Mail, MapPin, Menu, MousePointerClick, Move, Phone, ScanFace, Send, Upload, WandSparkles, X } from 'lucide-react'
 import { motion, useReducedMotion, useScroll } from 'framer-motion'
 import { PricingSection, type PricingPlan } from '@/components/ui/pricing'
 import { DotField } from '@/components/ui/dot-field'
@@ -565,6 +565,12 @@ export function LandingPage() {
           {/* (desktop: no Log in in the bar — the user's copy has Get Started only; the sign-up page's own bar
               has "Sign in". Phones keep it: nav-login in landing.css) */}
           <Link href="/login" className="btn-nav-ghost fill-btn fill-btn-sm nav-login"><FillButtonContent>Log in</FillButtonContent></Link>
+          {/* (desktop: Log in beside Get Started, for people who already have an account — user, 2026-11-26. On hover
+              the door-arrow flies to the middle and bobs while the words slide out; styles: landing.css) */}
+          <Link href="/login" className="nav-login-text">
+            <span className="nlt-icon" aria-hidden><span className="nlt-bob"><LogIn /></span></span>
+            <span className="nlt-label">Log in</span>
+          </Link>
           <Link href="/signup" className="btn-nav-primary arrow-btn">
             <span className="arrow-btn-label">Get Started</span>
             <SquiggleArrow />
