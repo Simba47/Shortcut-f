@@ -776,6 +776,7 @@ a.auth-back, a.auth-submit { text-decoration: none; }
   .ap-film video { opacity: 0; }
   .ap-film video[data-on="under"] { opacity: 1; z-index: 1; }
   .ap-film video[data-on="top"] { opacity: 1; z-index: 2; animation: ap-in .14s linear; }
+  .ap-film video[data-on="top"][data-fade="slow"] { animation-duration: .28s; animation-timing-function: ease-in-out; }
   @keyframes ap-in { from { opacity: 0; } }
   /* one soft spotlight from the top of the card, and its pool of light on the floor */
   .ap-light, .ap-floor { position: absolute; z-index: 3; pointer-events: none; mix-blend-mode: screen; }
@@ -791,13 +792,12 @@ a.auth-back, a.auth-submit { text-decoration: none; }
     background: radial-gradient(closest-side, rgb(255 255 255 / 0.1), transparent);
   }
 
-  /* The form drops into the card (motion on only; user, 2026-11-24: "make the falling look proper",
-     then "a little smoke when it lands"). Sign-up: it waits above the window until the panda tugs the
-     cord, then falls the whole way down, gathering speed (stretched a touch), lands with a squash, a
-     puff of dust out from under it and a jolt through the card (the spotlight dips), bounces twice,
-     rocking, and settles. Sign in ↔ Create account: it flies up out of the window and falls back the
-     same way. While it's out the card doesn't clip it (each half carries its own rounded corners),
-     and it passes behind the bar. (If the script never runs, it comes down by itself.) */
+  /* Sign in ↔ Create account (motion on only; user, 2026-11-24/25 — only on the switch, never when
+     the page opens): the panda tugs the cord and the form flies up out of the window, then falls the
+     whole way back down, gathering speed (stretched a touch), lands with a squash, a puff of dust out
+     from under it and a jolt through the card (the spotlight dips), bounces twice, rocking, and
+     settles. While it's out the card doesn't clip it (each half carries its own rounded corners), and
+     it passes behind the bar. */
   .auth-root[data-panda] > .auth-nav { z-index: 2; }
   .auth-root[data-panda] .ap-stage { border-radius: 27px 0 0 27px; }
   .auth-root[data-panda] .auth-side {
@@ -821,9 +821,6 @@ a.auth-back, a.auth-submit { text-decoration: none; }
   @media (prefers-reduced-motion: no-preference) {
     .auth-root[data-panda] .auth-card:has(> .auth-side[data-drop]) { overflow: visible; }
     .auth-side[data-drop] { box-shadow: 0 40px 80px -20px rgb(0 0 0 / 0.85), inset 0 0 0 1px rgb(255 255 255 / 0.12); }
-    /* (its own fallback name: sharing ap-drop with "in" made the browser carry the waiting animation's
-       clock over, so on the first visit the real fall was already over and the form just appeared) */
-    .auth-side[data-drop="wait"] { translate: 0 -100vh; animation: ap-late .6s ease-out 8s both; }
     .auth-side[data-drop="up"] { translate: 0 -100vh; rotate: 2deg; transition: translate .42s cubic-bezier(.5, 0, .9, .4), rotate .42s ease-in; }
     .auth-side[data-drop="in"] { animation: ap-drop 1.4s both; }
     /* at the landing (.53 s in): the card takes the hit, the spotlight dips, the dust puffs out */
@@ -841,8 +838,6 @@ a.auth-back, a.auth-submit { text-decoration: none; }
     82%  { translate: 0 0; rotate: .1deg; scale: 1.004 .992; animation-timing-function: ease-out; }
     100% { translate: 0 0; rotate: 0deg; scale: 1 1; }
   }
-  /* (only if the script never runs: the form comes down by itself) */
-  @keyframes ap-late { from { translate: 0 -100vh; } to { translate: 0 0; } }
   @keyframes ap-jolt {
     0%   { translate: 0 0; }
     30%  { translate: 0 6px; }

@@ -9,17 +9,21 @@ import {
 /**
  * The brand panda beside the sign-in / sign-up card, under one soft spotlight (styles: .ap-* in
  * app/auth.css; desktop only — phones keep the card alone). It reacts to the form:
- *   - sign-up opens with it looking away; it notices you, waves, pulls the cord — and the card
- *     drops in at the tug (any click or key drops it at once); sign-in: it waves
+ *   - sign-up opens with it looking away; it notices you, turns and waves (the form is already
+ *     there); sign-in: it waves
  *   - the email box: it turns to the card and reads along
  *   - a password box: paws over its eyes; the password shown (the eye button): it peeks
  *   - an error: oops (a real failure, or a little head shake for a small slip — taking turns when
  *     they repeat); signed in: it celebrates, then the next page opens
- *   - Sign in ↔ Create account: it tugs the cord, the card goes up and drops back in
+ *   - Sign in ↔ Create account: it tugs the cord, the form flies up and falls back in (any click
+ *     or key brings it down at once)
  *   - otherwise it stands, breathing and blinking
  * Each clip is its own small video; one plays at a time and the next fades in over it as it starts
  * (a few frames), so the joins don't jump. Motion turned down: a still panda, the card just there.
  */
+/** Where the panda shows (and moves): wide windows, motion not turned down */
+const SHOW_MEDIA = '(min-width: 900px) and (prefers-reduced-motion: no-preference)'
+
 export function PandaStage({ intro }: { intro: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
   const [live, setLive] = useState(false)
@@ -27,9 +31,7 @@ export function PandaStage({ intro }: { intro: boolean }) {
   const [still, setStill] = useState(false)
 
   useEffect(() => {
-    const desktop = window.matchMedia('(min-width: 900px)').matches
-    const calm = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (desktop && !calm) { setLive(true); return }
+    if (window.matchMedia(SHOW_MEDIA).matches) { setLive(true); return }
     // (no show: the card is simply there)
     setStill(true)
     ref.current?.closest('.auth-root')?.querySelector('.auth-side')?.removeAttribute('data-drop')
@@ -42,16 +44,21 @@ export function PandaStage({ intro }: { intro: boolean }) {
     return () => player.stop()
   }, [live, intro])
 
+  const firstClip: ClipName = intro ? 'greet' : 'hello'
   return (
     <div ref={ref} className="ap-stage" aria-hidden="true">
+      {/* (the first clip and the idle loop start downloading as the page arrives — wide windows with
+          motion on only — so the panda moves as soon as the page shows; the Player picks them up) */}
+      <link rel="preload" as="fetch" crossOrigin="anonymous" href={clipSrc(firstClip)} media={SHOW_MEDIA} />
+      <link rel="preload" as="fetch" crossOrigin="anonymous" href={clipSrc('idle')} media={SHOW_MEDIA} />
       <div className="ap-box">
         <div className="ap-film">
           {/* (shown until the first clip plays, and the whole panda when motion is turned down) */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img className="ap-still" src={intro && !still ? PANDA_POSTER_INTRO : PANDA_POSTER} alt="" width={640} height={720} />
+          {/* (the Player loads each clip into memory and gives it its source) */}
           {live && CLIP_NAMES.map(name => (
-            <video key={name} data-clip={name} src={clipSrc(name)} muted playsInline disablePictureInPicture
-              preload={name === (intro ? 'intro' : 'hello') || name === 'idle' ? 'auto' : 'none'} />
+            <video key={name} data-clip={name} muted playsInline disablePictureInPicture preload="auto" />
           ))}
         </div>
         <span className="ap-floor" />
@@ -61,8 +68,17 @@ export function PandaStage({ intro }: { intro: boolean }) {
   )
 }
 
-/** The fade between two clips (ms) — matches .ap-film video[data-on="top"] */
+/** From each pose, the clips the form can call for next (kept running in the background) */
+const NEXT_FROM: Record<Pose, ClipName[]> = {
+  neutral: ['watch-in', 'cover-in', 'idle'],
+  watch: ['watch-out', 'watch-loop'],
+  cover: ['cover-out', 'peek-open', 'cover-hold'],
+  peek: ['peek-close', 'peek-hold'],
+}
+
+/** The fade between two clips (ms) — matches .ap-film video[data-on="top"]; leaving a loop partway: FADE_SLOW */
 const FADE = 140
+const FADE_SLOW = 280
 
 class Player {
   private vids = new Map<ClipName, HTMLVideoElement>()
@@ -79,6 +95,10 @@ class Player {
   private lastOops: 'oops' | 'oops-small' | null = null
   private celebrateDone: (() => void) | null = null
   private token = 0
+  /** The token of the clip that has actually started (jumped back to its start and playing) */
+  private started = -1
+  /** The token of the clip last brought up on screen */
+  private shown = -1
   private stopped = false
   private off: (() => void)[] = []
   private timers = new Set<number>()
@@ -89,12 +109,34 @@ class Player {
     stage.querySelectorAll<HTMLVideoElement>('video[data-clip]').forEach(v => {
       const name = v.dataset.clip as ClipName
       this.vids.set(name, v)
-      const ended = () => { if (this.cur === name) this.advance() }
+      // (only a clip that has really started over counts: one kept running in the background can hit its
+      // end just as it's called up, before it has jumped back to its start)
+      const ended = () => { if (this.cur === name && this.started === this.token) this.advance() }
       v.addEventListener('ended', ended)
       this.off.push(() => v.removeEventListener('ended', ended))
     })
-    // (the rest load once the first is on its way)
-    this.later(() => this.vids.forEach(v => { if (v.preload !== 'auto') { v.preload = 'auto'; v.load() } }), 700)
+    // No waiting between clips (user, 2026-11-25: "between every video there is lag"):
+    //  - every clip is downloaded once into memory (a blob), so starting one never waits on the network
+    //  - each hidden clip is kept with its first frame decoded (the browser lets a paused hidden video go
+    //    to sleep; waking it took up to 0.7 s), checked every couple of seconds
+    //  - the next clip is started a frame before the current one ends, and shown on its first frame
+    const urls: string[] = []
+    const first: ClipName = intro ? 'greet' : 'hello'
+    const load = (name: ClipName) => {
+      const v = this.vids.get(name)
+      if (!v || v.getAttribute('src')) return
+      // (the same request the page's preload made, so the first two come straight from it)
+      fetch(clipSrc(name), { mode: 'cors', credentials: 'same-origin' }).then(r => (r.ok ? r.blob() : Promise.reject())).then(b => {
+        if (this.stopped || v.getAttribute('src')) return
+        const url = URL.createObjectURL(b); urls.push(url)
+        v.src = url; v.load()
+        v.addEventListener('loadedmetadata', () => { this.prime(v); this.warm() }, { once: true })
+      }).catch(() => { if (!this.stopped && !v.getAttribute('src')) { v.src = clipSrc(name); v.load() } })
+    }
+    load(first); load('idle')
+    this.later(() => CLIP_NAMES.forEach(load), 150)
+    const keepAwake = window.setInterval(() => this.vids.forEach(v => { if (!v.dataset.on) this.prime(v) }), 2000)
+    this.off.push(() => { window.clearInterval(keepAwake); urls.forEach(u => URL.revokeObjectURL(u)) })
 
     // the form: where the focus is, the eye buttons
     let t = 0
@@ -131,14 +173,9 @@ class Player {
       }
     }))
 
-    if (intro) {
-      // the card waits up top until the tug; a click or a key brings it now; never longer than this
-      this.waitForTug(7500)
-      this.play('intro')
-    } else {
-      this.card?.removeAttribute('data-drop')
-      this.play('hello')
-    }
+    // (the form is there from the start — user, 2026-11-25: the cord and the fall only for Sign in ↔ Create account)
+    this.card?.removeAttribute('data-drop')
+    this.play(intro ? 'greet' : 'hello')
   }
 
   stop() {
@@ -153,6 +190,43 @@ class Player {
     const id = window.setTimeout(() => { this.timers.delete(id); if (!this.stopped) fn() }, ms)
     this.timers.add(id)
     return id
+  }
+
+  /**
+   * The clips that can come next from where the panda is going are kept running, hidden: a playing
+   * video is never put to sleep by the browser, so the next one starts at once (a paused hidden one
+   * could take over a second to wake). The rest pause.
+   */
+  private warm() {
+    const next = new Set<ClipName>([this.decide(), ...NEXT_FROM[this.pose]])
+    this.vids.forEach((v, name) => {
+      if (v.dataset.on || name === this.cur) return   // (on screen, or just starting)
+      if (next.has(name)) { if (v.paused && v.getAttribute('src') && v.readyState >= 1) { v.loop = true; v.play().catch(() => {}) } }
+      else if (!v.paused) { v.pause(); v.currentTime = 0 }
+    })
+  }
+
+  /** A hidden clip, ready to start at once: its first frame decoded (a seek to 0 wakes it) */
+  private prime(v: HTMLVideoElement) {
+    if (v.readyState < 2 && v.getAttribute('src') && !v.seeking) v.currentTime = 0
+  }
+
+  /**
+   * A clip that ends on its own: the next one starts a frame before it does (so they meet with no
+   * stop); 'ended' stays as the fallback
+   */
+  private watchEnd(name: ClipName, v: HTMLVideoElement, token: number) {
+    if (typeof v.requestVideoFrameCallback !== 'function') return
+    // (a frame from before the jump back is ignored: only once a frame near its start has shown)
+    let fresh = false
+    const tick = (_: number, meta: VideoFrameCallbackMetadata) => {
+      if (this.stopped || token !== this.token || this.cur !== name) return
+      if (meta.mediaTime < 0.25) fresh = true
+      const left = (v.duration - meta.mediaTime) / (v.playbackRate || 1)
+      if (fresh && Number.isFinite(left) && left <= 0.07) { this.advance(); return }
+      v.requestVideoFrameCallback(tick)
+    }
+    v.requestVideoFrameCallback(tick)
   }
 
   /** Where the form's focus says the panda should be */
@@ -190,7 +264,7 @@ class Player {
     if (spec.loop) { const next = this.decide(); if (next !== cur) this.play(next); return }
     if (spec.once) {
       // (the cord pulls: once the card is down — at the tug, or sooner by a click — the form comes first)
-      const cardDown = (cur === 'intro' || cur === 'tug') && !this.card?.dataset.drop
+      const cardDown = cur === 'tug' && !this.card?.dataset.drop
       if (cardDown || this.time() >= CUT_IN_AFTER[cur as OnceClip]) this.play(this.decide())
       return
     }
@@ -220,37 +294,75 @@ class Player {
   private play(name: ClipName) {
     const v = this.vids.get(name)
     if (!v || this.stopped) return
-    const prev = this.cur ? this.vids.get(this.cur) : undefined
+    const prevName = this.cur
+    const prev = prevName ? this.vids.get(prevName) : undefined
+    // (leaving a loop partway through — the panda a little off its shared pose — the blend is longer;
+    // a clip that ran to its end meets the next on the very same frame)
+    const slow = !!prevName && 'loop' in CLIPS[prevName] && prevName !== name
     const token = ++this.token
     if (this.queue[0] === name) this.queue.shift()
     this.cur = name
     this.pose = CLIPS[name].pose
-    if (name === 'celebrate') this.later(() => { if (this.cur === 'celebrate') { this.celebrateDone?.(); this.celebrateDone = null } }, 2000)
+    if (name === 'celebrate') this.later(() => { if (this.cur === 'celebrate') { this.celebrateDone?.(); this.celebrateDone = null } }, 2400)
     v.loop = 'loop' in CLIPS[name]
     // (a turn in or out on the way to something else — not to rest — goes quicker)
     const passing = !('loop' in CLIPS[name]) && !('once' in CLIPS[name]) && this.decide() !== LOOP_OF[this.pose]
     if (TUG_AT[name] !== undefined && this.card?.dataset.drop) this.watchTug(name, token)
 
-    const show = () => {
-      if (token !== this.token) return
-      v.playbackRate = RATE[name] ?? (passing ? 1.6 : 1)
-      v.currentTime = 0
-      v.play().catch(() => this.dropCard())
+    // it starts underneath, and comes up over the one before on its first new frame — the one before
+    // keeps playing (or holds its last frame) until then, so the panda never sits on a frozen frame
+    const reveal = () => {
+      if (token !== this.token || this.shown === token) return
+      this.shown = token
+      if (slow) v.dataset.fade = 'slow'; else delete v.dataset.fade
       v.dataset.on = 'top'
       this.stage.dataset.playing = ''
-      if (prev && prev !== v) {
-        prev.dataset.on = 'under'
+      // every other clip still on screen goes under it and then away — not only the one before in the
+      // player's own order: when switching fast, that one may never have come up at all
+      this.vids.forEach(o => {
+        if (o === v || !o.dataset.on) return
+        o.dataset.on = 'under'
         this.later(() => {
-          if (prev.dataset.on !== 'under') return
-          prev.removeAttribute('data-on'); prev.pause(); prev.currentTime = 0
-        }, FADE + 40)
-      }
+          if (o.dataset.on !== 'under') return
+          o.removeAttribute('data-on'); o.pause(); o.currentTime = 0
+          this.warm()
+        }, (slow ? FADE_SLOW : FADE) + 40)
+      })
     }
-    if (v.readyState >= 2) show()
+    const start = () => {
+      if (token !== this.token) return
+      v.loop = 'loop' in CLIPS[name]
+      v.playbackRate = RATE[name] ?? (passing ? 1.6 : 1)
+      const go = () => {
+        if (token !== this.token) return
+        this.started = token
+        v.play().catch(() => this.dropCard())
+        // (it comes up on its first frame actually shown — never on a frame from before the jump back)
+        if (typeof v.requestVideoFrameCallback === 'function') v.requestVideoFrameCallback(() => reveal())
+        else v.addEventListener('playing', reveal, { once: true })
+        // (never left waiting on a frame callback that doesn't come)
+        this.later(reveal, 400)
+        if (!('loop' in CLIPS[name])) this.watchEnd(name, v, token)
+      }
+      // (a clip kept running in the background jumps back to its start first)
+      if (v.currentTime > 0.001 || !v.paused) { v.addEventListener('seeked', go, { once: true }); v.currentTime = 0 }
+      else go()
+      this.warm()
+    }
+    if (prev === v) { this.started = token; v.currentTime = 0; v.play().catch(() => {}); if (!('loop' in CLIPS[name])) this.watchEnd(name, v, token); return }
+    if (v.readyState >= 2) start()
     else {
-      if (v.preload !== 'auto') { v.preload = 'auto'; v.load() }
-      v.addEventListener('loadeddata', show, { once: true })
-      // (can't load: the card mustn't wait on it)
+      // (not ready yet: still arriving into memory, or asleep — start the moment its first frame is
+      // there; the one before keeps playing meanwhile)
+      let done = false
+      const go = () => {
+        if (done) return; done = true
+        ;['loadeddata', 'canplay', 'seeked'].forEach(e => v.removeEventListener(e, go))
+        start()
+      }
+      ;['loadeddata', 'canplay', 'seeked'].forEach(e => v.addEventListener(e, go))
+      this.prime(v)
+      // (can't load: the form mustn't wait on it)
       v.addEventListener('error', () => this.dropCard(), { once: true })
     }
   }
@@ -281,7 +393,7 @@ class Player {
   }
 
   private liftCard() {
-    if (!this.card || this.card.dataset.drop === 'up' || this.card.dataset.drop === 'wait') return
+    if (!this.card || this.card.dataset.drop === 'up') return
     this.card.dataset.drop = 'up'
     this.waitForTug(3200)
   }

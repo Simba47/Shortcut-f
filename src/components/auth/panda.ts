@@ -6,7 +6,7 @@
 
 const DIR = '/auth/panda'
 export const PANDA_POSTER = `${DIR}/poster.webp`
-/** Sign-up's first frame: looking away, before it notices you */
+/** Sign-up's first frame: looking away, before it notices you (the greeting) */
 export const PANDA_POSTER_INTRO = `${DIR}/poster-intro.webp`
 
 /**
@@ -18,12 +18,12 @@ export type Pose = 'neutral' | 'watch' | 'cover' | 'peek'
 
 export const CLIPS = {
   // once, from standing (they end standing)
-  intro: { pose: 'neutral', once: true },        // sign-up: looks away, notices you, waves, pulls the cord (the card drops), waves at the card
+  greet: { pose: 'neutral', once: true },        // sign-up opens: looks away, notices you, turns, waves, lowers its paw (the form is already there)
   hello: { pose: 'neutral', once: true },        // sign-in: waves at you
   tug: { pose: 'neutral', once: true },          // Sign in ↔ Create account: pulls the cord, the card drops back in
   oops: { pose: 'neutral', once: true },         // something really went wrong: eek, sheepish head scratch
   'oops-small': { pose: 'neutral', once: true }, // a small slip in the form: a little head shake
-  celebrate: { pose: 'neutral', once: true },    // signed in
+  celebrate: { pose: 'neutral', once: true },    // signed in: happy bounces with paws up, a big wave
   // standing still (looped)
   idle: { pose: 'neutral', loop: true },
   // the email box
@@ -41,7 +41,7 @@ export const CLIPS = {
 } as const satisfies Record<string, { pose: Pose; loop?: true; once?: true }>
 
 export type ClipName = keyof typeof CLIPS
-export type OnceClip = 'intro' | 'hello' | 'tug' | 'oops' | 'oops-small' | 'celebrate'
+export type OnceClip = 'greet' | 'hello' | 'tug' | 'oops' | 'oops-small' | 'celebrate'
 export const CLIP_NAMES = Object.keys(CLIPS) as ClipName[]
 export const clipSrc = (name: ClipName) => `${DIR}/${name}.mp4`
 
@@ -49,11 +49,11 @@ export const clipSrc = (name: ClipName) => `${DIR}/${name}.mp4`
 export const LOOP_OF: Record<Pose, ClipName> = { neutral: 'idle', watch: 'watch-loop', cover: 'cover-hold', peek: 'peek-hold' }
 
 /** Seconds into a clip (its own time) when the cord is tugged — the form starts to fall then */
-export const TUG_AT: Partial<Record<ClipName, number>> = { intro: 4.95, tug: 1.8 }
-/** How fast a clip plays (the intro a little quicker, so the card is down in about four seconds) */
-export const RATE: Partial<Record<ClipName, number>> = { intro: 1.2, tug: 1.35, oops: 1.1 }
+export const TUG_AT: Partial<Record<ClipName, number>> = { tug: 1.8 }
+/** How fast a clip plays (the tug a little quicker, so the form is back in about a second and a half) */
+export const RATE: Partial<Record<ClipName, number>> = { tug: 1.35, oops: 1.1 }
 /** Seconds into a once-clip after which something new may cut in (the cord let go, the reaction read) */
-export const CUT_IN_AFTER: Record<OnceClip, number> = { intro: 6.6, hello: 1.2, tug: 3.4, oops: 2.2, 'oops-small': 1.2, celebrate: Infinity }
+export const CUT_IN_AFTER: Record<OnceClip, number> = { greet: 1.5, hello: 1.2, tug: 3.4, oops: 2.2, 'oops-small': 1.2, celebrate: Infinity }
 
 /** What the form tells the panda */
 export type PandaCue =
@@ -79,6 +79,6 @@ export function pandaCelebrate(): Promise<void> {
   return new Promise(resolve => {
     if (!listener) { resolve(); return }
     listener({ type: 'celebrate', done: resolve })
-    setTimeout(resolve, 2400)
+    setTimeout(resolve, 2800)
   })
 }
