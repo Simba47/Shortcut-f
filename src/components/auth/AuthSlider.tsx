@@ -36,9 +36,9 @@ export function AuthSlider({ initialMode, google = false }: { initialMode: Mode;
 
   return (
     <AuthShell
-      // (the panda: sign-up opens with the card up top until it pulls the cord; sign-in, it waves)
+      // (the panda: sign-up opens with it looking away, then noticing you and waving; sign-in, it waves.
+      // The form is there from the start — the cord and the fall are for Sign in ↔ Create account only)
       panda={<PandaStage intro={initialMode === 'signup'} />}
-      cardWaits={initialMode === 'signup'}
       navAction={
         <NavSwitch
           prompt={other === 'signup' ? AUTH.nav.newHere : AUTH.nav.haveAccount}

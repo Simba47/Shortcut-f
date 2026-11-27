@@ -34,7 +34,7 @@ export const RECOVERY_BRAND: AuthBrand = { title: AUTH.recovery.brand.title, lea
  * window (user, 2026-10-31) — the brand side on its left, the screen's form on its right. On phones
  * the brand side is a short header above the form.
  */
-export function AuthShell({ brand = DEFAULT_BRAND, navAction, panda, cardWaits = false, children }: {
+export function AuthShell({ brand = DEFAULT_BRAND, navAction, panda, children }: {
   brand?: AuthBrand
   /** The nav's switch (Sign in ↔ Create account); by default a plain "Sign in" (the recovery screens) */
   navAction?: React.ReactNode
@@ -43,8 +43,6 @@ export function AuthShell({ brand = DEFAULT_BRAND, navAction, panda, cardWaits =
    * place of the crowd, the stage lights and the floating reactions (user, 2026-11-24; wide windows only)
    */
   panda?: React.ReactNode
-  /** Sign-up's opening: the form waits above the card until the panda pulls the cord (PandaStage drops it in) */
-  cardWaits?: boolean
   children: React.ReactNode
 }) {
   const pitch = (
@@ -68,7 +66,7 @@ export function AuthShell({ brand = DEFAULT_BRAND, navAction, panda, cardWaits =
       {/* (sign in / sign up, wide windows: the panda on the card's left; phones: hidden) */}
       {panda}
 
-      <main className="auth-side" data-drop={cardWaits ? 'wait' : undefined}>
+      <main className="auth-side">
         <div className="auth-panel">{children}</div>
       </main>
       {/* (the dust as the form lands in the card — PandaStage drops it; wide windows, motion on) */}
