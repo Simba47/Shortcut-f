@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { BrandLoader } from '@/components/ui/brand-loader'
 import { AuthShell, RECOVERY_BRAND } from '@/components/auth/AuthShell'
+import { ErrorNotice } from '@/components/errors/ErrorNotice'
 import {
   BackToSignIn, CodeInput, Field, Messages, PasswordInput, PasswordRules, ResendLine, SubmitButton,
   passwordOk, useCooldown,
@@ -81,18 +82,19 @@ function ResetPasswordForm() {
     if (!r?.ok) setError(AUTH.errors.resendFailed)
   }
 
+  // Opened without its email (an old bookmark, a copied link): the simple notice — the error pages' look,
+  // no panda here (user, 2026-11-28): centred, a small lock icon — not the sign-in card
   if (!email) {
     return (
-      <div className="auth-form">
-        <BackToSignIn />
-        <h1>{t.title}</h1>
-        <Messages error={t.missingEmail} />
-        <Link href="/forgot-password" className="auth-submit"><span>{t.startAgain}</span></Link>
-      </div>
+      <ErrorNotice
+        title={t.missingTitle} lines={t.missingLines} action={{ href: '/forgot-password', label: t.startAgain }}
+        icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="10.5" width="16" height="10.5" rx="3" /><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" /><path d="M12 14.5v2.5" /></svg>}
+      />
     )
   }
 
   return (
+    <AuthShell brand={RECOVERY_BRAND}>
     <form className="auth-form" onSubmit={handleSubmit}>
       <BackToSignIn />
       <h1>{t.title}</h1>
@@ -126,15 +128,16 @@ function ResetPasswordForm() {
         </p>
       )}
     </form>
+    </AuthShell>
   )
 }
 
+/** (the form needs the address's ?email=: until it's read, a quiet loader on the dark page — not the card, which
+    would flash before the notice when there's no email) */
 export default function ResetPasswordPage() {
   return (
-    <AuthShell brand={RECOVERY_BRAND}>
-      <Suspense fallback={<BrandLoader size={36} />}>
-        <ResetPasswordForm />
-      </Suspense>
-    </AuthShell>
+    <Suspense fallback={<div className="auth-wait"><BrandLoader size={36} /></div>}>
+      <ResetPasswordForm />
+    </Suspense>
   )
 }

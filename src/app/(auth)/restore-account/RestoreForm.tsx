@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 import { AuthShell, RECOVERY_BRAND } from '@/components/auth/AuthShell'
+import { ErrorNotice } from '@/components/errors/ErrorNotice'
 import { BackToSignIn, Field, Messages, SubmitButton } from '@/components/auth/fields'
 
 /** Shown with the restore form: at least this many letters (accountDeletion.ts MIN_FEEDBACK) */
@@ -48,18 +49,9 @@ export function RestoreForm({ token, email, restoreBy }: { token: string; email:
     )
   }
 
-  if (!email || !restoreBy) {
-    return (
-      <AuthShell brand={RECOVERY_BRAND}>
-        <div key="bad" className="auth-form">
-          <BackToSignIn />
-          <h1>This link doesn’t work</h1>
-          <p className="auth-sub">It has expired, was already used, or a newer link was sent. On the sign-in page, enter your email: if your account can still be restored, you can ask for a new link there.</p>
-          <Link href="/login" className="auth-submit"><span>Go to sign in</span><ArrowRight className="auth-submit-arrow" aria-hidden /></Link>
-        </div>
-      </AuthShell>
-    )
-  }
+  // The link has expired, was used, or a newer one replaced it (user, 2026-11-28: simple, not the sign-in card):
+  // the error pages' layout — the calm panda, the title, two short lines and one way on (ExpiredLink below)
+  if (!email || !restoreBy) return <ExpiredLink />
 
   return (
     <AuthShell brand={RECOVERY_BRAND}>
@@ -77,5 +69,16 @@ export function RestoreForm({ token, email, restoreBy }: { token: string; email:
         <SubmitButton busy={busy} disabled={letters < MIN} label="Restore my account" busyLabel="Restoring…" />
       </form>
     </AuthShell>
+  )
+}
+
+/** The expired restore link: the error pages' simple layout (components/errors/ErrorNotice), not the sign-in card */
+function ExpiredLink() {
+  return (
+    <ErrorNotice
+      title="This link has expired"
+      lines={['Restore links work once, for a limited time.', 'Get a new one from the sign-in page.']}
+      action={{ href: '/login', label: 'Go to sign in' }}
+    />
   )
 }

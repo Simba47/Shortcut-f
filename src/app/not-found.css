@@ -1,0 +1,169 @@
+/* The 404 page (not-found.tsx). "4 🐼 4": the panda is the 0 — it yawns, sits down and falls asleep, then
+   sleeps on with its Z z Z; point at "Take me home" and it peeks at you with one eye. Dark, lime only on the
+   main button. Everything is scoped under .nf. */
+
+.nf {
+  --nf-text: #f4f4f5;
+  --nf-muted: rgb(244 244 245 / 0.62);
+  --nf-dim: rgb(244 244 245 / 0.42);
+  --nf-line: rgb(255 255 255 / 0.12);
+  --nf-lime: #c8ff00;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  background: radial-gradient(ellipse 70% 60% at 50% 42%, #111112, #050505 78%);
+  color: var(--nf-text);
+  font-family: var(--font-display), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* top bar */
+.nf-head { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 18px clamp(16px, 3.4vw, 56px); }
+.nf-logo { display: inline-flex; align-items: center; border-radius: 10px; color: var(--nf-text); text-decoration: none; }
+.nf-login { display: inline-flex; align-items: center; height: 38px; padding: 0 18px; border-radius: 999px; border: 1px solid rgb(255 255 255 / 0.16);
+  color: var(--nf-text); text-decoration: none; font-size: 14px; font-weight: 600; transition: background .15s, border-color .15s; }
+.nf-login:hover { background: rgb(255 255 255 / 0.06); border-color: rgb(255 255 255 / 0.28); }
+
+.nf-main { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 12px 20px 40px; }
+
+/* a giant, barely-there 404 far behind everything */
+.nf-ghost { position: absolute; left: 50%; top: 46%; translate: -50% -50%; z-index: 0; margin: 0; pointer-events: none; user-select: none;
+  font-size: clamp(260px, 42vw, 640px); font-weight: 900; letter-spacing: -0.07em; line-height: 1; white-space: nowrap; color: rgb(255 255 255 / 0.018); }
+
+/* 4 🐼 4: the 4s in a silver fade, the panda standing on the same line */
+.nf-code { position: relative; display: flex; align-items: flex-end; justify-content: center; gap: clamp(4px, 1.33vw, 17px); margin-bottom: clamp(30px, 4.6vh, 44px); }
+.nf-four { font-size: clamp(114px, 16.15vw, 200px); font-weight: 900; line-height: .78; letter-spacing: -0.06em;
+  background: linear-gradient(180deg, #fff 0%, #d4d4d8 38%, rgb(212 212 216 / 0.18) 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: nf-rise .7s cubic-bezier(.2, .8, .2, 1) both; }
+.nf-four:last-child { animation-delay: .12s; }
+@keyframes nf-rise { from { opacity: 0; translate: 0 18px; } }
+
+/* the panda: its videos have a black background, which "lighten" drops into the page (on the whole box, so the
+   rise-in animation can't isolate it) */
+.nf-panda { position: relative; width: clamp(112px, 14.7vw, 180px); aspect-ratio: 640 / 720; margin-bottom: -6px;
+  mix-blend-mode: lighten; container-type: inline-size; animation: nf-rise .7s cubic-bezier(.2, .8, .2, 1) .06s both; }
+.nf-film { position: absolute; inset: 0; z-index: 1;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 7%, #000 95%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 7%, #000 95%, transparent); }
+.nf-film > * { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.nf-film video { opacity: 0; }
+.nf-film video[data-on] { opacity: 1; }
+.nf-floor { position: absolute; left: 50%; bottom: 0; width: 82%; height: 7%; translate: -50% 0;
+  background: radial-gradient(closest-side, rgb(255 255 255 / 0.12), transparent); }
+
+/* Z z Z: sized from the panda's own width (cqw), so they sit in the same place at every size — they rise from just
+   right of its head, above the ear, and drift up and to the right */
+.nf-zzz { position: absolute; left: 74cqw; top: -4cqw; z-index: 2; width: 30cqw; height: 40cqw; pointer-events: none; opacity: 0; transition: opacity .6s; }
+.nf-zzz[data-on] { opacity: 1; }
+.nf-zzz[data-off] { opacity: 0; }
+.nf-zzz b { position: absolute; left: 0; bottom: 0; font-weight: 800; line-height: 1; color: rgb(244 244 245 / 0.8); opacity: 0;
+  font-size: 8cqw; animation: nf-z 3.6s ease-out infinite; }
+.nf-zzz b:nth-child(2) { font-size: 10.5cqw; animation-delay: 1.2s; }
+.nf-zzz b:nth-child(3) { font-size: 13cqw; animation-delay: 2.4s; color: rgb(200 255 0 / 0.9); }
+@keyframes nf-z { 0% { opacity: 0; transform: translate(0, 0) scale(.7) rotate(-10deg); } 18% { opacity: 1; }
+  75% { opacity: .85; } 100% { opacity: 0; transform: translate(12cqw, -26cqw) scale(1) rotate(10deg); } }
+
+/* the words */
+/* a quiet label over the headline: small capitals between two hairlines (no box, no red dot) */
+.nf-eyebrow { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 14px; margin: 0 0 16px;
+  font-size: 12px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; color: var(--nf-dim); }
+.nf-eyebrow::before, .nf-eyebrow::after { content: ""; width: 32px; height: 1px; }
+.nf-eyebrow::before { background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.28)); }
+.nf-eyebrow::after { background: linear-gradient(90deg, rgb(255 255 255 / 0.28), transparent); }
+.nf-title { position: relative; z-index: 1; margin: 0; font-size: clamp(30px, 4.4vw, 50px); font-weight: 800; letter-spacing: -0.04em; line-height: 1.05; }
+/* one sentence per line (no lone word left on a line of its own); on narrow screens each sentence wraps evenly */
+.nf-sub { position: relative; z-index: 1; margin: 14px 0 0; max-width: 600px; font-size: clamp(15px, 1.5vw, 17px); line-height: 1.55; color: var(--nf-muted); }
+.nf-sub span { display: block; text-wrap: balance; }
+
+/* two clear buttons: back, and home (the one lime) */
+.nf-actions { position: relative; z-index: 1; display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 30px; }
+.nf-btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; height: 50px; padding: 0 24px; border-radius: 999px;
+  font: inherit; font-size: 15px; font-weight: 700; text-decoration: none; cursor: pointer; transition: transform .15s, background .15s, border-color .15s; }
+.nf-btn svg { width: 18px; height: 18px; }
+.nf-btn:active { transform: scale(.97); }
+.nf-btn-quiet { border: 1px solid rgb(255 255 255 / 0.16); background: rgb(255 255 255 / 0.03); color: var(--nf-text); }
+.nf-btn-quiet svg { transition: translate .2s; }
+.nf-btn-quiet:hover { background: rgb(255 255 255 / 0.07); border-color: rgb(255 255 255 / 0.3); }
+.nf-btn-quiet:hover svg { translate: -2px 0; }
+.nf-btn-main { border: 0; background: var(--nf-lime); color: #0a0a0a; }
+.nf-btn-main:hover { background: #d4ff33; }
+.nf-btn:focus-visible, .nf-login:focus-visible, .nf-logo:focus-visible { outline: 2px solid var(--nf-lime); outline-offset: 3px; }
+
+.nf-foot { position: relative; z-index: 2; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; padding: 16px clamp(16px, 3.4vw, 56px);
+  border-top: 1px solid rgb(255 255 255 / 0.06); font-size: 12.5px; color: var(--nf-dim); }
+.nf-foot nav { display: flex; gap: 18px; }
+.nf-foot a { color: var(--nf-dim); text-decoration: none; }
+.nf-foot a:hover { color: var(--nf-text); }
+
+/* phones */
+@media (max-width: 600px) {
+  .nf-head { padding: 14px 16px; }
+  .nf-four { font-size: 103px; }
+  .nf-panda { width: 106px; }
+  .nf-ghost { font-size: 220px; top: 38%; }
+  .nf-actions { flex-direction: column-reverse; width: 100%; max-width: 340px; }
+  .nf-btn { width: 100%; }
+  .nf-foot { justify-content: center; text-align: center; }
+}
+
+/* reduced motion: no videos — the panda is shown asleep, its Z z Z still */
+@media (prefers-reduced-motion: reduce) {
+  .nf-four, .nf-panda { animation: none; }
+  .nf-zzz b { animation: none; opacity: .8; }
+  .nf-zzz b:nth-child(2) { transform: translate(6cqw, -13cqw); }
+  .nf-zzz b:nth-child(3) { transform: translate(12cqw, -28cqw); }
+}
+
+/* ── "Something went wrong" (error.tsx) uses this same family; its own parts below ── */
+.nf-title { text-wrap: balance; }
+
+/* the panda alone (no digits): a little bigger, standing calmly */
+.nf-stage { position: relative; width: clamp(150px, 16vw, 210px); aspect-ratio: 640 / 720; margin-bottom: clamp(18px, 3vh, 28px);
+  mix-blend-mode: lighten; animation: nf-rise .7s cubic-bezier(.2, .8, .2, 1) both; }
+.nf-stage .nf-film video { transition: opacity .3s; }
+
+/* the error code, to quote to Support (it points to the full error in the server log) */
+.nf-codeline { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 8px; margin: 22px 0 0; font-size: 13px; color: var(--nf-dim); }
+.nf-codeline code { padding: 4px 8px; border-radius: 6px; background: rgb(255 255 255 / 0.05); color: var(--nf-muted);
+  font: 500 12.5px/1 ui-monospace, 'Cascadia Code', Consolas, monospace; }
+.nf-copy { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; border: 1px solid rgb(255 255 255 / 0.12);
+  background: transparent; color: var(--nf-muted); cursor: pointer; transition: color .15s, border-color .15s; }
+.nf-copy:hover { color: var(--nf-text); border-color: rgb(255 255 255 / 0.28); }
+.nf-copy[data-done] { color: var(--nf-lime); border-color: rgb(200 255 0 / 0.4); }
+.nf-copy svg { width: 14px; height: 14px; }
+.nf-copy:focus-visible { outline: 2px solid var(--nf-lime); outline-offset: 3px; }
+
+@media (max-width: 600px) { .nf-stage { width: 140px; } }
+@media (prefers-reduced-motion: reduce) { .nf-stage { animation: none; } }
+
+/* "Something went wrong": everything 5% smaller than the 404's (user, 2026-11-28) */
+.nf-crash .nf-stage { width: clamp(142px, 15.2vw, 200px); }
+.nf-crash .nf-eyebrow { font-size: 11.4px; }
+.nf-crash .nf-title { font-size: clamp(28.5px, 4.18vw, 47.5px); }
+.nf-crash .nf-sub { font-size: clamp(14.25px, 1.43vw, 16.15px); }
+.nf-crash .nf-btn { height: 48px; padding: 0 23px; font-size: 14.25px; }
+.nf-crash .nf-btn svg { width: 17px; height: 17px; }
+.nf-crash .nf-codeline { font-size: 12.35px; }
+.nf-crash .nf-codeline code { font-size: 11.9px; }
+@media (max-width: 600px) { .nf-crash .nf-stage { width: 133px; } }
+
+/* the expired restore link: a smaller panda (a short, simple page) */
+.nf-crash .nf-stage.nf-stage-sm { width: clamp(118px, 12vw, 150px); }
+@media (max-width: 600px) { .nf-crash .nf-stage.nf-stage-sm { width: 112px; } }
+
+/* the expired restore link, wide windows: the panda beside the message — it looks down at it (on its right) */
+.nf-side { display: flex; flex-direction: column; align-items: center; }
+@media (min-width: 900px) {
+  .nf-side { flex-direction: row; align-items: center; gap: clamp(28px, 3vw, 44px); text-align: left; }
+  .nf-side .nf-stage, .nf-crash .nf-side .nf-stage.nf-stage-sm { flex-shrink: 0; width: clamp(190px, 15vw, 230px); margin-bottom: 0; }
+  .nf-side .nf-actions { justify-content: flex-start; }
+}
+
+/* the same notice without the panda (the reset page): centred, a small calm icon on top */
+.nf-plain { display: flex; flex-direction: column; align-items: center; }
+.nf-ico { display: grid; place-items: center; width: 56px; height: 56px; margin-bottom: 22px; border-radius: 16px; color: rgb(244 244 245 / 0.78);
+  background: rgb(255 255 255 / 0.06); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1); animation: nf-rise .5s cubic-bezier(.2, .8, .2, 1) both; }
+.nf-ico svg { width: 26px; height: 26px; }
+@media (prefers-reduced-motion: reduce) { .nf-ico { animation: none; } }

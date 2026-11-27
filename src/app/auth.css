@@ -962,3 +962,6 @@ a.auth-back, a.auth-submit { text-decoration: none; }
   color: var(--text); font: inherit; font-size: 15px; line-height: 1.5;
 }
 .auth-form .auth-box textarea::placeholder { color: var(--auth-dim); }
+
+/* the reset page, while it reads its address (a moment): the loader alone on the dark page (reset-password) */
+.auth-wait { min-height: 100svh; display: grid; place-items: center; background: #050505; }

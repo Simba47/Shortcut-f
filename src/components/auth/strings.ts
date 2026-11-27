@@ -107,7 +107,9 @@ export const AUTH = {
       passwordPlaceholder: 'Create a password',
       submit: 'Update password',
       busy: 'Updating…',
-      missingEmail: 'This page needs the email you’re resetting. Start again from “Forgot password?”.',
+      // opened without its email (an old bookmark, a copied link): a calm page, not an error box (user, 2026-11-28)
+      missingTitle: 'Start your reset again',
+      missingLines: ['This page only works after you ask for a reset code.', 'Enter your email to get a new one.'] as const,
       startAgain: 'Start again',
       otherEmail: 'Use a different email',
     },
