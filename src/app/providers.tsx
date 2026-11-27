@@ -7,6 +7,8 @@ import { needsSignIn } from '@/lib/publicPaths'
 import { BrandKitDialogHost } from '@/components/brand/BrandKitDialog'
 import { GoogleAnalytics } from '@/components/analytics/GoogleAnalytics'
 import { LastSeenPing } from '@/components/LastSeenPing'
+import { Toaster, ConfirmHost } from '@/components/notices/Notices'
+import { ActivityWatcher } from '@/components/notices/ActivityWatcher'
 
 function SessionWatcher() {
   const { status, data } = useSession()
@@ -40,6 +42,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
       {children}
       {/* Brand kits, as a popup over any page (openBrandKits) */}
       <BrandKitDialogHost />
+      {/* The site's messages (components/notices): toasts at the bottom centre, askConfirm's question, and
+          work that finished while you were away */}
+      <Toaster />
+      <ConfirmHost />
+      <ActivityWatcher />
     </SessionProvider>
   )
 }

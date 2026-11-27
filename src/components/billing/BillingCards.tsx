@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { formatMoney } from '@/lib/currency'
 import { ledgerDetail, ledgerLabel } from '@/lib/credits'
+import { AlertCard } from '@/components/notices/Notices'
 
 // The account's money cards (user, 2026-11-19): Credit history in a popup from the account menu, Payment
 // history and the Pro invoice details on Plans & billing (its Payments & invoices tab). The Purchase credits card is the billing page (/billing), where the credits button goes.
@@ -116,7 +117,7 @@ export function PaymentsCards({ reloadKey = 0 }: { reloadKey?: number }) {
 
   return (
     <div className="st-billing flex flex-col gap-6">
-      {error && <div className="st-alert st-alert-red" role="alert">{error}</div>}
+      {error && <AlertCard title="Couldn’t load your billing" detail={error} />}
       {/* Pro: Payment history | Details on your invoices, side by side; other plans: Payment history alone */}
       <div className="st-grid">
         <section className={`st-card${info?.invoiceDetails ? '' : ' st-wide'}`}>

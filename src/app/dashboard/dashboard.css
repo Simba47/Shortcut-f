@@ -421,6 +421,8 @@
 }
 
 .dash-error { margin: -18px 0 26px; font-size: 13px; color: var(--danger); }
+/* An upload refused (no plan, storage full, too big): the site's alert card, in the same place (2026-11-26) */
+.dash-error-card { margin: -14px 0 24px; }
 .dash-note { padding: 48px 0; text-align: center; font-size: 14px; color: var(--text-muted); }
 
 /* Grid */

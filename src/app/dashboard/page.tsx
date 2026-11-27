@@ -23,6 +23,10 @@ import { DashSkeleton } from './DashSkeleton'
 import { FillButtonContent } from '@/components/ui/fill-button'
 import { useVideoUpload, formatBytes, uploadPace } from '@/modules/upload/useVideoUpload'
 import { useSmoothPct } from '@/lib/useSmoothPct'
+import { AlertCard, FieldMessage } from '@/components/notices/Notices'
+import { AccountBanner } from '@/components/notices/AccountBanner'
+import { watchActivity } from '@/components/notices/store'
+import { friendlyError } from '@/lib/friendlyError'
 
 type DashVideo = Video & { video_url?: string | null; clip_count?: number; error?: string | null
   /** Its picture (the worker's jobs/poster.ts), when it has one: shown instead of loading the video */
@@ -96,21 +100,12 @@ export default function DashboardPage() {
   // video just appears in the list (the user picks Make clips when they want)
   const [choosing, setChoosing] = useState<{ id: string; title: string; videoUrl?: string | null; posterUrl?: string | null; durationMs?: number | null } | null>(null)
   // (the reading is paid for as the upload finishes — the balance looked at again then, user 2026-11-18)
-  const upload = useVideoUpload((_id, paid) => { fetchVideos(); fetchPlan(); if (paid) applyCredits(paid); else refreshCredits() })
+  const upload = useVideoUpload((_id, paid) => { fetchVideos(); fetchPlan(); if (paid) applyCredits(paid); else refreshCredits(); watchActivity() })
   const uploading = upload.state.phase === 'uploading' || upload.state.phase === 'finishing'
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // "Upload video" asks where the video comes from: this device, or a Drive link
   const [chooserOpen, setChooserOpen] = useState(false)
-  // How much was stored (bytes) when the running-low line was hidden (it comes back once more is stored)
-  const [lowHiddenAt, setLowHiddenAt] = useState(-1)
-  useEffect(() => {
-    try { const v = Number(sessionStorage.getItem('dashSeenLow')); if (Number.isFinite(v) && v > 0) setLowHiddenAt(v) } catch { /* storage blocked */ }
-  }, [])
-  function hideLow(n: number) {
-    setLowHiddenAt(n)
-    try { sessionStorage.setItem('dashSeenLow', String(n)) } catch { /* storage blocked: hidden for now only */ }
-  }
   // Credits (null while loading, and when credits are off: no prices are shown then)
   const { credits, refresh: refreshCredits, apply: applyCredits } = useCredits()
 
@@ -277,12 +272,6 @@ export default function DashboardPage() {
   const usedBytes = planInfo?.usage.storageBytes ?? 0
   const usagePct = planInfo && planInfo.storageBytes > 0 ? Math.min(100, (usedBytes / planInfo.storageBytes) * 100) : 0
   const isEmpty = videos.length === 0
-  // Running low (user, 2026-11-11: told before an upload is refused, not after): 85% of the plan's storage used
-  // until it's full (then the strip says so). ✕ hides it — until more is stored (kept for the visit: dashSeenLow in
-  // this tab's storage)
-  const used = usedBytes
-  const low = !!planInfo && !atLimit && usagePct >= 85
-  const showLow = low && used > lowHiddenAt
 
   return (
     <div
@@ -357,19 +346,9 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {showLow && planInfo && (
-          <div className="dash-low" role="status">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9L2.4 17.6A2 2 0 004.1 20.6h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" /></svg>
-            <p>
-              You&apos;ve used <strong>{formatStorage(usedBytes)} of your {planInfo.storageGb} GB</strong> of storage.
-              <span> {formatStorage(storageFree)} free — delete old videos{topPlan ? '' : ', or get more space with a bigger plan'}.</span>
-            </p>
-            {!topPlan && <a href="/pricing" className="dash-low-cta">See plans</a>}
-            <button type="button" className="dash-low-x" aria-label="Hide this message" onClick={() => hideLow(used)}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-            </button>
-          </div>
-        )}
+        {/* The account's most urgent thing — storage running low (from 85%), a failed renewal, credits low, the
+            Trial ending…: one banner, the site's (components/notices; it replaced the storage strip, 2026-11-26) */}
+        <AccountBanner className="mb-4" />
 
         {/* Upload strip — takes the whole stage on first run */}
         <div className={`dash-drop${isEmpty ? ' is-empty' : ''}${dragOver ? ' is-over' : ''}`}>
@@ -401,7 +380,7 @@ export default function DashboardPage() {
             {upload.state.phase === 'failed' ? (
               <>
                 <p className="dash-upload-title" title={upload.state.fileName}>{upload.state.canRetry ? 'Upload paused' : 'Upload stopped'} · {upload.state.fileName}{upload.state.canRetry ? ` · ${upload.state.progress}%` : ''}</p>
-                <p className="dash-drop-error" role="alert">{upload.state.error}</p>
+                <FieldMessage className="dash-drop-error">{upload.state.error}</FieldMessage>
                 <div className="dash-progress"><div style={{ width: `${upload.state.progress}%` }} /></div>
               </>
             ) : upload.priceAsk ? (
@@ -476,7 +455,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {uploadError && <p className="dash-error" role="alert">{uploadError}</p>}
+        {uploadError && <AlertCard className="dash-error-card" title="Can’t upload this video" detail={uploadError} onClose={() => setUploadError(null)} />}
 
         {!isEmpty && (visible.length > 0 ? (
           <div className="dash-grid">
@@ -495,6 +474,7 @@ export default function DashboardPage() {
                   if (!res?.ok) return (res ? (await res.json().catch(() => ({}))).error : null) ?? 'Couldn’t start it again. Please try once more.'
                   await fetchVideos()
                   refreshCredits()
+                  watchActivity()
                   return null
                 }}
                 plan={planInfo?.plan ?? null}
@@ -710,6 +690,7 @@ function LinkImportStrip({ video, onChanged }: { video: DashVideo; onChanged: ()
       const d = r ? await r.json().catch(() => ({})) : {}
       setError(d.error ?? 'Could not continue. Try again.'); setBusy(null); return
     }
+    watchActivity()
     onChanged()
   }
 
@@ -747,7 +728,7 @@ function LinkImportStrip({ video, onChanged }: { video: DashVideo; onChanged: ()
                 : <>Reading this {minutes} min video uses no credits.</>}
             </p>
           )}
-          {(error || blocked) && <p className="dash-drop-error" role="alert">{error ?? blocked}</p>}
+          {(error || blocked) && <FieldMessage className="dash-drop-error">{error ?? blocked}</FieldMessage>}
           <p className="dash-upload-hint">Nothing is charged until you continue. Cancel removes it.</p>
         </div>
         <div className="dash-drop-actions">
@@ -776,7 +757,7 @@ function LinkImportStrip({ video, onChanged }: { video: DashVideo; onChanged: ()
           <div className="dash-progress"><div style={{ width: `${Math.max(2, pct)}%` }} /></div>
           <span className="dash-progress-pct">{whole}%</span>
         </div>
-        {error && <p className="dash-drop-error" role="alert">{error}</p>}
+        {error && <FieldMessage className="dash-drop-error">{error}</FieldMessage>}
         <p className="dash-upload-hint">You can leave this page: the import carries on, and the video shows below when it&apos;s in.</p>
       </div>
       <button type="button" className="dash-link-btn" disabled={!!busy} onClick={cancel}>{busy === 'cancel' ? 'Cancelling…' : 'Cancel'}</button>
@@ -1179,6 +1160,7 @@ function UploadChooser({ maxFileSizeGb, onClose, onDevice, onFile, onImported }:
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error ?? 'Could not import that link')
+      watchActivity()
       onImported() // the new video appears on the dashboard with its download progress
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not import that link')
@@ -1257,7 +1239,7 @@ function UploadChooser({ maxFileSizeGb, onClose, onDevice, onFile, onImported }:
             </button>
           </div>
           {error ? (
-            <p className="dash-sheet-error" role="alert">{error}</p>
+            <FieldMessage className="dash-sheet-error">{error}</FieldMessage>
           ) : (
             <div className="dash-sheet-sources">
               <span className={`dash-sheet-source${provider === 'drive' ? ' is-on' : ''}`}><DriveLogo /> Google Drive</span>
@@ -1321,8 +1303,8 @@ function DeleteDialog({ items, onClose, onDeleted }: {
           This permanently removes {one ? 'the video' : `${items.length} videos`}
           {clipCount > 0 ? ` and ${one ? 'its' : 'their'} ${clipCount} clip${clipCount === 1 ? '' : 's'}` : ''}.
           This can&apos;t be undone.
-          {error && <><br /><span style={{ color: 'var(--danger)' }}>{error}</span></>}
         </p>
+        {error && <AlertCard className="mb-4" title="Couldn’t delete" detail={friendlyError(error)} />}
         <div className="dash-modal-actions">
           <button className="dash-btn" onClick={onClose} disabled={deleting} autoFocus>Cancel</button>
           <button className="dash-btn dash-btn-danger" onClick={confirm} disabled={deleting}>

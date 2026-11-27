@@ -6,6 +6,8 @@ import { Breadcrumbs } from '@/components/ui/breadcrumbs'
 import { AccountMenu } from '@/components/ui/account-menu'
 import { CreditsButton } from '@/components/ui/credits-badge'
 import { BrandLoaderScreen } from '@/components/ui/brand-loader'
+import { AlertCard, FieldMessage } from '@/components/notices/Notices'
+import { toast } from '@/components/notices/store'
 
 type Account = { email: string; name: string | null; image: string | null; emailVerified: string | null; planName: string; hasPassword: boolean }
 
@@ -46,7 +48,7 @@ export default function SettingsPage() {
           <p className="st-sub">Your photo, name, password and account. Changes save straight away.</p>
         </header>
 
-        {loadError && <div className="st-alert st-alert-red" role="alert">{loadError}</div>}
+        {loadError && <AlertCard title="Couldn’t open your account" detail={loadError} />}
 
         {account && (
           <>
@@ -166,7 +168,7 @@ function PhotoRow({ account, onPhoto }: { account: Account; onPhoto: (image: str
           )}
         </div>
         <span className="st-hint">JPG, PNG or WebP</span>
-        {error && <p className="st-err" role="alert">{error}</p>}
+        {error && <AlertCard className="mt-2" title="Couldn’t change your photo" detail={error} onClose={() => setError(null)} />}
       </div>
       <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={pick} aria-label="Choose a profile photo" />
     </div>
@@ -214,7 +216,7 @@ function ProfileCard({ account, onSaved, onPhoto }: { account: Account; onSaved:
           </div>
           <span className="st-hint">Shown on your profile button.</span>
         </label>
-        {error && <p className="st-err" role="alert">{error}</p>}
+        {error && <FieldMessage>{error}</FieldMessage>}
 
         <div className="st-tiles">
           <div className="st-tile">
@@ -274,6 +276,7 @@ function PasswordCard() {
       const d = await r.json()
       if (!r.ok) throw new Error(d.error ?? 'Could not change your password')
       setCurrent(''); setNext(''); setConfirm(''); setDone(true)
+      toast({ tone: 'ok', text: 'Password changed' })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not change your password')
     } finally { setBusy(false) }
@@ -304,7 +307,7 @@ function PasswordCard() {
           {confirm && !matches && <span className="st-err">The passwords don’t match</span>}
         </label>
         {done && <p className="st-ok">✓ Password changed</p>}
-        {error && <p className="st-err" role="alert">{error}</p>}
+        {error && <FieldMessage>{error}</FieldMessage>}
         <div>
           <button type="submit" className="st-btn st-btn-lime" disabled={!ready || busy}>{busy ? 'Changing…' : 'Change password'}</button>
         </div>
@@ -355,7 +358,7 @@ function DangerCard({ hasPassword }: { hasPassword: boolean }) {
             <span className="st-label">Type <b style={{ color: '#fff' }}>DELETE</b> to confirm</span>
             <input className="st-input" value={typed} onChange={e => setTyped(e.target.value)} autoComplete="off" spellCheck={false} />
           </label>
-          {error && <p className="st-err" role="alert">{error}</p>}
+          {error && <FieldMessage>{error}</FieldMessage>}
           <div className="flex gap-2">
             <button type="button" className="st-btn st-btn-ghost" onClick={() => { setOpen(false); setPassword(''); setTyped(''); setError(null) }} disabled={busy}>Cancel</button>
             <button type="button" className="st-btn st-btn-danger-solid" onClick={remove} disabled={!ready || busy}>

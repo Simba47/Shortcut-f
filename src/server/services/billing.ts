@@ -123,7 +123,9 @@ export async function endSubscription(c: Extract<SubscriptionChange, { kind: 'en
     // Failed renewals (halted) end access now; a cancel keeps what was paid for
     await tx`
       UPDATE subscriptions SET status = ${halted ? 'ended' : 'cancelled'},
-        expires_at = ${halted ? new Date() : c.expiresAt}
+        expires_at = ${halted ? new Date() : c.expiresAt},
+        -- (a failed renewal is told to its person: the account banner, lib/notices.ts)
+        ended_reason = ${halted ? 'renewal_failed' : null}
       WHERE razorpay_subscription_id = ${c.subscriptionId} AND status <> 'replaced'`
     return true
   })
