@@ -19,6 +19,7 @@
     "test:routes": "npx tsx --test src/lib/publicPaths.test.ts",
     "test:analytics": "npx tsx --test src/lib/analytics.test.ts",
     "test:editor-words": "npx tsx --test src/modules/editor/transcriptWindow.test.ts",
+    "test:notices": "npx tsx --test src/lib/notices.test.ts src/server/services/notices.test.ts",
     "test:gemini": "npx tsx --test src/lib/aiPrices.test.mts src/lib/geminiPriority.test.mts src/lib/geminiVertexModel.test.mts src/lib/geminiWif.test.mts src/lib/geminiUsage.test.ts src/lib/geminiKey.test.ts"
   },
   "dependencies": {

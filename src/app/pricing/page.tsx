@@ -17,6 +17,8 @@ import { PaymentsCards } from '@/components/billing/BillingCards'
 import { CurrencySwitch } from '@/components/billing/CurrencySwitch'
 import { useCurrency } from '@/lib/useCurrency'
 import { formatMoney, packPriceMinor, planPriceMinor, type Currency } from '@/lib/currency'
+import { askConfirm } from '@/components/notices/store'
+import { AlertCard } from '@/components/notices/Notices'
 
 // (user, 2026-11-16) No free plan: the Trial pack (paid once) comes first. Plans v2 (2026-11-21): Trial,
 // Starter, Pro; Agency (not sold) shows only to someone still on it
@@ -129,7 +131,7 @@ export default function PricingPage() {
   const shown = PLAN_ORDER.filter(key => (PLANS[key].sold && planPriceMinor(key, currency) !== null) || mine?.plan === key)
 
   async function cancel() {
-    if (!window.confirm('Stop renewing? You keep your plan until the month you paid for ends.')) return
+    if (!await askConfirm({ title: 'Stop renewing?', body: 'You keep your plan until the month you paid for ends.', confirmLabel: 'Stop renewing', cancelLabel: 'Keep it' })) return
     setError(null)
     const res = await fetch('/api/billing/cancel', { method: 'POST' })
     const out = await res.json().catch(() => ({}))
@@ -193,7 +195,7 @@ export default function PricingPage() {
         )}
         <CurrencySwitch currency={currency} onChange={setCurrency} locked={locked} available={available} />
         {notice && <p className="st-ok text-center" role="status">{notice}</p>}
-        {error && <p className="st-err text-center" role="alert">{error}</p>}
+        {error && <AlertCard className="max-w-xl w-full mx-auto" title="That didn’t go through" detail={error} onClose={() => setError(null)} />}
 
         <section className="st-card">
           <div className={`st-plans${shown.length > 3 ? ' has-4' : ''}`}>

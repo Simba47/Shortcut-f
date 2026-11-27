@@ -15,6 +15,8 @@ import type { CreditsState } from '@/components/billing/BillingCards'
 import { CurrencySwitch } from '@/components/billing/CurrencySwitch'
 import { useCurrency } from '@/lib/useCurrency'
 import { formatMoney, packPriceMinor, packSavingIn, type Currency } from '@/lib/currency'
+import { AlertCard } from '@/components/notices/Notices'
+import { AccountBanner, accountChanged } from '@/components/notices/AccountBanner'
 
 /**
  * Buy credits: where the credits button goes (user, 2026-11-19), only the Purchase credits card. The credit
@@ -124,7 +126,7 @@ function PurchaseCard({ c, plan, testPack, accountCurrency, onBought }: { c: Cre
           </>
         )}
         {notice && <p className="st-ok" role="status" style={{ marginTop: 8 }}>{notice}</p>}
-        {error && <p className="st-err" role="alert" style={{ marginTop: 8 }}>{error}</p>}
+        {error && <AlertCard className="mt-2" title="Couldn’t buy the credits" detail={error} onClose={() => setError(null)} />}
       </div>
       <p className="st-hint" style={{ margin: 0 }}>
         <a href="/pricing#billing" className="st-link">Payments &amp; invoices</a>
@@ -164,8 +166,10 @@ export default function BillingPage() {
       </nav>
 
       <main className="st-billing flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-10 flex flex-col gap-6">
-        {error && <div className="st-alert st-alert-red" role="alert">{error}</div>}
-        {credits && <PurchaseCard c={credits} plan={plan?.plan ?? null} testPack={!!plan?.testPack} accountCurrency={plan?.currency ?? null} onBought={loadCredits} />}
+        {/* The account's most urgent thing (a failed renewal, credits low or expiring…): components/notices */}
+        <AccountBanner />
+        {error && <AlertCard title="Couldn’t load your credits" detail={error} />}
+        {credits && <PurchaseCard c={credits} plan={plan?.plan ?? null} testPack={!!plan?.testPack} accountCurrency={plan?.currency ?? null} onBought={() => { loadCredits(); accountChanged() }} />}
       </main>
     </div>
   )

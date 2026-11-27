@@ -5,6 +5,9 @@ let ready: Promise<void> | null = null
 export function ensureBillingSchema(): Promise<void> {
   ready ??= (async () => {
     await sql`ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS razorpay_subscription_id TEXT`
+    // Why a subscription ended (user, 2026-11-26): 'renewal_failed' when Razorpay couldn't charge it (halted), so the
+    // site can tell its person; NULL for one cancelled, or ended because the account was deleted
+    await sql`ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS ended_reason TEXT`
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_razorpay_sub_uq ON subscriptions (razorpay_subscription_id) WHERE razorpay_subscription_id IS NOT NULL`
     await sql`
       CREATE TABLE IF NOT EXISTS billing_plans (

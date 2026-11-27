@@ -34,7 +34,7 @@ export function useConfirm(): { confirm: (options: ConfirmOptions, onConfirm: (c
   return { confirm, dialog }
 }
 
-function ConfirmDialog({ title, body, confirmLabel = 'Delete', cancelLabel = 'Cancel', onCancel, cancelIsAction, tone = 'danger', extraLabel, onExtra, checkLabel, onConfirm, onClose }: Pending & { onClose: () => void }) {
+export function ConfirmDialog({ title, body, confirmLabel = 'Delete', cancelLabel = 'Cancel', onCancel, cancelIsAction, tone = 'danger', extraLabel, onExtra, checkLabel, onConfirm, onClose }: Pending & { onClose: () => void }) {
   const confirmRef = useRef<HTMLButtonElement>(null)
   const [checked, setChecked] = useState(false)
   // Esc and a click outside are the same answer as the cancel button, unless that button is an action of its own

@@ -33,6 +33,9 @@ import type { ClipPreviewData } from '@/server/services/clipPreview'
 import type { SegmentLocal } from '@chai-cut/shared'
 import { defaultCropForSlot, makeBox } from '@/modules/editor/utils'
 import { insidePicture, pictureOrWhole, type PictureBox } from '@/modules/editor/pictureBox'
+import { askConfirm, showOnScreen, watchActivity } from '@/components/notices/store'
+import { AlertCard } from '@/components/notices/Notices'
+import { AccountBanner } from '@/components/notices/AccountBanner'
 
 interface VideoData {
   id: string
@@ -606,6 +609,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
       exportAsks.current.set(id, ask)
       const res = await ask
       exportAsks.current.delete(id)
+      watchActivity()
       // 409: it's already exporting — just wait for it
       if (!res || (!res.ok && res.status !== 409)) {
         const error = res ? (await res.json().catch(() => ({}))).error ?? 'Could not export' : 'Could not export'
@@ -898,6 +902,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
   type Reading = { status: 'none' | 'running' | 'ready' | 'failed'; progress: number | null; error: string | null; stopped?: boolean; place?: number | null; step?: 'audio' | 'reading' | 'saving' | null; done?: number | null; total?: number | null; waitingOn?: 'copy' | 'queue' | 'server' | null; source?: 'reference'; needsCredits?: boolean }
   const [reading, setReading] = useState<Reading | null>(null)
   const { credits, refresh: refreshCredits } = useCredits()
+  // This video's reading, Make my clips and exports show here as they happen: the site's watcher doesn't toast them too
+  useEffect(() => showOnScreen('board', { videoIds: [initialVideo.id] }), [initialVideo.id])
   // (the allowance is read again after every run and search: so is the balance in the header)
   useEffect(() => { if (allowance) refreshCredits() }, [allowance, refreshCredits])
   // A price asked about in the site's own dialog
@@ -1209,6 +1215,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         throw new Error(d.error ?? 'Not enough credits')
       }
       if (!res.ok) throw new Error((await res.json()).error ?? 'Could not start making clips')
+      watchActivity()
       const d = await res.json() as { clip_count?: number; limited_by?: string | null; search?: string; credits?: number }
       const n = d.clip_count ?? count
       const why = d.limited_by === 'day' ? `that's what is left of today's clips`
@@ -1237,6 +1244,7 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         body: JSON.stringify({ confirm: true }),
       })
       if (!res.ok) throw new Error((await res.json()).error ?? 'Could not start making clips')
+      watchActivity()
       await loadAutoClips()
     } catch (e) {
       setAutoError(e instanceof Error ? e.message : 'Could not start making clips')
@@ -2123,12 +2131,12 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
           </p>
         )}
         {autoJob?.status === 'failed' && autoJob.error !== 'Cancelled by you' && (
-          <p className="text-xs" style={{ color: '#f87171' }}>
-            {/* (a video with no sound can't be tried again: its message says what to do) */}
-            {/no sound/i.test(autoJob.error ?? '')
-              ? <>{autoJob.error} You can still make clips by hand below.</>
-              : <>Making clips failed{autoJob.error ? `: ${autoJob.error}` : ''}. Try again, or make clips by hand below.</>}
-          </p>
+          // (a video with no sound can't be tried again: its message says what to do. Anything else in plain
+          // words — never the worker's raw text — and the credits for clips it didn't make come back: credits.ts sweep)
+          <AlertCard title="Make my clips didn’t finish"
+            detail={/no sound/i.test(autoJob.error ?? '')
+              ? `${autoJob.error} You can still make clips by hand below.`
+              : `${friendlyError(autoJob.error)} Try again, or make clips by hand below.${credits ? ' Credits for clips it didn’t make come back.' : ''}`} />
         )}
         {/* Main action last: solid lime, black words (.mmc-go — user, 2026-11-12: the quiet tint wasn't seen). Wide: it
             stays at the card's bottom however small the card is dragged (user, 2026-11-09: it was cut off) */}
@@ -2533,6 +2541,8 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
         <AccountMenu />
       </nav>
 
+      {/* The account's most urgent thing (a failed renewal, credits low…): components/notices */}
+      <AccountBanner className="mx-4 mt-3 shrink-0" />
       <div ref={columnsRef} data-resizing={resizing || undefined} className="cb-columns flex-1 flex gap-4 p-4 min-h-0 overflow-hidden">
 
         {/* ── Left: AI tools (wide screens) ─────────────────────── */}
@@ -2677,20 +2687,10 @@ export function ClipPickerShell({ video: initialVideo, videoUrl: signedUrl, vide
             })()}
           </div>
           {clipError && (
-            // (user, 2026-11-12) calm, not alarming: a neutral card with a soft red edge and icon; what failed, then
-            // why in plain words (styles: .cb-alert in globals.css)
-            <div role="alert" className="cb-alert mx-4 mb-2">
-              <span className="cb-alert-ico" aria-hidden="true">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5.5M12 16.5h.01" /></svg>
-              </span>
-              <span className="flex-1 min-w-0">
-                <span className="cb-alert-title">{clipError.title}</span>
-                <span className="cb-alert-text">{clipError.detail}<TopUpLink message={clipError.detail} /></span>
-              </span>
-              <button type="button" onClick={() => setClipError(null)} aria-label="Dismiss this message" className="cb-alert-x">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-              </button>
-            </div>
+            // (user, 2026-11-12) calm, not alarming: what failed, then why in plain words — the site's alert card
+            <AlertCard className="mx-4 mb-2" title={clipError.title} detail={clipError.detail} onClose={() => setClipError(null)}>
+              <TopUpLink message={clipError.detail} />
+            </AlertCard>
           )}
           <div className="cb-clip-list flex-1 min-h-0 overflow-y-auto px-4 pb-4">
             {/* Empty (user, 2026-11-12): an icon, one line and the next step — never a blank list */}
@@ -3474,7 +3474,7 @@ function useSubEdit(clipId: string, onDone?: () => void) {
       const data = await res.json().catch(() => ({}))
       // Subjects costs credits once per clip: the price is asked about first
       if (res.status === 402 && data.code === 'subjects_cost') {
-        if (window.confirm(`${data.error} Continue?`)) { await start(true); return }
+        if (await askConfirm({ title: 'Follow the people in this clip?', body: data.error, confirmLabel: 'Continue', tone: 'warning' })) { await start(true); return }
         stateRef.current = 'none'
         setState('none')
         return

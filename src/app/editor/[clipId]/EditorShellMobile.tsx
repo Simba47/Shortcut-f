@@ -34,6 +34,7 @@ import { isShot } from '@/modules/editor/shots'
 import { pictureOrWhole } from '@/modules/editor/pictureBox'
 import { setFramePicture } from '@/modules/editor/framePicture'
 import { transcriptWindowQuery } from '@/modules/editor/transcriptWindow'
+import { askConfirm } from '@/components/notices/store'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -515,12 +516,16 @@ export function EditorShellMobile({
     const span = captionSpan(clip.start_ms, clip.end_ms, words)
     if (!on || !span || transcribing || retranscribing || isFreePlan) return
     const price = captionCredits(span.end_ms - span.start_ms)
-    if (!credits || window.confirm(`Get captions for this clip (main video only)? ${price} credits. You have ${credits.balance}.`)) handleRetranscribe('unknown')
+    if (!credits) { handleRetranscribe('unknown'); return }
+    void askConfirm({ title: 'Get captions for this clip?', body: `Main video only. ${price} credits — you have ${credits.balance}.`, confirmLabel: 'Get captions', tone: 'warning' })
+      .then(ok => { if (ok) handleRetranscribe('unknown') })
   }
   /** Regenerate reads all of the clip again */
   function askRegenerate() {
     const price = captionCredits(clip.end_ms - clip.start_ms)
-    if (!credits || window.confirm(`Regenerate captions? All of this clip is read again, and words you corrected are replaced. ${price} credits. You have ${credits.balance}.`)) handleRetranscribe('unknown', true)
+    if (!credits) { handleRetranscribe('unknown', true); return }
+    void askConfirm({ title: 'Regenerate captions?', body: `All of this clip is read again, and words you corrected are replaced. ${price} credits — you have ${credits.balance}.`, confirmLabel: 'Regenerate', tone: 'warning' })
+      .then(ok => { if (ok) handleRetranscribe('unknown', true) })
   }
 
   // (`fresh`: Regenerate — read the clip again even where it has words; else only parts with none.

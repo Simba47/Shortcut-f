@@ -112,6 +112,9 @@ import { setFramePicture, framePicture, inFramePicture } from '@/modules/editor/
 import type { SegmentLocal, CropBoxLocal, FrameHold, FrameLayout, FrameLane, FrameItem, TransitionType } from '@chai-cut/shared'
 import { SPEED_MIN, SPEED_MAX } from '@chai-cut/shared'
 import { ToolHints } from '@/components/editor/ToolHints'
+import { AlertCard } from '@/components/notices/Notices'
+import { AccountBanner } from '@/components/notices/AccountBanner'
+import { toast, dismissToast, showOnScreen, watchActivity } from '@/components/notices/store'
 import { TransitionsPanel, TRANSITION_DEFAULT_MS, TRANSITION_KINDS, playedTransitionMs, type TransitionJoin } from '@/components/editor/TransitionsPanel'
 import { transcriptWindowQuery } from '@/modules/editor/transcriptWindow'
 
@@ -904,8 +907,14 @@ export function EditorShell({
   // The export's problem (user, 2026-11-12): what failed (title), why in plain words (detail: friendlyError —
   // never the server's raw text) and what Try again does
   const [exportError, setExportErrorState] = useState<{ title: string; detail: string; retry: 'export' | 'cancel' } | null>(null)
-  const setExportError = (title: string | null, e?: unknown, retry: 'export' | 'cancel' = 'export') =>
+  /** Credits the failed export gave back (its card says so) */
+  const [exportRefund, setExportRefund] = useState(0)
+  // This clip's export is shown here (its card, its "Your reel is ready"): the site's watcher doesn't toast it too
+  useEffect(() => showOnScreen('editor', { clipIds: [clip.id] }), [clip.id])
+  const setExportError = (title: string | null, e?: unknown, retry: 'export' | 'cancel' = 'export') => {
     setExportErrorState(title ? { title, detail: friendlyError(e), retry } : null)
+    setExportRefund(0)
+  }
   // What exports have always been rendered at (the worker ignored the 2160p asked for here)
   const renderQuality = '1080p' as const
   const [renderStuckSince, setRenderStuckSince] = useState<number | null>(clip.status === 'rendering' ? Date.now() : null)
@@ -1234,17 +1243,12 @@ export function EditorShell({
     lastTapRef.current = { key, at: now }
     return !!last && last.key === key && now - last.at < 450
   }
-  // "Locked" note: a short message when an edit is refused because something is locked
-  const [lockNote, setLockNote] = useState<string | null>(null)
-  const lockNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // (`icon`: the padlock, or the copy sign for Copy / Cut)
-  const [lockNoteIcon, setLockNoteIcon] = useState<'lock' | 'copy'>('lock')
+  // "Locked" note: a short message when an edit is refused because something is locked — a toast of the site's
+  // (components/notices, 2026-11-26): amber with the padlock, or a grey note with the copy sign for Copy / Cut.
+  // One at a time (the same id): a new one takes the old one's place
   function notifyLocked(msg: string, ms = 2200, icon: 'lock' | 'copy' = 'lock') {
     if (quietRef.current) return   // (a live drag: told once, on release)
-    setLockNote(msg)
-    setLockNoteIcon(icon)
-    if (lockNoteTimer.current) clearTimeout(lockNoteTimer.current)
-    lockNoteTimer.current = setTimeout(() => setLockNote(null), ms)
+    toast({ id: 'editor-note', tone: icon === 'copy' ? 'info' : 'warn', icon, text: msg, ms: Math.max(ms, 2600) })
   }
   // The section the user clicked (on the timeline strip or its card): the Delete buttons show only then
   const [pickedSegId, setPickedSegIdState] = useState<string | null>(null)
@@ -1511,7 +1515,11 @@ export function EditorShell({
         fetch(`/api/transcribe/words?video_id=${videoId}${wordsWindowQuery}`).then(r => r.ok ? r.json() : null)
           .then(d => { if (d?.words?.length) setWords(d.words) }).catch(() => {})
       }
-      if (data.status === 'failed') { setExportError('The export didn’t finish'); restoreStaleAfterExport() }
+      if (data.status === 'failed') {
+        setExportError('The export didn’t finish'); restoreStaleAfterExport()
+        // (a failed export gives its credits back: the card says how many — none when it was free or stopped)
+        fetch(`/api/notices/refund?clip=${clip.id}`).then(r => (r.ok ? r.json() : null)).then(d => setExportRefund(d?.credits ?? 0)).catch(() => {})
+      }
       if (data.status !== 'rendering') clearInterval(poll)
     }, 3000)
     return () => { clearInterval(poll); clearInterval(tick) }
@@ -1669,8 +1677,6 @@ export function EditorShell({
       }
       const reply = await res.json().catch(() => null) as { transitionsAsDissolve?: number; speedNotSaved?: number } | null
       setTrAsDissolve((reply?.transitionsAsDissolve ?? 0) > 0)
-      // (the database doesn't take a part's speed until the backend has been restarted once)
-      if ((reply?.speedNotSaved ?? 0) > 0) notifyLocked('A part\u2019s speed isn\u2019t saved yet: restart the backend once (it updates the database)')
       // Only clear "unsaved" if nothing changed while this save was in flight
       if (editVersionRef.current === version) unsavedRef.current = false
       serverKitRef.current = sentBrand?.kit_id ?? null
@@ -1767,6 +1773,8 @@ export function EditorShell({
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? '')
       refreshWordsOnDoneRef.current = retranscribe
       setClipStatus('rendering')
+      // (the site's watcher follows it: left for another page, its end is told there)
+      watchActivity()
     } catch (err) {
       setExportError('Couldn’t export your reel', err)
       restoreStaleAfterExport()
@@ -1829,9 +1837,19 @@ export function EditorShell({
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
       autoSaveTimerRef.current = setTimeout(() => latestHandleSaveRef.current(), 2500)
     }
+    sendWordFix(id, field, text)
+  }
+  /** A corrected word to the server; failed, it says so and stays until Retry or × (an error toast never hides by itself) */
+  function sendWordFix(id: string, field: string, text: string) {
     fetch('/api/transcribe/words', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, field, text }) })
-      .then(r => { if (!r.ok) throw new Error(String(r.status)) })
-      .catch(() => notifyLocked('That caption correction wasn’t saved. Check your connection and type it again.'))
+      .then(r => {
+        if (!r.ok) throw new Error(String(r.status))
+        dismissToast(`word-fix-${id}`)
+      })
+      .catch(() => toast({
+        id: `word-fix-${id}`, tone: 'error', text: `Your correction “${text.slice(0, 24)}” wasn’t saved`,
+        action: { label: 'Retry', onClick: () => sendWordFix(id, field, text) },
+      }))
   }
   /** Make captions for the clip as it is now: save first, so the job reads its current start and end */
   async function makeCaptions() {
@@ -5603,9 +5621,14 @@ export function EditorShell({
   const dropUploading = dropUpload.state.phase === 'uploading' || dropUpload.state.phase === 'finishing'
   useEffect(() => {
     if (dropUpload.state.phase !== 'failed') return
-    if (dropUpload.state.error) notifyLocked(`Upload failed: ${dropUpload.state.error}`)
+    if (dropUpload.state.error) toast({ id: 'drop-upload', tone: 'error', text: `Upload failed: ${friendlyError(dropUpload.state.error)}` })
     dropNext(null)
   }, [dropUpload.state.phase]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A file dropped in: its percent as a live toast (no ×, no timer) until it's in
+  useEffect(() => {
+    if (dropUploading) toast({ id: 'drop-upload', tone: 'info', live: true, text: `${dropUpload.state.phase === 'finishing' ? 'Adding' : 'Uploading'} ${dropUpload.state.fileName} · ${dropUpload.state.progress}%` })
+    else if (dropUpload.state.phase !== 'failed') dismissToast('drop-upload')
+  }, [dropUploading, dropUpload.state.phase, dropUpload.state.progress, dropUpload.state.fileName])
   const [sidebarDrop, setSidebarDrop] = useState(false)
   const kindOfFile = (f: File): 'video' | 'photo' | 'music' | null => {
     const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
@@ -7998,28 +8021,18 @@ export function EditorShell({
       {/* The export's problem (user, 2026-11-12): a calm card under the Export button — what failed, why in
           plain words, Try again — not a red strip of raw server text across the screen (styles: .ed-alert) */}
       {exportError && (
-        <div role="alert" className="ed-alert">
-          <span className="ed-alert-ico" aria-hidden="true">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7.5v5.5M12 16.5h.01" /></svg>
-          </span>
-          <span className="flex-1 min-w-0">
-            <span className="ed-alert-title">{exportError.title}</span>
-            <span className="ed-alert-text">{exportError.detail}<TopUpLink message={exportError.detail} /></span>
-            <button type="button" className="ed-alert-retry"
-              onClick={() => {
-                const what = exportError.retry
-                setExportError(null)
-                if (what === 'cancel') void cancelExport()
-                else if (hasOutput) askRender()
-                else requestExport()
-              }}>
-              Try again
-            </button>
-          </span>
-          <button type="button" onClick={() => setExportError(null)} aria-label="Dismiss this message" className="ed-alert-x">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-          </button>
-        </div>
+        <AlertCard float title={exportError.title}
+          detail={<>{exportError.detail}{exportRefund > 0 ? ` Your ${exportRefund} credit${exportRefund === 1 ? '' : 's'} came back.` : ''}</>}
+          onRetry={() => {
+            const what = exportError.retry
+            setExportError(null)
+            if (what === 'cancel') void cancelExport()
+            else if (hasOutput) askRender()
+            else requestExport()
+          }}
+          onClose={() => setExportError(null)}>
+          <TopUpLink message={exportError.detail} />
+        </AlertCard>
       )}
 
       {/* "Your reel is ready": slides up, stays 5 s (while pointed at or focused: until let go), fades away
@@ -8045,6 +8058,8 @@ export function EditorShell({
 
       {/* ── Body: [tools + options · player · preview] on top, the timeline full width below. Each
           area is a card of its own (.ed-card), with a gap round and between them ── */}
+      {/* A failed renewal or no credits left: a slim strip (the editor shows only the red account banners) */}
+      <AccountBanner slim className="mx-2 mt-2 shrink-0" />
       <div className="ed-body flex flex-col flex-1 min-h-0 overflow-hidden p-2">
       <div className="ed-top flex flex-1 min-h-0 overflow-hidden">
 
@@ -9440,25 +9455,6 @@ export function EditorShell({
       </div>
 
       {confirmDialog}
-
-      {/* Why an edit didn't happen: something is locked */}
-      {dropUploading && (
-        <div role="status" className="fixed left-1/2 bottom-16 -translate-x-1/2 flex items-center gap-2 px-3.5 h-9 rounded-full text-xs font-medium pointer-events-none"
-          style={{ zIndex: 130, background: 'var(--ed-popover)', color: 'var(--ed-text)', boxShadow: '0 0 0 1px rgba(200,255,0,0.35), 0 12px 32px -8px rgba(0,0,0,0.7)' }}>
-          {dropUpload.state.phase === 'finishing' ? 'Adding' : 'Uploading'} {dropUpload.state.fileName} · {dropUpload.state.progress}%
-        </div>
-      )}
-      {lockNote && (
-        <div role="status" className="fixed left-1/2 bottom-6 -translate-x-1/2 flex items-center gap-2 px-3.5 h-9 rounded-full text-xs font-medium pointer-events-none"
-          style={{ zIndex: 130, background: 'var(--ed-popover)', color: 'var(--ed-text)', boxShadow: '0 0 0 1px rgba(200,255,0,0.35), 0 12px 32px -8px rgba(0,0,0,0.7)' }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c8ff00" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            {lockNoteIcon === 'copy'
-              ? <><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5" /></>
-              : <><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 018 0v4" /></>}
-          </svg>
-          {lockNote}
-        </div>
-      )}
 
       {/* The timeline's "+" menu: photos / videos into a frame slot (Dual, Trio…), B-roll, music, text */}
       {addMenu && (() => {

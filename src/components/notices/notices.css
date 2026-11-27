@@ -1,0 +1,71 @@
+/* The site's one message system (user, 2026-11-26): toasts, alert cards, field messages and account banners,
+   the same on every page. Dark everywhere (the site has no light mode since 2026-11-13), so the colours are
+   written here and not borrowed from a page's own variables. Each has four tones: ok (lime), info (grey),
+   warn (amber), error (red). */
+
+.nt {
+  --nt-ok: #c8ff00; --nt-info: #a1a1aa; --nt-warn: #fbbf24; --nt-error: #f87171;
+  --nt-text: #f4f4f5; --nt-muted: rgba(244, 244, 245, 0.62);
+  --nt-c: var(--nt-info);
+}
+.nt[data-tone="ok"] { --nt-c: var(--nt-ok); }
+.nt[data-tone="warn"] { --nt-c: var(--nt-warn); }
+.nt[data-tone="error"] { --nt-c: var(--nt-error); }
+.nt-ico { flex-shrink: 0; display: grid; place-items: center; color: var(--nt-c); }
+.nt-x { flex-shrink: 0; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; border: 0; background: none; cursor: pointer;
+  color: rgba(244, 244, 245, 0.5); transition: background-color .15s, color .15s; }
+.nt-x:hover { color: var(--nt-text); background: rgba(244, 244, 245, 0.08); }
+.nt-x:focus-visible, .nt-act:focus-visible, .nt-btn:focus-visible { outline: 2px solid rgba(244, 244, 245, 0.55); outline-offset: 1px; }
+
+/* ── Toasts: bottom centre, stacked, the newest at the bottom ── */
+.nt-toasts { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 380; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  width: max-content; max-width: calc(100vw - 24px); pointer-events: none; }
+.nt-toast { pointer-events: auto; display: flex; align-items: center; gap: 9px; min-height: 38px; max-width: min(560px, calc(100vw - 24px)); padding: 6px 8px 6px 13px;
+  border-radius: 999px; background: #1a1a1a; color: var(--nt-text); font-size: 12.5px; font-weight: 600; line-height: 1.35;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--nt-c) 38%, transparent), 0 14px 34px -10px rgba(0, 0, 0, 0.75);
+  animation: nt-up .24s cubic-bezier(.2, .8, .3, 1); }
+.nt-toast[data-live] { padding-right: 15px; }
+.nt-toast-text { min-width: 0; padding: 3px 0; }
+.nt-act { flex-shrink: 0; height: 26px; padding: 0 10px; border-radius: 999px; border: 0; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700;
+  color: var(--nt-c); background: color-mix(in srgb, var(--nt-c) 12%, transparent); text-decoration: none; display: inline-flex; align-items: center;
+  transition: background-color .15s; }
+.nt-toast[data-tone="info"] .nt-act { color: var(--nt-ok); background: rgba(200, 255, 0, 0.1); }
+.nt-act:hover { background: color-mix(in srgb, var(--nt-c) 22%, transparent); }
+@keyframes nt-up { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+
+/* ── Alert card: an action that failed (or needs a look), next to what was pressed ── */
+.nt-card { display: flex; align-items: flex-start; gap: 10px; padding: 10px 8px 10px 11px; border-radius: 12px; background: #0e0e0f; color: var(--nt-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nt-c) 30%, transparent), inset 3px 0 0 color-mix(in srgb, var(--nt-c) 60%, transparent);
+  animation: nt-in .22s cubic-bezier(.2, .8, .3, 1); text-align: left; }
+.nt-card[data-float] { position: fixed; top: 64px; right: 12px; z-index: 65; width: min(400px, calc(100vw - 24px));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nt-c) 30%, transparent), inset 3px 0 0 color-mix(in srgb, var(--nt-c) 60%, transparent), 0 14px 34px -14px rgba(0, 0, 0, 0.6); }
+.nt-card .nt-ico { width: 24px; height: 24px; border-radius: 8px; background: color-mix(in srgb, var(--nt-c) 12%, transparent); }
+.nt-card-title { display: block; font-size: 12.5px; font-weight: 600; line-height: 1.35; }
+.nt-card-text { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: var(--nt-muted); }
+.nt-card-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.nt-btn { height: 26px; padding: 0 11px; border-radius: 8px; border: 0; cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 600; color: var(--nt-text);
+  background: rgba(244, 244, 245, 0.08); transition: background-color .15s; }
+.nt-btn:hover { background: rgba(244, 244, 245, 0.14); }
+.nt-btn:disabled { opacity: .5; cursor: default; }
+@keyframes nt-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* ── Field message: what to fix, right under the box ── */
+.nt-field { display: flex; align-items: flex-start; gap: 6px; margin: 6px 0 0; font-size: 12.5px; line-height: 1.4; color: #ef4444; text-align: left; }
+.nt-field .nt-ico { color: #ef4444; margin-top: 1px; }
+
+/* ── Account banner: the most urgent account thing, at the top of the page ── */
+.nt-banner { display: flex; align-items: center; gap: 12px; padding: 9px 9px 9px 14px; border-radius: 14px; color: var(--nt-text);
+  background: color-mix(in srgb, var(--nt-c) 9%, #121214); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nt-c) 30%, transparent);
+  animation: nt-in .22s cubic-bezier(.2, .8, .3, 1); }
+.nt-banner p { flex: 1; min-width: 0; margin: 0; font-size: 13px; line-height: 1.45; }
+.nt-banner p span { color: var(--nt-muted); }
+.nt-banner-cta { flex-shrink: 0; display: inline-flex; align-items: center; height: 30px; padding: 0 14px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
+  text-decoration: none; color: #0a0a0a; background: #f4f4f5; transition: background-color .15s, scale .15s; }
+.nt-banner-cta:hover { background: #fff; }
+.nt-banner-cta:active { scale: .97; }
+.nt-banner[data-slim] { border-radius: 10px; padding: 4px 6px 4px 12px; gap: 10px; }
+.nt-banner[data-slim] p { font-size: 12px; }
+.nt-banner[data-slim] .nt-banner-cta { height: 24px; padding: 0 11px; font-size: 11.5px; }
+@media (max-width: 640px) { .nt-banner { flex-wrap: wrap; } .nt-banner p { flex-basis: calc(100% - 60px); } }
+
+@media (prefers-reduced-motion: reduce) { .nt-toast, .nt-card, .nt-banner { animation: none; } }
